@@ -20,6 +20,10 @@ SMODS.Blind({
 	in_pool = function(self)
 		return false
 	end,
+	mp_credits = {
+		art = { "KilledByLava" },
+		code = { "Virtualized" },
+	},
 })
 
 table.insert(MP.blinds, "bl_mp_" .. key)
