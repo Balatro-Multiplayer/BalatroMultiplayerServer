@@ -64,33 +64,18 @@ return {
 			},
 		},
 		Blind = {
-			bl_mp_nemesis = {
+			bl_pvp = {
 				name = "Your Nemesis",
 				text = {
-					"Face your nemesis,", -- Changed as of 1.0
-					"most score wins",
+					"Face another player,",
+					"most chips wins",
 				},
 			},
-			bl_mp_precision = {
+			bl_precision = {
 				name = "Precision",
 				text = {
 					"Face another player,",
 					"closest to the target score wins",
-				},
-			},
-			-- New as of 1.0
-			bl_mp_horde = {
-				name = "The Horde",
-				text = {
-					"Face all other players,",
-					"least score loses",
-				},
-			},
-			bl_mp_truce = {
-				name = "The Truce",
-				text = {
-					"Copies #1#,",
-					"don't lose a life",
 				},
 			},
 		},
@@ -174,6 +159,8 @@ return {
 			lobby_options = "Lobby Options",
 			copy_clipboard = "Copy to clipboard",
 			connect_player = "Connected Players:",
+			view_code = "VIEW CODE",
+			leave = "LEAVE",
 			opts_only_host = "Only the Lobby Host can change these options",
 			opts_cb_money = "Give comeback $ on life loss",
 			opts_no_gold_on_loss = "Don't get blind rewards on round loss",
@@ -185,6 +172,10 @@ return {
 			bl_or = "or",
 			bl_life = "Life",
 			bl_death = "Death",
+			lobby = "Lobby",
+			return_to = "Return to",
+			enemy_loc_1 = "Enemy",
+			enemy_loc_2 = "location",
 			loc_ready = "Ready for PvP",
 			loc_selecting = "Selecting a Blind",
 			loc_shop = "Shopping",
@@ -196,26 +187,6 @@ return {
 			mod_hash_warning = "Players have different mods or mod versions! This can cause problems!",
 			lobby_choose_deck = "DECK",
 			opts_player_diff_deck = "Players have different decks",
-			-- New as of 1.0
-			page_title_lobby = "Lobby",
-			lobby_host = "Host",
-			lobby_member = "Member",
-			lobby_spectator = "Spectator",
-			lobby_deck = "Lobby Deck",
-			b_open_lobby = "Open Lobby",
-			b_join_lobby = "Join Lobby",
-			not_connected = "Server Not Found",
-			b_reconnect = "Reconnect",
-			b_copy_code = "Copy Code",
-			b_leave_lobby = "Leave Lobby",
-			k_enter_code = "Enter Code",
-			k_planetesimal = "Planetesimal",
-			consider_supporting = "This Mod is developed by one person, if you want to support it's development consider",
-			kofi_name = "Buying me a Coffee",
-			new_host = "The lobby host has left, you are now the lobby host. The lobby code has changed.",
-			enemy_loc = { "Enemy", "location" },
-			return_to_lobby_split = { "Return to", "Lobby" },
-			leave_lobby_split = { "Leave", "Lobby" },
 		},
 		v_dictionary = {
 			mp_art = { "Art: #1#" },

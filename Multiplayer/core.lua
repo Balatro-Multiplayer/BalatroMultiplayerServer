@@ -1,3 +1,4 @@
+sendDebugMessage("LOADED MP")
 MP = {
 	id = SMODS.current_mod["id"],
 	name = SMODS.current_mod["name"],
