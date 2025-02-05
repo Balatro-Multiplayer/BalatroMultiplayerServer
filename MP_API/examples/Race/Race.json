@@ -13,10 +13,12 @@
 	"dependencies": [
     "Steamodded (>>1.0.0~ALPHA-1304a)",
     "Lovely (>=0.7)",
-    "Balatro (>=1.*)"
+    "Balatro (>=1.*)",
+    "MultiplayerAPI"
   ],
 	"conflicts": [
 		"VirtualizedMultiplayer",
-		"Multiplayer"
+		"Multiplayer",
+    "JokerSwapExampleMod"
 	]
 }
