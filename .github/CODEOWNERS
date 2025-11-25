@@ -1,2 +1,3 @@
-.github/workflows/update-and-restart.yml @V-rtualized
-.github/CODEOWNERS @V-rtualized
+.github/workflows/update-and-restart.yml @V-rtualized @Casjb
+.github/workflows/update-and-restart-STAFF.yml @V-rtualized @Casjb
+.github/CODEOWNERS @V-rtualized @Casjb
