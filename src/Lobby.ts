@@ -33,8 +33,11 @@ class Lobby {
 	host: Client | null;
 	guest: Client | null;
 	gameMode: GameMode;
-	// biome-ignore lint/suspicious/noExplicitAny: 
+	// biome-ignore lint/suspicious/noExplicitAny:
 	options: { [key: string]: any };
+	tcgBets: Map<string, number>;
+    handyAllowMPExtension: Map<string, boolean>;
+	firstReadyAt: number | null;
 
 	// Attrition is the default game mode
 	constructor(host: Client, gameMode: GameMode = "attrition") {
@@ -47,6 +50,9 @@ class Lobby {
 		this.guest = null;
 		this.gameMode = gameMode;
 		this.options = {};
+		this.tcgBets = new Map();
+        this.handyAllowMPExtension = new Map();
+		this.firstReadyAt = null;
 
 		host.setLobby(this);
 		host.isReadyLobby = false;
@@ -73,6 +79,8 @@ class Lobby {
 		if (this.host === null) {
 			Lobbies.delete(this.code);
 		} else {
+            this.handyAllowMPExtension.delete(client.id)
+
 			// TODO: Refactor for more than 2 players
 			// Stop game if someone leaves
 			this.broadcastAction({ action: "stopGame" });
@@ -94,6 +102,7 @@ class Lobby {
 
 		client.setLobby(this);
 		client.isReadyLobby = false;
+        this.handyAllowMPExtension.set(client.id, false)
 		client.sendAction({
 			action: "joinedLobby",
 			code: this.code,
@@ -132,6 +141,11 @@ class Lobby {
 		// Should only sent true to the host
 		action.isHost = true;
 		this.host.sendAction(action);
+
+        this.broadcastAction({
+            action: "handyMPExtensionLobbyEnabled",
+            enabled: Array.from(this.handyAllowMPExtension.values()).every(Boolean)
+        })
 	};
 
 	setPlayersLives = (lives: number) => {
@@ -183,6 +197,8 @@ class Lobby {
 			this.guest.furthestBlind = 0;
 			this.guest.skips = 0;
 		}
+		this.tcgBets.clear();
+		this.firstReadyAt = null;
 	}
 }
 
