@@ -10,3 +10,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./logs:/logs
+    deploy:
+      resources:
+        limits:
+          memory: 128M
