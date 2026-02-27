@@ -1,6 +1,6 @@
 import { Socket, createServer } from 'node:net'
 import Client from './Client.js'
-import { actionHandlers } from './actionHandlers.js'
+import { actionHandlers, disconnectFromLobbyAction } from './actionHandlers.js'
 import { Lobbies } from './Lobby.js'
 import type {
 	Action,
@@ -35,6 +35,7 @@ import type {
 	ActionTcgPlayerStatusRequest,
 	ActionTcgEndTurn,
 	ActionModdedRequest,
+	ActionRejoinLobby,
     ActionHandyMPExtensionEnable,
     ActionHandyMPExtensionDisable,
 } from './actions.js'
@@ -43,11 +44,11 @@ import { InsaneInt } from './InsaneInt.js'
 const PORT = 8788
 
 /** The amount of milliseconds we wait before sending the initial keepalive packet  */
-const KEEP_ALIVE_INITIAL_TIMEOUT = 5000
+const KEEP_ALIVE_INITIAL_TIMEOUT = 15000
 /** The amount of milliseconds we wait after sending a new retry packet  */
-const KEEP_ALIVE_RETRY_TIMEOUT = 2500
+const KEEP_ALIVE_RETRY_TIMEOUT = 5000
 /** The amount of retries we do before we declare the socket dead */
-const KEEP_ALIVE_RETRY_COUNT = 3
+const KEEP_ALIVE_RETRY_COUNT = 4
 
 interface BigIntWithToJSON {
 	prototype: {
@@ -96,7 +97,7 @@ export const serializeAction = (action: Action): string => {
 
 const sendActionToSocket =
 	(socket: Socket) => (action: ActionServerToClient) => {
-		if (!socket) {
+		if (!socket || socket.destroyed) {
 			return
 		}
 
@@ -118,6 +119,8 @@ const server = createServer((socket) => {
 	// Do not wait for packets to buffer, helps
 	// improve latency between responses
 	socket.setNoDelay()
+	// Enable OS-level TCP keepalive as secondary dead connection detection
+	socket.setKeepAlive(true, 10000)
 
 	const client = new Client(socket.address(), sendActionToSocket(socket), socket.end)
 	client.sendAction({ action: 'connected' })
@@ -158,7 +161,7 @@ const server = createServer((socket) => {
 		const messages = data.toString().split('\n')
 
 		for (const msg of messages) {
-			if (!msg) return
+			if (!msg) continue
 			try {
 				const message: ActionClientToServer | ActionUtility = JSON.parse(msg)
 				const { action, ...actionArgs } = message
@@ -199,6 +202,12 @@ const server = createServer((socket) => {
 					case 'joinLobby':
 						actionHandlers.joinLobby(
 							actionArgs as ActionHandlerArgs<ActionJoinLobby>,
+							client,
+						)
+						break
+					case 'rejoinLobby':
+						actionHandlers.rejoinLobby(
+							actionArgs as ActionHandlerArgs<ActionRejoinLobby>,
 							client,
 						)
 						break
@@ -418,7 +427,7 @@ const server = createServer((socket) => {
 
 	socket.on('end', () => {
 		console.log(`Client disconnected ${client.id}`)
-		actionHandlers.leaveLobby?.(client)
+		disconnectFromLobbyAction(client)
 	})
 
 	socket.on(
@@ -435,7 +444,7 @@ const server = createServer((socket) => {
 			} else {
 				console.error('An unexpected error occurred:', err)
 			}
-			actionHandlers.leaveLobby?.(client)
+			disconnectFromLobbyAction(client)
 		},
 	)
 })
