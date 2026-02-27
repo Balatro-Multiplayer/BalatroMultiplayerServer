@@ -6,7 +6,7 @@ import type {
 	GameMode,
 } from "./actions.js";
 
-const Lobbies = new Map();
+export const Lobbies = new Map<string, Lobby>();
 
 const generateUniqueLobbyCode = (): string => {
 	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";

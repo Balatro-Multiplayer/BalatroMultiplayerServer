@@ -1,6 +1,7 @@
 import { Socket, createServer } from 'node:net'
 import Client from './Client.js'
 import { actionHandlers } from './actionHandlers.js'
+import { Lobbies } from './Lobby.js'
 import type {
 	Action,
 	ActionClientToServer,
@@ -441,4 +442,57 @@ const server = createServer((socket) => {
 
 server.listen(PORT, '0.0.0.0', () => {
 	console.log(`Server listening on port ${PORT}`)
+})
+
+// Admin server for sending messages to players
+const ADMIN_PORT = 8789
+
+const adminServer = createServer((socket) => {
+	socket.on('data', (data) => {
+		const messages = data.toString().split('\n')
+		for (const msg of messages) {
+			if (!msg) continue
+			try {
+				const { message, lobby_code, is_host } = JSON.parse(msg)
+
+				if (!message || typeof message !== 'string') {
+					socket.end(JSON.stringify({ success: false, error: 'Missing message' }) + '\n')
+					return
+				}
+
+				const errorAction = { action: 'error' as const, message }
+				let recipients = 0
+
+				if (lobby_code) {
+					const lobby = Lobbies.get(lobby_code)
+					if (!lobby) {
+						socket.end(JSON.stringify({ success: false, error: 'Lobby not found' }) + '\n')
+						return
+					}
+
+					if (is_host === true) {
+						if (lobby.host) { lobby.host.sendAction(errorAction); recipients++ }
+					} else if (is_host === false) {
+						if (lobby.guest) { lobby.guest.sendAction(errorAction); recipients++ }
+					} else {
+						if (lobby.host) { lobby.host.sendAction(errorAction); recipients++ }
+						if (lobby.guest) { lobby.guest.sendAction(errorAction); recipients++ }
+					}
+				} else {
+					for (const lobby of Lobbies.values()) {
+						if (lobby.host) { lobby.host.sendAction(errorAction); recipients++ }
+						if (lobby.guest) { lobby.guest.sendAction(errorAction); recipients++ }
+					}
+				}
+
+				socket.end(JSON.stringify({ success: true, recipients }) + '\n')
+			} catch (error) {
+				socket.end(JSON.stringify({ success: false, error: 'Invalid JSON' }) + '\n')
+			}
+		}
+	})
+})
+
+adminServer.listen(ADMIN_PORT, '127.0.0.1', () => {
+	console.log(`Admin server listening on 127.0.0.1:${ADMIN_PORT}`)
 })
