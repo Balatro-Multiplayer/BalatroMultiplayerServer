@@ -1,6 +1,5 @@
 import type Client from "./Client.js";
 import GameModes from "./GameMode.js";
-import { InsaneInt } from "./InsaneInt.js";
 import type {
 	ActionLobbyInfo,
 	ActionServerToClient,
@@ -32,24 +31,10 @@ export const getEnemy = (client: Client): [Lobby | null, Client | null] => {
 /** How long to keep a disconnected player's slot reserved (ms) */
 const RECONNECT_GRACE_PERIOD = 60000;
 
-interface DisconnectedGameState {
-	lives: number;
-	score: InsaneInt;
-	handsLeft: number;
-	ante: number;
-	skips: number;
-	furthestBlind: number;
-	livesBlocker: boolean;
-	isReady: boolean;
-	firstReady: boolean;
-	location: string;
-}
-
 interface DisconnectedSlot {
-	reconnectToken: string;
+	client: Client;
 	role: 'host' | 'guest';
 	timer: ReturnType<typeof setTimeout>;
-	gameState: DisconnectedGameState;
 }
 
 class Lobby {
@@ -145,20 +130,8 @@ class Lobby {
 		console.log(`Player ${client.id} disconnected from lobby ${this.code}, reserving slot for ${RECONNECT_GRACE_PERIOD / 1000}s`)
 
 		this.disconnectedSlot = {
-			reconnectToken: client.reconnectToken,
+			client,
 			role,
-			gameState: {
-				lives: client.lives,
-				score: new InsaneInt(client.score.startingECount, client.score.coefficient, client.score.exponent),
-				handsLeft: client.handsLeft,
-				ante: client.ante,
-				skips: client.skips,
-				furthestBlind: client.furthestBlind,
-				livesBlocker: client.livesBlocker,
-				isReady: client.isReady,
-				firstReady: client.firstReady,
-				location: client.location,
-			},
 			timer: setTimeout(() => {
 				// Grace period expired, do a full leave
 				console.log(`Reconnect grace period expired for lobby ${this.code}`)
@@ -179,44 +152,37 @@ class Lobby {
 		enemy?.sendAction({ action: "enemyDisconnected" });
 	};
 
-	/** Reconnecting client reclaims their slot */
-	rejoin = (newClient: Client, reconnectToken: string): boolean => {
-		if (!this.disconnectedSlot || this.disconnectedSlot.reconnectToken !== reconnectToken) {
-			return false;
+	/** Reconnecting client reclaims their slot.
+	 *  Returns the restored Client (with all game state intact) on success, or null on failure.
+	 *  The caller MUST use the returned client for all future messages on this socket. */
+	rejoin = (newClient: Client, reconnectToken: string): Client | null => {
+		if (!this.disconnectedSlot || this.disconnectedSlot.client.reconnectToken !== reconnectToken) {
+			return null;
 		}
 
-		const { role, timer, gameState } = this.disconnectedSlot;
+		const { client: oldClient, role, timer } = this.disconnectedSlot;
 		clearTimeout(timer);
 		this.disconnectedSlot = null;
 
-		// Restore game state from the disconnected client
-		newClient.lives = gameState.lives;
-		newClient.score = new InsaneInt(gameState.score.startingECount, gameState.score.coefficient, gameState.score.exponent);
-		newClient.handsLeft = gameState.handsLeft;
-		newClient.ante = gameState.ante;
-		newClient.skips = gameState.skips;
-		newClient.furthestBlind = gameState.furthestBlind;
-		newClient.livesBlocker = gameState.livesBlocker;
-		newClient.isReady = gameState.isReady;
-		newClient.firstReady = gameState.firstReady;
-		newClient.location = gameState.location;
+		// Swap the new socket/connection onto the old client, preserving all game state
+		oldClient.replaceConnection(newClient);
 
-		// Place the new client in the correct slot
+		// Place the old client back in the correct slot
 		if (role === 'host') {
-			this.host = newClient;
+			this.host = oldClient;
 		} else {
-			this.guest = newClient;
+			this.guest = oldClient;
 		}
 
-		newClient.setLobby(this);
-		this.handyAllowMPExtension.set(newClient.id, false);
+		oldClient.setLobby(this);
+		this.handyAllowMPExtension.set(oldClient.id, false);
 
 		// Send rejoin confirmation with new reconnect token
-		newClient.sendAction({
+		oldClient.sendAction({
 			action: "rejoinedLobby",
 			code: this.code,
 			type: this.gameMode,
-			reconnectToken: newClient.reconnectToken,
+			reconnectToken: oldClient.reconnectToken,
 		});
 
 		// Notify the other player
@@ -224,17 +190,17 @@ class Lobby {
 		enemy?.sendAction({ action: "enemyReconnected" });
 
 		// Re-sync game state so both sides have correct values
-		newClient.sendAction({ action: "playerInfo", lives: newClient.lives });
+		oldClient.sendAction({ action: "playerInfo", lives: oldClient.lives });
 		enemy?.sendAction({
 			action: "enemyInfo",
-			handsLeft: newClient.handsLeft,
-			score: newClient.score.toString(),
-			skips: newClient.skips,
-			lives: newClient.lives,
+			handsLeft: oldClient.handsLeft,
+			score: oldClient.score.toString(),
+			skips: oldClient.skips,
+			lives: oldClient.lives,
 		});
 
 		this.broadcastLobbyInfo();
-		return true;
+		return oldClient;
 	};
 
 	join = (client: Client) => {
