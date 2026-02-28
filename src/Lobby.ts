@@ -1,5 +1,6 @@
 import type Client from "./Client.js";
 import GameModes from "./GameMode.js";
+import { InsaneInt } from "./InsaneInt.js";
 import type {
 	ActionLobbyInfo,
 	ActionServerToClient,
@@ -31,10 +32,24 @@ export const getEnemy = (client: Client): [Lobby | null, Client | null] => {
 /** How long to keep a disconnected player's slot reserved (ms) */
 const RECONNECT_GRACE_PERIOD = 60000;
 
+interface DisconnectedGameState {
+	lives: number;
+	score: InsaneInt;
+	handsLeft: number;
+	ante: number;
+	skips: number;
+	furthestBlind: number;
+	livesBlocker: boolean;
+	isReady: boolean;
+	firstReady: boolean;
+	location: string;
+}
+
 interface DisconnectedSlot {
 	reconnectToken: string;
 	role: 'host' | 'guest';
 	timer: ReturnType<typeof setTimeout>;
+	gameState: DisconnectedGameState;
 }
 
 class Lobby {
@@ -132,6 +147,18 @@ class Lobby {
 		this.disconnectedSlot = {
 			reconnectToken: client.reconnectToken,
 			role,
+			gameState: {
+				lives: client.lives,
+				score: new InsaneInt(client.score.startingECount, client.score.coefficient, client.score.exponent),
+				handsLeft: client.handsLeft,
+				ante: client.ante,
+				skips: client.skips,
+				furthestBlind: client.furthestBlind,
+				livesBlocker: client.livesBlocker,
+				isReady: client.isReady,
+				firstReady: client.firstReady,
+				location: client.location,
+			},
 			timer: setTimeout(() => {
 				// Grace period expired, do a full leave
 				console.log(`Reconnect grace period expired for lobby ${this.code}`)
@@ -158,9 +185,21 @@ class Lobby {
 			return false;
 		}
 
-		const { role, timer } = this.disconnectedSlot;
+		const { role, timer, gameState } = this.disconnectedSlot;
 		clearTimeout(timer);
 		this.disconnectedSlot = null;
+
+		// Restore game state from the disconnected client
+		newClient.lives = gameState.lives;
+		newClient.score = new InsaneInt(gameState.score.startingECount, gameState.score.coefficient, gameState.score.exponent);
+		newClient.handsLeft = gameState.handsLeft;
+		newClient.ante = gameState.ante;
+		newClient.skips = gameState.skips;
+		newClient.furthestBlind = gameState.furthestBlind;
+		newClient.livesBlocker = gameState.livesBlocker;
+		newClient.isReady = gameState.isReady;
+		newClient.firstReady = gameState.firstReady;
+		newClient.location = gameState.location;
 
 		// Place the new client in the correct slot
 		if (role === 'host') {
@@ -183,6 +222,16 @@ class Lobby {
 		// Notify the other player
 		const enemy = role === 'host' ? this.guest : this.host;
 		enemy?.sendAction({ action: "enemyReconnected" });
+
+		// Re-sync game state so both sides have correct values
+		newClient.sendAction({ action: "playerInfo", lives: newClient.lives });
+		enemy?.sendAction({
+			action: "enemyInfo",
+			handsLeft: newClient.handsLeft,
+			score: newClient.score.toString(),
+			skips: newClient.skips,
+			lives: newClient.lives,
+		});
 
 		this.broadcastLobbyInfo();
 		return true;
