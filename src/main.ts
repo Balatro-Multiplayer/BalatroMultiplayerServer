@@ -126,6 +126,9 @@ const server = createServer((socket) => {
 	client.sendAction({ action: 'connected' })
 	client.sendAction({ action: 'version' })
 
+	// Buffer for incomplete TCP messages
+	let dataBuffer = ''
+
 	let isRetry = false
 	let retryCount = 0
 
@@ -158,7 +161,11 @@ const server = createServer((socket) => {
 		retryCount = 0
 		keepAlive.refresh()
 
-		const messages = data.toString().split('\n')
+		// Buffer incoming data — TCP may split large messages across multiple events
+		dataBuffer += data.toString()
+		const messages = dataBuffer.split('\n')
+		// Keep the last (possibly incomplete) chunk in the buffer
+		dataBuffer = messages.pop() ?? ''
 
 		for (const msg of messages) {
 			if (!msg) continue
