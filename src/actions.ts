@@ -3,7 +3,7 @@ export type ActionConnected = { action: 'connected' }
 export type ActionError = { action: 'error'; message: string }
 export type ActionJoinedLobby = { action: 'joinedLobby'; code: string; type: GameMode; reconnectToken?: string }
 export type ActionRejoinedLobby = { action: 'rejoinedLobby'; code: string; type: GameMode; reconnectToken: string }
-export type ActionEnemyDisconnected = { action: 'enemyDisconnected' }
+export type ActionEnemyDisconnected = { action: 'enemyDisconnected'; timeout: number }
 export type ActionEnemyReconnected = { action: 'enemyReconnected' }
 export type ActionLobbyInfo = {
 	action: 'lobbyInfo'
