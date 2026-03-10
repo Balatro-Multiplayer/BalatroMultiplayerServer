@@ -33,8 +33,8 @@ import type {
 	ActionTcgEndTurn,
 	ActionModded,
 	ActionModdedRequest,
-    ActionHandyMPExtensionEnable,
-    ActionHandyMPExtensionDisable,
+	ActionHandyMPExtensionEnable,
+	ActionHandyMPExtensionDisable,
 } from "./actions.js";
 import { generateSeed } from "./utils.js";
 
@@ -338,7 +338,7 @@ const setAnteAction = (
 };
 
 // TODO: Fix this
-const serverVersion = "0.3.0-MULTIPLAYER";
+const serverVersion = "0.3.2-MULTIPLAYER";
 /** Verifies the client version and allows connection if it matches the server's */
 const versionAction = (
 	{ version }: ActionHandlerArgs<ActionVersion>,
@@ -762,23 +762,23 @@ const moddedAction = (
 };
 
 const handyMPExtensionEnable = (
-    args: ActionHandlerArgs<ActionHandyMPExtensionEnable>,
-    client: Client,
+	args: ActionHandlerArgs<ActionHandyMPExtensionEnable>,
+	client: Client,
 ) => {
-    if (!client.lobby) return
+	if (!client.lobby) return
 
-    client.lobby.handyAllowMPExtension.set(client.id, true)
-    client.lobby.broadcastLobbyInfo()
+	client.lobby.handyAllowMPExtension.set(client.id, true)
+	client.lobby.broadcastLobbyInfo()
 }
 
 const handyMPExtensionDisable = (
-    args: ActionHandlerArgs<ActionHandyMPExtensionDisable>,
-    client: Client,
+	args: ActionHandlerArgs<ActionHandyMPExtensionDisable>,
+	client: Client,
 ) => {
-    if (!client.lobby) return
+	if (!client.lobby) return
 
-    client.lobby.handyAllowMPExtension.set(client.id, false)
-    client.lobby.broadcastLobbyInfo()
+	client.lobby.handyAllowMPExtension.set(client.id, false)
+	client.lobby.broadcastLobbyInfo()
 }
 
 export const actionHandlers = {
@@ -830,8 +830,8 @@ export const actionHandlers = {
 	tcgPlayerStatus: tcgPlayerStatusAction,
 	tcgEndTurn: tcgEndTurnAction,
 	moddedAction: moddedAction,
-    handyMPExtensionEnable: handyMPExtensionEnable,
-    handyMPExtensionDisable: handyMPExtensionDisable,
+	handyMPExtensionEnable: handyMPExtensionEnable,
+	handyMPExtensionDisable: handyMPExtensionDisable,
 } satisfies Partial<ActionHandlers>;
 
 /** Server-internal handler for connection drops (not a client action) */
