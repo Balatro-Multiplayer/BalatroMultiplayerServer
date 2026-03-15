@@ -464,18 +464,31 @@ server.listen(PORT, '0.0.0.0', () => {
 import { verify as cryptoVerify, createPublicKey } from 'node:crypto'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const ADMIN_PORT = 8789
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const ADMIN_PUBLIC_KEY_PATH = resolve(__dirname, '..', '..', '.github', 'admin_public.pem')
-const adminPublicKey = existsSync(ADMIN_PUBLIC_KEY_PATH)
+const isPkgRuntime = Boolean((process as NodeJS.Process & { pkg?: unknown }).pkg)
+const argvDirname = process.argv[1] ? dirname(resolve(process.argv[1])) : null
+
+const adminPublicKeyCandidates = [
+	process.env.BALATRO_ADMIN_PUBLIC_KEY_PATH,
+	resolve(process.cwd(), '.github', 'admin_public.pem'),
+	resolve(process.cwd(), 'admin_public.pem'),
+	resolve(dirname(process.execPath), '.github', 'admin_public.pem'),
+	resolve(dirname(process.execPath), 'admin_public.pem'),
+	argvDirname ? resolve(argvDirname, '..', '.github', 'admin_public.pem') : null,
+].filter((candidate): candidate is string => Boolean(candidate))
+
+const ADMIN_PUBLIC_KEY_PATH = adminPublicKeyCandidates.find((candidate) => existsSync(candidate))
+const adminPublicKey = ADMIN_PUBLIC_KEY_PATH
 	? createPublicKey(readFileSync(ADMIN_PUBLIC_KEY_PATH, 'utf-8'))
 	: null
 
 if (!adminPublicKey) {
-	console.warn('WARNING: admin_public.pem not found, admin server will reject all requests')
+	const locationHint = isPkgRuntime
+		? 'Set BALATRO_ADMIN_PUBLIC_KEY_PATH or place admin_public.pem next to the executable.'
+		: 'Place admin_public.pem in repo .github/ or set BALATRO_ADMIN_PUBLIC_KEY_PATH.'
+	console.warn(`WARNING: admin_public.pem not found. ${locationHint}`)
 }
 
 const verifyAdminSignature = (payload: string, signature: string): boolean => {
