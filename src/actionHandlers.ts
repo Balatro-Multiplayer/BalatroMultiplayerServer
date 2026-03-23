@@ -226,11 +226,11 @@ const playHandAction = (
 	// This info is only sent on a boss blind, so it shouldn't
 	// affect other blinds
 	if (
-		(lobby.guest.handsLeft === 0 &&
+		(lobby.guest.handsLeft <= 0 &&
 			lobby.guest.score.lessThan(lobby.host.score)) ||
-		(lobby.host.handsLeft === 0 &&
+		(lobby.host.handsLeft <= 0 &&
 			lobby.host.score.lessThan(lobby.guest.score)) ||
-		(lobby.host.handsLeft === 0 && lobby.guest.handsLeft === 0)
+		(lobby.host.handsLeft <= 0 && lobby.guest.handsLeft <= 0)
 	) {
 		const roundWinner = lobby.guest.score.lessThan(lobby.host.score)
 			? lobby.host
