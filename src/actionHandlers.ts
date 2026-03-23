@@ -214,6 +214,7 @@ const playHandAction = (
 
 	client.handsLeft =
 		typeof handsLeft === "number" ? handsLeft : Number(handsLeft);
+	client.handsLeft = Math.floor(client.handsLeft);
 
 	enemy.sendAction({
 		action: "enemyInfo",
@@ -226,11 +227,11 @@ const playHandAction = (
 	// This info is only sent on a boss blind, so it shouldn't
 	// affect other blinds
 	if (
-		(lobby.guest.handsLeft === 0 &&
+		(lobby.guest.handsLeft < 1 &&
 			lobby.guest.score.lessThan(lobby.host.score)) ||
-		(lobby.host.handsLeft === 0 &&
+		(lobby.host.handsLeft < 1 &&
 			lobby.host.score.lessThan(lobby.guest.score)) ||
-		(lobby.host.handsLeft === 0 && lobby.guest.handsLeft === 0)
+		(lobby.host.handsLeft < 1 && lobby.guest.handsLeft < 1)
 	) {
 		const roundWinner = lobby.guest.score.lessThan(lobby.host.score)
 			? lobby.host
@@ -242,7 +243,7 @@ const playHandAction = (
 			roundLoser.loseLife();
 
 			// If no lives are left, we end the game
-			if (lobby.host.lives === 0 || lobby.guest.lives === 0) {
+			if (lobby.host.lives <= 0 || lobby.guest.lives <= 0) {
 				const gameWinner =
 					lobby.host.lives > lobby.guest.lives ? lobby.host : lobby.guest;
 				const gameLoser =
