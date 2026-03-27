@@ -62,6 +62,8 @@ export type ActionGetNemesisStatsRequest = { action: 'endGameStatsRequested' }
 export type ActionReceiveNemesisStatsRequest = { action: 'nemesisEndGameStats', reroll_count: string, reroll_cost_total:string, vouchers:string }
 export type ActionStartAnteTimer = { action: 'startAnteTimer', time: number }
 export type ActionPauseAnteTimer = { action: 'pauseAnteTimer', time: number }
+export type ActionStartPvpTimer = { action: 'startPvpTimer', time: number }
+export type ActionPausePvpTimer = { action: 'pausePvpTimer', time: number }
 // Handy Actions (Server to Client)
 export type ActionHandyMPExtensionLobbyEnabled = { action: 'handyMPExtensionLobbyEnabled', enabled: boolean }
 // TCG Actions (Server to Client)
@@ -110,6 +112,8 @@ export type ActionServerToClient =
 	| ActionReceiveNemesisStatsRequest
 	| ActionStartAnteTimer
 	| ActionPauseAnteTimer
+	| ActionStartPvpTimer
+	| ActionPausePvpTimer
 	| ActionTcgCompatible
 	| ActionTcgStartGame
 	| ActionTcgPlayerStatus
@@ -161,6 +165,8 @@ export type ActionGetNemesisStatsResponse = { action: 'endGameStatsRequested' }
 export type ActionReceiveNemesisStatsResponse = { action: 'nemesisEndGameStats', reroll_count: string,reroll_cost_total:string, vouchers:string }
 export type ActionStartAnteTimerRequest = { action: 'startAnteTimer', time: number }
 export type ActionPauseAnteTimerRequest = { action: 'pauseAnteTimer', time: number }
+export type ActionStartPvpTimerRequest = { action: 'startPvpTimer', time: number }
+export type ActionPausePvpTimerRequest = { action: 'pausePvpTimer', time: number }
 export type ActionFailTimer = { action: 'failTimer' }
 export type ActionSyncClient = { action: 'syncClient', isCached: boolean }
 // TCG Actions (Client to Server)
@@ -215,6 +221,8 @@ export type ActionClientToServer =
 	| ActionReceiveNemesisStatsResponse
 	| ActionStartAnteTimerRequest
 	| ActionPauseAnteTimerRequest
+	| ActionStartPvpTimerRequest
+	| ActionPausePvpTimerRequest
 	| ActionFailTimer
 	| ActionSyncClient
 	| ActionTcgServerVersion

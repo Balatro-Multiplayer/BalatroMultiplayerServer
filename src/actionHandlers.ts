@@ -34,7 +34,7 @@ import type {
 	ActionModded,
 	ActionModdedRequest,
 	ActionHandyMPExtensionEnable,
-	ActionHandyMPExtensionDisable,
+	ActionHandyMPExtensionDisable, ActionStartPvpTimer, ActionPausePvpTimer,
 } from "./actions.js";
 import { generateSeed } from "./utils.js";
 
@@ -594,6 +594,30 @@ const pauseAnteTimerAction = (
 	});
 };
 
+const startPvpTimerAction = (
+	{ time }: ActionHandlerArgs<ActionStartPvpTimer>,
+	client: Client,
+) => {
+	const [lobby, enemy] = getEnemy(client)
+	if (!lobby || !enemy) return
+	enemy.sendAction({
+		action: "startPvpTimer",
+		time,
+	})
+}
+
+const pausePvpTimerAction = (
+	{ time }: ActionHandlerArgs<ActionPausePvpTimer>,
+	client: Client,
+) => {
+	const [lobby, enemy] = getEnemy(client)
+	if (!lobby || !enemy) return
+	enemy.sendAction({
+		action: "pausePvpTimer",
+		time,
+	})
+}
+
 const failTimerAction = (client: Client) => {
 	const lobby = client.lobby;
 
@@ -823,6 +847,8 @@ export const actionHandlers = {
 	nemesisEndGameStats: receiveNemesisStatsActionHandler,
 	startAnteTimer: startAnteTimerAction,
 	pauseAnteTimer: pauseAnteTimerAction,
+	startPvpTimer: startPvpTimerAction,
+	pausePvpTimer: pausePvpTimerAction,
 	failTimer: failTimerAction,
 	syncClient: syncClientAction,
 	tcgServerVersion: tcgServerVersionAction,
