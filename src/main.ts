@@ -360,6 +360,9 @@ const server = createServer((socket) => {
 					case 'failTimer':
 						actionHandlers.failTimer(client)
 						break
+					case 'failPvPTimer':
+						actionHandlers.failPvPTimer(client)
+						break
 					case 'syncClient':
 						actionHandlers.syncClient(
 							actionArgs as ActionHandlerArgs<ActionSyncClient>,
