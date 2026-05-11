@@ -186,7 +186,11 @@ const readyBlindAction = (client: Client) => {
 		client.lobby.host.handsLeft = 4;
 		client.lobby.guest.handsLeft = 4;
 
-		client.lobby.broadcastAction({ action: "startBlind" });
+        let firstPlayer: "host" | "guest" | undefined
+        if (client.lobby.host.firstReady) firstPlayer = "host"
+        if (client.lobby.guest.firstReady) firstPlayer = "guest"
+
+		client.lobby.broadcastAction({ action: "startBlind", firstPlayer });
 	}
 };
 
@@ -266,6 +270,53 @@ const playHandAction = (
 		});
 	}
 };
+
+const failPvPTimerAction = (
+	client: Client,
+) => {
+    const lobby = client.lobby;
+
+	client.loseLife();
+
+	if (!lobby) return;
+
+    if (client.lives === 0) {
+		let gameLoser = null;
+		let gameWinner = null;
+		if (client.id === lobby.host?.id) {
+			gameLoser = lobby.host;
+			gameWinner = lobby.guest;
+		} else {
+			gameLoser = lobby.guest;
+			gameWinner = lobby.host;
+		}
+
+		gameWinner?.sendAction({ action: "winGame" });
+		gameLoser?.sendAction({ action: "loseGame" });
+	} else {
+        let roundWinner: Client
+        let roundLoser: Client
+        if (client.id === lobby.host?.id) {
+            roundWinner = lobby.guest!;
+            roundLoser = lobby.host!;
+        } else {
+            roundWinner = lobby.host!;
+            roundLoser = lobby.guest!;
+        }
+        roundWinner.firstReady = false;
+		roundLoser.firstReady = false;
+		roundWinner.sendAction({
+            action: "endPvP",
+            lost: false,
+            pvpTimerLost: true
+        });
+		roundLoser.sendAction({
+			action: "endPvP",
+			lost: true,
+            pvpTimerLost: true
+		});
+    }
+}
 
 const stopGameAction = (client: Client) => {
 	if (!client.lobby) {
@@ -833,6 +884,7 @@ export const actionHandlers = {
 	moddedAction: moddedAction,
 	handyMPExtensionEnable: handyMPExtensionEnable,
 	handyMPExtensionDisable: handyMPExtensionDisable,
+    failPvPTimer: failPvPTimerAction,
 } satisfies Partial<ActionHandlers>;
 
 /** Server-internal handler for connection drops (not a client action) */
