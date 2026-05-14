@@ -139,6 +139,9 @@ const startGameAction = (client: Client) => {
 		? Number.parseInt(lobby.options.starting_lives)
 		: GameModes[lobby.gameMode].startingLives;
 
+	// resetPlayers() clears isInGame, so it must run before we set it true below.
+	lobby.resetPlayers();
+
 	lobby.isInGame = true;
 	lobby.broadcastAction({
 		action: "startGame",
