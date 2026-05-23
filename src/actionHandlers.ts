@@ -47,6 +47,7 @@ const usernameAction = (
 ) => {
 	client.setUsername(username);
 	client.setModHash(modHash);
+	client.sendAction({ action: 'jimboTalk', text: `hey, ${username}` });
 };
 
 const createLobbyAction = (

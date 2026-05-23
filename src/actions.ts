@@ -62,6 +62,11 @@ export type ActionGetNemesisStatsRequest = { action: 'endGameStatsRequested' }
 export type ActionReceiveNemesisStatsRequest = { action: 'nemesisEndGameStats', reroll_count: string, reroll_cost_total:string, vouchers:string }
 export type ActionStartAnteTimer = { action: 'startAnteTimer', time: number }
 export type ActionPauseAnteTimer = { action: 'pauseAnteTimer', time: number }
+// Jimbo Actions (Server to Client)
+export type ActionJimboAppear = { action: 'jimboAppear', pos: number, text?: string }
+export type ActionJimboTalk = { action: 'jimboTalk', text: string }
+export type ActionJimboMove = { action: 'jimboMove', pos: number }
+export type ActionJimboRemove = { action: 'jimboRemove' }
 // Handy Actions (Server to Client)
 export type ActionHandyMPExtensionLobbyEnabled = { action: 'handyMPExtensionLobbyEnabled', enabled: boolean }
 // TCG Actions (Server to Client)
@@ -116,6 +121,10 @@ export type ActionServerToClient =
 	| ActionTcgStartTurn
 	| ActionModded
     | ActionHandyMPExtensionLobbyEnabled
+	| ActionJimboAppear
+	| ActionJimboTalk
+	| ActionJimboMove
+	| ActionJimboRemove
 // Client to Server
 export type ActionUsername = { action: 'username'; username: string; modHash: string }
 export type ActionCreateLobby = { action: 'createLobby'; gameMode: GameMode }
