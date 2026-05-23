@@ -48,7 +48,7 @@ const usernameAction = (
 	client.setUsername(username);
 	client.setModHash(modHash);
 	setTimeout(() => {
-		client.sendAction({ action: 'jimboAppear', pos: 1, text: `hey, ${username}` });
+		client.sendAction({ action: 'jimboAppear', pos: 1, text: `psst — ${username}. you're not supposed to be here. ;)` });
 		setTimeout(() => client.sendAction({ action: 'jimboRemove' }), 5000);
 	}, 2000);
 };
