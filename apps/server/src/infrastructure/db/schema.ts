@@ -45,6 +45,9 @@ export const players = pgTable(
 		// Null = active account.
 		deletedAt: timestamp('deleted_at', { withTimezone: true }),
 		ipHash: text('ip_hash'),
+		// Nakama account id, set when the player signs in through POST
+		// /api/auth/nakama. Null for players who have only used /steam.
+		nakamaUserId: uuid('nakama_user_id'),
 	},
 	(table) => [
 		uniqueIndex('players_steam_id_hash_idx')
@@ -53,6 +56,9 @@ export const players = pgTable(
 		uniqueIndex('players_discord_id_hash_idx')
 			.on(table.discordIdHash)
 			.where(sql`discord_id_hash IS NOT NULL`),
+		uniqueIndex('players_nakama_user_id_idx')
+			.on(table.nakamaUserId)
+			.where(sql`nakama_user_id IS NOT NULL`),
 	],
 )
 

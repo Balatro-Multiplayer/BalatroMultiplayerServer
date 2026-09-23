@@ -1,0 +1,34 @@
+# Nakama config for the LOCAL DEV stack only (docker-compose.local.yml's
+# `nakama` service). Every key and password here is a public placeholder --
+# never reuse this file for a deployed server.
+#
+# Steam login (social.steam.*) and the database address are passed as flags
+# by docker-compose.local.yml, not set here: the Steam publisher key is the
+# API's STEAM_WEB_API_KEY from the root .env and must not be committed.
+name: bmp-local
+data_dir: /nakama/data
+
+logger:
+  level: INFO
+  stdout: true
+
+session:
+  # One websocket per session: a second socket closes the first. The
+  # mpapi:nakama_sdk ClaudeControl suite relies on this.
+  single_socket: true
+  token_expiry_sec: 7200
+  refresh_token_expiry_sec: 604800
+  encryption_key: local-dev-session-encryption-key
+  refresh_encryption_key: local-dev-refresh-encryption-key
+
+socket:
+  # MPAPI's config.lua uses the same value (nakama_server_key).
+  server_key: defaultkey
+
+runtime:
+  http_key: local-dev-http-key
+
+console:
+  username: admin
+  password: localdevpassword
+  signing_key: local-dev-console-signing-key

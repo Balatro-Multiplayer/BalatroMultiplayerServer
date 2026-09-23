@@ -17,6 +17,7 @@ import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/his
 import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
 import { listMutes } from '../../infrastructure/gateways/mute.gateway.js'
 import { signJwt } from './jwt.js'
+import type { NakamaAccount } from './nakama.js'
 
 type Provider = 'steam' | 'discord'
 type SessionInit = NonNullable<Parameters<typeof createSession>[1]>
@@ -158,6 +159,18 @@ export function createAuthService(deps: AuthServiceDeps) {
 		if (dbPlayer) return restoreSessionFromDbPlayer(dbPlayer, steamName)
 
 		return createBrandNewSteamSession(steamName, steamIdHash)
+	}
+
+	// Nakama has already verified the Steam ticket; from here on the player is
+	// found exactly as /steam finds them, and the Nakama account id is recorded.
+	async function authenticateWithNakama(
+		account: NakamaAccount,
+		steamName: string,
+	): Promise<SessionAndToken> {
+		const result = await authenticateWithSteam(account.steamId, steamName)
+		result.session.nakamaUserId = account.userId
+		await playerRepository.linkNakamaUser(result.session.playerId, account.userId)
+		return result
 	}
 
 	async function refreshDiscordSessionOnReauth(
@@ -347,6 +360,7 @@ export function createAuthService(deps: AuthServiceDeps) {
 			id: session.playerId,
 			steamName: session.steamName,
 			steamIdHash: session.steamIdHash,
+			nakamaUserId: session.nakamaUserId,
 		})
 	}
 
@@ -383,6 +397,7 @@ export function createAuthService(deps: AuthServiceDeps) {
 
 	return {
 		authenticateWithSteam,
+		authenticateWithNakama,
 		authenticateWithDiscord,
 		authenticateWithPlayerId,
 		impersonatePlayer,

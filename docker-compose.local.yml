@@ -53,3 +53,54 @@ services:
   web:
     ports:
       - "127.0.0.1:3000:3000"
+
+  # Game login through Nakama (POST /api/auth/nakama): the API asks Nakama
+  # who a session token belongs to. Local dev only -- the base file (and so
+  # prod) has no NAKAMA_URL, which leaves that route disabled.
+  api-blue:
+    environment:
+      NAKAMA_URL: http://nakama:7350
+
+  api-green:
+    environment:
+      NAKAMA_URL: http://nakama:7350
+
+  # Basic stock Nakama next to EMQX, local dev only. It verifies Steam
+  # tickets for in-game login (MPAPI's use_nakama_auth) with the same
+  # STEAM_WEB_API_KEY the API uses, read from the root .env. Its data lives in
+  # a separate "nakama" database on the shared Postgres server; `migrate up`
+  # creates it on first start. No nginx route: the Nakama client SDK builds
+  # scheme://host:port/... URLs and can't take a path prefix, so clients talk
+  # to 127.0.0.1:7350 directly. Console on 127.0.0.1:7351 (nakama/local.yml).
+  nakama:
+    image: heroiclabs/nakama:3.41.0
+    container_name: bmp-nakama
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        /nakama/nakama migrate up --database.address postgres:postgres@postgres:5432/nakama
+        exec /nakama/nakama --config /nakama/data/local.yml \
+          --database.address postgres:postgres@postgres:5432/nakama \
+          --social.steam.app_id "$$STEAM_APP_ID" \
+          --social.steam.publisher_key "$$STEAM_WEB_API_KEY"
+    environment:
+      STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
+      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+    volumes:
+      - ./nakama/local.yml:/nakama/data/local.yml:ro
+    ports:
+      - "127.0.0.1:7350:7350"
+      - "127.0.0.1:7351:7351"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - bmp

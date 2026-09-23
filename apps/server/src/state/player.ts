@@ -6,6 +6,7 @@ export class PlayerSession {
 	public steamName: string
 	public steamIdHash?: string
 	public discordIdHash?: string
+	public nakamaUserId?: string
 	public discordUsername?: string
 	public useDiscordName: boolean
 	public preferredJoker: string

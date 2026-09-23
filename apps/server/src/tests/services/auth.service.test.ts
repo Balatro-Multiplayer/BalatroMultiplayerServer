@@ -48,6 +48,7 @@ function makeMockPlayerRepository(): IPlayerRepository {
 		findPlayerBySteamName: vi.fn().mockResolvedValue(null),
 		createPlayer: vi.fn().mockResolvedValue(mockPlayerRecord),
 		linkSteam: vi.fn().mockResolvedValue(undefined),
+		linkNakamaUser: vi.fn().mockResolvedValue(undefined),
 		linkDiscord: vi.fn().mockResolvedValue(undefined),
 		unlinkDiscord: vi.fn().mockResolvedValue(undefined),
 		updateUseDiscordName: vi.fn().mockResolvedValue(undefined),
@@ -198,6 +199,37 @@ describe('auth.service', () => {
 			expect(gracePeriodService.cancelGracePeriod).toHaveBeenCalledWith('db-player-id')
 			expect(matchSessionRestorer.restorePlayerMatchSession).toHaveBeenCalledWith(session)
 			expect(session.steamName).toBe('Alice')
+		})
+	})
+
+	describe('authenticateWithNakama', () => {
+		const account = { userId: '11111111-2222-4333-8444-555555555555', steamId: 'steam-nk' }
+
+		it('finds the player by the Nakama account\'s Steam ID and records the Nakama user id', async () => {
+			const { service, playerRepository } = makeAuthService()
+			const { session } = await service.authenticateWithNakama(account, 'Alice')
+
+			expect(session.steamIdHash).toBe(hashProviderId('steam-nk'))
+			expect(session.nakamaUserId).toBe(account.userId)
+			expect(playerRepository.linkNakamaUser).toHaveBeenCalledWith(session.playerId, account.userId)
+		})
+
+		it('reuses the session a /steam login created for the same Steam ID', async () => {
+			const { service } = makeAuthService()
+			const first = await service.authenticateWithSteam('steam-nk', 'Alice')
+			const { session } = await service.authenticateWithNakama(account, 'Alice')
+
+			expect(session).toBe(first.session)
+		})
+
+		it('stores the Nakama user id when a new player accepts the ToS', async () => {
+			const { service, playerRepository } = makeAuthService()
+			const { session } = await service.authenticateWithNakama(account, 'Alice')
+			await service.acceptTos(session.playerId)
+
+			expect(playerRepository.createPlayer).toHaveBeenCalledWith(
+				expect.objectContaining({ id: session.playerId, nakamaUserId: account.userId }),
+			)
 		})
 	})
 

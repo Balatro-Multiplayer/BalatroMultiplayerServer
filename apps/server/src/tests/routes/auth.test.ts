@@ -150,6 +150,144 @@ describe('POST /api/auth/steam', () => {
 	})
 })
 
+describe('POST /api/auth/nakama', () => {
+	const originalNakamaUrl = env.NAKAMA_URL
+	const nakamaUserId = '11111111-2222-4333-8444-555555555555'
+
+	function nakamaAccountResponse(user: Record<string, unknown>) {
+		return new Response(JSON.stringify({ user }), { status: 200 })
+	}
+
+	beforeEach(() => {
+		;(env as { NAKAMA_URL: string }).NAKAMA_URL = 'http://nakama.test:7350'
+		// vi.restoreAllMocks() in prior afterEach blocks strips vi.mock() implementations
+		vi.mocked(issueRefreshToken).mockResolvedValue('mock-refresh-token')
+	})
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+		;(env as { NAKAMA_URL: string }).NAKAMA_URL = originalNakamaUrl
+	})
+
+	it('returns 404 when NAKAMA_URL is not set', async () => {
+		;(env as { NAKAMA_URL: string }).NAKAMA_URL = ''
+		const fetchSpy = vi.spyOn(globalThis, 'fetch')
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(404)
+		expect(fetchSpy).not.toHaveBeenCalled()
+	})
+
+	it('returns 400 when nakamaToken is missing', async () => {
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ steamName: 'Alice' })
+
+		expect(res.status).toBe(400)
+		expect(res.body.error).toMatch(/nakamaToken/)
+	})
+
+	it('asks Nakama for the account with the session token and signs the player in', async () => {
+		const fetchSpy = vi
+			.spyOn(globalThis, 'fetch')
+			.mockResolvedValue(nakamaAccountResponse({ id: nakamaUserId, steam_id: '76561198077777' }))
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(200)
+		expect(fetchSpy).toHaveBeenCalledWith('http://nakama.test:7350/v2/account', {
+			headers: { Authorization: 'Bearer session-token' },
+		})
+		expect(res.body.token).toBeDefined()
+		expect(res.body.refreshToken).toBe('mock-refresh-token')
+		expect(res.body.player.steamName).toBe('Alice')
+		expect(res.body.serverConfig).toBeDefined()
+		expect(vi.mocked(playerGateway.linkNakamaUser)).toHaveBeenCalledWith(res.body.player.id, nakamaUserId)
+	})
+
+	it('maps the Nakama account onto the player a /steam login found', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			nakamaAccountResponse({ id: nakamaUserId, steam_id: '76561198088888' }),
+		)
+		vi.mocked(playerGateway.findPlayerBySteamIdHash).mockResolvedValueOnce({
+			id: 'existing-steam-player',
+			steamIdHash: 'irrelevant-in-this-mock',
+			discordIdHash: null,
+			discordUsername: null,
+			useDiscordName: false,
+			preferredJoker: 'j_joker',
+			privileges: [],
+			steamName: 'Alice',
+			chatEnabled: false,
+			chatBlocked: false,
+			tosAcceptedVersion: 0,
+			deletedAt: null,
+		})
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(200)
+		expect(res.body.player.id).toBe('existing-steam-player')
+	})
+
+	it('returns the ToS gate for a new player', async () => {
+		setConfig({ tosVersion: 1, mods: [], chatAllowlist: new Set() })
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			nakamaAccountResponse({ id: nakamaUserId, steam_id: '76561198099999' }),
+		)
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(200)
+		expect(res.body).toMatchObject({ tosRequired: true, tosUpdate: false })
+		expect(res.body.token).toBeDefined()
+		expect(res.body.player).toBeUndefined()
+	})
+
+	it('returns 401 for an account without a Steam identity', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(nakamaAccountResponse({ id: nakamaUserId }))
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'device-session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(401)
+		expect(res.body.error).toMatch(/Steam identity/)
+	})
+
+	it('returns 401 when Nakama rejects the session token', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response(JSON.stringify({ code: 16, message: 'Auth token invalid' }), { status: 401 }),
+		)
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'bad-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(401)
+		expect(res.body.error).toMatch(/Invalid Nakama session/)
+	})
+
+	it('returns 502 when Nakama is unreachable', async () => {
+		vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'))
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(502)
+	})
+})
+
 describe('POST /api/auth/dev', () => {
 	const devApp = createTestApp()
 

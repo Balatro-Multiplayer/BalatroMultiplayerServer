@@ -59,6 +59,7 @@ export async function createPlayer(data: {
 	steamName: string
 	steamIdHash?: string
 	discordIdHash?: string
+	nakamaUserId?: string
 }): Promise<PlayerRecord> {
 	const [row] = await db
 		.insert(players)
@@ -67,6 +68,7 @@ export async function createPlayer(data: {
 			steamName: data.steamName,
 			steamIdHash: data.steamIdHash ?? null,
 			discordIdHash: data.discordIdHash ?? null,
+			nakamaUserId: data.nakamaUserId ?? null,
 		})
 		.returning()
 	return row
@@ -79,6 +81,18 @@ export async function linkSteam(
 	await db
 		.update(players)
 		.set({ steamIdHash, updatedAt: new Date() })
+		.where(eq(players.id, playerId))
+}
+
+// A no-op when the player has no row yet (a new player before accepting the
+// ToS); ensurePlayerExistsInDb stores the id when it creates the row.
+export async function linkNakamaUser(
+	playerId: string,
+	nakamaUserId: string,
+): Promise<void> {
+	await db
+		.update(players)
+		.set({ nakamaUserId, updatedAt: new Date() })
 		.where(eq(players.id, playerId))
 }
 

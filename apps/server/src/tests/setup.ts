@@ -147,6 +147,7 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	findPlayerBySteamName: vi.fn().mockResolvedValue(null),
 	createPlayer: vi.fn().mockResolvedValue(mockPlayerRecord),
 	linkSteam: vi.fn().mockResolvedValue(undefined),
+	linkNakamaUser: vi.fn().mockResolvedValue(undefined),
 	linkDiscord: vi.fn().mockResolvedValue(undefined),
 	unlinkDiscord: vi.fn().mockResolvedValue(undefined),
 	updateSteamName: vi.fn().mockResolvedValue(undefined),
@@ -197,6 +198,7 @@ beforeEach(async () => {
 	vi.mocked(playerDb.findPlayerById).mockResolvedValue(null)
 	vi.mocked(playerDb.createPlayer).mockResolvedValue(mockPlayerRecord)
 	vi.mocked(playerDb.linkSteam).mockResolvedValue(undefined)
+	vi.mocked(playerDb.linkNakamaUser).mockResolvedValue(undefined)
 	vi.mocked(playerDb.linkDiscord).mockResolvedValue(undefined)
 	vi.mocked(playerDb.unlinkDiscord).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updateSteamName).mockResolvedValue(undefined)

@@ -107,6 +107,11 @@ export const env = {
 		/\/+$/,
 		'',
 	),
+	// Nakama login bridge (POST /api/auth/nakama). Unset (default) disables the
+	// route; set to the Nakama HTTP API base, e.g. http://nakama:7350 on the local
+	// compose network (docker-compose.local.yml).
+	NAKAMA_URL: optional('NAKAMA_URL', '').replace(/\/+$/, ''),
+
 	MODERATION_BEARER_TOKEN: optional('MODERATION_BEARER_TOKEN', ''),
 	// Must exceed the moderation service's own judgement deadline plus margin.
 	// Set below it and a slow-but-successful verdict is abandoned here while it

@@ -6,6 +6,8 @@ import type { AuthService } from './auth.service.js'
 import { signJwt, signTosPendingToken, verifyTosPendingToken } from './jwt.js'
 import { getSteamOpenIdUrl, getSteamPlayerName, validateSteamOpenIdResponse, validateSteamTicket } from './steam.js'
 import { getDiscordAuthUrl, validateDiscordCode } from './discord.js'
+import { fetchNakamaAccount, isNakamaAuthEnabled } from './nakama.js'
+import type { NakamaAccountError } from './nakama.js'
 import { generateLinkState, verifyLinkState } from './link-state.js'
 import { cancelGracePeriod } from '../../infrastructure/mqtt/grace-period.service.js'
 import { getConfig } from '../../state/config.js'
@@ -69,6 +71,31 @@ function tosGate(session: PlayerSession): { tosRequired: true; tosUpdate: boolea
 	return null
 }
 
+// The in-game login response for /steam and /nakama: the ToS gate when the
+// player still has to accept it, otherwise the session.
+async function gameLoginPayload(session: PlayerSession, token: string) {
+	const isTemp = !session.steamIdHash
+
+	const gate = isTemp ? null : tosGate(session)
+	if (gate) return gate
+
+	const refreshToken = isTemp ? null : await issueRefreshToken(session.playerId)
+
+	return {
+		token,
+		refreshToken,
+		lobby: lobbyPayload(session),
+		player: playerPayload(session, { isTemp: isTemp || undefined }),
+		serverConfig: configPayload(),
+	}
+}
+
+const NAKAMA_ACCOUNT_ERRORS: Record<NakamaAccountError, [message: string, status: number]> = {
+	invalid_session: ['Invalid Nakama session', 401],
+	no_steam_identity: ['Nakama account has no Steam identity', 401],
+	api_error: ['Nakama request failed', 502],
+}
+
 export function createAuthRouter(service: AuthService): Router {
 	const router = Router()
 
@@ -102,23 +129,37 @@ export function createAuthRouter(service: AuthService): Router {
 				)
 			}
 			const { session, token } = await service.authenticateWithSteam(ticketResult.value.steamId, steamName)
-			const isTemp = !session.steamIdHash
+			res.json(await gameLoginPayload(session, token))
+		} catch (err) {
+			next(err)
+		}
+	})
 
-			const gate = isTemp ? null : tosGate(session)
-			if (gate) {
-				res.json(gate)
+	// Same as /steam, except Nakama has verified the Steam ticket: the client
+	// signs in to Nakama and sends its Nakama session token here instead.
+	router.post('/nakama', async (req, res, next) => {
+		try {
+			if (!isNakamaAuthEnabled()) {
+				res.status(404).json({ error: 'Not found' })
 				return
 			}
 
-			const refreshToken = isTemp ? null : await issueRefreshToken(session.playerId)
+			const { nakamaToken, steamName } = req.body
 
-			res.json({
-				token,
-				refreshToken,
-				lobby: lobbyPayload(session),
-				player: playerPayload(session, { isTemp: isTemp || undefined }),
-				serverConfig: configPayload(),
-			})
+			if (!nakamaToken || typeof nakamaToken !== 'string') {
+				throw new AppError('Missing or invalid nakamaToken', 400)
+			}
+			if (!steamName || typeof steamName !== 'string') {
+				throw new AppError('Missing or invalid steamName', 400)
+			}
+
+			const accountResult = await fetchNakamaAccount(nakamaToken)
+			if (!accountResult.ok) {
+				const [message, status] = NAKAMA_ACCOUNT_ERRORS[accountResult.error]
+				throw new AppError(message, status)
+			}
+			const { session, token } = await service.authenticateWithNakama(accountResult.value, steamName)
+			res.json(await gameLoginPayload(session, token))
 		} catch (err) {
 			next(err)
 		}

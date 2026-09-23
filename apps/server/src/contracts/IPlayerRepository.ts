@@ -25,8 +25,10 @@ export interface IPlayerRepository {
 		steamName: string
 		steamIdHash?: string
 		discordIdHash?: string
+		nakamaUserId?: string
 	}): Promise<PlayerRecord>
 	linkSteam(playerId: string, steamIdHash: string): Promise<void>
+	linkNakamaUser(playerId: string, nakamaUserId: string): Promise<void>
 	linkDiscord(
 		playerId: string,
 		discordIdHash: string,
