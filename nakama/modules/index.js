@@ -50,14 +50,17 @@ function verifySteamTicket(ctx, logger, nk, ticket) {
 		throw runtimeError(UNAVAILABLE, 'Steam request failed')
 	}
 
-	var params = null
+	var result = null
 	try {
 		var data = JSON.parse(response.body)
-		params = data && data.response && data.response.params
+		result = data && data.response
 	} catch (e) {
-		params = null
+		result = null
 	}
+	var params = result && result.params
 	if (!params || params.result !== 'OK' || !params.steamid) {
+		var steamError = (result && result.error) || {}
+		logger.warn('Steam rejected the ticket: %v %v', steamError.errorcode, steamError.errordesc)
 		throw runtimeError(UNAUTHENTICATED, 'Invalid Steam ticket')
 	}
 	return String(params.steamid)
