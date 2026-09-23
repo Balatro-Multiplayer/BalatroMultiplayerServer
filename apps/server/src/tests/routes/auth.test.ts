@@ -154,8 +154,11 @@ describe('POST /api/auth/nakama', () => {
 	const originalNakamaUrl = env.NAKAMA_URL
 	const nakamaUserId = '11111111-2222-4333-8444-555555555555'
 
-	function nakamaAccountResponse(user: Record<string, unknown>) {
-		return new Response(JSON.stringify({ user }), { status: 200 })
+	function nakamaAccountResponse(account: { userId: string; customId?: string }) {
+		return new Response(
+			JSON.stringify({ user: { id: account.userId }, custom_id: account.customId }),
+			{ status: 200 },
+		)
 	}
 
 	beforeEach(() => {
@@ -193,7 +196,7 @@ describe('POST /api/auth/nakama', () => {
 	it('asks Nakama for the account with the session token and signs the player in', async () => {
 		const fetchSpy = vi
 			.spyOn(globalThis, 'fetch')
-			.mockResolvedValue(nakamaAccountResponse({ id: nakamaUserId, steam_id: '76561198077777' }))
+			.mockResolvedValue(nakamaAccountResponse({ userId: nakamaUserId, customId: 'steam:76561198077777' }))
 
 		const res = await request(app)
 			.post('/api/auth/nakama')
@@ -212,7 +215,7 @@ describe('POST /api/auth/nakama', () => {
 
 	it('maps the Nakama account onto the player a /steam login found', async () => {
 		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			nakamaAccountResponse({ id: nakamaUserId, steam_id: '76561198088888' }),
+			nakamaAccountResponse({ userId: nakamaUserId, customId: 'steam:76561198088888' }),
 		)
 		vi.mocked(playerGateway.findPlayerBySteamIdHash).mockResolvedValueOnce({
 			id: 'existing-steam-player',
@@ -240,7 +243,7 @@ describe('POST /api/auth/nakama', () => {
 	it('returns the ToS gate for a new player', async () => {
 		setConfig({ tosVersion: 1, mods: [], chatAllowlist: new Set() })
 		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-			nakamaAccountResponse({ id: nakamaUserId, steam_id: '76561198099999' }),
+			nakamaAccountResponse({ userId: nakamaUserId, customId: 'steam:76561198099999' }),
 		)
 
 		const res = await request(app)
@@ -254,7 +257,7 @@ describe('POST /api/auth/nakama', () => {
 	})
 
 	it('returns 401 for an account without a Steam identity', async () => {
-		vi.spyOn(globalThis, 'fetch').mockResolvedValue(nakamaAccountResponse({ id: nakamaUserId }))
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(nakamaAccountResponse({ userId: nakamaUserId }))
 
 		const res = await request(app)
 			.post('/api/auth/nakama')
@@ -262,6 +265,18 @@ describe('POST /api/auth/nakama', () => {
 
 		expect(res.status).toBe(401)
 		expect(res.body.error).toMatch(/Steam identity/)
+	})
+
+	it('returns 401 for a custom id that is not a Steam login', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			nakamaAccountResponse({ userId: nakamaUserId, customId: 'steam:76561198012345-other' }),
+		)
+
+		const res = await request(app)
+			.post('/api/auth/nakama')
+			.send({ nakamaToken: 'session-token', steamName: 'Alice' })
+
+		expect(res.status).toBe(401)
 	})
 
 	it('returns 401 when Nakama rejects the session token', async () => {

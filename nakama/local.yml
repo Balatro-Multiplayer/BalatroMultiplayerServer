@@ -2,9 +2,10 @@
 # `nakama` service). Every key and password here is a public placeholder --
 # never reuse this file for a deployed server.
 #
-# Steam login (social.steam.*) and the database address are passed as flags
-# by docker-compose.local.yml, not set here: the Steam publisher key is the
-# API's STEAM_WEB_API_KEY from the root .env and must not be committed.
+# The database address and the Steam key (runtime.env, read by
+# modules/index.js) are passed as flags by docker-compose.local.yml, not set
+# here: the key is the API's STEAM_WEB_API_KEY from the root .env and must not
+# be committed.
 name: bmp-local
 data_dir: /nakama/data
 
@@ -27,6 +28,9 @@ socket:
 
 runtime:
   http_key: local-dev-http-key
+  # modules/index.js: Steam login through a before-hook on custom auth.
+  path: /nakama/data/modules
+  js_entrypoint: index.js
 
 console:
   username: admin
