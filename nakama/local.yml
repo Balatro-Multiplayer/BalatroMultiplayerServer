@@ -28,7 +28,8 @@ socket:
 
 runtime:
   http_key: local-dev-http-key
-  # modules/index.js: Steam login through a before-hook on custom auth.
+  # modules/index.js (built from ../src by build.mjs): Steam login through a
+  # before-hook on custom auth, plus the bmp_lobby match and lobby RPCs.
   path: /nakama/data/modules
   js_entrypoint: index.js
 

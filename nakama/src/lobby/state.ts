@@ -1,0 +1,447 @@
+// The lobby rules, as pure functions over plain data: no Nakama calls, no
+// clock (callers pass `now`), and every transition returns a new Lobby
+// instead of mutating. Nakama round-trips match state through Go between
+// calls, where Set/Map values are lost and in-place nested mutation can
+// silently not stick, so the state holds only plain objects and arrays.
+//
+// Parity source: the API's MQTT lobbies (apps/server/src/features/lobby/
+// lobby.service.ts and infrastructure/mqtt/grace-period.service.ts).
+import {
+	type LobbyEventMessage,
+	type LobbyEventType,
+	type PlayerInfo,
+	ServerOp,
+	type Snapshot,
+} from './protocol'
+
+export const DEFAULT_GRACE_MS = 120_000
+// A created lobby nobody joins (the creator's client crashed between the
+// create RPC and match_join) closes after this long.
+export const CREATOR_JOIN_TIMEOUT_MS = 30_000
+export const MIN_PLAYERS = 2
+export const MAX_PLAYERS = 128
+
+export interface LobbyPlayer {
+	id: string
+	// The presence currently attached; a stale session's leave is ignored.
+	sessionId: string
+	info: PlayerInfo
+	awaySince: number | null
+	ownState: unknown
+}
+
+export interface Lobby {
+	code: string
+	modId: string
+	maxPlayers: number
+	creatorId: string
+	hostId: string
+	metadata: { [key: string]: unknown }
+	// In join order: host transfer picks the earliest eligible player.
+	players: LobbyPlayer[]
+	kickedIds: string[]
+	createdAt: number
+	graceMs: number
+	closed: boolean
+}
+
+export type Outbound =
+	| { kind: 'send'; op: number; payload: unknown; to: string[] }
+	| { kind: 'kick'; userId: string }
+	| { kind: 'setCurrent'; userId: string }
+	| { kind: 'clearCurrent'; userId: string }
+
+export interface Step {
+	lobby: Lobby
+	out: Outbound[]
+}
+
+export function newLobby(params: {
+	code: string
+	modId: string
+	maxPlayers: number
+	creatorId: string
+	now: number
+	graceMs: number
+}): Lobby {
+	return {
+		code: params.code,
+		modId: params.modId,
+		maxPlayers: params.maxPlayers,
+		creatorId: params.creatorId,
+		hostId: params.creatorId,
+		metadata: {},
+		players: [],
+		kickedIds: [],
+		createdAt: params.now,
+		graceMs: params.graceMs,
+		closed: false,
+	}
+}
+
+export function labelOf(lobby: Lobby): string {
+	return JSON.stringify({
+		code: lobby.code,
+		modId: lobby.modId,
+		open: !lobby.closed && lobby.players.length < lobby.maxPlayers,
+		size: lobby.players.length,
+		max: lobby.maxPlayers,
+	})
+}
+
+export function findPlayer(
+	lobby: Lobby,
+	userId: string,
+): LobbyPlayer | undefined {
+	for (const p of lobby.players) {
+		if (p.id === userId) return p
+	}
+	return undefined
+}
+
+function allIds(lobby: Lobby): string[] {
+	return lobby.players.map((p) => p.id)
+}
+
+function othersThan(lobby: Lobby, userId: string): string[] {
+	return allIds(lobby).filter((id) => id !== userId)
+}
+
+function event(
+	lobby: Lobby,
+	type: LobbyEventType,
+	fields: Omit<LobbyEventMessage, 'type' | 'lobbyCode'>,
+	to: string[],
+): Outbound {
+	const payload: LobbyEventMessage = { type, lobbyCode: lobby.code, ...fields }
+	return { kind: 'send', op: ServerOp.EVENT, payload, to }
+}
+
+function rejectOp(userId: string, message: string): Outbound {
+	return {
+		kind: 'send',
+		op: ServerOp.ERROR,
+		payload: { message },
+		to: [userId],
+	}
+}
+
+// Why userId may not join, or null. A member rejoining (after a disconnect)
+// is always let back in.
+export function joinRejection(
+	lobby: Lobby,
+	userId: string,
+	modId: string,
+): string | null {
+	if (lobby.closed) return 'Lobby is closed'
+	if (findPlayer(lobby, userId)) return null
+	if (lobby.kickedIds.indexOf(userId) !== -1)
+		return 'You were kicked from this lobby'
+	if (modId !== lobby.modId) return 'Lobby is for a different mod'
+	if (lobby.players.length === 0 && userId !== lobby.creatorId)
+		return 'Lobby is not open yet'
+	if (lobby.players.length >= lobby.maxPlayers) return 'Lobby is full'
+	return null
+}
+
+export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
+	const self = findPlayer(lobby, userId)
+	return {
+		code: lobby.code,
+		modId: lobby.modId,
+		hostId: lobby.hostId,
+		maxPlayers: lobby.maxPlayers,
+		type: 'private',
+		metadata: lobby.metadata,
+		players: lobby.players.map((p) => ({
+			id: p.id,
+			displayName: p.info.displayName,
+			preferredJoker: p.info.preferredJoker,
+			mods: p.info.mods,
+			isAway: p.awaySince !== null,
+		})),
+		ownState: self ? self.ownState : null,
+	}
+}
+
+// Call after joinRejection returned null.
+export function join(
+	lobby: Lobby,
+	userId: string,
+	sessionId: string,
+	info: PlayerInfo,
+): Step {
+	const existing = findPlayer(lobby, userId)
+	if (existing) {
+		const wasAway = existing.awaySince !== null
+		const back: LobbyPlayer = { ...existing, sessionId, awaySince: null }
+		const next = {
+			...lobby,
+			players: lobby.players.map((p) => (p.id === userId ? back : p)),
+		}
+		const out: Outbound[] = [
+			{
+				kind: 'send',
+				op: ServerOp.SNAPSHOT,
+				payload: snapshotFor(next, userId),
+				to: [userId],
+			},
+		]
+		if (wasAway) {
+			out.push(
+				event(
+					next,
+					'player_reconnected',
+					{ playerId: userId, displayName: back.info.displayName },
+					othersThan(next, userId),
+				),
+			)
+		}
+		return { lobby: next, out }
+	}
+
+	const player: LobbyPlayer = {
+		id: userId,
+		sessionId,
+		info,
+		awaySince: null,
+		ownState: null,
+	}
+	const next = { ...lobby, players: lobby.players.concat([player]) }
+	const others = othersThan(next, userId)
+	return {
+		lobby: next,
+		out: [
+			{ kind: 'setCurrent', userId },
+			{
+				kind: 'send',
+				op: ServerOp.SNAPSHOT,
+				payload: snapshotFor(next, userId),
+				to: [userId],
+			},
+			event(
+				next,
+				'player_joined',
+				{ playerId: userId, displayName: info.displayName },
+				others,
+			),
+			{
+				kind: 'send',
+				op: ServerOp.PLAYER_INFO,
+				payload: { playerId: userId, info },
+				to: others,
+			},
+		],
+	}
+}
+
+// Next host after `leavingId`: the earliest-joined player still connected
+// (grace-period.service.ts findNextHost).
+function nextHost(lobby: Lobby, leavingId: string): string | null {
+	for (const p of lobby.players) {
+		if (p.id !== leavingId && p.awaySince === null) return p.id
+	}
+	return null
+}
+
+function transferHostFrom(lobby: Lobby, userId: string): Step {
+	if (lobby.hostId !== userId) return { lobby, out: [] }
+	const hostId = nextHost(lobby, userId)
+	if (!hostId) return { lobby, out: [] }
+	const next = { ...lobby, hostId }
+	return {
+		lobby: next,
+		out: [event(next, 'host_changed', { playerId: hostId }, allIds(next))],
+	}
+}
+
+export function close(lobby: Lobby): Step {
+	if (lobby.closed) return { lobby, out: [] }
+	const next = { ...lobby, closed: true }
+	const out: Outbound[] = [event(next, 'lobby_closed', {}, allIds(next))]
+	for (const id of allIds(next)) out.push({ kind: 'clearCurrent', userId: id })
+	return { lobby: next, out }
+}
+
+// A lobby nobody is connected to any more is closed straight away rather than
+// waiting out every player's grace period (grace-period.service.ts, "§7.8").
+function closeIfAbandoned(step: Step): Step {
+	const lobby = step.lobby
+	if (lobby.closed) return step
+	const anyoneHere = lobby.players.some((p) => p.awaySince === null)
+	if (anyoneHere) return step
+	const closed = close(lobby)
+	return { lobby: closed.lobby, out: step.out.concat(closed.out) }
+}
+
+// Drops userId from the roster: `type` is the event the others get
+// (player_left, or none when the caller already announced a kick).
+function remove(
+	lobby: Lobby,
+	userId: string,
+	type: 'player_left' | null,
+): Step {
+	const player = findPlayer(lobby, userId)
+	if (!player) return { lobby, out: [] }
+
+	// Host moves on before the player is gone, so the new host is never them.
+	const transferred = transferHostFrom(lobby, userId)
+	const next = {
+		...transferred.lobby,
+		players: transferred.lobby.players.filter((p) => p.id !== userId),
+	}
+	const others = allIds(next)
+	const out: Outbound[] = [{ kind: 'clearCurrent', userId }]
+	if (type)
+		out.push(
+			event(
+				next,
+				type,
+				{ playerId: userId, displayName: player.info.displayName },
+				others,
+			),
+		)
+	out.push({
+		kind: 'send',
+		op: ServerOp.PLAYER_INFO,
+		payload: { playerId: userId, info: null },
+		to: others,
+	})
+	out.push(
+		...transferred.out.map((o) =>
+			o.kind === 'send' ? { ...o, to: others } : o,
+		),
+	)
+
+	if (next.players.length === 0) {
+		const closed = close(next)
+		return { lobby: closed.lobby, out: out.concat(closed.out) }
+	}
+	return closeIfAbandoned({ lobby: next, out })
+}
+
+// The player asked to leave (op LEAVE, or the leave RPC): gone for good.
+export function leave(lobby: Lobby, userId: string): Step {
+	if (!findPlayer(lobby, userId)) return { lobby, out: [] }
+	const step = remove(lobby, userId, 'player_left')
+	return { lobby: step.lobby, out: step.out.concat([{ kind: 'kick', userId }]) }
+}
+
+// The player's socket dropped without a LEAVE: keep their seat for the grace
+// period. A leave from an older session of a player who already rejoined is
+// stale and ignored.
+export function disconnect(
+	lobby: Lobby,
+	userId: string,
+	sessionId: string,
+	now: number,
+): Step {
+	const player = findPlayer(lobby, userId)
+	if (!player || player.sessionId !== sessionId || player.awaySince !== null)
+		return { lobby, out: [] }
+
+	const away: LobbyPlayer = { ...player, awaySince: now }
+	const marked = {
+		...lobby,
+		players: lobby.players.map((p) => (p.id === userId ? away : p)),
+	}
+	const transferred = transferHostFrom(marked, userId)
+	const out: Outbound[] = [
+		event(
+			transferred.lobby,
+			'player_disconnected',
+			{ playerId: userId, displayName: player.info.displayName },
+			othersThan(transferred.lobby, userId),
+		),
+	]
+	return closeIfAbandoned({
+		lobby: transferred.lobby,
+		out: out.concat(transferred.out),
+	})
+}
+
+export function kick(lobby: Lobby, byId: string, targetId: string): Step {
+	if (lobby.hostId !== byId)
+		return { lobby, out: [rejectOp(byId, 'Only the host can kick players')] }
+	if (targetId === byId)
+		return { lobby, out: [rejectOp(byId, 'You cannot kick yourself')] }
+	const target = findPlayer(lobby, targetId)
+	if (!target)
+		return { lobby, out: [rejectOp(byId, 'Player is not in this lobby')] }
+
+	// Announced to everyone, the target included, before they are removed.
+	const announced = event(
+		lobby,
+		'player_kicked',
+		{
+			playerId: targetId,
+			displayName: target.info.displayName,
+			data: { kickedBy: byId },
+		},
+		allIds(lobby),
+	)
+	const marked = { ...lobby, kickedIds: lobby.kickedIds.concat([targetId]) }
+	const step = remove(marked, targetId, null)
+	return {
+		lobby: step.lobby,
+		out: [announced as Outbound].concat(step.out, [
+			{ kind: 'kick', userId: targetId },
+		]),
+	}
+}
+
+function isPlainObject(value: unknown): value is { [key: string]: unknown } {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function setMetadata(lobby: Lobby, byId: string, patch: unknown): Step {
+	if (lobby.hostId !== byId)
+		return { lobby, out: [rejectOp(byId, 'Only the host can set metadata')] }
+	if (!isPlainObject(patch))
+		return { lobby, out: [rejectOp(byId, 'Metadata must be an object')] }
+
+	const metadata = { ...lobby.metadata, ...patch }
+	const next = { ...lobby, metadata }
+	const everyone = allIds(next)
+	return {
+		lobby: next,
+		out: [
+			{ kind: 'send', op: ServerOp.METADATA, payload: metadata, to: everyone },
+			event(next, 'metadata_changed', { data: metadata }, everyone),
+		],
+	}
+}
+
+export function setOwnState(lobby: Lobby, byId: string, state: unknown): Step {
+	if (!findPlayer(lobby, byId)) return { lobby, out: [] }
+	return {
+		lobby: {
+			...lobby,
+			players: lobby.players.map((p) =>
+				p.id === byId ? { ...p, ownState: state } : p,
+			),
+		},
+		out: [],
+	}
+}
+
+// Time passing: expire grace periods, and close a lobby its creator never
+// joined.
+export function tick(lobby: Lobby, now: number): Step {
+	if (lobby.closed) return { lobby, out: [] }
+	if (lobby.players.length === 0) {
+		return now - lobby.createdAt >= CREATOR_JOIN_TIMEOUT_MS
+			? close(lobby)
+			: { lobby, out: [] }
+	}
+
+	let step: Step = { lobby, out: [] }
+	for (const p of lobby.players) {
+		if (step.lobby.closed) break
+		if (p.awaySince !== null && now - p.awaySince >= lobby.graceMs) {
+			const removed = remove(step.lobby, p.id, 'player_left')
+			step = { lobby: removed.lobby, out: step.out.concat(removed.out) }
+		}
+	}
+	return step
+}

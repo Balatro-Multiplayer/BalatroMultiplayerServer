@@ -67,7 +67,7 @@ services:
 
   # Basic Nakama next to EMQX, local dev only. It verifies Steam tickets for
   # in-game login (MPAPI's use_nakama_auth) in a runtime hook
-  # (nakama/modules/index.js -- stock authenticate_steam needs Balatro's
+  # (nakama/modules/index.js, built from nakama/src -- stock authenticate_steam needs Balatro's
   # publisher key) with the same STEAM_WEB_API_KEY the API uses, read from
   # the root .env. Its data lives in
   # a separate "nakama" database on the shared Postgres server; `migrate up`
@@ -85,10 +85,17 @@ services:
         exec /nakama/nakama --config /nakama/data/local.yml \
           --database.address postgres:postgres@postgres:5432/nakama \
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
-          --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY"
+          --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY" \
+          --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
+          --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS"
     environment:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+      # Device login lets impersonated ClaudeControl instances (no Steam
+      # ticket) into Nakama. Local dev only -- never set it on a real server.
+      ALLOW_DEVICE_AUTH: "true"
+      # Lobby grace period after a disconnect; empty = the 120s default.
+      LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
     volumes:
       - ./nakama/local.yml:/nakama/data/local.yml:ro
       - ./nakama/modules:/nakama/data/modules:ro
