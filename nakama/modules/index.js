@@ -104,74 +104,6 @@ function beforeAuthenticateDevice(ctx, logger, nk, data) {
   return data;
 }
 
-// src/actions/registry.ts
-var MAX_OPTIONS_BYTES = 4 * 1024;
-function isPlainObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-var ready = {
-  key: "mpapi_ready",
-  reduce(lobby, ctx, params) {
-    if (!isPlainObject(params) || typeof params.ready !== "boolean")
-      return { reject: "bad_params" };
-    if (lobby.game.started) return { reject: "in_game" };
-    const readyMap = __spreadValues({}, lobby.game.ready);
-    if (params.ready) readyMap[ctx.from] = true;
-    else delete readyMap[ctx.from];
-    return {
-      game: __spreadProps(__spreadValues({}, lobby.game), { ready: readyMap }),
-      params: { playerId: ctx.from, ready: params.ready }
-    };
-  }
-};
-var startGame = {
-  key: "mpapi_start_game",
-  reduce(lobby, ctx, params) {
-    const p = isPlainObject(params) ? params : {};
-    if (p.stake !== void 0 && typeof p.stake !== "number")
-      return { reject: "bad_params" };
-    const options = p.options === void 0 ? null : p.options;
-    if (JSON.stringify(options).length > MAX_OPTIONS_BYTES)
-      return { reject: "bad_params" };
-    if (lobby.hostId !== ctx.from) return { reject: "not_host" };
-    if (lobby.game.started) return { reject: "in_game" };
-    const present = lobby.players.filter((pl) => pl.awaySince === null);
-    if (present.length < 2) return { reject: "too_few_players" };
-    for (const pl of present) {
-      if (pl.id !== lobby.hostId && !lobby.game.ready[pl.id])
-        return { reject: "not_all_ready" };
-    }
-    const started = {
-      seed: ctx.newSeed(),
-      stake: typeof p.stake === "number" ? p.stake : null,
-      options,
-      startedAt: ctx.now
-    };
-    return {
-      game: { ready: {}, started },
-      params: { seed: started.seed, stake: started.stake, options }
-    };
-  }
-};
-var REGISTRY = {
-  [ready.key]: ready,
-  [startGame.key]: startGame
-};
-function authoritativeAction(key) {
-  return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
-}
-var SEED_ALPHABET = "123456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
-var SEED_LENGTH = 8;
-function seedFromHex(hex) {
-  const digits = hex.replace(/[^0-9a-f]/gi, "");
-  let seed = "";
-  for (let i = 0; i < SEED_LENGTH; i++) {
-    const n = Number.parseInt(digits.substr(i * 3, 3) || "0", 16);
-    seed += SEED_ALPHABET[n % SEED_ALPHABET.length];
-  }
-  return seed;
-}
-
 // src/lobby/protocol.ts
 var LOBBY_MATCH = "bmp_lobby";
 var ClientOp = {
@@ -210,68 +142,18 @@ var CURRENT_LOBBY_COLLECTION = "lobby";
 var CURRENT_LOBBY_KEY = "current";
 var LOBBY_CODE_COLLECTION = "lobby_codes";
 var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
-
-// src/lobby/codes.ts
-function keyOf(code) {
-  return {
-    collection: LOBBY_CODE_COLLECTION,
-    key: code,
-    userId: SYSTEM_USER_ID
-  };
-}
-function write(nk, code, entry, version) {
-  nk.storageWrite([
-    __spreadProps(__spreadValues({}, keyOf(code)), {
-      value: __spreadValues({}, entry),
-      permissionRead: 0,
-      permissionWrite: 0,
-      version
-    })
-  ]);
-}
-function read(nk, code) {
-  const objects = nk.storageRead([keyOf(code)]);
-  if (objects.length === 0) return null;
-  const value = objects[0].value;
-  return {
-    matchId: String(value.matchId || ""),
-    modId: String(value.modId || "")
-  };
-}
-function reserveCode(nk, code, modId) {
-  const existing = read(nk, code);
-  if (existing) {
-    if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
-    nk.storageDelete([keyOf(code)]);
-  }
-  try {
-    write(nk, code, { matchId: "", modId }, "*");
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-function bindCode(nk, code, matchId, modId) {
-  write(nk, code, { matchId, modId });
-}
-function lookupCode(nk, code) {
-  const entry = read(nk, code);
-  if (!entry || !entry.matchId || !nk.matchGet(entry.matchId)) return null;
-  return entry;
-}
-function releaseCode(nk, code, matchId) {
-  const entry = read(nk, code);
-  if (entry && entry.matchId === matchId) {
-    nk.storageDelete([keyOf(code)]);
-  }
-}
+var RUNS_COLLECTION = "match_runs";
+var LOGS_COLLECTION = "match_logs";
+var MY_RUNS_COLLECTION = "my_runs";
 
 // src/lobby/state.ts
 var DEFAULT_GRACE_MS = 12e4;
+var DEFAULT_RESULT_TIMEOUT_MS = 6e4;
 var CREATOR_JOIN_TIMEOUT_MS = 3e4;
 var MIN_PLAYERS = 2;
 var MAX_PLAYERS = 128;
 function newLobby(params) {
+  var _a;
   return {
     code: params.code,
     modId: params.modId,
@@ -283,9 +165,20 @@ function newLobby(params) {
     kickedIds: [],
     createdAt: params.now,
     graceMs: params.graceMs,
+    resultTimeoutMs: (_a = params.resultTimeoutMs) != null ? _a : DEFAULT_RESULT_TIMEOUT_MS,
     closed: false,
-    game: { ready: {}, started: null },
+    game: emptyGame(),
     actionBudget: {}
+  };
+}
+function emptyGame() {
+  return {
+    ready: {},
+    started: null,
+    reports: {},
+    reportOrder: [],
+    settleFrom: null,
+    logs: {}
   };
 }
 function labelOf(lobby) {
@@ -350,7 +243,11 @@ function snapshotFor(lobby, userId) {
       isAway: p.awaySince !== null
     })),
     ownState: self ? self.ownState : null,
-    game: lobby.game
+    game: {
+      ready: lobby.game.ready,
+      started: lobby.game.started,
+      reported: Object.keys(lobby.game.reports)
+    }
   };
 }
 function join(lobby, userId, sessionId, info) {
@@ -415,6 +312,9 @@ function join(lobby, userId, sessionId, info) {
     ]
   };
 }
+function logBudgetKey(userId) {
+  return `${userId}:log`;
+}
 function nextHost(lobby, leavingId) {
   for (const p of lobby.players) {
     if (p.id !== leavingId && p.awaySince === null) return p.id;
@@ -454,6 +354,7 @@ function remove(lobby, userId, type) {
   delete ready2[userId];
   const actionBudget = __spreadValues({}, transferred.lobby.actionBudget);
   delete actionBudget[userId];
+  delete actionBudget[logBudgetKey(userId)];
   const next = __spreadProps(__spreadValues({}, transferred.lobby), {
     players: transferred.lobby.players.filter((p) => p.id !== userId),
     game: __spreadProps(__spreadValues({}, transferred.lobby.game), { ready: ready2 }),
@@ -541,13 +442,13 @@ function kick(lobby, byId, targetId) {
     ])
   };
 }
-function isPlainObject2(value) {
+function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function setMetadata(lobby, byId, patch) {
   if (lobby.hostId !== byId)
     return { lobby, out: [rejectOp(byId, "Only the host can set metadata")] };
-  if (!isPlainObject2(patch))
+  if (!isPlainObject(patch))
     return { lobby, out: [rejectOp(byId, "Metadata must be an object")] };
   const metadata = __spreadValues(__spreadValues({}, lobby.metadata), patch);
   const next = __spreadProps(__spreadValues({}, lobby), { metadata });
@@ -587,12 +488,404 @@ function tick(lobby, now) {
   return step;
 }
 
+// src/actions/results.ts
+function parsePlacements(value, participants) {
+  if (!Array.isArray(value) || value.length !== participants.length)
+    return null;
+  const expected = {};
+  for (const p of participants) expected[p.id] = true;
+  const seen = {};
+  const placements = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { playerId, place, performance, metric } = entry;
+    if (typeof playerId !== "string" || !expected[playerId] || seen[playerId])
+      return null;
+    if (typeof place !== "number" || place % 1 !== 0 || place < 1)
+      return null;
+    const placement = { playerId, place };
+    if (performance !== void 0 && performance !== null) {
+      if (typeof performance !== "number" || !(performance >= 0 && performance <= 1))
+        return null;
+      placement.performance = performance;
+    }
+    if (metric !== void 0 && metric !== null) {
+      if (typeof metric !== "number" || !Number.isFinite(metric) || metric < 0)
+        return null;
+      placement.metric = metric;
+    }
+    seen[playerId] = true;
+    placements.push(placement);
+  }
+  return sortedById(placements);
+}
+function sortedById(placements) {
+  return placements.slice().sort((a, b) => a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0);
+}
+function placesKey(placements) {
+  return JSON.stringify(sortedById(placements).map((p) => [p.playerId, p.place]));
+}
+function reconcile(reports, reportOrder, participants, hostId) {
+  const reporters = reportOrder.filter((id) => reports[id] !== void 0);
+  if (reporters.length === 0) return { status: "abandoned", placements: [] };
+  const groups = {};
+  const keys = [];
+  for (const id of reporters) {
+    const key = placesKey(reports[id]);
+    if (!groups[key]) {
+      groups[key] = [];
+      keys.push(key);
+    }
+    groups[key].push(id);
+  }
+  if (keys.length === 1) {
+    const everyone = participants.every((p) => reports[p.id] !== void 0);
+    return {
+      status: everyone ? "agreed" : "partial",
+      placements: reports[reporters[0]]
+    };
+  }
+  let best = keys[0];
+  for (const key of keys) {
+    const size = groups[key].length;
+    const bestSize = groups[best].length;
+    const hasHost = groups[key].indexOf(hostId) !== -1;
+    const bestHasHost = groups[best].indexOf(hostId) !== -1;
+    if (size > bestSize || size === bestSize && hasHost && !bestHasHost)
+      best = key;
+  }
+  return { status: "disputed", placements: reports[groups[best][0]] };
+}
+function remainingParticipants(lobby) {
+  const started = lobby.game.started;
+  if (!started) return [];
+  const seated = {};
+  for (const p of lobby.players) seated[p.id] = true;
+  return started.players.filter((p) => seated[p.id]).map((p) => p.id);
+}
+function finishGame(lobby, now, override) {
+  const game = lobby.game;
+  const started = game.started;
+  if (!started) return { lobby, out: [] };
+  const reconciled = reconcile(
+    game.reports,
+    game.reportOrder,
+    started.players,
+    started.hostId
+  );
+  const status = override ? override.status : reconciled.status;
+  const placements = status === "abandoned" ? [] : reconciled.placements;
+  const run = {
+    runId: started.runId,
+    code: lobby.code,
+    modId: lobby.modId,
+    seed: started.seed,
+    stake: started.stake,
+    options: started.options,
+    startedAt: started.startedAt,
+    endedAt: now,
+    status,
+    placements,
+    reports: game.reports,
+    players: started.players
+  };
+  const next = __spreadProps(__spreadValues({}, lobby), { game: emptyGame() });
+  const out = [{ kind: "saveRun", run, logs: game.logs }];
+  if (!override || override.announce) {
+    const ended = { runId: started.runId, status, placements };
+    out.push({
+      kind: "send",
+      op: ServerOp.EVENT,
+      payload: { type: "game_ended", lobbyCode: lobby.code, data: ended },
+      to: next.players.map((p) => p.id)
+    });
+  }
+  return { lobby: next, out };
+}
+function settle(lobby, now) {
+  const started = lobby.game.started;
+  if (!started) return { lobby, out: [] };
+  const remaining = remainingParticipants(lobby);
+  if (remaining.length === 0) return finishGame(lobby, now);
+  const reports = lobby.game.reports;
+  const anyReport = lobby.game.reportOrder.length > 0;
+  if (anyReport && remaining.every((id) => reports[id] !== void 0))
+    return finishGame(lobby, now);
+  let current = lobby;
+  if (current.game.settleFrom === null && remaining.length < 2) {
+    current = __spreadProps(__spreadValues({}, current), { game: __spreadProps(__spreadValues({}, current.game), { settleFrom: now }) });
+  }
+  const from = current.game.settleFrom;
+  if (from !== null && now - from >= current.resultTimeoutMs)
+    return finishGame(current, now);
+  return { lobby: current, out: [] };
+}
+
+// src/actions/registry.ts
+var MAX_OPTIONS_BYTES = 4 * 1024;
+var MIN_GAME_PLAYERS = 2;
+function isPlainObject2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var ready = {
+  key: "mpapi_ready",
+  reduce(lobby, ctx, params) {
+    if (!isPlainObject2(params) || typeof params.ready !== "boolean")
+      return { reject: "bad_params" };
+    if (lobby.game.started) return { reject: "in_game" };
+    const readyMap = __spreadValues({}, lobby.game.ready);
+    if (params.ready) readyMap[ctx.from] = true;
+    else delete readyMap[ctx.from];
+    return {
+      game: __spreadProps(__spreadValues({}, lobby.game), { ready: readyMap }),
+      params: { playerId: ctx.from, ready: params.ready }
+    };
+  }
+};
+function startedParams(started) {
+  return {
+    runId: started.runId,
+    seed: started.seed,
+    stake: started.stake,
+    options: started.options,
+    players: started.players
+  };
+}
+function newGame(lobby, ctx, stake, options) {
+  return {
+    runId: ctx.newId(),
+    seed: ctx.newSeed(),
+    stake,
+    options,
+    startedAt: ctx.now,
+    hostId: lobby.hostId,
+    players: lobby.players.filter((pl) => pl.awaySince === null).map((pl) => ({ id: pl.id, displayName: pl.info.displayName }))
+  };
+}
+var startGame = {
+  key: "mpapi_start_game",
+  reduce(lobby, ctx, params) {
+    const p = isPlainObject2(params) ? params : {};
+    if (p.stake !== void 0 && typeof p.stake !== "number")
+      return { reject: "bad_params" };
+    if (p.minPlayers !== void 0 && (typeof p.minPlayers !== "number" || p.minPlayers % 1 !== 0))
+      return { reject: "bad_params" };
+    const options = p.options === void 0 ? null : p.options;
+    if (JSON.stringify(options).length > MAX_OPTIONS_BYTES)
+      return { reject: "bad_params" };
+    if (lobby.hostId !== ctx.from) return { reject: "not_host" };
+    if (lobby.game.started) return { reject: "in_game" };
+    const minPlayers = Math.min(
+      Math.max(MIN_GAME_PLAYERS, typeof p.minPlayers === "number" ? p.minPlayers : 0),
+      lobby.maxPlayers,
+      MAX_PLAYERS
+    );
+    const present = lobby.players.filter((pl) => pl.awaySince === null);
+    if (present.length < minPlayers) return { reject: "too_few_players" };
+    for (const pl of present) {
+      if (pl.id !== lobby.hostId && !lobby.game.ready[pl.id])
+        return { reject: "not_all_ready" };
+    }
+    const started = newGame(
+      lobby,
+      ctx,
+      typeof p.stake === "number" ? p.stake : null,
+      options
+    );
+    return {
+      game: __spreadProps(__spreadValues({}, emptyGame()), { started }),
+      params: startedParams(started)
+    };
+  }
+};
+var restartGame = {
+  key: "mpapi_restart_game",
+  reduce(lobby, ctx) {
+    if (lobby.hostId !== ctx.from) return { reject: "not_host" };
+    const current = lobby.game.started;
+    if (!current) return { reject: "not_in_game" };
+    const finished = finishGame(lobby, ctx.now, {
+      status: "restarted",
+      announce: false
+    });
+    const started = newGame(
+      finished.lobby,
+      ctx,
+      current.stake,
+      current.options
+    );
+    return {
+      game: __spreadProps(__spreadValues({}, emptyGame()), { started }),
+      params: startedParams(started),
+      out: finished.out
+    };
+  }
+};
+var abandonGame = {
+  key: "mpapi_abandon_game",
+  reduce(lobby, ctx) {
+    if (lobby.hostId !== ctx.from) return { reject: "not_host" };
+    const current = lobby.game.started;
+    if (!current) return { reject: "not_in_game" };
+    const finished = finishGame(lobby, ctx.now, {
+      status: "abandoned",
+      announce: true
+    });
+    return {
+      game: finished.lobby.game,
+      params: { runId: current.runId },
+      out: finished.out
+    };
+  }
+};
+function isParticipant(lobby, userId) {
+  const started = lobby.game.started;
+  return !!started && started.players.some((p) => p.id === userId);
+}
+var reportResult = {
+  key: "mpapi_report_result",
+  reduce(lobby, ctx, params) {
+    const started = lobby.game.started;
+    if (!started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    const placements = parsePlacements(
+      isPlainObject2(params) ? params.placements : null,
+      started.players
+    );
+    if (!placements) return { reject: "bad_params" };
+    const game = lobby.game;
+    return {
+      game: __spreadProps(__spreadValues({}, game), {
+        reports: __spreadProps(__spreadValues({}, game.reports), { [ctx.from]: placements }),
+        reportOrder: game.reportOrder.indexOf(ctx.from) === -1 ? game.reportOrder.concat([ctx.from]) : game.reportOrder,
+        settleFrom: game.settleFrom === null ? ctx.now : game.settleFrom
+      }),
+      params: { playerId: ctx.from, reported: true }
+    };
+  }
+};
+var MAX_LOG_EVENTS = 2e4;
+var MAX_LOG_BYTES = 1024 * 1024;
+var MAX_OPCODE_LENGTH = 64;
+var logEvent = {
+  key: "mpapi_log_event",
+  reduce(lobby, ctx, params) {
+    if (!lobby.game.started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    if (!isPlainObject2(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
+      return { reject: "bad_params" };
+    const args = params.args === void 0 ? null : params.args;
+    const event2 = [params.t, params.opcode, args];
+    const size = JSON.stringify(event2).length;
+    const game = lobby.game;
+    const log = game.logs[ctx.from] || { events: [], bytes: 0, truncated: false };
+    if (log.truncated || log.events.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
+      const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
+      return {
+        game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: truncated }) }),
+        params: null,
+        to: "none"
+      };
+    }
+    const grown = {
+      events: log.events.concat([event2]),
+      bytes: log.bytes + size,
+      truncated: false
+    };
+    return {
+      game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: grown }) }),
+      params: { playerId: ctx.from, t: params.t, opcode: params.opcode, args },
+      to: "others"
+    };
+  }
+};
+var REGISTRY = {
+  [ready.key]: ready,
+  [startGame.key]: startGame,
+  [restartGame.key]: restartGame,
+  [abandonGame.key]: abandonGame,
+  [reportResult.key]: reportResult,
+  [logEvent.key]: logEvent
+};
+var LOG_EVENT_KEY = logEvent.key;
+function authoritativeAction(key) {
+  return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
+}
+var SEED_ALPHABET = "123456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
+var SEED_LENGTH = 8;
+function seedFromHex(hex) {
+  const digits = hex.replace(/[^0-9a-f]/gi, "");
+  let seed = "";
+  for (let i = 0; i < SEED_LENGTH; i++) {
+    const n = Number.parseInt(digits.substr(i * 3, 3) || "0", 16);
+    seed += SEED_ALPHABET[n % SEED_ALPHABET.length];
+  }
+  return seed;
+}
+
+// src/lobby/codes.ts
+function keyOf(code) {
+  return {
+    collection: LOBBY_CODE_COLLECTION,
+    key: code,
+    userId: SYSTEM_USER_ID
+  };
+}
+function write(nk, code, entry, version) {
+  nk.storageWrite([
+    __spreadProps(__spreadValues({}, keyOf(code)), {
+      value: __spreadValues({}, entry),
+      permissionRead: 0,
+      permissionWrite: 0,
+      version
+    })
+  ]);
+}
+function read(nk, code) {
+  const objects = nk.storageRead([keyOf(code)]);
+  if (objects.length === 0) return null;
+  const value = objects[0].value;
+  return {
+    matchId: String(value.matchId || ""),
+    modId: String(value.modId || "")
+  };
+}
+function reserveCode(nk, code, modId) {
+  const existing = read(nk, code);
+  if (existing) {
+    if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
+    nk.storageDelete([keyOf(code)]);
+  }
+  try {
+    write(nk, code, { matchId: "", modId }, "*");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function bindCode(nk, code, matchId, modId) {
+  write(nk, code, { matchId, modId });
+}
+function lookupCode(nk, code) {
+  const entry = read(nk, code);
+  if (!entry || !entry.matchId || !nk.matchGet(entry.matchId)) return null;
+  return entry;
+}
+function releaseCode(nk, code, matchId) {
+  const entry = read(nk, code);
+  if (entry && entry.matchId === matchId) {
+    nk.storageDelete([keyOf(code)]);
+  }
+}
+
 // src/lobby/relay.ts
 var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 var MAX_PARAMS_BYTES = 16 * 1024;
 var MAX_CID_LENGTH = 64;
 var RATE_PER_SECOND = 40;
 var BURST = 100;
+var LOG_RATE_PER_SECOND = 20;
+var LOG_BURST = 200;
 function reject(to, rejection) {
   return {
     kind: "send",
@@ -601,16 +894,20 @@ function reject(to, rejection) {
     to: [to]
   };
 }
-function spend(lobby, userId, now) {
-  const bucket = lobby.actionBudget[userId] || { tokens: BURST, at: now };
+function spend(lobby, userId, key, now) {
+  const isLog = key === LOG_EVENT_KEY;
+  const budgetKey = isLog ? logBudgetKey(userId) : userId;
+  const burst = isLog ? LOG_BURST : BURST;
+  const rate = isLog ? LOG_RATE_PER_SECOND : RATE_PER_SECOND;
+  const bucket = lobby.actionBudget[budgetKey] || { tokens: burst, at: now };
   const refilled = Math.min(
-    BURST,
-    bucket.tokens + (now - bucket.at) / 1e3 * RATE_PER_SECOND
+    burst,
+    bucket.tokens + (now - bucket.at) / 1e3 * rate
   );
   if (refilled < 1) return null;
   return __spreadProps(__spreadValues({}, lobby), {
     actionBudget: __spreadProps(__spreadValues({}, lobby.actionBudget), {
-      [userId]: { tokens: refilled - 1, at: now }
+      [budgetKey]: { tokens: refilled - 1, at: now }
     })
   });
 }
@@ -632,7 +929,7 @@ function action(lobby, senderId, data, ctx) {
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
     return refuse("too_large");
-  const budgeted = spend(lobby, senderId, ctx.now);
+  const budgeted = spend(lobby, senderId, key, ctx.now);
   if (!budgeted) return refuse("rate_limited");
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
@@ -644,24 +941,26 @@ function action(lobby, senderId, data, ctx) {
     );
     if ("reject" in result) return refuse(result.reject);
     const next = __spreadProps(__spreadValues({}, budgeted), { game: result.game });
-    const envelope2 = {
-      cid,
-      action: key,
-      from: SERVER_TARGET,
-      to: BROADCAST_TARGET,
-      params: result.params
-    };
-    return {
-      lobby: next,
-      out: [
-        {
-          kind: "send",
-          op: ServerOp.ACTION,
-          payload: envelope2,
-          to: next.players.map((p) => p.id)
-        }
-      ]
-    };
+    const out = [];
+    const audience = result.to || "all";
+    if (audience !== "none") {
+      const envelope2 = {
+        cid,
+        action: key,
+        from: SERVER_TARGET,
+        to: BROADCAST_TARGET,
+        params: result.params
+      };
+      out.push({
+        kind: "send",
+        op: ServerOp.ACTION,
+        payload: envelope2,
+        to: next.players.map((p) => p.id).filter((id) => audience === "all" || id !== senderId)
+      });
+    }
+    if (result.out) out.push(...result.out);
+    const settled = settle(next, ctx.now);
+    return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
   if (authoritative) return refuse("authoritative_only");
   let targets;
@@ -687,12 +986,125 @@ function action(lobby, senderId, data, ctx) {
   };
 }
 
+// src/lobby/storage.ts
+function logKey(runId, playerId) {
+  return `${runId}:${playerId}`;
+}
+function runWrites(run, logs) {
+  const writes = [
+    {
+      collection: RUNS_COLLECTION,
+      key: run.runId,
+      userId: SYSTEM_USER_ID,
+      value: __spreadValues({}, run),
+      permissionRead: 2,
+      permissionWrite: 0
+    }
+  ];
+  for (const player of run.players) {
+    const log = logs[player.id];
+    writes.push({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, player.id),
+      userId: SYSTEM_USER_ID,
+      value: {
+        events: log ? log.events : [],
+        eventCount: log ? log.events.length : 0,
+        truncated: log ? log.truncated : false
+      },
+      permissionRead: 0,
+      permissionWrite: 0
+    });
+    const placement = run.placements.filter((p) => p.playerId === player.id)[0];
+    writes.push({
+      collection: MY_RUNS_COLLECTION,
+      key: run.runId,
+      userId: player.id,
+      value: {
+        runId: run.runId,
+        modId: run.modId,
+        endedAt: run.endedAt,
+        status: run.status,
+        place: placement ? placement.place : null
+      },
+      permissionRead: 1,
+      permissionWrite: 0
+    });
+  }
+  return writes;
+}
+function saveRun(nk, run, logs) {
+  nk.storageWrite(runWrites(run, logs));
+}
+function requireUser(ctx) {
+  if (!ctx.userId)
+    throw runtimeError(UNAUTHENTICATED, "Run RPCs need a player session");
+  return ctx.userId;
+}
+function parseInput(payload) {
+  if (!payload) return {};
+  try {
+    const data = JSON.parse(payload);
+    if (Array.isArray(data) && data.length === 0) return {};
+    if (typeof data === "object" && data !== null && !Array.isArray(data))
+      return data;
+  } catch (e) {
+  }
+  throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+}
+function readRun(nk, runId) {
+  if (typeof runId !== "string" || runId === "")
+    throw runtimeError(INVALID_ARGUMENT, "runId is required");
+  const objects = nk.storageRead([
+    { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
+  ]);
+  if (objects.length === 0) throw runtimeError(NOT_FOUND, "Run not found");
+  return objects[0].value;
+}
+function rpcRunGet(ctx, logger, nk, payload) {
+  requireUser(ctx);
+  return JSON.stringify(readRun(nk, parseInput(payload).runId));
+}
+function rpcRunLogs(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parseInput(payload);
+  const run = readRun(nk, input.runId);
+  if (!run.players.some((p) => p.id === userId))
+    throw runtimeError(NOT_FOUND, "Run not found");
+  const wanted = run.players.filter(
+    (p) => typeof input.playerId !== "string" || p.id === input.playerId
+  );
+  const objects = nk.storageRead(
+    wanted.map((p) => ({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, p.id),
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  const logs = {};
+  for (const object of objects) {
+    logs[object.key.slice(run.runId.length + 1)] = object.value;
+  }
+  return JSON.stringify({ logs });
+}
+var RUNS_PAGE = 20;
+function rpcRunsMine(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parseInput(payload);
+  const cursor = typeof input.cursor === "string" ? input.cursor : "";
+  const page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
+  return JSON.stringify({
+    runs: (page.objects || []).map((o) => o.value),
+    cursor: page.cursor || ""
+  });
+}
+
 // src/lobby/match.ts
 var TICK_RATE = 5;
 var MAX_MESSAGE_BYTES = 64 * 1024;
-function graceMsFrom(ctx) {
-  const seconds = Number(ctx.env.LOBBY_GRACE_SECONDS);
-  return seconds > 0 ? seconds * 1e3 : DEFAULT_GRACE_MS;
+function secondsFromEnv(ctx, name, fallbackMs) {
+  const seconds = Number(ctx.env[name]);
+  return seconds > 0 ? seconds * 1e3 : fallbackMs;
 }
 function writeCurrent(nk, ctx, lobby, userId) {
   nk.storageWrite([
@@ -717,7 +1129,12 @@ function clearCurrent(nk, ctx, userId) {
     nk.storageDelete([key]);
   }
 }
-function apply(ctx, logger, nk, dispatcher, state, step) {
+function apply(ctx, logger, nk, dispatcher, state, raw) {
+  let step = raw;
+  if (step.lobby.closed && step.lobby.game.started) {
+    const finished = finishGame(step.lobby, Date.now());
+    step = { lobby: finished.lobby, out: step.out.concat(finished.out) };
+  }
   const presences = __spreadValues({}, state.presences);
   for (const effect of step.out) {
     runEffect(ctx, logger, nk, dispatcher, step.lobby, presences, effect);
@@ -757,6 +1174,18 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
     case "setCurrent":
       writeCurrent(nk, ctx, lobby, effect.userId);
       return;
+    case "saveRun":
+      try {
+        saveRun(nk, effect.run, effect.logs);
+      } catch (e) {
+        logger.error(
+          "Lobby %s: could not store run %s: %v",
+          lobby.code,
+          effect.run.runId,
+          e
+        );
+      }
+      return;
     case "clearCurrent":
       try {
         clearCurrent(nk, ctx, effect.userId);
@@ -782,7 +1211,12 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     maxPlayers: Number(params.maxPlayers),
     creatorId: stringParam(params, "creatorId"),
     now: Date.now(),
-    graceMs: graceMsFrom(ctx)
+    graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
+    resultTimeoutMs: secondsFromEnv(
+      ctx,
+      "RESULT_TIMEOUT_SECONDS",
+      DEFAULT_RESULT_TIMEOUT_MS
+    )
   });
   const label = labelOf(lobby);
   const state = {
@@ -906,7 +1340,8 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
     case ClientOp.ACTION:
       return action(lobby, senderId, data, {
         now: Date.now(),
-        newSeed: () => seedFromHex(nk.uuidv4())
+        newSeed: () => seedFromHex(nk.uuidv4()),
+        newId: () => nk.uuidv4()
       });
     case ClientOp.LEAVE:
       return leave(lobby, senderId);
@@ -952,15 +1387,18 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
     current = apply(ctx, logger, nk, dispatcher, current, step);
   }
   if (!current) return null;
-  const ticked = apply(
+  const now = Date.now();
+  const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now));
+  if (!ticked) return null;
+  const settled = apply(
     ctx,
     logger,
     nk,
     dispatcher,
-    current,
-    tick(current.lobby, Date.now())
+    ticked,
+    settle(ticked.lobby, now)
   );
-  return ticked ? { state: ticked } : null;
+  return settled ? { state: settled } : null;
 }
 function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) {
   let signal;
@@ -1008,7 +1446,7 @@ function generateCode() {
   }
   return code;
 }
-function requireUser(ctx) {
+function requireUser2(ctx) {
   if (!ctx.userId)
     throw runtimeError(UNAUTHENTICATED, "Lobby RPCs need a player session");
   return ctx.userId;
@@ -1043,7 +1481,7 @@ function currentLobby(nk, userId) {
   return null;
 }
 function rpcLobbyCreate(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
+  const userId = requireUser2(ctx);
   const input = parsePayload(payload);
   const modId = input.modId;
   if (typeof modId !== "string" || !MOD_ID_PATTERN.test(modId)) {
@@ -1084,7 +1522,7 @@ function rpcLobbyCreate(ctx, logger, nk, payload) {
   throw runtimeError(UNAVAILABLE, "Could not allocate a lobby code");
 }
 function rpcLobbyFind(ctx, logger, nk, payload) {
-  requireUser(ctx);
+  requireUser2(ctx);
   const input = parsePayload(payload);
   const code = typeof input.code === "string" ? input.code.toUpperCase() : "";
   if (!CODE_PATTERN.test(code))
@@ -1094,11 +1532,11 @@ function rpcLobbyFind(ctx, logger, nk, payload) {
   return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
 }
 function rpcLobbyCurrent(ctx, logger, nk, payload) {
-  const current = currentLobby(nk, requireUser(ctx));
+  const current = currentLobby(nk, requireUser2(ctx));
   return JSON.stringify(current || {});
 }
 function rpcLobbyLeave(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
+  const userId = requireUser2(ctx);
   const current = currentLobby(nk, userId);
   if (current) {
     const signal = { type: "leave", userId };
@@ -1127,6 +1565,9 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("lobby_find", rpcLobbyFind);
   initializer.registerRpc("lobby_current", rpcLobbyCurrent);
   initializer.registerRpc("lobby_leave", rpcLobbyLeave);
+  initializer.registerRpc("run_get", rpcRunGet);
+  initializer.registerRpc("run_logs", rpcRunLogs);
+  initializer.registerRpc("runs_mine", rpcRunsMine);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

@@ -1,0 +1,408 @@
+import { describe, expect, it } from 'vitest'
+import { type RunRecord, ServerOp } from '../lobby/protocol'
+import { action } from '../lobby/relay'
+import {
+	type Lobby,
+	type Outbound,
+	type Step,
+	disconnect,
+	join,
+	joinRejection,
+	labelOf,
+	leave,
+	newLobby,
+	snapshotFor,
+	tick,
+} from '../lobby/state'
+import { runWrites } from '../lobby/storage'
+import { MAX_LOG_EVENTS } from './registry'
+import { reconcile, settle } from './results'
+
+const info = (name: string) => ({
+	displayName: name,
+	preferredJoker: null,
+	mods: null,
+})
+
+let ids = 0
+const ctxAt = (now: number) => ({
+	now,
+	newSeed: () => `SEED000${ids}`,
+	newId: () => `RUN${++ids}`,
+})
+
+function send(lobby: Lobby, from: string, key: string, params: unknown = {}, now = 1000) {
+	return action(lobby, from, { cid: `${key}-${from}`, action: key, to: 'server', params }, ctxAt(now))
+}
+
+type Send = Extract<Outbound, { kind: 'send' }>
+type Save = Extract<Outbound, { kind: 'saveRun' }>
+function rejection(step: Step): string | undefined {
+	const r = step.out.filter(
+		(o): o is Send => o.kind === 'send' && o.op === ServerOp.ACTION_REJECTED,
+	)[0]
+	return r && (r.payload as { reason: string }).reason
+}
+function saved(step: Step): Save | undefined {
+	return step.out.filter((o): o is Save => o.kind === 'saveRun')[0]
+}
+function gameEnded(step: Step) {
+	const e = step.out.filter(
+		(o): o is Send =>
+			o.kind === 'send' &&
+			o.op === ServerOp.EVENT &&
+			(o.payload as { type: string }).type === 'game_ended',
+	)[0]
+	return e && (e.payload as { data: unknown }).data
+}
+
+// A lobby of `players` (the first is host) with a game started.
+function started(...players: string[]): Lobby {
+	let lobby = newLobby({
+		code: 'ABC123',
+		modId: 'MultiplayerSPDRN',
+		maxPlayers: 8,
+		creatorId: players[0],
+		now: 0,
+		graceMs: 10_000,
+		resultTimeoutMs: 60_000,
+	})
+	for (const id of players) lobby = join(lobby, id, `${id}-s1`, info(id)).lobby
+	for (const id of players.slice(1))
+		lobby = send(lobby, id, 'mpapi_ready', { ready: true }).lobby
+	const step = send(lobby, players[0], 'mpapi_start_game', { stake: 2 })
+	expect(rejection(step)).toBeUndefined()
+	return step.lobby
+}
+
+const places = (...order: string[]) =>
+	order.map((playerId, i) => ({ playerId, place: i + 1 }))
+const report = (lobby: Lobby, from: string, placements: unknown, now = 2000) =>
+	send(lobby, from, 'mpapi_report_result', { placements }, now)
+
+describe('reporting results', () => {
+	it('ends the game once every participant agrees', () => {
+		let lobby = started('a', 'b')
+		const first = report(lobby, 'a', places('b', 'a'))
+		expect(saved(first)).toBeUndefined()
+		expect(first.lobby.game.started).not.toBeNull()
+		const last = report(first.lobby, 'b', places('b', 'a'), 2500)
+		const run = saved(last)?.run as RunRecord
+		expect(run.status).toBe('agreed')
+		expect(run.placements).toEqual(places('a', 'b').map((p) => ({
+			playerId: p.playerId,
+			place: p.playerId === 'b' ? 1 : 2,
+		})))
+		expect(run.seed).toMatch(/^SEED/)
+		expect(run.stake).toBe(2)
+		expect(run.endedAt).toBe(2500)
+		expect(gameEnded(last)).toMatchObject({ runId: run.runId, status: 'agreed' })
+		lobby = last.lobby
+		// The lobby is open again, and can start a second game.
+		expect(lobby.game.started).toBeNull()
+		expect(JSON.parse(labelOf(lobby)).open).toBe(true)
+		expect(joinRejection(lobby, 'z', 'MultiplayerSPDRN')).toBeNull()
+		lobby = send(lobby, 'b', 'mpapi_ready', { ready: true }).lobby
+		const again = send(lobby, 'a', 'mpapi_start_game', {})
+		expect(rejection(again)).toBeUndefined()
+		expect(again.lobby.game.started?.runId).not.toBe(run.runId)
+	})
+
+	it('refuses malformed or outside reports', () => {
+		const lobby = started('a', 'b')
+		expect(rejection(report(lobby, 'a', places('a')))).toBe('bad_params')
+		expect(rejection(report(lobby, 'a', places('a', 'z')))).toBe('bad_params')
+		expect(rejection(report(lobby, 'a', places('a', 'a')))).toBe('bad_params')
+		expect(
+			rejection(report(lobby, 'a', [{ playerId: 'a', place: 0 }, { playerId: 'b', place: 1 }])),
+		).toBe('bad_params')
+		expect(
+			rejection(
+				report(lobby, 'a', [
+					{ playerId: 'a', place: 1, performance: 2 },
+					{ playerId: 'b', place: 2 },
+				]),
+			),
+		).toBe('bad_params')
+		const notStarted = newLobby({
+			code: 'X',
+			modId: 'm',
+			maxPlayers: 2,
+			creatorId: 'a',
+			now: 0,
+			graceMs: 1,
+		})
+		const joined = join(notStarted, 'a', 's', info('a')).lobby
+		expect(rejection(report(joined, 'a', places('a')))).toBe('not_in_game')
+	})
+
+	it('refuses a report from a player who sat the game out', () => {
+		// c was away when the game started, so isn't a participant.
+		let lobby = newLobby({
+			code: 'X',
+			modId: 'm',
+			maxPlayers: 4,
+			creatorId: 'a',
+			now: 0,
+			graceMs: 10_000,
+		})
+		for (const id of ['a', 'b', 'c']) lobby = join(lobby, id, `${id}-s`, info(id)).lobby
+		lobby = send(lobby, 'b', 'mpapi_ready', { ready: true }).lobby
+		lobby = disconnect(lobby, 'c', 'c-s', 500).lobby
+		lobby = send(lobby, 'a', 'mpapi_start_game', {}).lobby
+		lobby = join(lobby, 'c', 'c-s2', info('c')).lobby
+		expect(rejection(report(lobby, 'c', places('a', 'b')))).toBe('not_participant')
+		expect(
+			rejection(send(lobby, 'c', 'mpapi_log_event', { t: 1, opcode: 'play' })),
+		).toBe('not_participant')
+	})
+
+	it('lets a player replace their report', () => {
+		let lobby = started('a', 'b', 'c')
+		lobby = report(lobby, 'a', places('a', 'b', 'c')).lobby
+		lobby = report(lobby, 'a', places('b', 'a', 'c')).lobby
+		expect(lobby.game.reports.a).toEqual(
+			[
+				{ playerId: 'a', place: 2 },
+				{ playerId: 'b', place: 1 },
+				{ playerId: 'c', place: 3 },
+			],
+		)
+		expect(lobby.game.reportOrder).toEqual(['a'])
+	})
+
+	it('records the majority when reports differ', () => {
+		let lobby = started('a', 'b', 'c')
+		lobby = report(lobby, 'a', places('a', 'b', 'c')).lobby
+		lobby = report(lobby, 'b', places('b', 'a', 'c')).lobby
+		const step = report(lobby, 'c', places('b', 'a', 'c'))
+		const run = saved(step)?.run as RunRecord
+		expect(run.status).toBe('disputed')
+		expect(run.placements.filter((p) => p.place === 1)[0].playerId).toBe('b')
+		expect(Object.keys(run.reports).sort()).toEqual(['a', 'b', 'c'])
+	})
+
+	it('breaks a tie with the host report, else the first', () => {
+		const participants = ['a', 'b'].map((id) => ({ id, displayName: id }))
+		const reports = { a: places('a', 'b'), b: places('b', 'a') }
+		expect(reconcile(reports, ['b', 'a'], participants, 'a').placements).toEqual(
+			reports.a,
+		)
+		expect(reconcile(reports, ['b', 'a'], participants, 'z').placements).toEqual(
+			reports.b,
+		)
+	})
+
+	it('agrees on places even when metrics differ', () => {
+		const participants = ['a', 'b'].map((id) => ({ id, displayName: id }))
+		const reports = {
+			a: [
+				{ playerId: 'a', place: 1, metric: 10 },
+				{ playerId: 'b', place: 2 },
+			],
+			b: [
+				{ playerId: 'a', place: 1, metric: 11 },
+				{ playerId: 'b', place: 2 },
+			],
+		}
+		expect(reconcile(reports, ['a', 'b'], participants, 'a').status).toBe('agreed')
+	})
+
+	it('stores a partial result when the rest never report', () => {
+		let lobby = started('a', 'b', 'c')
+		lobby = report(lobby, 'a', places('a', 'b', 'c'), 2000).lobby
+		expect(saved(settle(lobby, 2000 + 59_999))).toBeUndefined()
+		const step = settle(lobby, 2000 + 60_000)
+		expect(saved(step)?.run.status).toBe('partial')
+		expect(step.lobby.game.started).toBeNull()
+	})
+
+	it('waits for an away participant until the timeout', () => {
+		let lobby = started('a', 'b')
+		lobby = disconnect(lobby, 'b', 'b-s1', 1500).lobby
+		lobby = report(lobby, 'a', places('a', 'b'), 2000).lobby
+		expect(lobby.game.started).not.toBeNull()
+		expect(saved(settle(lobby, 61_999))).toBeUndefined()
+		expect(saved(settle(lobby, 62_000))?.run.status).toBe('partial')
+	})
+
+	it('lets the last player standing report, then times out', () => {
+		let lobby = started('a', 'b')
+		lobby = leave(lobby, 'b').lobby
+		const noted = settle(lobby, 3000)
+		expect(noted.lobby.game.settleFrom).toBe(3000)
+		expect(saved(noted)).toBeUndefined()
+		// The remaining player reporting is everyone who's left.
+		const step = report(noted.lobby, 'a', places('a', 'b'), 4000)
+		expect(saved(step)?.run.status).toBe('partial')
+		// Nobody reporting at all: abandoned after the timeout.
+		let quiet = started('a', 'b')
+		quiet = leave(quiet, 'b').lobby
+		quiet = settle(quiet, 3000).lobby
+		expect(saved(settle(quiet, 63_000))?.run.status).toBe('abandoned')
+	})
+
+	it('starts the result clock when grace expiry leaves one player', () => {
+		let lobby = started('a', 'b')
+		lobby = disconnect(lobby, 'b', 'b-s1', 1000).lobby
+		lobby = tick(lobby, 1000 + 10_000).lobby
+		const step = settle(lobby, 12_000)
+		expect(step.lobby.game.settleFrom).toBe(12_000)
+	})
+
+	it('hands reports and the run id back in the snapshot', () => {
+		let lobby = started('a', 'b')
+		lobby = report(lobby, 'a', places('a', 'b')).lobby
+		const snap = snapshotFor(lobby, 'b')
+		expect(snap.game.reported).toEqual(['a'])
+		expect(snap.game.started?.runId).toMatch(/^RUN/)
+		expect(snap.game).not.toHaveProperty('logs')
+	})
+})
+
+describe('abandon and restart', () => {
+	it('lets only the host abandon, storing no result', () => {
+		const lobby = report(started('a', 'b'), 'a', places('a', 'b')).lobby
+		expect(rejection(send(lobby, 'b', 'mpapi_abandon_game'))).toBe('not_host')
+		const step = send(lobby, 'a', 'mpapi_abandon_game')
+		expect(saved(step)?.run.status).toBe('abandoned')
+		expect(saved(step)?.run.placements).toEqual([])
+		expect(gameEnded(step)).toMatchObject({ status: 'abandoned' })
+		expect(step.lobby.game.started).toBeNull()
+	})
+
+	it('restarts on a new seed, storing the old game quietly', () => {
+		const lobby = started('a', 'b')
+		const before = lobby.game.started
+		expect(rejection(send(lobby, 'b', 'mpapi_restart_game'))).toBe('not_host')
+		const step = send(lobby, 'a', 'mpapi_restart_game')
+		expect(saved(step)?.run).toMatchObject({ runId: before?.runId, status: 'restarted' })
+		expect(gameEnded(step)).toBeUndefined()
+		const after = step.lobby.game.started
+		expect(after?.runId).not.toBe(before?.runId)
+		expect(after?.seed).not.toBe(before?.seed)
+		expect(after?.stake).toBe(2)
+		expect(after?.players.map((p) => p.id)).toEqual(['a', 'b'])
+	})
+
+	it('needs a game to restart or abandon', () => {
+		let lobby = newLobby({ code: 'X', modId: 'm', maxPlayers: 2, creatorId: 'a', now: 0, graceMs: 1 })
+		lobby = join(lobby, 'a', 's', info('a')).lobby
+		expect(rejection(send(lobby, 'a', 'mpapi_restart_game'))).toBe('not_in_game')
+		expect(rejection(send(lobby, 'a', 'mpapi_abandon_game'))).toBe('not_in_game')
+	})
+})
+
+describe('start options', () => {
+	it('honours a gamemode minimum, within the lobby size', () => {
+		let lobby = newLobby({ code: 'X', modId: 'm', maxPlayers: 3, creatorId: 'a', now: 0, graceMs: 1 })
+		for (const id of ['a', 'b']) lobby = join(lobby, id, `${id}-s`, info(id)).lobby
+		lobby = send(lobby, 'b', 'mpapi_ready', { ready: true }).lobby
+		expect(rejection(send(lobby, 'a', 'mpapi_start_game', { minPlayers: 3 }))).toBe(
+			'too_few_players',
+		)
+		// Asking for more than the lobby holds is capped at its size.
+		lobby = join(lobby, 'c', 'c-s', info('c')).lobby
+		lobby = send(lobby, 'c', 'mpapi_ready', { ready: true }).lobby
+		expect(
+			rejection(send(lobby, 'a', 'mpapi_start_game', { minPlayers: 50 })),
+		).toBeUndefined()
+		expect(rejection(send(lobby, 'a', 'mpapi_start_game', { minPlayers: 'x' }))).toBe(
+			'bad_params',
+		)
+	})
+})
+
+describe('replay logs', () => {
+	const log = (lobby: Lobby, from: string, t: number, now = 1500) =>
+		send(lobby, from, 'mpapi_log_event', { t, opcode: 'play', args: [t] }, now)
+
+	it('keeps events per player and passes them on to the others', () => {
+		let step = log(started('a', 'b', 'c'), 'a', 1)
+		const sent = step.out.filter((o): o is Send => o.kind === 'send')[0]
+		expect(sent.to).toEqual(['b', 'c'])
+		expect(sent.payload).toMatchObject({
+			from: 'server',
+			params: { playerId: 'a', t: 1, opcode: 'play', args: [1] },
+		})
+		step = log(step.lobby, 'a', 2)
+		expect(step.lobby.game.logs.a.events).toEqual([
+			[1, 'play', [1]],
+			[2, 'play', [2]],
+		])
+	})
+
+	it('refuses events outside a game, or malformed ones', () => {
+		const idle = newLobby({ code: 'X', modId: 'm', maxPlayers: 2, creatorId: 'a', now: 0, graceMs: 1 })
+		const joined = join(idle, 'a', 's', info('a')).lobby
+		expect(rejection(log(joined, 'a', 1))).toBe('not_in_game')
+		expect(
+			rejection(send(started('a', 'b'), 'a', 'mpapi_log_event', { t: 'x', opcode: 'play' })),
+		).toBe('bad_params')
+	})
+
+	it('stops keeping events past the cap, silently', () => {
+		const lobby = started('a', 'b')
+		const full = {
+			...lobby,
+			game: {
+				...lobby.game,
+				logs: {
+					a: {
+						events: new Array(MAX_LOG_EVENTS).fill([0, 'x', null]),
+						bytes: 0,
+						truncated: false,
+					},
+				},
+			},
+		}
+		const step = log(full, 'a', 1)
+		expect(rejection(step)).toBeUndefined()
+		expect(step.out).toEqual([])
+		expect(step.lobby.game.logs.a.truncated).toBe(true)
+		expect(step.lobby.game.logs.a.events).toHaveLength(MAX_LOG_EVENTS)
+	})
+
+	it('budgets log events apart from other actions', () => {
+		let lobby = started('a', 'b')
+		for (let i = 0; i < 150; i++) lobby = log(lobby, 'a', i, 1500).lobby
+		// 150 log events in the same instant, and 'a' can still act.
+		const step = report(lobby, 'a', places('a', 'b'), 1500)
+		expect(rejection(step)).toBeUndefined()
+	})
+
+	it('stores the logs with the run', () => {
+		let lobby = log(started('a', 'b'), 'a', 1).lobby
+		lobby = report(lobby, 'a', places('a', 'b')).lobby
+		const step = report(lobby, 'b', places('a', 'b'))
+		expect(saved(step)?.logs.a.events).toEqual([[1, 'play', [1]]])
+		expect(step.lobby.game.logs).toEqual({})
+	})
+})
+
+describe('storage writes', () => {
+	it('writes the run, a log per player, and a pointer per player', () => {
+		let lobby = log2(started('a', 'b'))
+		lobby = report(lobby, 'a', places('b', 'a')).lobby
+		const save = saved(report(lobby, 'b', places('b', 'a'))) as Save
+		const writes = runWrites(save.run, save.logs)
+		const summary = writes.map((w) => [w.collection, w.key, w.userId, w.permissionRead])
+		const runId = save.run.runId
+		const system = '00000000-0000-0000-0000-000000000000'
+		expect(summary).toEqual([
+			['match_runs', runId, system, 2],
+			['match_logs', `${runId}:a`, system, 0],
+			['my_runs', runId, 'a', 1],
+			['match_logs', `${runId}:b`, system, 0],
+			['my_runs', runId, 'b', 1],
+		])
+		expect(writes[1].value).toMatchObject({ eventCount: 1, truncated: false })
+		expect(writes[3].value).toMatchObject({ eventCount: 0, events: [] })
+		expect(writes[2].value).toMatchObject({ status: 'agreed', place: 2 })
+		expect(writes[4].value).toMatchObject({ place: 1 })
+	})
+})
+
+function log2(lobby: Lobby): Lobby {
+	return send(lobby, 'a', 'mpapi_log_event', { t: 1, opcode: 'play' }, 1500).lobby
+}

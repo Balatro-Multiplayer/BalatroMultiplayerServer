@@ -87,7 +87,8 @@ services:
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY" \
           --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
-          --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS"
+          --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
+          --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS"
     environment:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
@@ -96,6 +97,8 @@ services:
       ALLOW_DEVICE_AUTH: "true"
       # Lobby grace period after a disconnect; empty = the 120s default.
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
+      # How long a game waits for the rest of its results; empty = 60s.
+      RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
     volumes:
       - ./nakama/local.yml:/nakama/data/local.yml:ro
       - ./nakama/modules:/nakama/data/modules:ro

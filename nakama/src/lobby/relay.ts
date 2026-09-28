@@ -4,7 +4,12 @@
 // The server stamps `from` with the sender, so -- unlike MQTT, where the
 // payload's `from` is whatever the client wrote -- a player can't pose as
 // another, and only the server can send an authoritative action's result.
-import { type ActionContext, authoritativeAction } from '../actions/registry'
+import {
+	type ActionContext,
+	LOG_EVENT_KEY,
+	authoritativeAction,
+} from '../actions/registry'
+import { settle } from '../actions/results'
 import {
 	type ActionEnvelope,
 	type ActionRejection,
@@ -12,15 +17,25 @@ import {
 	SERVER_TARGET,
 	ServerOp,
 } from './protocol'
-import { type Lobby, type Outbound, type Step, findPlayer } from './state'
+import {
+	type Lobby,
+	type Outbound,
+	type Step,
+	findPlayer,
+	logBudgetKey,
+} from './state'
 
 export const ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/
 export const MAX_PARAMS_BYTES = 16 * 1024
 export const MAX_CID_LENGTH = 64
 // Token bucket per sender: RATE_PER_SECOND refill, BURST capacity. Generous:
-// replay-log actions can come in bursts of dozens after a scored hand.
+// a mod's own actions can come in bursts after a scored hand.
 export const RATE_PER_SECOND = 40
 export const BURST = 100
+// mpapi_log_event has a bucket of its own, so a busy replay stream (dozens
+// of events after a scored hand) never starves a player's other actions.
+export const LOG_RATE_PER_SECOND = 20
+export const LOG_BURST = 200
 
 function reject(to: string, rejection: ActionRejection): Outbound {
 	return {
@@ -31,19 +46,28 @@ function reject(to: string, rejection: ActionRejection): Outbound {
 	}
 }
 
-// Spends one token from the sender's bucket; null when it's empty.
-function spend(lobby: Lobby, userId: string, now: number): Lobby | null {
-	const bucket = lobby.actionBudget[userId] || { tokens: BURST, at: now }
+// Spends one token from the bucket for this action; null when it's empty.
+function spend(
+	lobby: Lobby,
+	userId: string,
+	key: string,
+	now: number,
+): Lobby | null {
+	const isLog = key === LOG_EVENT_KEY
+	const budgetKey = isLog ? logBudgetKey(userId) : userId
+	const burst = isLog ? LOG_BURST : BURST
+	const rate = isLog ? LOG_RATE_PER_SECOND : RATE_PER_SECOND
+	const bucket = lobby.actionBudget[budgetKey] || { tokens: burst, at: now }
 	const refilled = Math.min(
-		BURST,
-		bucket.tokens + ((now - bucket.at) / 1000) * RATE_PER_SECOND,
+		burst,
+		bucket.tokens + ((now - bucket.at) / 1000) * rate,
 	)
 	if (refilled < 1) return null
 	return {
 		...lobby,
 		actionBudget: {
 			...lobby.actionBudget,
-			[userId]: { tokens: refilled - 1, at: now },
+			[budgetKey]: { tokens: refilled - 1, at: now },
 		},
 	}
 }
@@ -74,7 +98,7 @@ export function action(
 	if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
 		return refuse('too_large')
 
-	const budgeted = spend(lobby, senderId, ctx.now)
+	const budgeted = spend(lobby, senderId, key, ctx.now)
 	if (!budgeted) return refuse('rate_limited')
 
 	const authoritative = authoritativeAction(key)
@@ -87,25 +111,30 @@ export function action(
 		)
 		if ('reject' in result) return refuse(result.reject)
 		const next = { ...budgeted, game: result.game }
-		// The request's cid, so the sender's pending callback resolves.
-		const envelope: ActionEnvelope = {
-			cid,
-			action: key,
-			from: SERVER_TARGET,
-			to: BROADCAST_TARGET,
-			params: result.params,
+		const out: Outbound[] = []
+		const audience = result.to || 'all'
+		if (audience !== 'none') {
+			// The request's cid, so the sender's pending callback resolves.
+			const envelope: ActionEnvelope = {
+				cid,
+				action: key,
+				from: SERVER_TARGET,
+				to: BROADCAST_TARGET,
+				params: result.params,
+			}
+			out.push({
+				kind: 'send',
+				op: ServerOp.ACTION,
+				payload: envelope,
+				to: next.players
+					.map((p) => p.id)
+					.filter((id) => audience === 'all' || id !== senderId),
+			})
 		}
-		return {
-			lobby: next,
-			out: [
-				{
-					kind: 'send',
-					op: ServerOp.ACTION,
-					payload: envelope,
-					to: next.players.map((p) => p.id),
-				},
-			],
-		}
+		if (result.out) out.push(...result.out)
+		// A report may have been the last one the game was waiting for.
+		const settled = settle(next, ctx.now)
+		return { lobby: settled.lobby, out: out.concat(settled.out) }
 	}
 	// Only the server may send an authoritative action's result.
 	if (authoritative) return refuse('authoritative_only')

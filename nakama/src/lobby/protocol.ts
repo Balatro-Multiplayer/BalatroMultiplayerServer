@@ -65,16 +65,91 @@ export interface ActionRejection {
 	reason: string
 }
 
+// One player's finishing position, as every participant reports it.
+export interface Placement {
+	playerId: string
+	place: number
+	performance?: number
+	metric?: number
+}
+
+// A participant of a started game, captured at the start (they may leave).
+export interface Participant {
+	id: string
+	displayName: string
+}
+
+export interface StartedGame {
+	runId: string
+	seed: string
+	stake: number | null
+	options: unknown
+	startedAt: number
+	hostId: string
+	players: Participant[]
+}
+
+// One player's replay events, [t, opcode, args] tuples in arrival order.
+export interface PlayerLog {
+	events: unknown[][]
+	bytes: number
+	truncated: boolean
+}
+
 // State the server owns for its authoritative actions (src/actions).
 export interface GameState {
 	// userId -> ready. Absent means not ready.
 	ready: { [userId: string]: boolean }
-	started: null | {
-		seed: string
-		stake: number | null
-		options: unknown
-		startedAt: number
-	}
+	started: null | StartedGame
+	// userId -> that participant's report of the placements.
+	reports: { [userId: string]: Placement[] }
+	// Report order, for breaking a disputed tie with no host report.
+	reportOrder: string[]
+	// When the result clock started: the first report, or the game dropping
+	// under two remaining participants.
+	settleFrom: number | null
+	logs: { [userId: string]: PlayerLog }
+}
+
+// What clients see of GameState (logs stay on the server).
+export interface GameView {
+	ready: { [userId: string]: boolean }
+	started: null | StartedGame
+	reported: string[]
+}
+
+// agreed: every participant reported the same places. partial: whoever
+// reported agreed, but not everyone reported. disputed: reports differ (the
+// majority's -- or the host's -- is recorded). abandoned: no result.
+// restarted: the host restarted the game.
+export type RunStatus =
+	| 'agreed'
+	| 'partial'
+	| 'disputed'
+	| 'abandoned'
+	| 'restarted'
+
+// A finished game, as stored in RUNS_COLLECTION.
+export interface RunRecord {
+	runId: string
+	code: string
+	modId: string
+	seed: string
+	stake: number | null
+	options: unknown
+	startedAt: number
+	endedAt: number
+	status: RunStatus
+	placements: Placement[]
+	reports: { [userId: string]: Placement[] }
+	players: Participant[]
+}
+
+// GAME_ENDED event data.
+export interface GameEnded {
+	runId: string
+	status: RunStatus
+	placements: Placement[]
 }
 
 // The LobbyEvent wire strings MPAPI already handles (domain/lobby_event.lua).
@@ -87,6 +162,7 @@ export type LobbyEventType =
 	| 'metadata_changed'
 	| 'host_changed'
 	| 'lobby_closed'
+	| 'game_ended'
 
 export interface LobbyEventMessage {
 	type: LobbyEventType
@@ -116,7 +192,7 @@ export interface Snapshot {
 	metadata: { [key: string]: unknown }
 	players: SnapshotPlayer[]
 	ownState: unknown
-	game: GameState
+	game: GameView
 }
 
 // matchSignal payloads (from RPCs) and replies.
@@ -135,3 +211,9 @@ export const CURRENT_LOBBY_KEY = 'current'
 // only succeeds if the code is free, which makes reserving one atomic.
 export const LOBBY_CODE_COLLECTION = 'lobby_codes'
 export const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
+// Finished games (src/lobby/storage.ts). Runs and logs are owned by the
+// system user; each participant gets a pointer in MY_RUNS_COLLECTION.
+export const RUNS_COLLECTION = 'match_runs'
+export const LOGS_COLLECTION = 'match_logs'
+export const MY_RUNS_COLLECTION = 'my_runs'

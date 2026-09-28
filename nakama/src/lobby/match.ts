@@ -2,6 +2,7 @@
 // pure rules in state.ts and carries out the Outbound effects they return.
 // One match per lobby; the match ends (returns null) once the lobby closes.
 import { seedFromHex } from '../actions/registry'
+import { finishGame, settle } from '../actions/results'
 import { releaseCode } from './codes'
 import {
 	CURRENT_LOBBY_COLLECTION,
@@ -13,6 +14,7 @@ import {
 import { action } from './relay'
 import {
 	DEFAULT_GRACE_MS,
+	DEFAULT_RESULT_TIMEOUT_MS,
 	type Lobby,
 	type Outbound,
 	type Step,
@@ -28,6 +30,7 @@ import {
 	setOwnState,
 	tick,
 } from './state'
+import { saveRun } from './storage'
 
 const TICK_RATE = 5
 const MAX_MESSAGE_BYTES = 64 * 1024
@@ -42,9 +45,13 @@ export interface LobbyMatchState extends nkruntime.MatchState {
 	label: string
 }
 
-function graceMsFrom(ctx: nkruntime.Context): number {
-	const seconds = Number(ctx.env.LOBBY_GRACE_SECONDS)
-	return seconds > 0 ? seconds * 1000 : DEFAULT_GRACE_MS
+function secondsFromEnv(
+	ctx: nkruntime.Context,
+	name: string,
+	fallbackMs: number,
+): number {
+	const seconds = Number(ctx.env[name])
+	return seconds > 0 ? seconds * 1000 : fallbackMs
 }
 
 // The per-user record lobby_current reads. Only cleared if it still names
@@ -91,8 +98,14 @@ function apply(
 	nk: nkruntime.Nakama,
 	dispatcher: nkruntime.MatchDispatcher,
 	state: LobbyMatchState,
-	step: Step,
+	raw: Step,
 ): LobbyMatchState | null {
+	// A lobby that closes mid-game still stores the game.
+	let step = raw
+	if (step.lobby.closed && step.lobby.game.started) {
+		const finished = finishGame(step.lobby, Date.now())
+		step = { lobby: finished.lobby, out: step.out.concat(finished.out) }
+	}
 	const presences = { ...state.presences }
 	for (const effect of step.out) {
 		runEffect(ctx, logger, nk, dispatcher, step.lobby, presences, effect)
@@ -146,6 +159,18 @@ function runEffect(
 		case 'setCurrent':
 			writeCurrent(nk, ctx, lobby, effect.userId)
 			return
+		case 'saveRun':
+			try {
+				saveRun(nk, effect.run, effect.logs)
+			} catch (e) {
+				logger.error(
+					'Lobby %s: could not store run %s: %v',
+					lobby.code,
+					effect.run.runId,
+					e,
+				)
+			}
+			return
 		case 'clearCurrent':
 			try {
 				clearCurrent(nk, ctx, effect.userId)
@@ -178,7 +203,12 @@ export function lobbyMatchInit(
 		maxPlayers: Number(params.maxPlayers),
 		creatorId: stringParam(params, 'creatorId'),
 		now: Date.now(),
-		graceMs: graceMsFrom(ctx),
+		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
+		resultTimeoutMs: secondsFromEnv(
+			ctx,
+			'RESULT_TIMEOUT_SECONDS',
+			DEFAULT_RESULT_TIMEOUT_MS,
+		),
 	})
 	const label = labelOf(lobby)
 	const state: LobbyMatchState = {
@@ -361,6 +391,7 @@ function stepForMessage(
 			return action(lobby, senderId, data, {
 				now: Date.now(),
 				newSeed: () => seedFromHex(nk.uuidv4()),
+				newId: () => nk.uuidv4(),
 			})
 		case ClientOp.LEAVE:
 			return leave(lobby, senderId)
@@ -417,15 +448,18 @@ export function lobbyMatchLoop(
 		current = apply(ctx, logger, nk, dispatcher, current, step)
 	}
 	if (!current) return null
-	const ticked = apply(
+	const now = Date.now()
+	const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now))
+	if (!ticked) return null
+	const settled = apply(
 		ctx,
 		logger,
 		nk,
 		dispatcher,
-		current,
-		tick(current.lobby, Date.now()),
+		ticked,
+		settle(ticked.lobby, now),
 	)
-	return ticked ? { state: ticked } : null
+	return settled ? { state: settled } : null
 }
 
 export function lobbyMatchSignal(

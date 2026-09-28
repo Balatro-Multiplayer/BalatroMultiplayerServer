@@ -1,0 +1,189 @@
+// Ending a started game: every participant reports the placements
+// (mpapi_report_result), and once they're all in -- or the clock runs out --
+// the reports are reconciled into one result, handed off to be stored, and
+// the lobby is free to start again. Pure, like the rest of src/actions.
+import {
+	type GameEnded,
+	type Participant,
+	type Placement,
+	type RunRecord,
+	type RunStatus,
+	ServerOp,
+} from '../lobby/protocol'
+import { type Lobby, type Outbound, type Step, emptyGame } from '../lobby/state'
+
+// A report's placements, or why it's malformed. Every participant must be
+// placed exactly once.
+export function parsePlacements(
+	value: unknown,
+	participants: Participant[],
+): Placement[] | null {
+	if (!Array.isArray(value) || value.length !== participants.length)
+		return null
+	const expected: { [id: string]: boolean } = {}
+	for (const p of participants) expected[p.id] = true
+	const seen: { [id: string]: boolean } = {}
+	const placements: Placement[] = []
+	for (const entry of value) {
+		if (typeof entry !== 'object' || entry === null) return null
+		const { playerId, place, performance, metric } = entry as {
+			[key: string]: unknown
+		}
+		if (typeof playerId !== 'string' || !expected[playerId] || seen[playerId])
+			return null
+		if (typeof place !== 'number' || place % 1 !== 0 || place < 1)
+			return null
+		const placement: Placement = { playerId, place }
+		if (performance !== undefined && performance !== null) {
+			if (typeof performance !== 'number' || !(performance >= 0 && performance <= 1))
+				return null
+			placement.performance = performance
+		}
+		if (metric !== undefined && metric !== null) {
+			if (typeof metric !== 'number' || !Number.isFinite(metric) || metric < 0)
+				return null
+			placement.metric = metric
+		}
+		seen[playerId] = true
+		placements.push(placement)
+	}
+	return sortedById(placements)
+}
+
+function sortedById(placements: Placement[]): Placement[] {
+	return placements
+		.slice()
+		.sort((a, b) => (a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0))
+}
+
+// Two reports agree when they give everyone the same place; performance and
+// metric come along from whichever report is recorded.
+function placesKey(placements: Placement[]): string {
+	return JSON.stringify(sortedById(placements).map((p) => [p.playerId, p.place]))
+}
+
+// The recorded placements and status for the reports in so far.
+export function reconcile(
+	reports: { [userId: string]: Placement[] },
+	reportOrder: string[],
+	participants: Participant[],
+	hostId: string,
+): { status: RunStatus; placements: Placement[] } {
+	const reporters = reportOrder.filter((id) => reports[id] !== undefined)
+	if (reporters.length === 0) return { status: 'abandoned', placements: [] }
+
+	const groups: { [key: string]: string[] } = {}
+	const keys: string[] = []
+	for (const id of reporters) {
+		const key = placesKey(reports[id])
+		if (!groups[key]) {
+			groups[key] = []
+			keys.push(key)
+		}
+		groups[key].push(id)
+	}
+
+	if (keys.length === 1) {
+		const everyone = participants.every((p) => reports[p.id] !== undefined)
+		return {
+			status: everyone ? 'agreed' : 'partial',
+			placements: reports[reporters[0]],
+		}
+	}
+
+	// Biggest group wins; a tie goes to the host's report, then to whichever
+	// report came first (keys are in first-report order).
+	let best = keys[0]
+	for (const key of keys) {
+		const size = groups[key].length
+		const bestSize = groups[best].length
+		const hasHost = groups[key].indexOf(hostId) !== -1
+		const bestHasHost = groups[best].indexOf(hostId) !== -1
+		if (size > bestSize || (size === bestSize && hasHost && !bestHasHost))
+			best = key
+	}
+	return { status: 'disputed', placements: reports[groups[best][0]] }
+}
+
+// Participants of the started game still seated in the lobby (an away player
+// counts until their grace period runs out).
+function remainingParticipants(lobby: Lobby): string[] {
+	const started = lobby.game.started
+	if (!started) return []
+	const seated: { [id: string]: boolean } = {}
+	for (const p of lobby.players) seated[p.id] = true
+	return started.players.filter((p) => seated[p.id]).map((p) => p.id)
+}
+
+// Ends the started game: the record to store, GAME_ENDED to everyone (unless
+// `announce` is false, as for a restart), and a clean game state.
+export function finishGame(
+	lobby: Lobby,
+	now: number,
+	override?: { status: RunStatus; announce: boolean },
+): Step {
+	const game = lobby.game
+	const started = game.started
+	if (!started) return { lobby, out: [] }
+
+	const reconciled = reconcile(
+		game.reports,
+		game.reportOrder,
+		started.players,
+		started.hostId,
+	)
+	const status = override ? override.status : reconciled.status
+	const placements = status === 'abandoned' ? [] : reconciled.placements
+	const run: RunRecord = {
+		runId: started.runId,
+		code: lobby.code,
+		modId: lobby.modId,
+		seed: started.seed,
+		stake: started.stake,
+		options: started.options,
+		startedAt: started.startedAt,
+		endedAt: now,
+		status,
+		placements,
+		reports: game.reports,
+		players: started.players,
+	}
+
+	const next = { ...lobby, game: emptyGame() }
+	const out: Outbound[] = [{ kind: 'saveRun', run, logs: game.logs }]
+	if (!override || override.announce) {
+		const ended: GameEnded = { runId: started.runId, status, placements }
+		out.push({
+			kind: 'send',
+			op: ServerOp.EVENT,
+			payload: { type: 'game_ended', lobbyCode: lobby.code, data: ended },
+			to: next.players.map((p) => p.id),
+		})
+	}
+	return { lobby: next, out }
+}
+
+// Time passing (and after each report): ends the game once every remaining
+// participant has reported, or once the result clock -- started by the first
+// report, or by the game dropping under two players -- runs out.
+export function settle(lobby: Lobby, now: number): Step {
+	const started = lobby.game.started
+	if (!started) return { lobby, out: [] }
+
+	const remaining = remainingParticipants(lobby)
+	if (remaining.length === 0) return finishGame(lobby, now)
+
+	const reports = lobby.game.reports
+	const anyReport = lobby.game.reportOrder.length > 0
+	if (anyReport && remaining.every((id) => reports[id] !== undefined))
+		return finishGame(lobby, now)
+
+	let current = lobby
+	if (current.game.settleFrom === null && remaining.length < 2) {
+		current = { ...current, game: { ...current.game, settleFrom: now } }
+	}
+	const from = current.game.settleFrom
+	if (from !== null && now - from >= current.resultTimeoutMs)
+		return finishGame(current, now)
+	return { lobby: current, out: [] }
+}

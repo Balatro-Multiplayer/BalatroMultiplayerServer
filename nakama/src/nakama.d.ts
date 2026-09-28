@@ -76,6 +76,12 @@ declare namespace nkruntime {
 		storageRead(reads: StorageReadRequest[]): StorageObject[]
 		storageWrite(writes: StorageWriteRequest[]): unknown
 		storageDelete(deletes: StorageReadRequest[]): void
+		storageList(
+			userId: string,
+			collection: string,
+			limit: number,
+			cursor: string,
+		): { objects?: StorageObject[]; cursor?: string }
 		uuidv4(): string
 	}
 

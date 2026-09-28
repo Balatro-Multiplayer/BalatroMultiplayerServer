@@ -11,11 +11,16 @@ import {
 	type LobbyEventMessage,
 	type LobbyEventType,
 	type PlayerInfo,
+	type PlayerLog,
+	type RunRecord,
 	ServerOp,
 	type Snapshot,
 } from './protocol'
 
 export const DEFAULT_GRACE_MS = 120_000
+// How long a started game waits for the rest of its results once the first
+// report is in (or once it's down to fewer than two players).
+export const DEFAULT_RESULT_TIMEOUT_MS = 60_000
 // A created lobby nobody joins (the creator's client crashed between the
 // create RPC and match_join) closes after this long.
 export const CREATOR_JOIN_TIMEOUT_MS = 30_000
@@ -43,6 +48,7 @@ export interface Lobby {
 	kickedIds: string[]
 	createdAt: number
 	graceMs: number
+	resultTimeoutMs: number
 	closed: boolean
 	// Owned by the authoritative actions (src/actions).
 	game: GameState
@@ -55,6 +61,11 @@ export type Outbound =
 	| { kind: 'kick'; userId: string }
 	| { kind: 'setCurrent'; userId: string }
 	| { kind: 'clearCurrent'; userId: string }
+	| {
+			kind: 'saveRun'
+			run: RunRecord
+			logs: { [userId: string]: PlayerLog }
+	  }
 
 export interface Step {
 	lobby: Lobby
@@ -68,6 +79,7 @@ export function newLobby(params: {
 	creatorId: string
 	now: number
 	graceMs: number
+	resultTimeoutMs?: number
 }): Lobby {
 	return {
 		code: params.code,
@@ -80,9 +92,22 @@ export function newLobby(params: {
 		kickedIds: [],
 		createdAt: params.now,
 		graceMs: params.graceMs,
+		resultTimeoutMs: params.resultTimeoutMs ?? DEFAULT_RESULT_TIMEOUT_MS,
 		closed: false,
-		game: { ready: {}, started: null },
+		game: emptyGame(),
 		actionBudget: {},
+	}
+}
+
+// No game running: nobody ready, no reports, no logs.
+export function emptyGame(): GameState {
+	return {
+		ready: {},
+		started: null,
+		reports: {},
+		reportOrder: [],
+		settleFrom: null,
+		logs: {},
 	}
 }
 
@@ -172,7 +197,11 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 			isAway: p.awaySince !== null,
 		})),
 		ownState: self ? self.ownState : null,
-		game: lobby.game,
+		game: {
+			ready: lobby.game.ready,
+			started: lobby.game.started,
+			reported: Object.keys(lobby.game.reports),
+		},
 	}
 }
 
@@ -247,6 +276,12 @@ export function join(
 	}
 }
 
+// The actionBudget key of a player's replay-log bucket (relay.ts), separate
+// so a busy log stream can't starve their other actions.
+export function logBudgetKey(userId: string): string {
+	return `${userId}:log`
+}
+
 // Next host after `leavingId`: the earliest-joined player still connected
 // (grace-period.service.ts findNextHost).
 function nextHost(lobby: Lobby, leavingId: string): string | null {
@@ -302,6 +337,7 @@ function remove(
 	delete ready[userId]
 	const actionBudget = { ...transferred.lobby.actionBudget }
 	delete actionBudget[userId]
+	delete actionBudget[logBudgetKey(userId)]
 	const next = {
 		...transferred.lobby,
 		players: transferred.lobby.players.filter((p) => p.id !== userId),

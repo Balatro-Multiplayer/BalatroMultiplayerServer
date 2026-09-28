@@ -35,7 +35,7 @@ function lobbyWith(...ids: string[]): Lobby {
 	return lobby
 }
 
-const ctx = { now: 1000, newSeed: () => 'SEED1234' }
+const ctx = { now: 1000, newSeed: () => 'SEED1234', newId: () => 'RUN1' }
 
 function send(lobby: Lobby, from: string, data: { [key: string]: unknown }) {
 	return action(lobby, from, data, ctx)
@@ -240,18 +240,32 @@ describe('authoritative actions', () => {
 		lobby = ready(lobby, 'c', true).lobby
 		const step = start(lobby, 'a', { stake: 3, options: { deck: 'b_red' } })
 		expect(rejection(step)).toBeUndefined()
+		const players = ['a', 'b', 'c'].map((id) => ({ id, displayName: id }))
 		expect(step.lobby.game).toEqual({
 			ready: {},
 			started: {
+				runId: 'RUN1',
 				seed: 'SEED1234',
 				stake: 3,
 				options: { deck: 'b_red' },
 				startedAt: 1000,
+				hostId: 'a',
+				players,
 			},
+			reports: {},
+			reportOrder: [],
+			settleFrom: null,
+			logs: {},
 		})
 		expect(delivered(step)[0].payload).toMatchObject({
 			from: 'server',
-			params: { seed: 'SEED1234', stake: 3, options: { deck: 'b_red' } },
+			params: {
+				runId: 'RUN1',
+				seed: 'SEED1234',
+				stake: 3,
+				options: { deck: 'b_red' },
+				players,
+			},
 		})
 	})
 
