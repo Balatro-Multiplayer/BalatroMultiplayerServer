@@ -57,7 +57,7 @@ function parsePayload(payload: string): { [key: string]: unknown } {
 function currentLobby(
 	nk: nkruntime.Nakama,
 	userId: string,
-): { matchId: string; code: string } | null {
+): { matchId: string; code: string; modId: string } | null {
 	const key = {
 		collection: CURRENT_LOBBY_COLLECTION,
 		key: CURRENT_LOBBY_KEY,
@@ -67,6 +67,7 @@ function currentLobby(
 	if (objects.length === 0) return null
 	const matchId = objects[0].value.matchId
 	const code = objects[0].value.code
+	const modId = String(objects[0].value.modId || '')
 	if (
 		typeof matchId === 'string' &&
 		typeof code === 'string' &&
@@ -74,7 +75,7 @@ function currentLobby(
 	) {
 		const signal: LobbySignal = { type: 'has_player', userId }
 		if (nk.matchSignal(matchId, JSON.stringify(signal)) === 'yes')
-			return { matchId, code }
+			return { matchId, code, modId }
 	}
 	nk.storageDelete([key])
 	return null

@@ -512,7 +512,7 @@ function writeCurrent(nk, ctx, lobby, userId) {
       collection: CURRENT_LOBBY_COLLECTION,
       key: CURRENT_LOBBY_KEY,
       userId,
-      value: { matchId: ctx.matchId, code: lobby.code },
+      value: { matchId: ctx.matchId, code: lobby.code, modId: lobby.modId },
       permissionRead: 0,
       permissionWrite: 0
     }
@@ -833,10 +833,11 @@ function currentLobby(nk, userId) {
   if (objects.length === 0) return null;
   const matchId = objects[0].value.matchId;
   const code = objects[0].value.code;
+  const modId = String(objects[0].value.modId || "");
   if (typeof matchId === "string" && typeof code === "string" && nk.matchGet(matchId)) {
     const signal = { type: "has_player", userId };
     if (nk.matchSignal(matchId, JSON.stringify(signal)) === "yes")
-      return { matchId, code };
+      return { matchId, code, modId };
   }
   nk.storageDelete([key]);
   return null;

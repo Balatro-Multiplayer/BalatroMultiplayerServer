@@ -58,7 +58,7 @@ function writeCurrent(
 			collection: CURRENT_LOBBY_COLLECTION,
 			key: CURRENT_LOBBY_KEY,
 			userId,
-			value: { matchId: ctx.matchId, code: lobby.code },
+			value: { matchId: ctx.matchId, code: lobby.code, modId: lobby.modId },
 			permissionRead: 0,
 			permissionWrite: 0,
 		},
