@@ -242,14 +242,14 @@ const logEvent: AuthoritativeAction = {
 		)
 			return { reject: 'bad_params' }
 		const args = params.args === undefined ? null : params.args
-		const event = [params.t, params.opcode, args]
-		const size = JSON.stringify(event).length
+		const line = JSON.stringify([params.t, params.opcode, args])
+		const size = line.length
 
 		const game = lobby.game
-		const log = game.logs[ctx.from] || { events: [], bytes: 0, truncated: false }
+		const log = game.logs[ctx.from] || { lines: [], bytes: 0, truncated: false }
 		if (
 			log.truncated ||
-			log.events.length >= MAX_LOG_EVENTS ||
+			log.lines.length >= MAX_LOG_EVENTS ||
 			log.bytes + size > MAX_LOG_BYTES
 		) {
 			const truncated = { ...log, truncated: true }
@@ -260,7 +260,7 @@ const logEvent: AuthoritativeAction = {
 			}
 		}
 		const grown = {
-			events: log.events.concat([event]),
+			lines: log.lines.concat([line]),
 			bytes: log.bytes + size,
 			truncated: false,
 		}

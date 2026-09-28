@@ -83,6 +83,7 @@ declare namespace nkruntime {
 			cursor: string,
 		): { objects?: StorageObject[]; cursor?: string }
 		uuidv4(): string
+		sha256Hash(input: string): string
 	}
 
 	interface Presence {

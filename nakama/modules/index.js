@@ -775,11 +775,11 @@ var logEvent = {
     if (!isPlainObject2(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
       return { reject: "bad_params" };
     const args = params.args === void 0 ? null : params.args;
-    const event2 = [params.t, params.opcode, args];
-    const size = JSON.stringify(event2).length;
+    const line = JSON.stringify([params.t, params.opcode, args]);
+    const size = line.length;
     const game = lobby.game;
-    const log = game.logs[ctx.from] || { events: [], bytes: 0, truncated: false };
-    if (log.truncated || log.events.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
+    const log = game.logs[ctx.from] || { lines: [], bytes: 0, truncated: false };
+    if (log.truncated || log.lines.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
       const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
       return {
         game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: truncated }) }),
@@ -788,7 +788,7 @@ var logEvent = {
       };
     }
     const grown = {
-      events: log.events.concat([event2]),
+      lines: log.lines.concat([line]),
       bytes: log.bytes + size,
       truncated: false
     };
@@ -986,17 +986,52 @@ function action(lobby, senderId, data, ctx) {
   };
 }
 
+// src/lobby/log_check.ts
+var FRAMING_OPCODES = { end: true, chk: true };
+function opcodeOf(line) {
+  return JSON.parse(line)[1];
+}
+function hashInput(lines) {
+  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
+}
+function claimedHash(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event2 = JSON.parse(lines[i]);
+    if (event2[1] !== "chk") continue;
+    const args = event2[2];
+    return args && typeof args.carbon === "string" ? args.carbon : null;
+  }
+  return null;
+}
+function checkLog(log, sha256) {
+  if (!log) return { carbonHash: null, check: "unavailable" };
+  const carbonHash = claimedHash(log.lines);
+  if (carbonHash === null || log.truncated)
+    return { carbonHash, check: "unavailable" };
+  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
+  return {
+    carbonHash,
+    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
+  };
+}
+
 // src/lobby/storage.ts
 function logKey(runId, playerId) {
   return `${runId}:${playerId}`;
 }
-function runWrites(run, logs) {
+function runWrites(run, logs, sha256) {
+  const checks = {};
+  const logChecks = {};
+  for (const player of run.players) {
+    checks[player.id] = checkLog(logs[player.id], sha256);
+    logChecks[player.id] = checks[player.id].check;
+  }
   const writes = [
     {
       collection: RUNS_COLLECTION,
       key: run.runId,
       userId: SYSTEM_USER_ID,
-      value: __spreadValues({}, run),
+      value: __spreadProps(__spreadValues({}, run), { logChecks }),
       permissionRead: 2,
       permissionWrite: 0
     }
@@ -1008,9 +1043,11 @@ function runWrites(run, logs) {
       key: logKey(run.runId, player.id),
       userId: SYSTEM_USER_ID,
       value: {
-        events: log ? log.events : [],
-        eventCount: log ? log.events.length : 0,
-        truncated: log ? log.truncated : false
+        events: log ? log.lines.map((line) => JSON.parse(line)) : [],
+        eventCount: log ? log.lines.length : 0,
+        truncated: log ? log.truncated : false,
+        carbonHash: checks[player.id].carbonHash,
+        check: checks[player.id].check
       },
       permissionRead: 0,
       permissionWrite: 0
@@ -1022,7 +1059,9 @@ function runWrites(run, logs) {
       userId: player.id,
       value: {
         runId: run.runId,
+        code: run.code,
         modId: run.modId,
+        startedAt: run.startedAt,
         endedAt: run.endedAt,
         status: run.status,
         place: placement ? placement.place : null
@@ -1034,7 +1073,9 @@ function runWrites(run, logs) {
   return writes;
 }
 function saveRun(nk, run, logs) {
-  nk.storageWrite(runWrites(run, logs));
+  const writes = runWrites(run, logs, (input) => nk.sha256Hash(input));
+  nk.storageWrite(writes);
+  return writes[0].value;
 }
 function requireUser(ctx) {
   if (!ctx.userId)
@@ -1176,7 +1217,16 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
       return;
     case "saveRun":
       try {
-        saveRun(nk, effect.run, effect.logs);
+        const { logChecks } = saveRun(nk, effect.run, effect.logs);
+        for (const playerId in logChecks) {
+          if (logChecks[playerId] === "mismatch")
+            logger.warn(
+              "Lobby %s: run %s: %s's replay log does not match its hash",
+              lobby.code,
+              effect.run.runId,
+              playerId
+            );
+        }
       } catch (e) {
         logger.error(
           "Lobby %s: could not store run %s: %v",

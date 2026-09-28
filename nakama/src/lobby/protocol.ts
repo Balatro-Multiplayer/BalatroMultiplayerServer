@@ -89,9 +89,12 @@ export interface StartedGame {
 	players: Participant[]
 }
 
-// One player's replay events, [t, opcode, args] tuples in arrival order.
+// One player's replay events in arrival order, each the JSON text of its
+// [t, opcode, args] tuple as encoded on arrival. Kept as text because object
+// keys don't keep their order once match state has been through the Go
+// runtime, and the log's hash (log_check.ts) is over the client's key order.
 export interface PlayerLog {
-	events: unknown[][]
+	lines: string[]
 	bytes: number
 	truncated: boolean
 }
@@ -128,6 +131,9 @@ export type RunStatus =
 	| 'disputed'
 	| 'abandoned'
 	| 'restarted'
+
+// A stored replay log against the client's own closing hash (log_check.ts).
+export type LogCheck = 'match' | 'mismatch' | 'unavailable'
 
 // A finished game, as stored in RUNS_COLLECTION.
 export interface RunRecord {

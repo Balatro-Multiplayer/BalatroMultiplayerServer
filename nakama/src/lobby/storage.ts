@@ -3,7 +3,9 @@
 // can list their own runs. Written by the bmp_lobby match; read by the run
 // RPCs below.
 import { INVALID_ARGUMENT, NOT_FOUND, UNAUTHENTICATED, runtimeError } from '../errors'
+import { checkLog } from './log_check'
 import {
+	type LogCheck,
 	LOGS_COLLECTION,
 	MY_RUNS_COLLECTION,
 	type PlayerLog,
@@ -16,17 +18,26 @@ function logKey(runId: string, playerId: string): string {
 	return `${runId}:${playerId}`
 }
 
-// The storage writes for a finished run. Pure, so it can be tested.
+// The storage writes for a finished run: the record (with each player's
+// log check), a log per player and a pointer per player. Pure, so it can be
+// tested; sha256 returns a hex digest.
 export function runWrites(
 	run: RunRecord,
 	logs: { [userId: string]: PlayerLog },
+	sha256: (input: string) => string,
 ): nkruntime.StorageWriteRequest[] {
+	const checks: { [userId: string]: ReturnType<typeof checkLog> } = {}
+	const logChecks: { [userId: string]: LogCheck } = {}
+	for (const player of run.players) {
+		checks[player.id] = checkLog(logs[player.id], sha256)
+		logChecks[player.id] = checks[player.id].check
+	}
 	const writes: nkruntime.StorageWriteRequest[] = [
 		{
 			collection: RUNS_COLLECTION,
 			key: run.runId,
 			userId: SYSTEM_USER_ID,
-			value: { ...run },
+			value: { ...run, logChecks },
 			permissionRead: 2,
 			permissionWrite: 0,
 		},
@@ -38,9 +49,11 @@ export function runWrites(
 			key: logKey(run.runId, player.id),
 			userId: SYSTEM_USER_ID,
 			value: {
-				events: log ? log.events : [],
-				eventCount: log ? log.events.length : 0,
+				events: log ? log.lines.map((line) => JSON.parse(line)) : [],
+				eventCount: log ? log.lines.length : 0,
 				truncated: log ? log.truncated : false,
+				carbonHash: checks[player.id].carbonHash,
+				check: checks[player.id].check,
 			},
 			permissionRead: 0,
 			permissionWrite: 0,
@@ -52,7 +65,9 @@ export function runWrites(
 			userId: player.id,
 			value: {
 				runId: run.runId,
+				code: run.code,
 				modId: run.modId,
+				startedAt: run.startedAt,
 				endedAt: run.endedAt,
 				status: run.status,
 				place: placement ? placement.place : null,
@@ -69,7 +84,9 @@ export function saveRun(
 	run: RunRecord,
 	logs: { [userId: string]: PlayerLog },
 ) {
-	nk.storageWrite(runWrites(run, logs))
+	const writes = runWrites(run, logs, (input) => nk.sha256Hash(input))
+	nk.storageWrite(writes)
+	return writes[0].value as { logChecks: { [userId: string]: LogCheck } }
 }
 
 function requireUser(ctx: nkruntime.Context): string {
@@ -145,7 +162,8 @@ export function rpcRunLogs(
 
 const RUNS_PAGE = 20
 
-// {cursor?} -> {runs: [{runId, modId, endedAt, status, place}], cursor}.
+// {cursor?} -> {runs: [{runId, code, modId, startedAt, endedAt, status,
+// place}], cursor}.
 export function rpcRunsMine(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,

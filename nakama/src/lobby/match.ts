@@ -161,7 +161,16 @@ function runEffect(
 			return
 		case 'saveRun':
 			try {
-				saveRun(nk, effect.run, effect.logs)
+				const { logChecks } = saveRun(nk, effect.run, effect.logs)
+				for (const playerId in logChecks) {
+					if (logChecks[playerId] === 'mismatch')
+						logger.warn(
+							'Lobby %s: run %s: %s\'s replay log does not match its hash',
+							lobby.code,
+							effect.run.runId,
+							playerId,
+						)
+				}
 			} catch (e) {
 				logger.error(
 					'Lobby %s: could not store run %s: %v',

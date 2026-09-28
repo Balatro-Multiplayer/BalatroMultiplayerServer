@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { type RunRecord, ServerOp } from '../lobby/protocol'
 import { action } from '../lobby/relay'
@@ -326,10 +327,7 @@ describe('replay logs', () => {
 			params: { playerId: 'a', t: 1, opcode: 'play', args: [1] },
 		})
 		step = log(step.lobby, 'a', 2)
-		expect(step.lobby.game.logs.a.events).toEqual([
-			[1, 'play', [1]],
-			[2, 'play', [2]],
-		])
+		expect(step.lobby.game.logs.a.lines).toEqual(['[1,"play",[1]]', '[2,"play",[2]]'])
 	})
 
 	it('refuses events outside a game, or malformed ones', () => {
@@ -349,7 +347,7 @@ describe('replay logs', () => {
 				...lobby.game,
 				logs: {
 					a: {
-						events: new Array(MAX_LOG_EVENTS).fill([0, 'x', null]),
+						lines: new Array(MAX_LOG_EVENTS).fill('[0,"x",null]'),
 						bytes: 0,
 						truncated: false,
 					},
@@ -360,7 +358,7 @@ describe('replay logs', () => {
 		expect(rejection(step)).toBeUndefined()
 		expect(step.out).toEqual([])
 		expect(step.lobby.game.logs.a.truncated).toBe(true)
-		expect(step.lobby.game.logs.a.events).toHaveLength(MAX_LOG_EVENTS)
+		expect(step.lobby.game.logs.a.lines).toHaveLength(MAX_LOG_EVENTS)
 	})
 
 	it('budgets log events apart from other actions', () => {
@@ -375,7 +373,7 @@ describe('replay logs', () => {
 		let lobby = log(started('a', 'b'), 'a', 1).lobby
 		lobby = report(lobby, 'a', places('a', 'b')).lobby
 		const step = report(lobby, 'b', places('a', 'b'))
-		expect(saved(step)?.logs.a.events).toEqual([[1, 'play', [1]]])
+		expect(saved(step)?.logs.a.lines).toEqual(['[1,"play",[1]]'])
 		expect(step.lobby.game.logs).toEqual({})
 	})
 })
@@ -385,7 +383,7 @@ describe('storage writes', () => {
 		let lobby = log2(started('a', 'b'))
 		lobby = report(lobby, 'a', places('b', 'a')).lobby
 		const save = saved(report(lobby, 'b', places('b', 'a'))) as Save
-		const writes = runWrites(save.run, save.logs)
+		const writes = runWrites(save.run, save.logs, sha256)
 		const summary = writes.map((w) => [w.collection, w.key, w.userId, w.permissionRead])
 		const runId = save.run.runId
 		const system = '00000000-0000-0000-0000-000000000000'
@@ -396,13 +394,22 @@ describe('storage writes', () => {
 			['match_logs', `${runId}:b`, system, 0],
 			['my_runs', runId, 'b', 1],
 		])
-		expect(writes[1].value).toMatchObject({ eventCount: 1, truncated: false })
+		expect(writes[1].value).toMatchObject({ eventCount: 1, truncated: false, events: [[1, 'play', null]] })
 		expect(writes[3].value).toMatchObject({ eventCount: 0, events: [] })
 		expect(writes[2].value).toMatchObject({ status: 'agreed', place: 2 })
 		expect(writes[4].value).toMatchObject({ place: 1 })
+		// No 'chk' event in these logs, so nothing to check them against.
+		expect(writes[0].value).toMatchObject({
+			logChecks: { a: 'unavailable', b: 'unavailable' },
+		})
+		expect(writes[2].value).toMatchObject({ code: save.run.code, startedAt: save.run.startedAt })
 	})
 })
 
 function log2(lobby: Lobby): Lobby {
 	return send(lobby, 'a', 'mpapi_log_event', { t: 1, opcode: 'play' }, 1500).lobby
+}
+
+function sha256(input: string): string {
+	return createHash('sha256').update(input).digest('hex')
 }
