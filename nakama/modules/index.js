@@ -104,6 +104,74 @@ function beforeAuthenticateDevice(ctx, logger, nk, data) {
   return data;
 }
 
+// src/actions/registry.ts
+var MAX_OPTIONS_BYTES = 4 * 1024;
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+var ready = {
+  key: "mpapi_ready",
+  reduce(lobby, ctx, params) {
+    if (!isPlainObject(params) || typeof params.ready !== "boolean")
+      return { reject: "bad_params" };
+    if (lobby.game.started) return { reject: "in_game" };
+    const readyMap = __spreadValues({}, lobby.game.ready);
+    if (params.ready) readyMap[ctx.from] = true;
+    else delete readyMap[ctx.from];
+    return {
+      game: __spreadProps(__spreadValues({}, lobby.game), { ready: readyMap }),
+      params: { playerId: ctx.from, ready: params.ready }
+    };
+  }
+};
+var startGame = {
+  key: "mpapi_start_game",
+  reduce(lobby, ctx, params) {
+    const p = isPlainObject(params) ? params : {};
+    if (p.stake !== void 0 && typeof p.stake !== "number")
+      return { reject: "bad_params" };
+    const options = p.options === void 0 ? null : p.options;
+    if (JSON.stringify(options).length > MAX_OPTIONS_BYTES)
+      return { reject: "bad_params" };
+    if (lobby.hostId !== ctx.from) return { reject: "not_host" };
+    if (lobby.game.started) return { reject: "in_game" };
+    const present = lobby.players.filter((pl) => pl.awaySince === null);
+    if (present.length < 2) return { reject: "too_few_players" };
+    for (const pl of present) {
+      if (pl.id !== lobby.hostId && !lobby.game.ready[pl.id])
+        return { reject: "not_all_ready" };
+    }
+    const started = {
+      seed: ctx.newSeed(),
+      stake: typeof p.stake === "number" ? p.stake : null,
+      options,
+      startedAt: ctx.now
+    };
+    return {
+      game: { ready: {}, started },
+      params: { seed: started.seed, stake: started.stake, options }
+    };
+  }
+};
+var REGISTRY = {
+  [ready.key]: ready,
+  [startGame.key]: startGame
+};
+function authoritativeAction(key) {
+  return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
+}
+var SEED_ALPHABET = "123456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
+var SEED_LENGTH = 8;
+function seedFromHex(hex) {
+  const digits = hex.replace(/[^0-9a-f]/gi, "");
+  let seed = "";
+  for (let i = 0; i < SEED_LENGTH; i++) {
+    const n = Number.parseInt(digits.substr(i * 3, 3) || "0", 16);
+    seed += SEED_ALPHABET[n % SEED_ALPHABET.length];
+  }
+  return seed;
+}
+
 // src/lobby/protocol.ts
 var LOBBY_MATCH = "bmp_lobby";
 var ClientOp = {
@@ -114,7 +182,10 @@ var ClientOp = {
   // {metadata} -- host only; shallow-merged into the lobby metadata.
   SET_METADATA: 3,
   // {state} -- the sender's own state, handed back in the snapshot on rejoin.
-  SET_STATE: 4
+  SET_STATE: 4,
+  // ActionMessage -- a relayed action (to a player id or '*'), or an
+  // authoritative one (to 'server').
+  ACTION: 5
 };
 var ServerOp = {
   // Snapshot, to the joining player only.
@@ -126,8 +197,15 @@ var ServerOp = {
   // {playerId, info} -- info is null when the player is gone.
   PLAYER_INFO: 103,
   // {message}, to the sender of a rejected op.
-  ERROR: 104
+  ERROR: 104,
+  // ActionEnvelope -- a relayed action, or an authoritative action's result
+  // (from 'server').
+  ACTION: 105,
+  // {cid, action, reason}, to the sender of a refused ACTION.
+  ACTION_REJECTED: 106
 };
+var BROADCAST_TARGET = "*";
+var SERVER_TARGET = "server";
 var CURRENT_LOBBY_COLLECTION = "lobby";
 var CURRENT_LOBBY_KEY = "current";
 var LOBBY_CODE_COLLECTION = "lobby_codes";
@@ -205,14 +283,16 @@ function newLobby(params) {
     kickedIds: [],
     createdAt: params.now,
     graceMs: params.graceMs,
-    closed: false
+    closed: false,
+    game: { ready: {}, started: null },
+    actionBudget: {}
   };
 }
 function labelOf(lobby) {
   return JSON.stringify({
     code: lobby.code,
     modId: lobby.modId,
-    open: !lobby.closed && lobby.players.length < lobby.maxPlayers,
+    open: !lobby.closed && lobby.game.started === null && lobby.players.length < lobby.maxPlayers,
     size: lobby.players.length,
     max: lobby.maxPlayers
   });
@@ -247,6 +327,7 @@ function joinRejection(lobby, userId, modId) {
   if (lobby.kickedIds.indexOf(userId) !== -1)
     return "You were kicked from this lobby";
   if (modId !== lobby.modId) return "Lobby is for a different mod";
+  if (lobby.game.started) return "The game has already started";
   if (lobby.players.length === 0 && userId !== lobby.creatorId)
     return "Lobby is not open yet";
   if (lobby.players.length >= lobby.maxPlayers) return "Lobby is full";
@@ -268,7 +349,8 @@ function snapshotFor(lobby, userId) {
       mods: p.info.mods,
       isAway: p.awaySince !== null
     })),
-    ownState: self ? self.ownState : null
+    ownState: self ? self.ownState : null,
+    game: lobby.game
   };
 }
 function join(lobby, userId, sessionId, info) {
@@ -368,8 +450,14 @@ function remove(lobby, userId, type) {
   const player = findPlayer(lobby, userId);
   if (!player) return { lobby, out: [] };
   const transferred = transferHostFrom(lobby, userId);
+  const ready2 = __spreadValues({}, transferred.lobby.game.ready);
+  delete ready2[userId];
+  const actionBudget = __spreadValues({}, transferred.lobby.actionBudget);
+  delete actionBudget[userId];
   const next = __spreadProps(__spreadValues({}, transferred.lobby), {
-    players: transferred.lobby.players.filter((p) => p.id !== userId)
+    players: transferred.lobby.players.filter((p) => p.id !== userId),
+    game: __spreadProps(__spreadValues({}, transferred.lobby.game), { ready: ready2 }),
+    actionBudget
   });
   const others = allIds(next);
   const out = [{ kind: "clearCurrent", userId }];
@@ -453,13 +541,13 @@ function kick(lobby, byId, targetId) {
     ])
   };
 }
-function isPlainObject(value) {
+function isPlainObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function setMetadata(lobby, byId, patch) {
   if (lobby.hostId !== byId)
     return { lobby, out: [rejectOp(byId, "Only the host can set metadata")] };
-  if (!isPlainObject(patch))
+  if (!isPlainObject2(patch))
     return { lobby, out: [rejectOp(byId, "Metadata must be an object")] };
   const metadata = __spreadValues(__spreadValues({}, lobby.metadata), patch);
   const next = __spreadProps(__spreadValues({}, lobby), { metadata });
@@ -497,6 +585,106 @@ function tick(lobby, now) {
     }
   }
   return step;
+}
+
+// src/lobby/relay.ts
+var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
+var MAX_PARAMS_BYTES = 16 * 1024;
+var MAX_CID_LENGTH = 64;
+var RATE_PER_SECOND = 40;
+var BURST = 100;
+function reject(to, rejection) {
+  return {
+    kind: "send",
+    op: ServerOp.ACTION_REJECTED,
+    payload: rejection,
+    to: [to]
+  };
+}
+function spend(lobby, userId, now) {
+  const bucket = lobby.actionBudget[userId] || { tokens: BURST, at: now };
+  const refilled = Math.min(
+    BURST,
+    bucket.tokens + (now - bucket.at) / 1e3 * RATE_PER_SECOND
+  );
+  if (refilled < 1) return null;
+  return __spreadProps(__spreadValues({}, lobby), {
+    actionBudget: __spreadProps(__spreadValues({}, lobby.actionBudget), {
+      [userId]: { tokens: refilled - 1, at: now }
+    })
+  });
+}
+function stringField(data, key) {
+  const value = data[key];
+  return typeof value === "string" ? value : "";
+}
+function action(lobby, senderId, data, ctx) {
+  const cid = stringField(data, "cid").slice(0, MAX_CID_LENGTH);
+  const key = stringField(data, "action");
+  const to = stringField(data, "to");
+  const refuse = (reason) => ({
+    lobby,
+    out: [reject(senderId, { cid, action: key, reason })]
+  });
+  const sender = findPlayer(lobby, senderId);
+  if (!sender || sender.awaySince !== null) return { lobby, out: [] };
+  if (!ACTION_KEY_PATTERN.test(key)) return refuse("bad_action");
+  const params = data.params === void 0 ? null : data.params;
+  if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
+    return refuse("too_large");
+  const budgeted = spend(lobby, senderId, ctx.now);
+  if (!budgeted) return refuse("rate_limited");
+  const authoritative = authoritativeAction(key);
+  if (to === SERVER_TARGET) {
+    if (!authoritative) return refuse("not_authoritative");
+    const result = authoritative.reduce(
+      budgeted,
+      __spreadProps(__spreadValues({}, ctx), { from: senderId }),
+      params
+    );
+    if ("reject" in result) return refuse(result.reject);
+    const next = __spreadProps(__spreadValues({}, budgeted), { game: result.game });
+    const envelope2 = {
+      cid,
+      action: key,
+      from: SERVER_TARGET,
+      to: BROADCAST_TARGET,
+      params: result.params
+    };
+    return {
+      lobby: next,
+      out: [
+        {
+          kind: "send",
+          op: ServerOp.ACTION,
+          payload: envelope2,
+          to: next.players.map((p) => p.id)
+        }
+      ]
+    };
+  }
+  if (authoritative) return refuse("authoritative_only");
+  let targets;
+  if (to === BROADCAST_TARGET) {
+    targets = budgeted.players.map((p) => p.id);
+  } else if (findPlayer(budgeted, to)) {
+    targets = [to];
+  } else {
+    return refuse("unknown_target");
+  }
+  const envelope = {
+    cid,
+    action: key,
+    from: senderId,
+    to,
+    params
+  };
+  const responseTo = stringField(data, "responseTo");
+  if (responseTo) envelope.responseTo = responseTo.slice(0, MAX_CID_LENGTH);
+  return {
+    lobby: budgeted,
+    out: [{ kind: "send", op: ServerOp.ACTION, payload: envelope, to: targets }]
+  };
 }
 
 // src/lobby/match.ts
@@ -713,8 +901,13 @@ function parseMessage(nk, message) {
     return null;
   }
 }
-function stepForMessage(lobby, senderId, opCode, data) {
+function stepForMessage(nk, lobby, senderId, opCode, data) {
   switch (opCode) {
+    case ClientOp.ACTION:
+      return action(lobby, senderId, data, {
+        now: Date.now(),
+        newSeed: () => seedFromHex(nk.uuidv4())
+      });
     case ClientOp.LEAVE:
       return leave(lobby, senderId);
     case ClientOp.KICK:
@@ -740,7 +933,13 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
   for (const message of messages) {
     if (!current) break;
     const data = parseMessage(nk, message);
-    const step = data && stepForMessage(current.lobby, message.sender.userId, message.opCode, data);
+    const step = data && stepForMessage(
+      nk,
+      current.lobby,
+      message.sender.userId,
+      message.opCode,
+      data
+    );
     if (!step) {
       logger.warn(
         "Lobby %s: dropped op %d from %s",

@@ -12,6 +12,9 @@ export const ClientOp = {
 	SET_METADATA: 3,
 	// {state} -- the sender's own state, handed back in the snapshot on rejoin.
 	SET_STATE: 4,
+	// ActionMessage -- a relayed action (to a player id or '*'), or an
+	// authoritative one (to 'server').
+	ACTION: 5,
 } as const
 
 export const ServerOp = {
@@ -25,7 +28,54 @@ export const ServerOp = {
 	PLAYER_INFO: 103,
 	// {message}, to the sender of a rejected op.
 	ERROR: 104,
+	// ActionEnvelope -- a relayed action, or an authoritative action's result
+	// (from 'server').
+	ACTION: 105,
+	// {cid, action, reason}, to the sender of a refused ACTION.
+	ACTION_REJECTED: 106,
 } as const
+
+// Where an ACTION goes: a player id, '*' for everyone (the sender included,
+// as over MQTT), or SERVER_TARGET for an authoritative action.
+export const BROADCAST_TARGET = '*'
+export const SERVER_TARGET = 'server'
+
+// What a client sends. `from` is never read: the server stamps the sender.
+export interface ActionMessage {
+	cid: string
+	action: string
+	to: string
+	params: unknown
+	responseTo?: string
+}
+
+// What a client receives.
+export interface ActionEnvelope {
+	cid: string
+	action: string
+	from: string
+	to: string
+	params: unknown
+	responseTo?: string
+}
+
+export interface ActionRejection {
+	cid: string
+	action: string
+	reason: string
+}
+
+// State the server owns for its authoritative actions (src/actions).
+export interface GameState {
+	// userId -> ready. Absent means not ready.
+	ready: { [userId: string]: boolean }
+	started: null | {
+		seed: string
+		stake: number | null
+		options: unknown
+		startedAt: number
+	}
+}
 
 // The LobbyEvent wire strings MPAPI already handles (domain/lobby_event.lua).
 export type LobbyEventType =
@@ -66,6 +116,7 @@ export interface Snapshot {
 	metadata: { [key: string]: unknown }
 	players: SnapshotPlayer[]
 	ownState: unknown
+	game: GameState
 }
 
 // matchSignal payloads (from RPCs) and replies.

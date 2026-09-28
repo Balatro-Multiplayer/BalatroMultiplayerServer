@@ -76,6 +76,7 @@ declare namespace nkruntime {
 		storageRead(reads: StorageReadRequest[]): StorageObject[]
 		storageWrite(writes: StorageWriteRequest[]): unknown
 		storageDelete(deletes: StorageReadRequest[]): void
+		uuidv4(): string
 	}
 
 	interface Presence {

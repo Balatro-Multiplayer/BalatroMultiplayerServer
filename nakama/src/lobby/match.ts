@@ -1,6 +1,7 @@
 // The bmp_lobby authoritative match: adapts Nakama's match callbacks to the
 // pure rules in state.ts and carries out the Outbound effects they return.
 // One match per lobby; the match ends (returns null) once the lobby closes.
+import { seedFromHex } from '../actions/registry'
 import { releaseCode } from './codes'
 import {
 	CURRENT_LOBBY_COLLECTION,
@@ -9,6 +10,7 @@ import {
 	type LobbySignal,
 	type PlayerInfo,
 } from './protocol'
+import { action } from './relay'
 import {
 	DEFAULT_GRACE_MS,
 	type Lobby,
@@ -348,12 +350,18 @@ function parseMessage(
 }
 
 function stepForMessage(
+	nk: nkruntime.Nakama,
 	lobby: Lobby,
 	senderId: string,
 	opCode: number,
 	data: { [key: string]: unknown },
 ): Step | null {
 	switch (opCode) {
+		case ClientOp.ACTION:
+			return action(lobby, senderId, data, {
+				now: Date.now(),
+				newSeed: () => seedFromHex(nk.uuidv4()),
+			})
 		case ClientOp.LEAVE:
 			return leave(lobby, senderId)
 		case ClientOp.KICK:
@@ -390,7 +398,13 @@ export function lobbyMatchLoop(
 		const data = parseMessage(nk, message)
 		const step =
 			data &&
-			stepForMessage(current.lobby, message.sender.userId, message.opCode, data)
+			stepForMessage(
+				nk,
+				current.lobby,
+				message.sender.userId,
+				message.opCode,
+				data,
+			)
 		if (!step) {
 			logger.warn(
 				'Lobby %s: dropped op %d from %s',

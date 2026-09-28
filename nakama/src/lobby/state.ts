@@ -7,6 +7,7 @@
 // Parity source: the API's MQTT lobbies (apps/server/src/features/lobby/
 // lobby.service.ts and infrastructure/mqtt/grace-period.service.ts).
 import {
+	type GameState,
 	type LobbyEventMessage,
 	type LobbyEventType,
 	type PlayerInfo,
@@ -43,6 +44,10 @@ export interface Lobby {
 	createdAt: number
 	graceMs: number
 	closed: boolean
+	// Owned by the authoritative actions (src/actions).
+	game: GameState
+	// userId -> the sender's ACTION rate-limit bucket (relay.ts).
+	actionBudget: { [userId: string]: { tokens: number; at: number } }
 }
 
 export type Outbound =
@@ -76,6 +81,8 @@ export function newLobby(params: {
 		createdAt: params.now,
 		graceMs: params.graceMs,
 		closed: false,
+		game: { ready: {}, started: null },
+		actionBudget: {},
 	}
 }
 
@@ -83,7 +90,10 @@ export function labelOf(lobby: Lobby): string {
 	return JSON.stringify({
 		code: lobby.code,
 		modId: lobby.modId,
-		open: !lobby.closed && lobby.players.length < lobby.maxPlayers,
+		open:
+			!lobby.closed &&
+			lobby.game.started === null &&
+			lobby.players.length < lobby.maxPlayers,
 		size: lobby.players.length,
 		max: lobby.maxPlayers,
 	})
@@ -138,6 +148,7 @@ export function joinRejection(
 	if (lobby.kickedIds.indexOf(userId) !== -1)
 		return 'You were kicked from this lobby'
 	if (modId !== lobby.modId) return 'Lobby is for a different mod'
+	if (lobby.game.started) return 'The game has already started'
 	if (lobby.players.length === 0 && userId !== lobby.creatorId)
 		return 'Lobby is not open yet'
 	if (lobby.players.length >= lobby.maxPlayers) return 'Lobby is full'
@@ -161,6 +172,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 			isAway: p.awaySince !== null,
 		})),
 		ownState: self ? self.ownState : null,
+		game: lobby.game,
 	}
 }
 
@@ -286,9 +298,15 @@ function remove(
 
 	// Host moves on before the player is gone, so the new host is never them.
 	const transferred = transferHostFrom(lobby, userId)
+	const ready = { ...transferred.lobby.game.ready }
+	delete ready[userId]
+	const actionBudget = { ...transferred.lobby.actionBudget }
+	delete actionBudget[userId]
 	const next = {
 		...transferred.lobby,
 		players: transferred.lobby.players.filter((p) => p.id !== userId),
+		game: { ...transferred.lobby.game, ready },
+		actionBudget,
 	}
 	const others = allIds(next)
 	const out: Outbound[] = [{ kind: 'clearCurrent', userId }]
