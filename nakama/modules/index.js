@@ -707,7 +707,8 @@ function parseMessage(nk, message) {
   if (message.data.byteLength > MAX_MESSAGE_BYTES) return null;
   try {
     const data = JSON.parse(nk.binaryToString(message.data));
-    return typeof data === "object" && data !== null && !Array.isArray(data) ? data : null;
+    if (Array.isArray(data)) return data.length === 0 ? {} : null;
+    return typeof data === "object" && data !== null ? data : null;
   } catch (e) {
     return null;
   }
