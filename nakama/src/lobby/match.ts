@@ -236,6 +236,9 @@ export function lobbyMatchInit(
 		maxPlayers: Number(params.maxPlayers),
 		creatorId: stringParam(params, 'creatorId'),
 		rankedMode: stringParam(params, 'rankedMode') || undefined,
+		allowedIds: stringParam(params, 'allowedIds')
+			? stringParam(params, 'allowedIds').split(',')
+			: undefined,
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
 		resultTimeoutMs: secondsFromEnv(

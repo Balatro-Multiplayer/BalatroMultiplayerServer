@@ -5,6 +5,7 @@ import { boardId, newRating, type RatingRecord } from './apply'
 import { PLACEMENT_GAMES } from './elo'
 
 const BOARD_PAGE = 50
+const USER_ID_PATTERN = /^[0-9a-f-]{36}$/
 const MODE_PATTERN = /^[A-Za-z0-9_:.-]{1,64}$/
 
 function boardOf(payload: string): { modId: string; mode: string; input: { [key: string]: unknown } } {
@@ -21,7 +22,7 @@ function boardOf(payload: string): { modId: string; mode: string; input: { [key:
 	return { modId, mode, input }
 }
 
-// {modId, mode} -> the caller's rating record on that board (a fresh one if
+// {modId, mode, playerId?} -> the player's (default: the caller's) rating record on that board (a fresh one if
 // they haven't played it), plus whether they're still in placement games.
 export function rpcRatingGet(
 	ctx: nkruntime.Context,
@@ -30,9 +31,14 @@ export function rpcRatingGet(
 	payload: string,
 ) {
 	if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, 'Rating RPCs need a player session')
-	const { modId, mode } = boardOf(payload)
+	const { modId, mode, input } = boardOf(payload)
+	// Ratings are public: a lobby's players read each other's (the card info
+	// shown for an opponent). Default is the caller's own.
+	const playerId = input.playerId === undefined ? ctx.userId : input.playerId
+	if (typeof playerId !== 'string' || !USER_ID_PATTERN.test(playerId))
+		throw runtimeError(INVALID_ARGUMENT, 'playerId is not a user id')
 	const objects = nk.storageRead([
-		{ collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: ctx.userId },
+		{ collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: playerId },
 	])
 	const rating = objects.length > 0 ? (objects[0].value as unknown as RatingRecord) : newRating()
 	return JSON.stringify({ ...rating, isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })

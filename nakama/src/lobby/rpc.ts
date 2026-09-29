@@ -22,15 +22,16 @@ import { MAX_PLAYERS, MIN_PLAYERS } from './state'
 // lengths: 6 for manual lobbies, 5 for matchmade ones.
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ123456789'
 const CODE_LENGTH = 6
+export const MATCHMADE_CODE_LENGTH = 5
 const CODE_PATTERN = /^[A-HJ-NP-Z1-9]{5,6}$/
-const CODE_ATTEMPTS = 10
+export const CODE_ATTEMPTS = 10
 const MOD_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
 const DEFAULT_MAX_PLAYERS = 16
 const RANKED_MODE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
 
-function generateCode(): string {
+export function generateCode(length: number = CODE_LENGTH): string {
 	let code = ''
-	for (let i = 0; i < CODE_LENGTH; i++) {
+	for (let i = 0; i < length; i++) {
 		code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length))
 	}
 	return code
@@ -112,8 +113,9 @@ export function rpcLobbyCreate(
 		)
 	}
 
-	// Ranked lobbies count on a rating board. Until matchmaking creates them,
-	// only a server run with ALLOW_RANKED_LOBBIES=true lets a client ask.
+	// Ranked lobbies count on a rating board. The matchmaker creates the real
+	// ones; only a server run with ALLOW_RANKED_LOBBIES=true (dev) lets a
+	// client ask for one directly.
 	const rankedMode = input.rankedMode
 	if (rankedMode !== undefined && rankedMode !== null) {
 		if (typeof rankedMode !== 'string' || !RANKED_MODE_PATTERN.test(rankedMode))

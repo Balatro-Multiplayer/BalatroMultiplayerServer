@@ -254,6 +254,17 @@ declare namespace nkruntime {
 		registerBeforeLinkCustom(fn: BeforeHookFunction<AccountCustom>): void
 		registerBeforeUnlinkCustom(fn: BeforeHookFunction<AccountCustom>): void
 		registerRpc(id: string, fn: RpcFunction): void
+		registerMatchmakerMatched(
+			fn: (
+				ctx: Context,
+				logger: Logger,
+				nk: Nakama,
+				matches: {
+					presence: Presence
+					properties: { [key: string]: string }
+				}[],
+			) => string | void,
+		): void
 		registerMatch<S extends MatchState>(
 			name: string,
 			handler: MatchHandler<S>,

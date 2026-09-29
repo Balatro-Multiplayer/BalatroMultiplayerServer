@@ -37,3 +37,8 @@ console:
   username: admin
   password: localdevpassword
   signing_key: local-dev-console-signing-key
+
+matchmaker:
+  # Default is 15s between matching passes; local tests shouldn't wait that long.
+  interval_sec: 2
+  max_tickets: 3

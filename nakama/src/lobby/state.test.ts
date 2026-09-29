@@ -12,6 +12,7 @@ import {
 	labelOf,
 	leave,
 	newLobby,
+	snapshotFor,
 	setMetadata,
 	setOwnState,
 	tick,
@@ -89,6 +90,35 @@ describe('joinRejection', () => {
 		expect(joinRejection(lobby, 'b', 'm')).toBe(
 			'You were kicked from this lobby',
 		)
+	})
+})
+
+describe('matchmade lobbies', () => {
+	const made = () =>
+		newLobby({
+			code: 'ABCDE',
+			modId: 'm',
+			maxPlayers: 2,
+			creatorId: 'a',
+			rankedMode: 'mode',
+			allowedIds: ['a', 'b'],
+			now: 0,
+			graceMs: GRACE,
+		})
+
+	it('seats only the matched players, in any order', () => {
+		const lobby = made()
+		expect(joinRejection(lobby, 'b', 'm')).toBeNull()
+		expect(joinRejection(lobby, 'x', 'm')).toBe(
+			'This lobby is reserved for matched players',
+		)
+	})
+
+	it('makes whoever arrives first the host and reports the lobby as ranked', () => {
+		const lobby = join(made(), 'b', 'b-s1', info('b')).lobby
+		expect(lobby.hostId).toBe('b')
+		expect(snapshotFor(lobby, 'b').type).toBe('ranked')
+		expect(snapshotFor(lobbyWith('a'), 'a').type).toBe('private')
 	})
 })
 

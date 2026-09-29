@@ -44,6 +44,9 @@ export interface Lobby {
 	hostId: string
 	// Set when the lobby was created ranked: the rating board its games count on.
 	rankedMode?: string
+	// Set when the matchmaker made the lobby: only these players may take a
+	// seat, and each may do so before the first of them has arrived.
+	allowedIds?: string[]
 	metadata: { [key: string]: unknown }
 	// In join order: host transfer picks the earliest eligible player.
 	players: LobbyPlayer[]
@@ -80,6 +83,7 @@ export function newLobby(params: {
 	maxPlayers: number
 	creatorId: string
 	rankedMode?: string
+	allowedIds?: string[]
 	now: number
 	graceMs: number
 	resultTimeoutMs?: number
@@ -91,6 +95,7 @@ export function newLobby(params: {
 		creatorId: params.creatorId,
 		hostId: params.creatorId,
 		rankedMode: params.rankedMode,
+		allowedIds: params.allowedIds,
 		metadata: {},
 		players: [],
 		kickedIds: [],
@@ -178,8 +183,12 @@ export function joinRejection(
 		return 'You were kicked from this lobby'
 	if (modId !== lobby.modId) return 'Lobby is for a different mod'
 	if (lobby.game.started) return 'The game has already started'
-	if (lobby.players.length === 0 && userId !== lobby.creatorId)
+	if (lobby.allowedIds) {
+		if (lobby.allowedIds.indexOf(userId) === -1)
+			return 'This lobby is reserved for matched players'
+	} else if (lobby.players.length === 0 && userId !== lobby.creatorId) {
 		return 'Lobby is not open yet'
+	}
 	if (lobby.players.length >= lobby.maxPlayers) return 'Lobby is full'
 	return null
 }
@@ -191,7 +200,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 		modId: lobby.modId,
 		hostId: lobby.hostId,
 		maxPlayers: lobby.maxPlayers,
-		type: 'private',
+		type: lobby.rankedMode ? 'ranked' : lobby.allowedIds ? 'public' : 'private',
 		metadata: lobby.metadata,
 		players: lobby.players.map((p) => ({
 			id: p.id,
@@ -252,7 +261,13 @@ export function join(
 		awaySince: null,
 		ownState: null,
 	}
-	const next = { ...lobby, players: lobby.players.concat([player]) }
+	// A matchmade lobby has no creator to wait for: whoever arrives first hosts.
+	const next = {
+		...lobby,
+		hostId:
+			lobby.allowedIds && lobby.players.length === 0 ? userId : lobby.hostId,
+		players: lobby.players.concat([player]),
+	}
 	const others = othersThan(next, userId)
 	return {
 		lobby: next,

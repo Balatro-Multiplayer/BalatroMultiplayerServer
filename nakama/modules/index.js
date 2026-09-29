@@ -163,6 +163,7 @@ function newLobby(params) {
     creatorId: params.creatorId,
     hostId: params.creatorId,
     rankedMode: params.rankedMode,
+    allowedIds: params.allowedIds,
     metadata: {},
     players: [],
     kickedIds: [],
@@ -224,8 +225,12 @@ function joinRejection(lobby, userId, modId) {
     return "You were kicked from this lobby";
   if (modId !== lobby.modId) return "Lobby is for a different mod";
   if (lobby.game.started) return "The game has already started";
-  if (lobby.players.length === 0 && userId !== lobby.creatorId)
+  if (lobby.allowedIds) {
+    if (lobby.allowedIds.indexOf(userId) === -1)
+      return "This lobby is reserved for matched players";
+  } else if (lobby.players.length === 0 && userId !== lobby.creatorId) {
     return "Lobby is not open yet";
+  }
   if (lobby.players.length >= lobby.maxPlayers) return "Lobby is full";
   return null;
 }
@@ -236,7 +241,7 @@ function snapshotFor(lobby, userId) {
     modId: lobby.modId,
     hostId: lobby.hostId,
     maxPlayers: lobby.maxPlayers,
-    type: "private",
+    type: lobby.rankedMode ? "ranked" : lobby.allowedIds ? "public" : "private",
     metadata: lobby.metadata,
     players: lobby.players.map((p) => ({
       id: p.id,
@@ -288,7 +293,10 @@ function join(lobby, userId, sessionId, info) {
     awaySince: null,
     ownState: null
   };
-  const next = __spreadProps(__spreadValues({}, lobby), { players: lobby.players.concat([player]) });
+  const next = __spreadProps(__spreadValues({}, lobby), {
+    hostId: lobby.allowedIds && lobby.players.length === 0 ? userId : lobby.hostId,
+    players: lobby.players.concat([player])
+  });
   const others = othersThan(next, userId);
   return {
     lobby: next,
@@ -1589,6 +1597,7 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     maxPlayers: Number(params.maxPlayers),
     creatorId: stringParam(params, "creatorId"),
     rankedMode: stringParam(params, "rankedMode") || void 0,
+    allowedIds: stringParam(params, "allowedIds") ? stringParam(params, "allowedIds").split(",") : void 0,
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
     resultTimeoutMs: secondsFromEnv(
@@ -1817,14 +1826,15 @@ function lobbyMatchTerminate(ctx, logger, nk, dispatcher, tickNumber, state, gra
 // src/lobby/rpc.ts
 var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ123456789";
 var CODE_LENGTH = 6;
+var MATCHMADE_CODE_LENGTH = 5;
 var CODE_PATTERN = /^[A-HJ-NP-Z1-9]{5,6}$/;
 var CODE_ATTEMPTS = 10;
 var MOD_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 var DEFAULT_MAX_PLAYERS = 16;
 var RANKED_MODE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
-function generateCode() {
+function generateCode(length = CODE_LENGTH) {
   let code = "";
-  for (let i = 0; i < CODE_LENGTH; i++) {
+  for (let i = 0; i < length; i++) {
     code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length));
   }
   return code;
@@ -1944,8 +1954,66 @@ function rpcLobbyLeave(ctx, logger, nk, payload) {
   return JSON.stringify({});
 }
 
+// src/matchmaking/matched.ts
+var NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+function planMatch(entries) {
+  if (entries.length < 2) return "A match needs at least two players";
+  const first = entries[0].properties;
+  const modId = first.modId;
+  const mode = first.mode;
+  const kind = first.kind === "ranked" ? "ranked" : "casual";
+  if (!NAME_PATTERN.test(modId || "") || !NAME_PATTERN.test(mode || ""))
+    return "Ticket has no valid modId and mode";
+  const ids = [];
+  for (const entry of entries) {
+    const p = entry.properties;
+    if (p.modId !== modId || p.mode !== mode || (p.kind === "ranked" ? "ranked" : "casual") !== kind)
+      return "Tickets disagree on what they queued for";
+    if (ids.indexOf(entry.presence.userId) !== -1)
+      return "A player is in the match twice";
+    ids.push(entry.presence.userId);
+  }
+  return { modId, rankedMode: kind === "ranked" ? mode : "", playerIds: ids };
+}
+function matchmakerMatched(ctx, logger, nk, matches) {
+  const plan = planMatch(matches);
+  if (typeof plan === "string") {
+    logger.warn("Matchmaker group refused: %s", plan);
+    throw new Error(plan);
+  }
+  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
+    const code = generateCode(MATCHMADE_CODE_LENGTH);
+    if (!reserveCode(nk, code, plan.modId)) continue;
+    let matchId;
+    try {
+      matchId = nk.matchCreate(LOBBY_MATCH, {
+        code,
+        modId: plan.modId,
+        maxPlayers: plan.playerIds.length,
+        creatorId: plan.playerIds[0],
+        rankedMode: plan.rankedMode,
+        allowedIds: plan.playerIds.join(",")
+      });
+    } catch (e) {
+      releaseCode(nk, code, "");
+      throw e;
+    }
+    bindCode(nk, code, matchId, plan.modId);
+    logger.info(
+      "Matchmaker made lobby %s for %d players (%s%s)",
+      code,
+      plan.playerIds.length,
+      plan.modId,
+      plan.rankedMode ? ", ranked " + plan.rankedMode : ""
+    );
+    return matchId;
+  }
+  throw new Error("Could not allocate a lobby code");
+}
+
 // src/rating/rpc.ts
 var BOARD_PAGE = 50;
+var USER_ID_PATTERN = /^[0-9a-f-]{36}$/;
 var MODE_PATTERN = /^[A-Za-z0-9_:.-]{1,64}$/;
 function boardOf(payload) {
   let input = {};
@@ -1962,9 +2030,12 @@ function boardOf(payload) {
 }
 function rpcRatingGet(ctx, logger, nk, payload) {
   if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
-  const { modId, mode } = boardOf(payload);
+  const { modId, mode, input } = boardOf(payload);
+  const playerId = input.playerId === void 0 ? ctx.userId : input.playerId;
+  if (typeof playerId !== "string" || !USER_ID_PATTERN.test(playerId))
+    throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
   const objects = nk.storageRead([
-    { collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: ctx.userId }
+    { collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: playerId }
   ]);
   const rating = objects.length > 0 ? objects[0].value : newRating();
   return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
@@ -2010,6 +2081,7 @@ function InitModule(ctx, logger, nk, initializer) {
     matchSignal: lobbyMatchSignal,
     matchTerminate: lobbyMatchTerminate
   });
+  initializer.registerMatchmakerMatched(matchmakerMatched);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);
   initializer.registerRpc("lobby_find", rpcLobbyFind);
   initializer.registerRpc("lobby_current", rpcLobbyCurrent);

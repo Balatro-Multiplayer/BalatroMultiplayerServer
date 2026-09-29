@@ -216,7 +216,7 @@ export interface Snapshot {
 	modId: string
 	hostId: string
 	maxPlayers: number
-	type: 'private'
+	type: 'private' | 'public' | 'ranked'
 	metadata: { [key: string]: unknown }
 	players: SnapshotPlayer[]
 	ownState: unknown

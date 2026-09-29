@@ -22,6 +22,7 @@ import {
 	rpcLobbyLeave,
 	rpcRunActive,
 } from './lobby/rpc'
+import { matchmakerMatched } from './matchmaking/matched'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 
@@ -48,6 +49,7 @@ function InitModule(
 		matchSignal: lobbyMatchSignal,
 		matchTerminate: lobbyMatchTerminate,
 	})
+	initializer.registerMatchmakerMatched(matchmakerMatched)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)
 	initializer.registerRpc('lobby_find', rpcLobbyFind)
 	initializer.registerRpc('lobby_current', rpcLobbyCurrent)
