@@ -6,6 +6,7 @@ var __getOwnPropDescs = Object.getOwnPropertyDescriptors;
 var __getOwnPropSymbols = Object.getOwnPropertySymbols;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __propIsEnum = Object.prototype.propertyIsEnumerable;
+var __pow = Math.pow;
 var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __spreadValues = (a, b) => {
   for (var prop in b || (b = {}))
@@ -145,6 +146,7 @@ var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
 var RUNS_COLLECTION = "match_runs";
 var LOGS_COLLECTION = "match_logs";
 var MY_RUNS_COLLECTION = "my_runs";
+var RATINGS_COLLECTION = "ratings";
 
 // src/lobby/state.ts
 var DEFAULT_GRACE_MS = 12e4;
@@ -160,6 +162,7 @@ function newLobby(params) {
     maxPlayers: params.maxPlayers,
     creatorId: params.creatorId,
     hostId: params.creatorId,
+    rankedMode: params.rankedMode,
     metadata: {},
     players: [],
     kickedIds: [],
@@ -587,7 +590,8 @@ function finishGame(lobby, now, override) {
     status,
     placements,
     reports: game.reports,
-    players: started.players
+    players: started.players,
+    rankedMode: lobby.rankedMode
   };
   const next = __spreadProps(__spreadValues({}, lobby), { game: emptyGame() });
   const out = [{ kind: "saveRun", run, logs: game.logs }];
@@ -823,6 +827,24 @@ function seedFromHex(hex) {
   return seed;
 }
 
+// src/lobby/active.ts
+function activeRunOf(lobby, userId) {
+  const started = lobby.game.started;
+  if (!started || lobby.closed) return null;
+  if (!started.players.some((p) => p.id === userId)) return null;
+  if (!lobby.players.some((p) => p.id === userId)) return null;
+  const log = lobby.game.logs[userId];
+  return {
+    runId: started.runId,
+    code: lobby.code,
+    modId: lobby.modId,
+    events: (log ? log.lines : []).map((line) => {
+      const [t, opcode, args] = JSON.parse(line);
+      return { t, opcode, args };
+    })
+  };
+}
+
 // src/lobby/codes.ts
 function keyOf(code) {
   return {
@@ -986,6 +1008,290 @@ function action(lobby, senderId, data, ctx) {
   };
 }
 
+// src/rating/elo.ts
+var INITIAL_HIDDEN_RATING = 600;
+var PLACEMENT_GAMES = 5;
+var K_ESTABLISHED = 40;
+var RATING_FLOOR = 100;
+var ELO_SCALE = 1e3;
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+function effectiveK(gamesPlayed, performance) {
+  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
+  const baseK = 200 - gamesPlayed * 40;
+  return baseK * (1 + clamp(performance, 0, 1));
+}
+function expectedScore(ratingA, ratingB) {
+  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
+}
+function compute1v1(a, b, outcome) {
+  const ea = expectedScore(a.rating, b.rating);
+  const eb = 1 - ea;
+  let sa;
+  let sb;
+  if (outcome === "a_wins") {
+    sa = 1;
+    sb = 0;
+  } else if (outcome === "b_wins") {
+    sa = 0;
+    sb = 1;
+  } else {
+    sa = 0.5;
+    sb = 0.5;
+  }
+  const ka = effectiveK(a.gamesPlayed, a.performance);
+  const kb = effectiveK(b.gamesPlayed, b.performance);
+  return {
+    deltaA: Math.round(ka * (sa - ea)),
+    deltaB: Math.round(kb * (sb - eb))
+  };
+}
+function computeFFA(players) {
+  const n = players.length;
+  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
+  const kDivisor = n - 1;
+  const deltas = /* @__PURE__ */ new Map();
+  for (const p of players) {
+    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
+    let sum = 0;
+    for (const q of players) {
+      if (q.playerId === p.playerId) continue;
+      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
+      const ep = expectedScore(p.rating, q.rating);
+      sum += kp * (score - ep);
+    }
+    deltas.set(p.playerId, Math.round(sum));
+  }
+  return deltas;
+}
+function computeTeam(teams, winnerTeamIndex) {
+  const deltas = /* @__PURE__ */ new Map();
+  if (teams.length !== 2) {
+    for (const team of teams) {
+      for (const p of team) deltas.set(p.playerId, 0);
+    }
+    return deltas;
+  }
+  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
+  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
+  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
+  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
+  const winner = teams[winnerTeamIndex];
+  const loser = teams[loserTeamIndex];
+  const winnerAvg = {
+    rating: avgRating(winner),
+    gamesPlayed: avgGamesPlayed(winner),
+    performance: avgPerformance(winner)
+  };
+  const loserAvg = {
+    rating: avgRating(loser),
+    gamesPlayed: avgGamesPlayed(loser),
+    performance: avgPerformance(loser)
+  };
+  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
+  for (const p of winner) deltas.set(p.playerId, deltaA);
+  for (const p of loser) deltas.set(p.playerId, deltaB);
+  return deltas;
+}
+function detectRatingMode(placements) {
+  if (placements.some((p) => p.teamId)) return "team";
+  if (placements.length === 2) return "solo";
+  return "ffa";
+}
+function computeRatingDeltas(mode, placements, ratings) {
+  var _a, _b;
+  if (mode === "solo") {
+    const [a, b] = placements;
+    const ra = ratings.get(a.playerId);
+    const rb = ratings.get(b.playerId);
+    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
+    const { deltaA, deltaB } = compute1v1(
+      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
+      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
+      outcome
+    );
+    return /* @__PURE__ */ new Map([
+      [a.playerId, deltaA],
+      [b.playerId, deltaB]
+    ]);
+  }
+  if (mode === "ffa") {
+    return computeFFA(
+      placements.map((p) => {
+        var _a2;
+        const r = ratings.get(p.playerId);
+        return {
+          playerId: p.playerId,
+          rating: r.rating,
+          gamesPlayed: r.gamesPlayed,
+          performance: (_a2 = p.performance) != null ? _a2 : 0,
+          place: p.place
+        };
+      })
+    );
+  }
+  const teamMap = /* @__PURE__ */ new Map();
+  for (const p of placements) {
+    const tid = p.teamId;
+    if (!teamMap.has(tid)) teamMap.set(tid, []);
+    teamMap.get(tid).push(p);
+  }
+  const teamEntries = Array.from(teamMap.entries());
+  const winnerTeamPlace = Math.min(
+    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
+  );
+  const winnerTeamIdx = teamEntries.findIndex(
+    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
+  );
+  const teams = teamEntries.map(
+    ([, members]) => members.map((m) => {
+      var _a2;
+      const r = ratings.get(m.playerId);
+      return {
+        playerId: m.playerId,
+        rating: r.rating,
+        gamesPlayed: r.gamesPlayed,
+        performance: (_a2 = m.performance) != null ? _a2 : 0
+      };
+    })
+  );
+  return computeTeam(teams, winnerTeamIdx);
+}
+
+// src/rating/metrics.ts
+var METRIC_CONFIG = {
+  MultiplayerPvP: { kind: "score", direction: "desc" },
+  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
+};
+var BOUNDS = {
+  score: { min: 0, max: 1e15 },
+  // A legitimate ranked run can't complete in under 10s nor take over 6h.
+  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
+};
+function nextSeasonBest(modId, reported, current) {
+  const config = METRIC_CONFIG[modId];
+  if (!config || reported === void 0) return current;
+  const bounds = BOUNDS[config.kind];
+  if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
+    return current;
+  if (current === null) return reported;
+  const better = config.direction === "asc" ? reported < current : reported > current;
+  return better ? reported : current;
+}
+
+// src/rating/apply.ts
+var CURRENT_SEASON = 1;
+function boardId(modId, mode) {
+  return `${modId}:${mode}:${CURRENT_SEASON}`;
+}
+function newRating() {
+  return {
+    rating: INITIAL_HIDDEN_RATING,
+    wins: 0,
+    losses: 0,
+    gamesPlayed: 0,
+    seasonBest: null,
+    lastMatchAt: 0
+  };
+}
+function planRatings(run, checks, current) {
+  const plan = { updates: {}, results: {} };
+  if (run.status !== "agreed" && run.status !== "partial") return plan;
+  const placements = run.placements.filter((p) => checks[p.playerId] !== "mismatch");
+  if (placements.length < 2) return plan;
+  const ratings = /* @__PURE__ */ new Map();
+  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
+  const entries = placements.map((p) => ({
+    playerId: p.playerId,
+    place: p.place,
+    performance: p.performance
+  }));
+  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
+  const bestPlace = Math.min(...placements.map((p) => p.place));
+  for (const p of placements) {
+    const before = ratings.get(p.playerId);
+    const delta = deltas.get(p.playerId) || 0;
+    const won = p.place === bestPlace;
+    const after = {
+      rating: Math.max(RATING_FLOOR, before.rating + delta),
+      wins: before.wins + (won ? 1 : 0),
+      losses: before.losses + (won ? 0 : 1),
+      gamesPlayed: before.gamesPlayed + 1,
+      seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
+      lastMatchAt: run.endedAt
+    };
+    plan.updates[p.playerId] = after;
+    const placing = after.gamesPlayed < PLACEMENT_GAMES;
+    plan.results[p.playerId] = {
+      delta: placing ? null : after.rating - before.rating,
+      newRating: placing ? null : after.rating,
+      isPlacement: placing,
+      gamesPlayed: after.gamesPlayed
+    };
+  }
+  return plan;
+}
+var WRITE_ATTEMPTS = 5;
+function keyOf2(modId, mode) {
+  return boardId(modId, mode);
+}
+function applyRatings(nk, logger, run, mode, checks) {
+  const key = keyOf2(run.modId, mode);
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+    const objects = nk.storageRead(
+      run.players.map((p) => ({ collection: RATINGS_COLLECTION, key, userId: p.id }))
+    );
+    const current = {};
+    const versions = {};
+    for (const object of objects) {
+      current[object.userId] = object.value;
+      versions[object.userId] = object.version;
+    }
+    const plan = planRatings(run, checks, current);
+    const ids = Object.keys(plan.updates);
+    if (ids.length === 0) return {};
+    try {
+      nk.storageWrite(
+        ids.map((id) => ({
+          collection: RATINGS_COLLECTION,
+          key,
+          userId: id,
+          value: plan.updates[id],
+          permissionRead: 2,
+          permissionWrite: 0,
+          // '*' = only if it doesn't exist yet.
+          version: versions[id] || "*"
+        }))
+      );
+    } catch (e) {
+      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
+      continue;
+    }
+    mirrorToLeaderboard(nk, logger, run, mode, plan, checks);
+    return plan.results;
+  }
+  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS);
+  return {};
+}
+function mirrorToLeaderboard(nk, logger, run, mode, plan, _checks) {
+  const id = boardId(run.modId, mode);
+  try {
+    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
+    for (const player of run.players) {
+      const after = plan.updates[player.id];
+      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
+      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
+        losses: after.losses,
+        gamesPlayed: after.gamesPlayed,
+        seasonBest: after.seasonBest
+      }, "set");
+    }
+  } catch (e) {
+    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
+  }
+}
+
 // src/lobby/log_check.ts
 var FRAMING_OPCODES = { end: true, chk: true };
 function opcodeOf(line) {
@@ -1016,8 +1322,18 @@ function checkLog(log, sha256) {
 }
 
 // src/lobby/storage.ts
+function myRunKey(run) {
+  const reversed = String(9999999999999 - run.endedAt).padStart(13, "0");
+  return `${reversed}:${run.runId}`;
+}
 function logKey(runId, playerId) {
   return `${runId}:${playerId}`;
+}
+function logChecksOf(run, logs, sha256) {
+  const checks = {};
+  for (const player of run.players)
+    checks[player.id] = checkLog(logs[player.id], sha256).check;
+  return checks;
 }
 function runWrites(run, logs, sha256) {
   const checks = {};
@@ -1055,7 +1371,7 @@ function runWrites(run, logs, sha256) {
     const placement = run.placements.filter((p) => p.playerId === player.id)[0];
     writes.push({
       collection: MY_RUNS_COLLECTION,
-      key: run.runId,
+      key: myRunKey(run),
       userId: player.id,
       value: {
         runId: run.runId,
@@ -1064,7 +1380,8 @@ function runWrites(run, logs, sha256) {
         startedAt: run.startedAt,
         endedAt: run.endedAt,
         status: run.status,
-        place: placement ? placement.place : null
+        place: placement ? placement.place : null,
+        rating: run.ratings && run.ratings[player.id] || null
       },
       permissionRead: 1,
       permissionWrite: 0
@@ -1191,6 +1508,16 @@ function apply(ctx, logger, nk, dispatcher, state, raw) {
   }
   return { lobby: step.lobby, presences, pendingInfo: state.pendingInfo, label };
 }
+function withRatings(nk, logger, run, logs) {
+  if (!run.rankedMode) return run;
+  try {
+    const checks = logChecksOf(run, logs, (input) => nk.sha256Hash(input));
+    return __spreadProps(__spreadValues({}, run), { ratings: applyRatings(nk, logger, run, run.rankedMode, checks) });
+  } catch (e) {
+    logger.error("Could not rate run %s: %v", run.runId, e);
+    return run;
+  }
+}
 function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
   switch (effect.kind) {
     case "send": {
@@ -1217,7 +1544,8 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
       return;
     case "saveRun":
       try {
-        const { logChecks } = saveRun(nk, effect.run, effect.logs);
+        const run = withRatings(nk, logger, effect.run, effect.logs);
+        const { logChecks } = saveRun(nk, run, effect.logs);
         for (const playerId in logChecks) {
           if (logChecks[playerId] === "mismatch")
             logger.warn(
@@ -1260,6 +1588,7 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     modId: stringParam(params, "modId"),
     maxPlayers: Number(params.maxPlayers),
     creatorId: stringParam(params, "creatorId"),
+    rankedMode: stringParam(params, "rankedMode") || void 0,
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
     resultTimeoutMs: secondsFromEnv(
@@ -1461,6 +1790,9 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     const member = state.lobby.players.some((p) => p.id === signal.userId);
     return { state, data: member ? "yes" : "no" };
   }
+  if (signal.type === "get_active") {
+    return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) };
+  }
   if (signal.type === "leave") {
     const next = apply(
       ctx,
@@ -1489,6 +1821,7 @@ var CODE_PATTERN = /^[A-HJ-NP-Z1-9]{5,6}$/;
 var CODE_ATTEMPTS = 10;
 var MOD_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 var DEFAULT_MAX_PLAYERS = 16;
+var RANKED_MODE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 function generateCode() {
   let code = "";
   for (let i = 0; i < CODE_LENGTH; i++) {
@@ -1544,6 +1877,13 @@ function rpcLobbyCreate(ctx, logger, nk, payload) {
       `maxPlayers must be a whole number from ${MIN_PLAYERS} to ${MAX_PLAYERS}`
     );
   }
+  const rankedMode = input.rankedMode;
+  if (rankedMode !== void 0 && rankedMode !== null) {
+    if (typeof rankedMode !== "string" || !RANKED_MODE_PATTERN.test(rankedMode))
+      throw runtimeError(INVALID_ARGUMENT, "rankedMode is not a valid mode");
+    if (ctx.env.ALLOW_RANKED_LOBBIES !== "true")
+      throw runtimeError(PERMISSION_DENIED, "Ranked lobbies are not enabled");
+  }
   const current = currentLobby(nk, userId);
   if (current)
     throw runtimeError(ALREADY_EXISTS, `Already in lobby ${current.code}`);
@@ -1556,7 +1896,8 @@ function rpcLobbyCreate(ctx, logger, nk, payload) {
         code,
         modId,
         maxPlayers,
-        creatorId: userId
+        creatorId: userId,
+        rankedMode: typeof rankedMode === "string" ? rankedMode : ""
       });
     } catch (e) {
       releaseCode(nk, code, "");
@@ -1585,6 +1926,14 @@ function rpcLobbyCurrent(ctx, logger, nk, payload) {
   const current = currentLobby(nk, requireUser2(ctx));
   return JSON.stringify(current || {});
 }
+function rpcRunActive(ctx, logger, nk, payload) {
+  const userId = requireUser2(ctx);
+  const current = currentLobby(nk, userId);
+  if (!current) return JSON.stringify({});
+  const signal = { type: "get_active", userId };
+  const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)));
+  return JSON.stringify(active ? { active } : {});
+}
 function rpcLobbyLeave(ctx, logger, nk, payload) {
   const userId = requireUser2(ctx);
   const current = currentLobby(nk, userId);
@@ -1593,6 +1942,56 @@ function rpcLobbyLeave(ctx, logger, nk, payload) {
     nk.matchSignal(current.matchId, JSON.stringify(signal));
   }
   return JSON.stringify({});
+}
+
+// src/rating/rpc.ts
+var BOARD_PAGE = 50;
+var MODE_PATTERN = /^[A-Za-z0-9_:.-]{1,64}$/;
+function boardOf(payload) {
+  let input = {};
+  try {
+    const data = payload ? JSON.parse(payload) : {};
+    if (typeof data === "object" && data !== null && !Array.isArray(data)) input = data;
+  } catch (e) {
+    throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+  }
+  const { modId, mode } = input;
+  if (typeof modId !== "string" || typeof mode !== "string" || !MODE_PATTERN.test(mode))
+    throw runtimeError(INVALID_ARGUMENT, "modId and mode are required");
+  return { modId, mode, input };
+}
+function rpcRatingGet(ctx, logger, nk, payload) {
+  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
+  const { modId, mode } = boardOf(payload);
+  const objects = nk.storageRead([
+    { collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: ctx.userId }
+  ]);
+  const rating = objects.length > 0 ? objects[0].value : newRating();
+  return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
+}
+function rpcLeaderboardGet(ctx, logger, nk, payload) {
+  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
+  const { modId, mode, input } = boardOf(payload);
+  const cursor = typeof input.cursor === "string" ? input.cursor : "";
+  let page;
+  try {
+    page = nk.leaderboardRecordsList(boardId(modId, mode), null, BOARD_PAGE, cursor, 0);
+  } catch (e) {
+    return JSON.stringify({ entries: [], cursor: "" });
+  }
+  return JSON.stringify({
+    entries: (page.records || []).map((r) => ({
+      rank: r.rank,
+      playerId: r.ownerId,
+      name: r.username,
+      rating: r.score,
+      wins: r.subscore,
+      losses: r.metadata.losses,
+      gamesPlayed: r.metadata.gamesPlayed,
+      seasonBest: r.metadata.seasonBest
+    })),
+    cursor: page.nextCursor || ""
+  });
 }
 
 // src/main.ts
@@ -1615,9 +2014,12 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("lobby_find", rpcLobbyFind);
   initializer.registerRpc("lobby_current", rpcLobbyCurrent);
   initializer.registerRpc("lobby_leave", rpcLobbyLeave);
+  initializer.registerRpc("run_active", rpcRunActive);
   initializer.registerRpc("run_get", rpcRunGet);
   initializer.registerRpc("run_logs", rpcRunLogs);
   initializer.registerRpc("runs_mine", rpcRunsMine);
+  initializer.registerRpc("rating_get", rpcRatingGet);
+  initializer.registerRpc("leaderboard_get", rpcLeaderboardGet);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

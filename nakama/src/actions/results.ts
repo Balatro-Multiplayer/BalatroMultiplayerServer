@@ -147,6 +147,7 @@ export function finishGame(
 		placements,
 		reports: game.reports,
 		players: started.players,
+		rankedMode: lobby.rankedMode,
 	}
 
 	const next = { ...lobby, game: emptyGame() }

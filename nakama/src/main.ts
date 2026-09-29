@@ -20,7 +20,9 @@ import {
 	rpcLobbyCurrent,
 	rpcLobbyFind,
 	rpcLobbyLeave,
+	rpcRunActive,
 } from './lobby/rpc'
+import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 
 function InitModule(
@@ -50,9 +52,12 @@ function InitModule(
 	initializer.registerRpc('lobby_find', rpcLobbyFind)
 	initializer.registerRpc('lobby_current', rpcLobbyCurrent)
 	initializer.registerRpc('lobby_leave', rpcLobbyLeave)
+	initializer.registerRpc('run_active', rpcRunActive)
 	initializer.registerRpc('run_get', rpcRunGet)
 	initializer.registerRpc('run_logs', rpcRunLogs)
 	initializer.registerRpc('runs_mine', rpcRunsMine)
+	initializer.registerRpc('rating_get', rpcRatingGet)
+	initializer.registerRpc('leaderboard_get', rpcLeaderboardGet)
 	logger.info('BMP lobby module loaded')
 }
 

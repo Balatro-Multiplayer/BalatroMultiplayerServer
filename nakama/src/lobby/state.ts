@@ -42,6 +42,8 @@ export interface Lobby {
 	maxPlayers: number
 	creatorId: string
 	hostId: string
+	// Set when the lobby was created ranked: the rating board its games count on.
+	rankedMode?: string
 	metadata: { [key: string]: unknown }
 	// In join order: host transfer picks the earliest eligible player.
 	players: LobbyPlayer[]
@@ -77,6 +79,7 @@ export function newLobby(params: {
 	modId: string
 	maxPlayers: number
 	creatorId: string
+	rankedMode?: string
 	now: number
 	graceMs: number
 	resultTimeoutMs?: number
@@ -87,6 +90,7 @@ export function newLobby(params: {
 		maxPlayers: params.maxPlayers,
 		creatorId: params.creatorId,
 		hostId: params.creatorId,
+		rankedMode: params.rankedMode,
 		metadata: {},
 		players: [],
 		kickedIds: [],

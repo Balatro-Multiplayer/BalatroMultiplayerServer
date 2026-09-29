@@ -132,6 +132,15 @@ export type RunStatus =
 	| 'abandoned'
 	| 'restarted'
 
+// What a rated game did to one player: rating change and new rating are null
+// while they are still in their placement games.
+export interface RatingResult {
+	delta: number | null
+	newRating: number | null
+	isPlacement: boolean
+	gamesPlayed: number
+}
+
 // A stored replay log against the client's own closing hash (log_check.ts).
 export type LogCheck = 'match' | 'mismatch' | 'unavailable'
 
@@ -149,6 +158,19 @@ export interface RunRecord {
 	placements: Placement[]
 	reports: { [userId: string]: Placement[] }
 	players: Participant[]
+	// Set for a ranked lobby: the rating board (mode) the game counted on.
+	rankedMode?: string
+	// Each rated player's result, once the game was rated.
+	ratings?: { [userId: string]: RatingResult }
+}
+
+// A game a player is still in, as run_active answers it: their own replay
+// events so far, for a client that restarted mid-game to play catch-up.
+export interface ActiveRun {
+	runId: string
+	code: string
+	modId: string
+	events: { t: unknown; opcode: unknown; args: unknown }[]
 }
 
 // GAME_ENDED event data.
@@ -205,6 +227,7 @@ export interface Snapshot {
 export type LobbySignal =
 	| { type: 'has_player'; userId: string }
 	| { type: 'leave'; userId: string }
+	| { type: 'get_active'; userId: string }
 
 // Storage object (per user) naming the lobby they are in, for reconnect after
 // a game restart. Written and removed by the match only.
@@ -223,3 +246,7 @@ export const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
 export const RUNS_COLLECTION = 'match_runs'
 export const LOGS_COLLECTION = 'match_logs'
 export const MY_RUNS_COLLECTION = 'my_runs'
+
+// A player's rating on one (mod, mode, season) board, owned by that player
+// and written by the match only (src/rating).
+export const RATINGS_COLLECTION = 'ratings'

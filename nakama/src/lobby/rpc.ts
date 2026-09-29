@@ -4,6 +4,7 @@ import {
 	ALREADY_EXISTS,
 	INVALID_ARGUMENT,
 	NOT_FOUND,
+	PERMISSION_DENIED,
 	UNAUTHENTICATED,
 	UNAVAILABLE,
 	runtimeError,
@@ -25,6 +26,7 @@ const CODE_PATTERN = /^[A-HJ-NP-Z1-9]{5,6}$/
 const CODE_ATTEMPTS = 10
 const MOD_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
 const DEFAULT_MAX_PLAYERS = 16
+const RANKED_MODE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
 
 function generateCode(): string {
 	let code = ''
@@ -110,6 +112,16 @@ export function rpcLobbyCreate(
 		)
 	}
 
+	// Ranked lobbies count on a rating board. Until matchmaking creates them,
+	// only a server run with ALLOW_RANKED_LOBBIES=true lets a client ask.
+	const rankedMode = input.rankedMode
+	if (rankedMode !== undefined && rankedMode !== null) {
+		if (typeof rankedMode !== 'string' || !RANKED_MODE_PATTERN.test(rankedMode))
+			throw runtimeError(INVALID_ARGUMENT, 'rankedMode is not a valid mode')
+		if (ctx.env.ALLOW_RANKED_LOBBIES !== 'true')
+			throw runtimeError(PERMISSION_DENIED, 'Ranked lobbies are not enabled')
+	}
+
 	const current = currentLobby(nk, userId)
 	if (current)
 		throw runtimeError(ALREADY_EXISTS, `Already in lobby ${current.code}`)
@@ -124,6 +136,7 @@ export function rpcLobbyCreate(
 				modId,
 				maxPlayers,
 				creatorId: userId,
+				rankedMode: typeof rankedMode === 'string' ? rankedMode : '',
 			})
 		} catch (e) {
 			releaseCode(nk, code, '')
@@ -164,6 +177,23 @@ export function rpcLobbyCurrent(
 ) {
 	const current = currentLobby(nk, requireUser(ctx))
 	return JSON.stringify(current || {})
+}
+
+// {} when the caller isn't in a running game, else {active: {runId, code,
+// modId, events}}: what the reconnect prompt needs to catch a restarted client
+// up (the API's GET /runs/mine/active, on Nakama).
+export function rpcRunActive(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	const userId = requireUser(ctx)
+	const current = currentLobby(nk, userId)
+	if (!current) return JSON.stringify({})
+	const signal: LobbySignal = { type: 'get_active', userId }
+	const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)))
+	return JSON.stringify(active ? { active } : {})
 }
 
 // Leave the current lobby without joining its match first (the reconnect

@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { type RunRecord, ServerOp } from '../lobby/protocol'
+import { activeRunOf } from '../lobby/active'
 import { action } from '../lobby/relay'
 import {
 	type Lobby,
 	type Outbound,
 	type Step,
 	disconnect,
+	emptyGame,
 	join,
 	joinRejection,
 	labelOf,
@@ -378,6 +380,27 @@ describe('replay logs', () => {
 	})
 })
 
+describe('active run', () => {
+	it('is null when no game is running', () => {
+		expect(activeRunOf({ ...started('a', 'b'), game: emptyGame() }, 'a')).toBeNull()
+	})
+
+	it('gives a participant their own events so far, as {t, opcode, args}', () => {
+		const lobby = log2(started('a', 'b'))
+		const active = activeRunOf(lobby, 'a')
+		expect(active).toMatchObject({ runId: lobby.game.started?.runId, code: lobby.code, modId: lobby.modId })
+		expect(active?.events).toEqual([{ t: 1, opcode: 'play', args: null }])
+		expect(activeRunOf(lobby, 'b')?.events).toEqual([])
+	})
+
+	it('is null for someone who is not playing or has left', () => {
+		const lobby = started('a', 'b')
+		expect(activeRunOf(lobby, 'z')).toBeNull()
+		const gone = { ...lobby, players: lobby.players.filter((p) => p.id !== 'b') }
+		expect(activeRunOf(gone, 'b')).toBeNull()
+	})
+})
+
 describe('storage writes', () => {
 	it('writes the run, a log per player, and a pointer per player', () => {
 		let lobby = log2(started('a', 'b'))
@@ -387,12 +410,13 @@ describe('storage writes', () => {
 		const summary = writes.map((w) => [w.collection, w.key, w.userId, w.permissionRead])
 		const runId = save.run.runId
 		const system = '00000000-0000-0000-0000-000000000000'
+		const myKey = `${String(9_999_999_999_999 - save.run.endedAt).padStart(13, '0')}:${runId}`
 		expect(summary).toEqual([
 			['match_runs', runId, system, 2],
 			['match_logs', `${runId}:a`, system, 0],
-			['my_runs', runId, 'a', 1],
+			['my_runs', myKey, 'a', 1],
 			['match_logs', `${runId}:b`, system, 0],
-			['my_runs', runId, 'b', 1],
+			['my_runs', myKey, 'b', 1],
 		])
 		expect(writes[1].value).toMatchObject({ eventCount: 1, truncated: false, events: [[1, 'play', null]] })
 		expect(writes[3].value).toMatchObject({ eventCount: 0, events: [] })

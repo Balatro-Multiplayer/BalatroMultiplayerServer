@@ -40,6 +40,8 @@ declare namespace nkruntime {
 		key: string
 		userId: string
 		value: { [key: string]: unknown }
+		// Changes with every write; pass it back to write only if unchanged.
+		version?: string
 	}
 
 	interface StorageWriteRequest {
@@ -82,8 +84,41 @@ declare namespace nkruntime {
 			limit: number,
 			cursor: string,
 		): { objects?: StorageObject[]; cursor?: string }
+		leaderboardCreate(
+			id: string,
+			authoritative: boolean,
+			sortOrder: 'asc' | 'desc',
+			operator: 'best' | 'set' | 'incr' | 'decr',
+			resetSchedule: string | null,
+			metadata: { [key: string]: unknown },
+		): void
+		leaderboardRecordWrite(
+			id: string,
+			ownerId: string,
+			username: string,
+			score: number,
+			subscore: number,
+			metadata: { [key: string]: unknown },
+			overrideOperator?: 'best' | 'set' | 'incr' | 'decr',
+		): LeaderboardRecord
+		leaderboardRecordsList(
+			id: string,
+			ownerIds: string[] | null,
+			limit: number,
+			cursor: string,
+			expiry: number,
+		): { records?: LeaderboardRecord[]; nextCursor?: string }
 		uuidv4(): string
 		sha256Hash(input: string): string
+	}
+
+	interface LeaderboardRecord {
+		ownerId: string
+		username: string
+		score: number
+		subscore: number
+		metadata: { [key: string]: unknown }
+		rank: number
 	}
 
 	interface Presence {

@@ -14,8 +14,27 @@ import {
 	SYSTEM_USER_ID,
 } from './protocol'
 
+// Newest-first key order, so a player's first storageList page is their most
+// recent games (listing is in key order, and a run id is a random uuid).
+function myRunKey(run: RunRecord): string {
+	const reversed = String(9_999_999_999_999 - run.endedAt).padStart(13, '0')
+	return `${reversed}:${run.runId}`
+}
+
 function logKey(runId: string, playerId: string): string {
 	return `${runId}:${playerId}`
+}
+
+// Each player's replay log checked against the hash they sent.
+export function logChecksOf(
+	run: RunRecord,
+	logs: { [userId: string]: PlayerLog },
+	sha256: (input: string) => string,
+): { [userId: string]: LogCheck } {
+	const checks: { [userId: string]: LogCheck } = {}
+	for (const player of run.players)
+		checks[player.id] = checkLog(logs[player.id], sha256).check
+	return checks
 }
 
 // The storage writes for a finished run: the record (with each player's
@@ -61,7 +80,7 @@ export function runWrites(
 		const placement = run.placements.filter((p) => p.playerId === player.id)[0]
 		writes.push({
 			collection: MY_RUNS_COLLECTION,
-			key: run.runId,
+			key: myRunKey(run),
 			userId: player.id,
 			value: {
 				runId: run.runId,
@@ -71,6 +90,7 @@ export function runWrites(
 				endedAt: run.endedAt,
 				status: run.status,
 				place: placement ? placement.place : null,
+				rating: (run.ratings && run.ratings[player.id]) || null,
 			},
 			permissionRead: 1,
 			permissionWrite: 0,

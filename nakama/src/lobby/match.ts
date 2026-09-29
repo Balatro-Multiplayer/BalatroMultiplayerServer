@@ -3,6 +3,7 @@
 // One match per lobby; the match ends (returns null) once the lobby closes.
 import { seedFromHex } from '../actions/registry'
 import { finishGame, settle } from '../actions/results'
+import { activeRunOf } from './active'
 import { releaseCode } from './codes'
 import {
 	CURRENT_LOBBY_COLLECTION,
@@ -10,6 +11,8 @@ import {
 	ClientOp,
 	type LobbySignal,
 	type PlayerInfo,
+	type PlayerLog,
+	type RunRecord,
 } from './protocol'
 import { action } from './relay'
 import {
@@ -30,7 +33,8 @@ import {
 	setOwnState,
 	tick,
 } from './state'
-import { saveRun } from './storage'
+import { applyRatings } from '../rating/apply'
+import { logChecksOf, saveRun } from './storage'
 
 const TICK_RATE = 5
 const MAX_MESSAGE_BYTES = 64 * 1024
@@ -124,6 +128,25 @@ function apply(
 	return { lobby: step.lobby, presences, pendingInfo: state.pendingInfo, label }
 }
 
+// A ranked game is rated before it's stored, so the run and each player's
+// pointer carry what it did to their rating. A rating failure must not lose
+// the run, so it leaves the run unrated instead.
+function withRatings(
+	nk: nkruntime.Nakama,
+	logger: nkruntime.Logger,
+	run: RunRecord,
+	logs: { [userId: string]: PlayerLog },
+): RunRecord {
+	if (!run.rankedMode) return run
+	try {
+		const checks = logChecksOf(run, logs, (input) => nk.sha256Hash(input))
+		return { ...run, ratings: applyRatings(nk, logger, run, run.rankedMode, checks) }
+	} catch (e) {
+		logger.error('Could not rate run %s: %v', run.runId, e)
+		return run
+	}
+}
+
 function runEffect(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -161,7 +184,8 @@ function runEffect(
 			return
 		case 'saveRun':
 			try {
-				const { logChecks } = saveRun(nk, effect.run, effect.logs)
+				const run = withRatings(nk, logger, effect.run, effect.logs)
+				const { logChecks } = saveRun(nk, run, effect.logs)
 				for (const playerId in logChecks) {
 					if (logChecks[playerId] === 'mismatch')
 						logger.warn(
@@ -211,6 +235,7 @@ export function lobbyMatchInit(
 		modId: stringParam(params, 'modId'),
 		maxPlayers: Number(params.maxPlayers),
 		creatorId: stringParam(params, 'creatorId'),
+		rankedMode: stringParam(params, 'rankedMode') || undefined,
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
 		resultTimeoutMs: secondsFromEnv(
@@ -489,6 +514,9 @@ export function lobbyMatchSignal(
 	if (signal.type === 'has_player') {
 		const member = state.lobby.players.some((p) => p.id === signal.userId)
 		return { state, data: member ? 'yes' : 'no' }
+	}
+	if (signal.type === 'get_active') {
+		return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) }
 	}
 	if (signal.type === 'leave') {
 		const next = apply(
