@@ -26,6 +26,7 @@ import { rpcChatEnable, rpcChatSend } from './chat/rpc'
 import { matchmakerMatched } from './matchmaking/matched'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
+import { configureSeason } from './rating/season'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -33,6 +34,7 @@ function InitModule(
 	nk: nkruntime.Nakama,
 	initializer: nkruntime.Initializer,
 ) {
+	configureSeason(ctx.env['RATING_SEASON'])
 	initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom)
 	initializer.registerBeforeLinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeUnlinkCustom(refuseCustomIdChange)

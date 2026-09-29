@@ -1,0 +1,45 @@
+// Rating seasons and inactivity decay, ported from the legacy matchmaking
+// gateway. Neither needs a scheduler: a new season's rating is seeded from the
+// previous one the first time it is read, and decay is computed from
+// lastMatchAt whenever a rating is read (and stored with the player's next game).
+import { applySoftReset, PLACEMENT_GAMES, RATING_FLOOR } from './elo'
+
+export const DECAY_INACTIVE_THRESHOLD_DAYS = 7
+export const DECAY_RATE_PER_DAY = 5
+const DAY_MS = 24 * 60 * 60 * 1000
+
+let season = 1
+
+export function currentSeason(): number {
+	return season
+}
+
+// RATING_SEASON is the runtime env value; anything that isn't a positive
+// integer keeps the current season.
+export function configureSeason(value: string | undefined): void {
+	const parsed = value === undefined ? NaN : Number(value)
+	if (Number.isInteger(parsed) && parsed > 0) season = parsed
+}
+
+interface Rated {
+	rating: number
+	gamesPlayed: number
+	lastMatchAt: number
+}
+
+// Inactive for more than a week costs 5 points per further whole day, down to
+// the floor. Still-placing players and players who never played don't decay.
+export function decayedRating(record: Rated, now: number): number {
+	if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating
+	const inactiveDays = (now - record.lastMatchAt) / DAY_MS
+	if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating
+	const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY
+	return Math.max(RATING_FLOOR, record.rating - loss)
+}
+
+// A player's first record in a new season: their old rating soft-reset, with
+// placement games to play again. Players who never left placement carry nothing.
+export function carriedOver(previous: Rated | undefined, now: number): number | undefined {
+	if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return undefined
+	return applySoftReset(decayedRating(previous, now))
+}

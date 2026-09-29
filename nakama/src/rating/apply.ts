@@ -8,11 +8,9 @@ import {
 	RATING_FLOOR,
 } from './elo'
 import { nextSeasonBest } from './metrics'
+import { carriedOver, currentSeason, decayedRating } from './season'
 import type { LogCheck, RunRecord } from '../lobby/protocol'
 import { RATINGS_COLLECTION, type RatingResult } from '../lobby/protocol'
-
-// One rating season for now; rollover and decay aren't ported yet.
-export const CURRENT_SEASON = 1
 
 // A player's rating on one (mod, mode, season) board: the stored object.
 export interface RatingRecord {
@@ -24,8 +22,8 @@ export interface RatingRecord {
 	lastMatchAt: number
 }
 
-export function boardId(modId: string, mode: string): string {
-	return `${modId}:${mode}:${CURRENT_SEASON}`
+export function boardId(modId: string, mode: string, season: number = currentSeason()): string {
+	return `${modId}:${mode}:${season}`
 }
 
 export function newRating(): RatingRecord {
@@ -95,8 +93,42 @@ export function planRatings(
 // games ending together can race on the same player's object.
 const WRITE_ATTEMPTS = 5
 
-function keyOf(modId: string, mode: string): string {
-	return boardId(modId, mode)
+// The players' ratings as they stand now: decayed for inactivity, and for a
+// player with no record this season, carried over from the last one. `versions`
+// holds the stored object's version (absent = nothing stored yet this season).
+export function loadRatings(
+	nk: nkruntime.Nakama,
+	modId: string,
+	mode: string,
+	playerIds: string[],
+	now: number,
+): { current: { [userId: string]: RatingRecord }; versions: { [userId: string]: string | undefined } } {
+	const key = boardId(modId, mode)
+	const current: { [userId: string]: RatingRecord } = {}
+	const versions: { [userId: string]: string | undefined } = {}
+	for (const object of nk.storageRead(
+		playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id })),
+	)) {
+		const record = object.value as unknown as RatingRecord
+		current[object.userId] = { ...record, rating: decayedRating(record, now) }
+		versions[object.userId] = object.version
+	}
+	const season = currentSeason()
+	const fresh = playerIds.filter((id) => !current[id])
+	if (season > 1 && fresh.length > 0) {
+		const previous = nk.storageRead(
+			fresh.map((id) => ({
+				collection: RATINGS_COLLECTION,
+				key: boardId(modId, mode, season - 1),
+				userId: id,
+			})),
+		)
+		for (const object of previous) {
+			const rating = carriedOver(object.value as unknown as RatingRecord, now)
+			if (rating !== undefined) current[object.userId] = { ...newRating(), rating }
+		}
+	}
+	return { current, versions }
 }
 
 // Reads, plans and writes the ratings for a finished ranked game, retrying
@@ -109,17 +141,15 @@ export function applyRatings(
 	mode: string,
 	checks: { [userId: string]: LogCheck },
 ): { [userId: string]: RatingResult } {
-	const key = keyOf(run.modId, mode)
+	const key = boardId(run.modId, mode)
 	for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
-		const objects = nk.storageRead(
-			run.players.map((p) => ({ collection: RATINGS_COLLECTION, key, userId: p.id })),
+		const { current, versions } = loadRatings(
+			nk,
+			run.modId,
+			mode,
+			run.players.map((p) => p.id),
+			run.endedAt,
 		)
-		const current: { [userId: string]: RatingRecord } = {}
-		const versions: { [userId: string]: string | undefined } = {}
-		for (const object of objects) {
-			current[object.userId] = object.value as unknown as RatingRecord
-			versions[object.userId] = object.version
-		}
 		const plan = planRatings(run, checks, current)
 		const ids = Object.keys(plan.updates)
 		if (ids.length === 0) return {}

@@ -1,7 +1,6 @@
 // Rating read RPCs: a player's own rating on a board, and a board's top.
 import { INVALID_ARGUMENT, UNAUTHENTICATED, runtimeError } from '../errors'
-import { RATINGS_COLLECTION } from '../lobby/protocol'
-import { boardId, newRating, type RatingRecord } from './apply'
+import { boardId, loadRatings, newRating } from './apply'
 import { PLACEMENT_GAMES } from './elo'
 
 const BOARD_PAGE = 50
@@ -37,10 +36,7 @@ export function rpcRatingGet(
 	const playerId = input.playerId === undefined ? ctx.userId : input.playerId
 	if (typeof playerId !== 'string' || !USER_ID_PATTERN.test(playerId))
 		throw runtimeError(INVALID_ARGUMENT, 'playerId is not a user id')
-	const objects = nk.storageRead([
-		{ collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: playerId },
-	])
-	const rating = objects.length > 0 ? (objects[0].value as unknown as RatingRecord) : newRating()
+	const rating = loadRatings(nk, modId, mode, [playerId], Date.now()).current[playerId] || newRating()
 	return JSON.stringify({ ...rating, isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
 }
 

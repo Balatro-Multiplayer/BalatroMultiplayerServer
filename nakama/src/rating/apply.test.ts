@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { LogCheck, RunRecord } from '../lobby/protocol'
 import { type RatingRecord, applyRatings, newRating, planRatings } from './apply'
 import { nextSeasonBest } from './metrics'
+import { configureSeason } from './season'
 
 function run(overrides: Partial<RunRecord> = {}): RunRecord {
 	return {
@@ -182,5 +183,29 @@ describe('applyRatings', () => {
 		const nk = fakeNk()
 		expect(applyRatings(nk as never, logger, run({ status: 'disputed' }), 'solo', clean)).toEqual({})
 		expect(nk.writes).toBe(0)
+	})
+
+	it('seeds a new season from the last one, soft-reset, and decays idle ratings', () => {
+		const nk = fakeNk()
+		// a played recently (lastMatchAt = the run's end); b has been idle for 17 days.
+		nk.objects.set('a/MultiplayerSPDRN:solo:1', { value: { ...seasoned(1000), lastMatchAt: 61_000 }, version: 1 })
+		nk.objects.set('b/MultiplayerSPDRN:solo:1', {
+			value: { ...seasoned(1000), lastMatchAt: 61_000 - 17 * 24 * 3600 * 1000 },
+			version: 1,
+		})
+		configureSeason('2')
+		try {
+			const results = applyRatings(nk as never, logger, run(), 'solo', clean)
+			// 800 and 775 (1000 - 10 days' decay, then halved toward 600), both placing again.
+			expect(nk.objects.get('a/MultiplayerSPDRN:solo:2')?.value.gamesPlayed).toBe(1)
+			expect(results.a.isPlacement).toBe(true)
+			const a = nk.objects.get('a/MultiplayerSPDRN:solo:2')?.value.rating
+			const b = nk.objects.get('b/MultiplayerSPDRN:solo:2')?.value.rating
+			expect(a as number).toBeGreaterThan(b as number)
+			expect(a as number).toBeGreaterThan(700)
+			expect(b as number).toBeLessThan(800)
+		} finally {
+			configureSeason('1')
+		}
 	})
 })

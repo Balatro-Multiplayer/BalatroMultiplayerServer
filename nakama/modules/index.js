@@ -1023,6 +1023,7 @@ var INITIAL_HIDDEN_RATING = 600;
 var PLACEMENT_GAMES = 5;
 var K_ESTABLISHED = 40;
 var RATING_FLOOR = 100;
+var SOFT_RESET_ANCHOR = 1200;
 var ELO_SCALE = 1e3;
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -1103,6 +1104,10 @@ function computeTeam(teams, winnerTeamIndex) {
   for (const p of winner) deltas.set(p.playerId, deltaA);
   for (const p of loser) deltas.set(p.playerId, deltaB);
   return deltas;
+}
+function applySoftReset(rating) {
+  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
+  return Math.min(pulled, SOFT_RESET_ANCHOR);
 }
 function detectRatingMode(placements) {
   if (placements.some((p) => p.teamId)) return "team";
@@ -1190,10 +1195,33 @@ function nextSeasonBest(modId, reported, current) {
   return better ? reported : current;
 }
 
+// src/rating/season.ts
+var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
+var DECAY_RATE_PER_DAY = 5;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var season = 1;
+function currentSeason() {
+  return season;
+}
+function configureSeason(value) {
+  const parsed = value === void 0 ? NaN : Number(value);
+  if (Number.isInteger(parsed) && parsed > 0) season = parsed;
+}
+function decayedRating(record, now) {
+  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
+  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
+  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
+  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
+  return Math.max(RATING_FLOOR, record.rating - loss);
+}
+function carriedOver(previous, now) {
+  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
+  return applySoftReset(decayedRating(previous, now));
+}
+
 // src/rating/apply.ts
-var CURRENT_SEASON = 1;
-function boardId(modId, mode) {
-  return `${modId}:${mode}:${CURRENT_SEASON}`;
+function boardId(modId, mode, season2 = currentSeason()) {
+  return `${modId}:${mode}:${season2}`;
 }
 function newRating() {
   return {
@@ -1243,21 +1271,44 @@ function planRatings(run, checks, current) {
   return plan;
 }
 var WRITE_ATTEMPTS = 5;
-function keyOf2(modId, mode) {
-  return boardId(modId, mode);
+function loadRatings(nk, modId, mode, playerIds, now) {
+  const key = boardId(modId, mode);
+  const current = {};
+  const versions = {};
+  for (const object of nk.storageRead(
+    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
+  )) {
+    const record = object.value;
+    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
+    versions[object.userId] = object.version;
+  }
+  const season2 = currentSeason();
+  const fresh = playerIds.filter((id) => !current[id]);
+  if (season2 > 1 && fresh.length > 0) {
+    const previous = nk.storageRead(
+      fresh.map((id) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(modId, mode, season2 - 1),
+        userId: id
+      }))
+    );
+    for (const object of previous) {
+      const rating = carriedOver(object.value, now);
+      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
+    }
+  }
+  return { current, versions };
 }
 function applyRatings(nk, logger, run, mode, checks) {
-  const key = keyOf2(run.modId, mode);
+  const key = boardId(run.modId, mode);
   for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
-    const objects = nk.storageRead(
-      run.players.map((p) => ({ collection: RATINGS_COLLECTION, key, userId: p.id }))
+    const { current, versions } = loadRatings(
+      nk,
+      run.modId,
+      mode,
+      run.players.map((p) => p.id),
+      run.endedAt
     );
-    const current = {};
-    const versions = {};
-    for (const object of objects) {
-      current[object.userId] = object.value;
-      versions[object.userId] = object.version;
-    }
     const plan = planRatings(run, checks, current);
     const ids = Object.keys(plan.updates);
     if (ids.length === 0) return {};
@@ -2222,10 +2273,7 @@ function rpcRatingGet(ctx, logger, nk, payload) {
   const playerId = input.playerId === void 0 ? ctx.userId : input.playerId;
   if (typeof playerId !== "string" || !USER_ID_PATTERN.test(playerId))
     throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
-  const objects = nk.storageRead([
-    { collection: RATINGS_COLLECTION, key: boardId(modId, mode), userId: playerId }
-  ]);
-  const rating = objects.length > 0 ? objects[0].value : newRating();
+  const rating = loadRatings(nk, modId, mode, [playerId], Date.now()).current[playerId] || newRating();
   return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
 }
 function rpcLeaderboardGet(ctx, logger, nk, payload) {
@@ -2255,6 +2303,7 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
 
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
+  configureSeason(ctx.env["RATING_SEASON"]);
   initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom);
   initializer.registerBeforeLinkCustom(refuseCustomIdChange);
   initializer.registerBeforeUnlinkCustom(refuseCustomIdChange);
