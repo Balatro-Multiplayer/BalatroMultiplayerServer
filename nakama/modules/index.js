@@ -135,7 +135,9 @@ var ServerOp = {
   // (from 'server').
   ACTION: 105,
   // {cid, action, reason}, to the sender of a refused ACTION.
-  ACTION_REJECTED: 106
+  ACTION_REJECTED: 106,
+  // {senderId, displayName, message}: a chat line, to everyone seated.
+  CHAT: 107
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -1300,6 +1302,47 @@ function mirrorToLeaderboard(nk, logger, run, mode, plan, _checks) {
   }
 }
 
+// src/lobby/chat.ts
+var CHAT_BURST = 5;
+var CHAT_REFILL_MS = 1e3;
+var CHAT_CONTEXT_LINES = 8;
+var CHAT_TAIL = 20;
+function chatBudgetKey(userId) {
+  return "chat:" + userId;
+}
+function chatCheck(lobby, userId, now) {
+  const player = findPlayer(lobby, userId);
+  if (!player || lobby.closed) return { ok: false, reason: "not_in_lobby" };
+  const key = chatBudgetKey(userId);
+  const bucket = lobby.actionBudget[key] || { tokens: CHAT_BURST, at: now };
+  const tokens = Math.min(CHAT_BURST, bucket.tokens + (now - bucket.at) / CHAT_REFILL_MS);
+  if (tokens < 1) return { ok: false, reason: "rate_limited" };
+  const next = __spreadProps(__spreadValues({}, lobby), {
+    actionBudget: __spreadProps(__spreadValues({}, lobby.actionBudget), { [key]: { tokens: tokens - 1, at: now } })
+  });
+  const context = (lobby.chat || []).slice(-CHAT_CONTEXT_LINES).map((line) => ({
+    who: line.senderId === userId ? "sender" : "other",
+    text: line.text
+  }));
+  return { ok: true, lobby: next, displayName: player.info.displayName, context };
+}
+function chatPost(lobby, userId, text) {
+  const player = findPlayer(lobby, userId);
+  if (!player || lobby.closed) return { lobby, out: [] };
+  const chat = (lobby.chat || []).concat([{ senderId: userId, text }]).slice(-CHAT_TAIL);
+  return {
+    lobby: __spreadProps(__spreadValues({}, lobby), { chat }),
+    out: [
+      {
+        kind: "send",
+        op: ServerOp.CHAT,
+        payload: { senderId: userId, displayName: player.info.displayName, message: text },
+        to: lobby.players.map((p) => p.id)
+      }
+    ]
+  };
+}
+
 // src/lobby/log_check.ts
 var FRAMING_OPCODES = { end: true, chk: true };
 function opcodeOf(line) {
@@ -1802,6 +1845,29 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
   if (signal.type === "get_active") {
     return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) };
   }
+  if (signal.type === "chat_check") {
+    const check = chatCheck(state.lobby, signal.userId, Date.now());
+    if (!check.ok) return { state, data: JSON.stringify({ error: check.reason }) };
+    return {
+      state: __spreadProps(__spreadValues({}, state), { lobby: check.lobby }),
+      data: JSON.stringify({
+        code: check.lobby.code,
+        displayName: check.displayName,
+        context: check.context
+      })
+    };
+  }
+  if (signal.type === "chat_post") {
+    const next = apply(
+      ctx,
+      logger,
+      nk,
+      dispatcher,
+      state,
+      chatPost(state.lobby, signal.userId, signal.text)
+    );
+    return { state: next || state, data: "ok" };
+  }
   if (signal.type === "leave") {
     const next = apply(
       ctx,
@@ -1954,6 +2020,128 @@ function rpcLobbyLeave(ctx, logger, nk, payload) {
   return JSON.stringify({});
 }
 
+// src/chat/moderation.ts
+var MAX_MESSAGE_LENGTH = 500;
+function verdictOf(value) {
+  if (typeof value !== "object" || value === null) return null;
+  const record = value;
+  return record.verdict === "allow" || record.verdict === "reject" ? record : null;
+}
+function decideModerationOutcome(attempt) {
+  const body = attempt && attempt.status === 200 ? verdictOf(attempt.body) : null;
+  if (!body) return { allowed: false, reason: "unavailable" };
+  if (body.verdict === "allow") {
+    const rewrite = body.publishText;
+    if (rewrite === void 0) return { allowed: true, publishText: null };
+    if (typeof rewrite !== "string" || !rewrite.trim())
+      return { allowed: false, reason: "moderated", band: "unusable_rewrite" };
+    if (rewrite.length > MAX_MESSAGE_LENGTH)
+      return { allowed: false, reason: "moderated", band: "oversized_rewrite" };
+    return { allowed: true, publishText: rewrite };
+  }
+  const band = typeof body.band === "string" ? body.band : void 0;
+  if (band === "guard_unavailable") return { allowed: false, reason: "unavailable" };
+  return { allowed: false, reason: "moderated", band };
+}
+var DEFAULT_TIMEOUT_MS = 3e3;
+function callModeration(nk, logger, env, request) {
+  const headers = { "Content-Type": "application/json" };
+  if (env.MODERATION_BEARER_TOKEN) headers.Authorization = `Bearer ${env.MODERATION_BEARER_TOKEN}`;
+  const timeout = Number(env.MODERATION_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+  try {
+    const res = nk.httpRequest(
+      `${env.MODERATION_SERVICE_URL}/moderate`,
+      "post",
+      headers,
+      JSON.stringify(request),
+      timeout
+    );
+    let body = null;
+    try {
+      body = JSON.parse(res.body);
+    } catch (e) {
+    }
+    if (res.code !== 200 && res.code !== 429)
+      logger.error("Moderation service returned %d, chat fails closed", res.code);
+    return { status: res.code, body };
+  } catch (e) {
+    logger.error("Moderation request failed, chat fails closed: %v", e);
+    return null;
+  }
+}
+
+// src/chat/rpc.ts
+var PREFS_COLLECTION = "chat_prefs";
+var PREFS_KEY = "chat";
+function requireUser3(ctx) {
+  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Chat needs a player session");
+  return ctx.userId;
+}
+function isEnabled(nk, userId) {
+  const objects = nk.storageRead([
+    { collection: PREFS_COLLECTION, key: PREFS_KEY, userId }
+  ]);
+  return objects.length > 0 && objects[0].value.enabled === true;
+}
+function rpcChatEnable(ctx, logger, nk, payload) {
+  const userId = requireUser3(ctx);
+  nk.storageWrite([
+    {
+      collection: PREFS_COLLECTION,
+      key: PREFS_KEY,
+      userId,
+      value: { enabled: true },
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+  return JSON.stringify({ enabled: true });
+}
+function rpcChatSend(ctx, logger, nk, payload) {
+  const userId = requireUser3(ctx);
+  let message;
+  try {
+    message = JSON.parse(payload || "{}").message;
+  } catch (e) {
+    throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+  }
+  if (typeof message !== "string" || !message.trim())
+    throw runtimeError(INVALID_ARGUMENT, "Message is empty");
+  if (message.length > MAX_MESSAGE_LENGTH)
+    throw runtimeError(INVALID_ARGUMENT, `Message is over ${MAX_MESSAGE_LENGTH} characters`);
+  if (!isEnabled(nk, userId)) throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
+  const current = currentLobby(nk, userId);
+  if (!current) throw runtimeError(INVALID_ARGUMENT, "Not in a lobby");
+  const check = JSON.parse(
+    nk.matchSignal(current.matchId, JSON.stringify({ type: "chat_check", userId }))
+  );
+  if (check.error === "rate_limited") throw runtimeError(UNAVAILABLE, "You are sending messages too fast");
+  if (check.error) throw runtimeError(INVALID_ARGUMENT, "Not in a lobby");
+  let text = message;
+  if (ctx.env.MODERATION_SERVICE_URL) {
+    const outcome = decideModerationOutcome(
+      callModeration(nk, logger, ctx.env, {
+        playerId: userId,
+        lobbyCode: check.code,
+        message,
+        context: check.context
+      })
+    );
+    if (!outcome.allowed) {
+      if (outcome.reason === "moderated") throw runtimeError(PERMISSION_DENIED, "Message blocked by moderation");
+      throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
+    }
+    text = outcome.publishText === null ? message : outcome.publishText;
+  } else if (ctx.env.CHAT_UNMODERATED !== "true") {
+    throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
+  }
+  nk.matchSignal(
+    current.matchId,
+    JSON.stringify({ type: "chat_post", userId, text })
+  );
+  return JSON.stringify({ text });
+}
+
 // src/matchmaking/matched.ts
 var NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 function planMatch(entries) {
@@ -2082,6 +2270,8 @@ function InitModule(ctx, logger, nk, initializer) {
     matchTerminate: lobbyMatchTerminate
   });
   initializer.registerMatchmakerMatched(matchmakerMatched);
+  initializer.registerRpc("chat_enable", rpcChatEnable);
+  initializer.registerRpc("chat_send", rpcChatSend);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);
   initializer.registerRpc("lobby_find", rpcLobbyFind);
   initializer.registerRpc("lobby_current", rpcLobbyCurrent);

@@ -34,6 +34,7 @@ import {
 	tick,
 } from './state'
 import { applyRatings } from '../rating/apply'
+import { chatCheck, chatPost } from './chat'
 import { logChecksOf, saveRun } from './storage'
 
 const TICK_RATE = 5
@@ -520,6 +521,29 @@ export function lobbyMatchSignal(
 	}
 	if (signal.type === 'get_active') {
 		return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) }
+	}
+	if (signal.type === 'chat_check') {
+		const check = chatCheck(state.lobby, signal.userId, Date.now())
+		if (!check.ok) return { state, data: JSON.stringify({ error: check.reason }) }
+		return {
+			state: { ...state, lobby: check.lobby },
+			data: JSON.stringify({
+				code: check.lobby.code,
+				displayName: check.displayName,
+				context: check.context,
+			}),
+		}
+	}
+	if (signal.type === 'chat_post') {
+		const next = apply(
+			ctx,
+			logger,
+			nk,
+			dispatcher,
+			state,
+			chatPost(state.lobby, signal.userId, signal.text),
+		)
+		return { state: next || state, data: 'ok' }
 	}
 	if (signal.type === 'leave') {
 		const next = apply(

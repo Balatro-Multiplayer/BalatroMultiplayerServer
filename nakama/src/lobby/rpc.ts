@@ -57,7 +57,7 @@ function parsePayload(payload: string): { [key: string]: unknown } {
 
 // The lobby the user is still seated in, per their current-lobby record, or
 // null (clearing a record that no longer holds).
-function currentLobby(
+export function currentLobby(
 	nk: nkruntime.Nakama,
 	userId: string,
 ): { matchId: string; code: string; modId: string } | null {

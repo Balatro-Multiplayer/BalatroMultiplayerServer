@@ -57,6 +57,8 @@ export interface Lobby {
 	closed: boolean
 	// Owned by the authoritative actions (src/actions).
 	game: GameState
+	// The last few approved chat lines (chat.ts), the moderation context.
+	chat?: { senderId: string; text: string }[]
 	// userId -> the sender's ACTION rate-limit bucket (relay.ts).
 	actionBudget: { [userId: string]: { tokens: number; at: number } }
 }

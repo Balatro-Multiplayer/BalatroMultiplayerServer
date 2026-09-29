@@ -22,6 +22,7 @@ import {
 	rpcLobbyLeave,
 	rpcRunActive,
 } from './lobby/rpc'
+import { rpcChatEnable, rpcChatSend } from './chat/rpc'
 import { matchmakerMatched } from './matchmaking/matched'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
@@ -50,6 +51,8 @@ function InitModule(
 		matchTerminate: lobbyMatchTerminate,
 	})
 	initializer.registerMatchmakerMatched(matchmakerMatched)
+	initializer.registerRpc('chat_enable', rpcChatEnable)
+	initializer.registerRpc('chat_send', rpcChatSend)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)
 	initializer.registerRpc('lobby_find', rpcLobbyFind)
 	initializer.registerRpc('lobby_current', rpcLobbyCurrent)

@@ -89,7 +89,10 @@ services:
           --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
           --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
-          --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS"
+          --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
+          --runtime.env "CHAT_UNMODERATED=$$CHAT_UNMODERATED" \
+          --runtime.env "MODERATION_SERVICE_URL=$$MODERATION_SERVICE_URL" \
+          --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN"
     environment:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
@@ -103,6 +106,11 @@ services:
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
       # How long a game waits for the rest of its results; empty = 60s.
       RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
+      # Chat is off unless a moderation service is configured; local dev may
+      # send unmoderated instead. Never set CHAT_UNMODERATED on a real server.
+      CHAT_UNMODERATED: "true"
+      MODERATION_SERVICE_URL: ${MODERATION_SERVICE_URL:-}
+      MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
     volumes:
       - ./nakama/local.yml:/nakama/data/local.yml:ro
       - ./nakama/modules:/nakama/data/modules:ro

@@ -33,6 +33,8 @@ export const ServerOp = {
 	ACTION: 105,
 	// {cid, action, reason}, to the sender of a refused ACTION.
 	ACTION_REJECTED: 106,
+	// {senderId, displayName, message}: a chat line, to everyone seated.
+	CHAT: 107,
 } as const
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included,
@@ -228,6 +230,10 @@ export type LobbySignal =
 	| { type: 'has_player'; userId: string }
 	| { type: 'leave'; userId: string }
 	| { type: 'get_active'; userId: string }
+	// chat_send's two steps around the (slow) moderation call, kept out of the
+	// match loop: check the sender may talk and fetch the context, then post.
+	| { type: 'chat_check'; userId: string }
+	| { type: 'chat_post'; userId: string; text: string }
 
 // Storage object (per user) naming the lobby they are in, for reconnect after
 // a game restart. Written and removed by the match only.
