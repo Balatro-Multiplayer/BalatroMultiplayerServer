@@ -109,6 +109,7 @@ declare namespace nkruntime {
 			expiry: number,
 		): { records?: LeaderboardRecord[]; nextCursor?: string }
 		uuidv4(): string
+		accountGetId(userId: string): { user: { username: string }; customId: string }
 		sha256Hash(input: string): string
 	}
 
@@ -237,6 +238,13 @@ declare namespace nkruntime {
 		nk: Nakama,
 		data: T,
 	) => T | undefined
+	type AfterHookFunction<Res, Req> = (
+		ctx: Context,
+		logger: Logger,
+		nk: Nakama,
+		data: Res,
+		request: Req,
+	) => void
 	type RpcFunction = (
 		ctx: Context,
 		logger: Logger,
@@ -250,6 +258,9 @@ declare namespace nkruntime {
 		): void
 		registerBeforeAuthenticateDevice(
 			fn: BeforeHookFunction<AuthenticateDeviceRequest>,
+		): void
+		registerAfterAuthenticateCustom(
+			fn: AfterHookFunction<{ created?: boolean }, AuthenticateCustomRequest>,
 		): void
 		registerBeforeLinkCustom(fn: BeforeHookFunction<AccountCustom>): void
 		registerBeforeUnlinkCustom(fn: BeforeHookFunction<AccountCustom>): void

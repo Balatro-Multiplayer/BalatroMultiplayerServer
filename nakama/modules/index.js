@@ -2297,10 +2297,133 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   });
 }
 
+// src/rating/legacy.ts
+var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
+var SYSTEM_USER_ID2 = "00000000-0000-0000-0000-000000000000";
+var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
+var HASH_PATTERN = /^[0-9a-f]{64}$/;
+var IMPORT_BATCH_LIMIT = 100;
+function steamIdHash(nk, salt, steamId) {
+  return nk.sha256Hash(steamId + salt);
+}
+function isLegacyBoard(value) {
+  const b = value;
+  return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
+}
+function recordOf(board) {
+  return {
+    rating: board.rating,
+    wins: board.wins,
+    losses: board.losses,
+    gamesPlayed: board.gamesPlayed,
+    seasonBest: board.seasonBest,
+    lastMatchAt: board.lastMatchAt
+  };
+}
+function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
+  if (ctx.userId) throw runtimeError(PERMISSION_DENIED, "Only the server may import ratings");
+  let players;
+  try {
+    players = JSON.parse(payload).players;
+  } catch (e) {
+    throw runtimeError(INVALID_ARGUMENT, "Payload must be {players: {<hash>: {boards: []}}}");
+  }
+  const hashes = Object.keys(players || {});
+  if (hashes.length === 0 || hashes.length > IMPORT_BATCH_LIMIT)
+    throw runtimeError(INVALID_ARGUMENT, `Send 1 to ${IMPORT_BATCH_LIMIT} players per call`);
+  const valid = [];
+  let skipped = 0;
+  for (const hash of hashes) {
+    const boards = players[hash].boards;
+    if (!HASH_PATTERN.test(hash) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
+      skipped++;
+      continue;
+    }
+    valid.push({ hash, boards });
+  }
+  const claimed = new Set(
+    nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID2 }))).filter((o) => o.value.claimedBy).map((o) => o.key)
+  );
+  const writes = valid.filter((p) => !claimed.has(p.hash)).map((p) => ({
+    collection: LEGACY_RATINGS_COLLECTION,
+    key: p.hash,
+    userId: SYSTEM_USER_ID2,
+    value: { boards: p.boards },
+    permissionRead: 0,
+    permissionWrite: 0
+  }));
+  if (writes.length > 0) nk.storageWrite(writes);
+  logger.info("Legacy ratings import: %d written, %d already claimed, %d skipped", writes.length, claimed.size, skipped);
+  return JSON.stringify({ imported: writes.length, alreadyClaimed: claimed.size, skipped });
+}
+function claimLegacyRatings(nk, logger, userId, username, hash, now) {
+  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID2 }]);
+  const legacy = parked == null ? void 0 : parked.value;
+  if (!parked || !legacy || legacy.claimedBy) return 0;
+  const existing = new Set(
+    nk.storageRead(
+      legacy.boards.map((b) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(b.modId, b.mode, b.season),
+        userId
+      }))
+    ).map((o) => o.key)
+  );
+  const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
+  const writes = fresh.map((b) => ({
+    collection: RATINGS_COLLECTION,
+    key: boardId(b.modId, b.mode, b.season),
+    userId,
+    value: recordOf(b),
+    permissionRead: 2,
+    permissionWrite: 0,
+    version: "*"
+  }));
+  writes.push({
+    collection: LEGACY_RATINGS_COLLECTION,
+    key: hash,
+    userId: SYSTEM_USER_ID2,
+    value: __spreadProps(__spreadValues({}, legacy), { claimedBy: userId, claimedAt: now }),
+    permissionRead: 0,
+    permissionWrite: 0,
+    version: parked.version
+  });
+  nk.storageWrite(writes);
+  for (const b of fresh) {
+    if (b.gamesPlayed < PLACEMENT_GAMES) continue;
+    const id = boardId(b.modId, b.mode, b.season);
+    try {
+      nk.leaderboardCreate(id, true, "desc", "set", null, { modId: b.modId, mode: b.mode });
+      nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
+        losses: b.losses,
+        gamesPlayed: b.gamesPlayed,
+        seasonBest: b.seasonBest
+      }, "set");
+    } catch (e) {
+      logger.warn("Legacy rating leaderboard write for %s failed: %v", userId, e);
+    }
+  }
+  logger.info("Claimed %d legacy rating boards for %s", fresh.length, userId);
+  return fresh.length;
+}
+function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
+  try {
+    const salt = ctx.env.PLAYER_ID_SALT;
+    if (!salt || !ctx.userId) return;
+    const account = nk.accountGetId(ctx.userId);
+    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX2)) return;
+    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX2.length));
+    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
+  } catch (e) {
+    logger.error("Legacy rating claim failed: %v", e);
+  }
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
   initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom);
+  initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom);
   initializer.registerBeforeLinkCustom(refuseCustomIdChange);
   initializer.registerBeforeUnlinkCustom(refuseCustomIdChange);
   initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice);
@@ -2325,6 +2448,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("run_get", rpcRunGet);
   initializer.registerRpc("run_logs", rpcRunLogs);
   initializer.registerRpc("runs_mine", rpcRunsMine);
+  initializer.registerRpc("legacy_ratings_import", rpcLegacyRatingsImport);
   initializer.registerRpc("rating_get", rpcRatingGet);
   initializer.registerRpc("leaderboard_get", rpcLeaderboardGet);
   logger.info("BMP lobby module loaded");

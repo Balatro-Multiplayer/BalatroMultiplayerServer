@@ -96,6 +96,7 @@ services:
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY" \
           --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
+          --runtime.env "PLAYER_ID_SALT=$$PLAYER_ID_SALT" \
           --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
@@ -103,6 +104,9 @@ services:
     environment:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+      # Same salt as the API's, so a login's Steam id hashes to the key the
+      # legacy ratings import parked its ratings under.
+      PLAYER_ID_SALT: ${PLAYER_ID_SALT:-}
       # Device login lets impersonated ClaudeControl instances (no Steam
       # ticket) into Nakama. Local dev only -- never set it on a real server.
       ALLOW_DEVICE_AUTH: "true"

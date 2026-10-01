@@ -26,6 +26,7 @@ import { rpcChatEnable, rpcChatSend } from './chat/rpc'
 import { matchmakerMatched } from './matchmaking/matched'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
+import { afterAuthenticateCustom, rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
 
 function InitModule(
@@ -36,6 +37,7 @@ function InitModule(
 ) {
 	configureSeason(ctx.env['RATING_SEASON'])
 	initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom)
+	initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom)
 	initializer.registerBeforeLinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeUnlinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice)
@@ -63,6 +65,7 @@ function InitModule(
 	initializer.registerRpc('run_get', rpcRunGet)
 	initializer.registerRpc('run_logs', rpcRunLogs)
 	initializer.registerRpc('runs_mine', rpcRunsMine)
+	initializer.registerRpc('legacy_ratings_import', rpcLegacyRatingsImport)
 	initializer.registerRpc('rating_get', rpcRatingGet)
 	initializer.registerRpc('leaderboard_get', rpcLeaderboardGet)
 	logger.info('BMP lobby module loaded')
