@@ -84,25 +84,19 @@ export function rpcChatSend(
 	if (check.error === 'rate_limited') throw runtimeError(UNAVAILABLE, 'You are sending messages too fast')
 	if (check.error) throw runtimeError(INVALID_ARGUMENT, 'Not in a lobby')
 
-	let text = message
-	if (ctx.env.MODERATION_SERVICE_URL) {
-		const outcome = decideModerationOutcome(
-			callModeration(nk, logger, ctx.env, {
-				playerId: userId,
-				lobbyCode: check.code,
-				message,
-				context: check.context,
-			}),
-		)
-		if (!outcome.allowed) {
-			if (outcome.reason === 'moderated') throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
-			throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
-		}
-		text = outcome.publishText === null ? message : outcome.publishText
-	} else if (ctx.env.CHAT_UNMODERATED !== 'true') {
-		// No moderation service configured: chat stays off rather than open.
+	const outcome = decideModerationOutcome(
+		callModeration(nk, logger, ctx.env, {
+			playerId: userId,
+			lobbyCode: check.code,
+			message,
+			context: check.context,
+		}),
+	)
+	if (!outcome.allowed) {
+		if (outcome.reason === 'moderated') throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
 		throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
 	}
+	const text = outcome.publishText === null ? message : outcome.publishText
 
 	nk.matchSignal(
 		current.matchId,

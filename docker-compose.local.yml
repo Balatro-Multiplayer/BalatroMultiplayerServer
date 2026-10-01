@@ -65,6 +65,15 @@ services:
     environment:
       NAKAMA_URL: http://nakama:7350
 
+  # One moderation replica instead of five (nginx/local/moderation-upstream.conf):
+  # each holds a ~3GB model. Only moderation-1 is started locally, and
+  # moderation-lb no longer depends on the other four.
+  moderation-lb:
+    depends_on: !override
+      - moderation-1
+    volumes: !override
+      - ./nginx/local/moderation-upstream.conf:/etc/nginx/conf.d/moderation-upstream.conf:ro
+
   # Basic Nakama next to EMQX, local dev only. It verifies Steam tickets for
   # in-game login (MPAPI's use_nakama_auth) in a runtime hook
   # (nakama/modules/index.js, built from nakama/src -- stock authenticate_steam needs Balatro's
@@ -90,8 +99,6 @@ services:
           --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
-          --runtime.env "CHAT_UNMODERATED=$$CHAT_UNMODERATED" \
-          --runtime.env "MODERATION_SERVICE_URL=$$MODERATION_SERVICE_URL" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN"
     environment:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
@@ -106,10 +113,9 @@ services:
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
       # How long a game waits for the rest of its results; empty = 60s.
       RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
-      # Chat is off unless a moderation service is configured; local dev may
-      # send unmoderated instead. Never set CHAT_UNMODERATED on a real server.
-      CHAT_UNMODERATED: "true"
-      MODERATION_SERVICE_URL: ${MODERATION_SERVICE_URL:-}
+      # Chat is judged by moderation-lb (hardcoded in nakama/src/chat). It
+      # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
+      # missing model from blocking.
       MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
     volumes:
       - ./nakama/local.yml:/nakama/data/local.yml:ro

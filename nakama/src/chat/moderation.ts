@@ -52,8 +52,13 @@ export interface ModerationRequest {
 
 const DEFAULT_TIMEOUT_MS = 3000
 
-// One attempt against MODERATION_SERVICE_URL (a redirect is a failure: only the
-// configured origin may decide). null on any transport failure.
+// The moderation load balancer's service name on the compose network
+// (docker-compose.yml's moderation-lb). Fixed rather than configurable: chat is
+// always judged by that one internal service, never by an address from env.
+export const MODERATION_SERVICE_URL = 'http://moderation-lb:8001'
+
+// One attempt against MODERATION_SERVICE_URL (a redirect is a failure: only that
+// origin may decide). null on any transport failure.
 export function callModeration(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
@@ -65,7 +70,7 @@ export function callModeration(
 	const timeout = Number(env.MODERATION_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS
 	try {
 		const res = nk.httpRequest(
-			`${env.MODERATION_SERVICE_URL}/moderate`,
+			`${MODERATION_SERVICE_URL}/moderate`,
 			'post',
 			headers,
 			JSON.stringify(request),
