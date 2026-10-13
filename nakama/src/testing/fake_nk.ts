@@ -35,6 +35,16 @@ export function fakeNk(overrides: { [key: string]: unknown } = {}): FakeNk {
 		storageDelete: (deletes: any[]) => {
 			for (const d of deletes) objects.delete(k(d.collection, d.userId, d.key))
 		},
+		// userId null lists the collection across every owner, as Nakama does.
+		storageList: (userId: string | null, collection: string) => ({
+			objects: [...objects.entries()]
+				.map(([key, o]) => {
+					const [c, u, ...rest] = key.split('/')
+					return { collection: c, userId: u, key: rest.join('/'), value: o.value, version: String(o.version) }
+				})
+				.filter((o) => o.collection === collection && (userId === null || o.userId === userId)),
+			cursor: '',
+		}),
 		notificationSend: (userId: string, subject: string, content: any, code: number, _sender: string, persistent: boolean) => {
 			nk.notifications.push({ userId, subject, content, code, persistent })
 		},

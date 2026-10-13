@@ -242,6 +242,7 @@ export function lobbyMatchInit(
 		allowedIds: stringParam(params, 'allowedIds')
 			? stringParam(params, 'allowedIds').split(',')
 			: undefined,
+		gameMode: stringParam(params, 'gameMode') || undefined,
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
 		resultTimeoutMs: secondsFromEnv(

@@ -11,13 +11,14 @@ describe('planMatch', () => {
 		expect(planMatch([entry('a', RANKED), entry('b', RANKED)])).toEqual({
 			modId: 'MultiplayerPvP',
 			rankedMode: 'pvp_ranked_standard',
+			gameMode: 'ranked:pvp_ranked_standard',
 			playerIds: ['a', 'b'],
 		})
 	})
 	it('plans a casual lobby with no rating board', () => {
 		const casual = { modId: 'MultiplayerSPDRN', mode: 'standard', kind: 'casual' }
 		const plan = planMatch([entry('a', casual), entry('b', casual), entry('c', casual)])
-		expect(plan).toMatchObject({ rankedMode: '', playerIds: ['a', 'b', 'c'] })
+		expect(plan).toMatchObject({ rankedMode: '', gameMode: 'standard', playerIds: ['a', 'b', 'c'] })
 	})
 	it('refuses a group that queued for different things', () => {
 		const other = { ...RANKED, kind: 'casual' }

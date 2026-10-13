@@ -4,6 +4,7 @@
 import { generateCode, CODE_ATTEMPTS, MATCHMADE_CODE_LENGTH } from '../lobby/rpc'
 import { bindCode, releaseCode, reserveCode } from '../lobby/codes'
 import { LOBBY_MATCH } from '../lobby/protocol'
+import { clearMatched } from './queue'
 
 export interface MatchedEntry {
 	presence: { userId: string }
@@ -14,7 +15,14 @@ export interface MatchPlan {
 	modId: string
 	// The rating board the game counts on, '' for a casual game.
 	rankedMode: string
+	// The queue, keyed as the API keys it: 'mode', or 'ranked:mode'.
+	gameMode: string
 	playerIds: string[]
+}
+
+// How the API names a queue: the bare mode, 'ranked:'-prefixed when ranked.
+export function queueKey(mode: string, kind: string): string {
+	return kind === 'ranked' ? 'ranked:' + mode : mode
 }
 
 const NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
@@ -43,7 +51,12 @@ export function planMatch(entries: MatchedEntry[]): MatchPlan | string {
 			return 'A player is in the match twice'
 		ids.push(entry.presence.userId)
 	}
-	return { modId, rankedMode: kind === 'ranked' ? mode : '', playerIds: ids }
+	return {
+		modId,
+		rankedMode: kind === 'ranked' ? mode : '',
+		gameMode: queueKey(mode, kind),
+		playerIds: ids,
+	}
 }
 
 export function matchmakerMatched(
@@ -69,12 +82,14 @@ export function matchmakerMatched(
 				creatorId: plan.playerIds[0],
 				rankedMode: plan.rankedMode,
 				allowedIds: plan.playerIds.join(','),
+				gameMode: plan.gameMode,
 			})
 		} catch (e) {
 			releaseCode(nk, code, '')
 			throw e
 		}
 		bindCode(nk, code, matchId, plan.modId)
+		clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds)
 		logger.info(
 			'Matchmaker made lobby %s for %d players (%s%s)',
 			code,

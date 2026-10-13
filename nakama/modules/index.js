@@ -773,6 +773,7 @@ function newLobby(params) {
     hostId: params.creatorId,
     rankedMode: params.rankedMode,
     allowedIds: params.allowedIds,
+    gameMode: params.gameMode,
     metadata: {},
     players: [],
     kickedIds: [],
@@ -794,13 +795,24 @@ function emptyGame() {
     logs: {}
   };
 }
+function lobbyType(lobby) {
+  return lobby.allowedIds ? "public" : "private";
+}
+function isSpectatable(lobby) {
+  return lobbyType(lobby) === "public" || lobby.metadata.spectatable === true;
+}
 function labelOf(lobby) {
   return JSON.stringify({
     code: lobby.code,
     modId: lobby.modId,
+    type: lobbyType(lobby),
+    mode: lobby.gameMode || "",
     open: !lobby.closed && lobby.game.started === null && lobby.players.length < lobby.maxPlayers,
+    started: lobby.game.started !== null,
     size: lobby.players.length,
-    max: lobby.maxPlayers
+    max: lobby.maxPlayers,
+    spectatable: isSpectatable(lobby),
+    spectators: (lobby.spectators || []).length
   });
 }
 function findPlayer(lobby, userId) {
@@ -2133,6 +2145,7 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     creatorId: stringParam(params, "creatorId"),
     rankedMode: stringParam(params, "rankedMode") || void 0,
     allowedIds: stringParam(params, "allowedIds") ? stringParam(params, "allowedIds").split(",") : void 0,
+    gameMode: stringParam(params, "gameMode") || void 0,
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
     resultTimeoutMs: secondsFromEnv(
@@ -2630,7 +2643,155 @@ function rpcChatSend(ctx, logger, nk, payload) {
   return JSON.stringify({ text });
 }
 
+// src/matchmaking/queue.ts
+var QUEUE_COLLECTION = "queue_presence";
+var QUEUE_STALE_MS = 30 * 6e4;
+var LIST_PAGE = 100;
+var MATCH_LIST_LIMIT = 100;
+var NOTIFICATIONS_STREAM = 0;
+var TOMBSTONE_MS = 6e4;
+var MOD_ID_PATTERN2 = /^[A-Za-z0-9_.-]{1,64}$/;
+function recordKey(modId, gameMode) {
+  return modId + ":" + gameMode;
+}
+function field(obj, camel, snake) {
+  if (!obj || typeof obj !== "object") return void 0;
+  const o = obj;
+  return o[camel] !== void 0 ? o[camel] : o[snake];
+}
+function recordOf2(input, output, sessionId, now) {
+  const add = field(input, "matchmakerAdd", "matchmaker_add");
+  const props = field(add, "stringProperties", "string_properties") || {};
+  const ticket = field(field(output, "matchmakerTicket", "matchmaker_ticket"), "ticket", "ticket");
+  const modId = props.modId;
+  const mode = props.mode;
+  if (typeof ticket !== "string" || typeof modId !== "string" || typeof mode !== "string") return null;
+  if (!MOD_ID_PATTERN2.test(modId) || !MOD_ID_PATTERN2.test(mode)) return null;
+  const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
+  return { modId, gameMode, ticket, sessionId, at: now };
+}
+function countQueues(modId, records, labels, now) {
+  const gameModes = {};
+  const entry = (mode) => gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 };
+  for (const r of records) {
+    if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue;
+    entry(r.gameMode).queued++;
+  }
+  for (const raw of labels) {
+    let label;
+    try {
+      label = JSON.parse(raw);
+    } catch (e) {
+      continue;
+    }
+    if (!label || label.modId !== modId || label.type !== "public" || !label.mode || !(label.size > 0)) continue;
+    entry(label.mode).inMatch += label.size;
+  }
+  return { modId, gameModes };
+}
+function deleteRecords(nk, userId, keys) {
+  if (keys.length === 0) return;
+  nk.storageDelete(keys.map((key) => ({ collection: QUEUE_COLLECTION, key, userId })));
+}
+function ownRecords(nk, userId) {
+  const out = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE, cursor);
+    for (const o of page.objects || []) out.push(o);
+    cursor = page.cursor || "";
+  } while (cursor);
+  return out;
+}
+var REMOVED_PREFIX = "removed:";
+function isRecord(o) {
+  return o.key.indexOf(REMOVED_PREFIX) !== 0;
+}
+function afterMatchmakerAdd(ctx, logger, nk, output, input) {
+  if (!ctx.userId) return;
+  const record = recordOf2(input, output, ctx.sessionId || "", Date.now());
+  if (!record) return;
+  const tombstone = REMOVED_PREFIX + record.ticket;
+  const removed = nk.storageRead([{ collection: QUEUE_COLLECTION, key: tombstone, userId: ctx.userId }]);
+  if (removed.length > 0) {
+    deleteRecords(nk, ctx.userId, [tombstone]);
+    return;
+  }
+  nk.storageWrite([
+    {
+      collection: QUEUE_COLLECTION,
+      key: recordKey(record.modId, record.gameMode),
+      userId: ctx.userId,
+      value: __spreadValues({}, record),
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function beforeMatchmakerRemove(ctx, logger, nk, envelope) {
+  const ticket = field(field(envelope, "matchmakerRemove", "matchmaker_remove"), "ticket", "ticket");
+  if (!ctx.userId || typeof ticket !== "string" || !ticket) return envelope;
+  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord(o) && o.value.ticket === ticket).map((o) => o.key);
+  if (keys.length > 0) {
+    deleteRecords(nk, ctx.userId, keys);
+  } else {
+    nk.storageWrite([
+      {
+        collection: QUEUE_COLLECTION,
+        key: REMOVED_PREFIX + ticket,
+        userId: ctx.userId,
+        value: { at: Date.now() },
+        permissionRead: 0,
+        permissionWrite: 0
+      }
+    ]);
+  }
+  return envelope;
+}
+function clearMatched(nk, modId, gameMode, userIds) {
+  for (const userId of userIds) deleteRecords(nk, userId, [recordKey(modId, gameMode)]);
+}
+function liveRecords(nk, modId, now) {
+  const byUser = {};
+  let cursor = "";
+  do {
+    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE, cursor);
+    for (const o of page.objects || []) {
+      if (!isRecord(o)) {
+        if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
+        continue;
+      }
+      if (o.value.modId !== modId) continue;
+      (byUser[o.userId] = byUser[o.userId] || []).push(o);
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  const live = [];
+  for (const userId in byUser) {
+    const sessions = nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
+    const dead = [];
+    for (const o of byUser[userId]) {
+      const record = o.value;
+      if (sessions.indexOf(record.sessionId) === -1) dead.push(o.key);
+      else live.push(record);
+    }
+    deleteRecords(nk, userId, dead);
+  }
+  return live;
+}
+function rpcQueueCounts(ctx, logger, nk, payload) {
+  const modId = parsePayload(payload).modId;
+  if (typeof modId !== "string" || !MOD_ID_PATTERN2.test(modId))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
+  const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
+  const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
+  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()));
+}
+
 // src/matchmaking/matched.ts
+function queueKey(mode, kind) {
+  return kind === "ranked" ? "ranked:" + mode : mode;
+}
 var NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 function planMatch(entries) {
   if (entries.length < 2) return "A match needs at least two players";
@@ -2649,7 +2810,12 @@ function planMatch(entries) {
       return "A player is in the match twice";
     ids.push(entry.presence.userId);
   }
-  return { modId, rankedMode: kind === "ranked" ? mode : "", playerIds: ids };
+  return {
+    modId,
+    rankedMode: kind === "ranked" ? mode : "",
+    gameMode: queueKey(mode, kind),
+    playerIds: ids
+  };
 }
 function matchmakerMatched(ctx, logger, nk, matches) {
   const plan = planMatch(matches);
@@ -2668,13 +2834,15 @@ function matchmakerMatched(ctx, logger, nk, matches) {
         maxPlayers: plan.playerIds.length,
         creatorId: plan.playerIds[0],
         rankedMode: plan.rankedMode,
-        allowedIds: plan.playerIds.join(",")
+        allowedIds: plan.playerIds.join(","),
+        gameMode: plan.gameMode
       });
     } catch (e) {
       releaseCode(nk, code, "");
       throw e;
     }
     bindCode(nk, code, matchId, plan.modId);
+    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
     logger.info(
       "Matchmaker made lobby %s for %d players (%s%s)",
       code,
@@ -2989,6 +3157,9 @@ function InitModule(ctx, logger, nk, initializer) {
     matchTerminate: lobbyMatchTerminate
   });
   initializer.registerMatchmakerMatched(matchmakerMatched);
+  initializer.registerRtAfter("MatchmakerAdd", afterMatchmakerAdd);
+  initializer.registerRtBefore("MatchmakerRemove", beforeMatchmakerRemove);
+  initializer.registerRpc("queue_counts", rpcQueueCounts);
   initializer.registerRpc("session_init", rpcSessionInit);
   initializer.registerRpc("tos_accept", rpcTosAccept);
   initializer.registerRpc("profile_set_display", rpcProfileSetDisplay);

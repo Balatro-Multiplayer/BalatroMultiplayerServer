@@ -7,6 +7,8 @@ declare namespace nkruntime {
 		userId: string
 		username: string
 		matchId: string
+		// The calling socket's session (realtime hooks, socket RPCs).
+		sessionId?: string
 	}
 
 	interface Logger {
@@ -75,11 +77,19 @@ declare namespace nkruntime {
 			query: string | null,
 		): Match[]
 		matchSignal(id: string, data: string): string
+		// Presences on a stream; mode 0 (notifications) holds every
+		// connected session of the user named by subject.
+		streamUserList(
+			stream: { mode: number; subject?: string; subcontext?: string; label?: string },
+			includeHidden?: boolean,
+			includeNotHidden?: boolean,
+		): Presence[]
 		storageRead(reads: StorageReadRequest[]): StorageObject[]
 		storageWrite(writes: StorageWriteRequest[]): unknown
 		storageDelete(deletes: StorageReadRequest[]): void
+		// userId null lists the collection across every owner ('' is refused).
 		storageList(
-			userId: string,
+			userId: string | null,
 			collection: string,
 			limit: number,
 			cursor: string,
@@ -311,12 +321,7 @@ declare namespace nkruntime {
 		registerBeforeSessionRefresh(
 			fn: BeforeHookFunction<{ token?: string; vars?: { [key: string]: string } }>,
 		): void
-		registerEventSessionStart(
-			fn: (ctx: Context, logger: Logger, nk: Nakama, event: SessionEvent) => void,
-		): void
-		registerEventSessionEnd(
-			fn: (ctx: Context, logger: Logger, nk: Nakama, event: SessionEvent) => void,
-		): void
+		// No session start/end events: 3.41's JS runtime only has them for Go.
 		// id is the envelope's message name, e.g. 'MatchmakerAdd'. Returning
 		// nothing (or throwing) drops the message.
 		registerRtBefore(

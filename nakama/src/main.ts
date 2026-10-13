@@ -26,6 +26,11 @@ import {
 } from './lobby/rpc'
 import { rpcChatEnable, rpcChatSend } from './chat/rpc'
 import { matchmakerMatched } from './matchmaking/matched'
+import {
+	afterMatchmakerAdd,
+	beforeMatchmakerRemove,
+	rpcQueueCounts,
+} from './matchmaking/queue'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
@@ -59,6 +64,9 @@ function InitModule(
 		matchTerminate: lobbyMatchTerminate,
 	})
 	initializer.registerMatchmakerMatched(matchmakerMatched)
+	initializer.registerRtAfter('MatchmakerAdd', afterMatchmakerAdd)
+	initializer.registerRtBefore('MatchmakerRemove', beforeMatchmakerRemove)
+	initializer.registerRpc('queue_counts', rpcQueueCounts)
 	initializer.registerRpc('session_init', rpcSessionInit)
 	initializer.registerRpc('tos_accept', rpcTosAccept)
 	initializer.registerRpc('profile_set_display', rpcProfileSetDisplay)

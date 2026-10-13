@@ -154,6 +154,32 @@ describe('join', () => {
 	})
 })
 
+describe('labelOf', () => {
+	it('labels a code lobby private, not started, and not spectatable', () => {
+		expect(JSON.parse(labelOf(lobbyWith('a', 'b')))).toMatchObject({
+			type: 'private',
+			mode: '',
+			started: false,
+			spectatable: false,
+			spectators: 0,
+		})
+	})
+	it('labels a matchmade lobby public with its queue, and spectatable', () => {
+		const lobby = { ...lobbyWith('a', 'b'), allowedIds: ['a', 'b'], gameMode: 'ranked:x', spectators: ['c'] }
+		expect(JSON.parse(labelOf(lobby))).toMatchObject({
+			type: 'public',
+			mode: 'ranked:x',
+			spectatable: true,
+			spectators: 1,
+		})
+	})
+	it('marks a private lobby spectatable when its host allows it, and started once a game runs', () => {
+		const base = lobbyWith('a', 'b')
+		const lobby = { ...base, metadata: { spectatable: true }, game: { ...base.game, started: { at: 1 } as any } }
+		expect(JSON.parse(labelOf(lobby))).toMatchObject({ spectatable: true, started: true, open: false })
+	})
+})
+
 describe('leave', () => {
 	it('removes the player, passes host on in join order, and kicks the presence', () => {
 		const step = leave(lobbyWith('a', 'b', 'c'), 'a')

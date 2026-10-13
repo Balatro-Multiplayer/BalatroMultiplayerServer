@@ -47,6 +47,11 @@ export interface Lobby {
 	// Set when the matchmaker made the lobby: only these players may take a
 	// seat, and each may do so before the first of them has arrived.
 	allowedIds?: string[]
+	// The queue a matchmade lobby came from, as the API keys it ('mode' or
+	// 'ranked:mode'); queue_counts counts its players as in a match.
+	gameMode?: string
+	// Watching, not playing (spectate.ts): never seated, counted or ready.
+	spectators?: string[]
 	metadata: { [key: string]: unknown }
 	// In join order: host transfer picks the earliest eligible player.
 	players: LobbyPlayer[]
@@ -86,6 +91,7 @@ export function newLobby(params: {
 	creatorId: string
 	rankedMode?: string
 	allowedIds?: string[]
+	gameMode?: string
 	now: number
 	graceMs: number
 	resultTimeoutMs?: number
@@ -98,6 +104,7 @@ export function newLobby(params: {
 		hostId: params.creatorId,
 		rankedMode: params.rankedMode,
 		allowedIds: params.allowedIds,
+		gameMode: params.gameMode,
 		metadata: {},
 		players: [],
 		kickedIds: [],
@@ -122,16 +129,35 @@ export function emptyGame(): GameState {
 	}
 }
 
+// The API's lobby types: the matchmaker makes 'public' lobbies, players make
+// 'private' ones by code.
+export function lobbyType(lobby: Lobby): 'public' | 'private' {
+	return lobby.allowedIds ? 'public' : 'private'
+}
+
+// Public lobbies can always be watched; a private one when its host has set
+// metadata.spectatable (as the API's /lobbies/spectatable decides).
+export function isSpectatable(lobby: Lobby): boolean {
+	return lobbyType(lobby) === 'public' || lobby.metadata.spectatable === true
+}
+
+// The match label, searchable with matchList queries (e.g.
+// +label.modId:X +label.spectatable:T).
 export function labelOf(lobby: Lobby): string {
 	return JSON.stringify({
 		code: lobby.code,
 		modId: lobby.modId,
+		type: lobbyType(lobby),
+		mode: lobby.gameMode || '',
 		open:
 			!lobby.closed &&
 			lobby.game.started === null &&
 			lobby.players.length < lobby.maxPlayers,
+		started: lobby.game.started !== null,
 		size: lobby.players.length,
 		max: lobby.maxPlayers,
+		spectatable: isSpectatable(lobby),
+		spectators: (lobby.spectators || []).length,
 	})
 }
 
