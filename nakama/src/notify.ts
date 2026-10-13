@@ -1,3 +1,5 @@
+import { SYSTEM_USER_ID } from './lobby/protocol'
+
 // Pushes to a player's socket, as Nakama notifications. The client routes
 // them by code (MPAPI networking/nakama_notify.lua); keep both lists in step.
 export const NotifyCode = {
@@ -16,6 +18,9 @@ export function isNotifyCode(code: unknown): code is number {
 	return typeof code === 'number' && CODES.indexOf(code) !== -1
 }
 
+// Nakama 3.41 refuses '' as a sender ("expects senderId to either be not
+// set, empty string or a valid UUID", despite the message): server pushes
+// come from the system user.
 // Persistent notifications are also kept for players who are offline and
 // listed for them at their next login; transient ones only reach live sockets.
 export function notify(
@@ -26,5 +31,5 @@ export function notify(
 	content: { [key: string]: unknown },
 	persistent = false,
 ) {
-	nk.notificationSend(userId, subject, content, code, '', persistent)
+	nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent)
 }

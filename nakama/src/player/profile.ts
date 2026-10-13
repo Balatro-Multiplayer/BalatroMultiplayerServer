@@ -31,6 +31,10 @@ export interface Profile {
 	legacyPlayerId: string | null
 	// True once the Postgres sync ran (or there was nothing to sync).
 	synced: boolean
+	// True once the player has logged in through session_init (nakama_only).
+	// Until then the API owns the account (names included), and this profile
+	// only holds what Nakama's own checks need (ToS, chat consent).
+	nakamaLogin: boolean
 }
 
 // What the API's player-sync route answers (apps/server/src/features/nakama/player-sync.service.ts).
@@ -71,6 +75,7 @@ export function defaultProfile(steamName: string): Profile {
 		unresolvedMutedPlayerIds: [],
 		legacyPlayerId: null,
 		synced: false,
+		nakamaLogin: false,
 	}
 }
 
@@ -96,6 +101,7 @@ export function profileOf(value: { [key: string]: unknown }, fallbackName: strin
 		unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
 		legacyPlayerId: typeof value.legacyPlayerId === 'string' ? value.legacyPlayerId : null,
 		synced: value.synced === true,
+		nakamaLogin: value.nakamaLogin === true,
 	}
 }
 

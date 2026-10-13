@@ -500,6 +500,21 @@ export function setOwnState(lobby: Lobby, byId: string, state: unknown): Step {
 	}
 }
 
+// A player's info changed outside the match (their profile: display name,
+// joker, mods). Everyone, the player included, gets the new info.
+export function setPlayerInfo(lobby: Lobby, userId: string, patch: Partial<PlayerInfo>): Step {
+	const player = findPlayer(lobby, userId)
+	if (!player) return { lobby, out: [] }
+	const info: PlayerInfo = { ...player.info, ...patch }
+	return {
+		lobby: {
+			...lobby,
+			players: lobby.players.map((p) => (p.id === userId ? { ...p, info } : p)),
+		},
+		out: [{ kind: 'send', op: ServerOp.PLAYER_INFO, payload: { playerId: userId, info }, to: allIds(lobby) }],
+	}
+}
+
 // Time passing: expire grace periods, and close a lobby its creator never
 // joined.
 export function tick(lobby: Lobby, now: number): Step {

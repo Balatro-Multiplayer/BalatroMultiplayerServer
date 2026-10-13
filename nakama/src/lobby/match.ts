@@ -31,8 +31,10 @@ import {
 	newLobby,
 	setMetadata,
 	setOwnState,
+	setPlayerInfo,
 	tick,
 } from './state'
+import { displayNameOf, readProfile } from '../player/profile'
 import { applyRatings } from '../rating/apply'
 import { chatCheck, chatPost } from './chat'
 import { logChecksOf, saveRun } from './storage'
@@ -268,6 +270,31 @@ function parseMods(raw: string | undefined): unknown {
 	}
 }
 
+// The joining player's info. Their profile (player/profile.ts), once they
+// have logged in through session_init, decides the name and joker; the
+// metadata only fills in for players who logged in through the API, and for
+// mods.
+export function joinInfoOf(
+	nk: nkruntime.Nakama,
+	presence: nkruntime.Presence,
+	meta: { [key: string]: string },
+): PlayerInfo {
+	const sentMods = parseMods(meta.mods)
+	const stored = readProfile(nk, presence.userId, presence.username)
+	if (stored && stored.profile.nakamaLogin) {
+		return {
+			displayName: displayNameOf(stored.profile),
+			preferredJoker: stored.profile.preferredJoker,
+			mods: sentMods !== null ? sentMods : stored.profile.mods,
+		}
+	}
+	return {
+		displayName: meta.displayName || presence.username,
+		preferredJoker: meta.preferredJoker || null,
+		mods: sentMods,
+	}
+}
+
 // One lobby at a time: a player whose current-lobby record names another
 // live match they are still in must leave that one first.
 function otherLobbyOf(
@@ -320,11 +347,7 @@ export function lobbyMatchJoinAttempt(
 		}
 	}
 
-	const info: PlayerInfo = {
-		displayName: meta.displayName || presence.username,
-		preferredJoker: meta.preferredJoker || null,
-		mods: parseMods(meta.mods),
-	}
+	const info = joinInfoOf(nk, presence, meta)
 	return {
 		state: {
 			...state,
@@ -542,6 +565,17 @@ export function lobbyMatchSignal(
 			dispatcher,
 			state,
 			chatPost(state.lobby, signal.userId, signal.text),
+		)
+		return { state: next || state, data: 'ok' }
+	}
+	if (signal.type === 'player_info') {
+		const next = apply(
+			ctx,
+			logger,
+			nk,
+			dispatcher,
+			state,
+			setPlayerInfo(state.lobby, signal.userId, signal.info),
 		)
 		return { state: next || state, data: 'ok' }
 	}

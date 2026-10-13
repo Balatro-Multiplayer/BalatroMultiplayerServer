@@ -26,6 +26,7 @@ var INVALID_ARGUMENT = 3;
 var NOT_FOUND = 5;
 var ALREADY_EXISTS = 6;
 var PERMISSION_DENIED = 7;
+var FAILED_PRECONDITION = 9;
 var UNAVAILABLE = 14;
 var UNAUTHENTICATED = 16;
 function runtimeError(code, message) {
@@ -170,7 +171,7 @@ function isNotifyCode(code) {
   return typeof code === "number" && CODES.indexOf(code) !== -1;
 }
 function notify(nk, userId, code, subject, content, persistent = false) {
-  nk.notificationSend(userId, subject, content, code, "", persistent);
+  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
 }
 
 // src/rpc.ts
@@ -1091,6 +1092,17 @@ function setOwnState(lobby, byId, state) {
     out: []
   };
 }
+function setPlayerInfo(lobby, userId, patch) {
+  const player = findPlayer(lobby, userId);
+  if (!player) return { lobby, out: [] };
+  const info = __spreadValues(__spreadValues({}, player.info), patch);
+  return {
+    lobby: __spreadProps(__spreadValues({}, lobby), {
+      players: lobby.players.map((p) => p.id === userId ? __spreadProps(__spreadValues({}, p), { info }) : p)
+    }),
+    out: [{ kind: "send", op: ServerOp.PLAYER_INFO, payload: { playerId: userId, info }, to: allIds(lobby) }]
+  };
+}
 function tick(lobby, now) {
   if (lobby.closed) return { lobby, out: [] };
   if (lobby.players.length === 0) {
@@ -1624,6 +1636,180 @@ function action(lobby, senderId, data, ctx) {
   };
 }
 
+// src/shared/jokers.ts
+var STANDARD_JOKERS = [
+  "j_joker",
+  "j_mime",
+  "j_chaos",
+  "j_space",
+  "j_scholar",
+  "j_egg",
+  "j_burglar",
+  "j_runner",
+  "j_sixth_sense",
+  "j_hiker",
+  "j_card_sharp",
+  "j_madness",
+  "j_vampire",
+  "j_baron",
+  "j_fortune_teller",
+  "j_luchador",
+  "j_lucky_cat",
+  "j_bull",
+  "j_swashbuckler",
+  "j_throwback",
+  "j_mr_bones",
+  "j_ring_master",
+  "j_idol",
+  "j_merry_andy",
+  "j_stuntman",
+  "j_matador",
+  "j_troubadour",
+  "j_ancient",
+  "j_even_steven",
+  "j_odd_todd"
+];
+var PRIVILEGE_JOKERS = {
+  virtualized: "j_perkeo",
+  bean: "j_turtle_bean",
+  vagabond: "j_vagabond",
+  sizaak: "j_dusk",
+  lava: "j_burnt",
+  twelve: "j_stone"
+};
+var DEFAULT_JOKER = "j_joker";
+function isValidJoker(id, privileges = []) {
+  if (STANDARD_JOKERS.indexOf(id) !== -1) return true;
+  return privileges.some((p) => PRIVILEGE_JOKERS[p] === id);
+}
+function privilegeTable(privileges) {
+  const jokers = privileges.map((p) => PRIVILEGE_JOKERS[p]).filter((j) => !!j);
+  return jokers.length > 0 ? { jokers } : {};
+}
+
+// src/player/profile.ts
+var PLAYER_COLLECTION = "player";
+var PROFILE_KEY = "profile";
+var MAX_NAME_LENGTH = 64;
+var WRITE_ATTEMPTS2 = 3;
+function cleanName(name) {
+  if (typeof name !== "string") return "";
+  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
+}
+function defaultProfile(steamName) {
+  return {
+    steamName,
+    useDiscordName: false,
+    preferredJoker: DEFAULT_JOKER,
+    mods: null,
+    discordIdHash: null,
+    discordUsername: null,
+    privileges: [],
+    tosAcceptedVersion: 0,
+    chatEnabled: false,
+    chatBlocked: false,
+    mutedUserIds: [],
+    unresolvedMutedPlayerIds: [],
+    legacyPlayerId: null,
+    synced: false,
+    nakamaLogin: false
+  };
+}
+function stringList(value) {
+  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+}
+function profileOf(value, fallbackName) {
+  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
+  return __spreadProps(__spreadValues({}, base), {
+    useDiscordName: value.useDiscordName === true,
+    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
+    mods: value.mods === void 0 ? null : value.mods,
+    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
+    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
+    privileges: stringList(value.privileges),
+    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
+    chatEnabled: value.chatEnabled === true,
+    chatBlocked: value.chatBlocked === true,
+    mutedUserIds: stringList(value.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
+    synced: value.synced === true,
+    nakamaLogin: value.nakamaLogin === true
+  });
+}
+function withSync(profile, sync) {
+  var _a, _b;
+  return __spreadProps(__spreadValues({}, profile), {
+    useDiscordName: sync.useDiscordName === true,
+    preferredJoker: typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker,
+    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
+    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
+    privileges: stringList(sync.privileges),
+    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
+    chatEnabled: sync.chatEnabled === true,
+    chatBlocked: sync.chatBlocked === true,
+    mutedUserIds: stringList(sync.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
+    synced: true
+  });
+}
+function displayNameOf(profile) {
+  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
+  return profile.steamName;
+}
+function playerView(userId, profile) {
+  return {
+    id: userId,
+    steamName: profile.steamName,
+    displayName: displayNameOf(profile),
+    useDiscordName: profile.useDiscordName,
+    preferredJoker: profile.preferredJoker,
+    discordLinked: profile.discordIdHash !== null,
+    discordUsername: profile.discordUsername,
+    privileges: privilegeTable(profile.privileges),
+    chatEnabled: profile.chatEnabled,
+    chatBlocked: profile.chatBlocked,
+    mutedPlayerIds: profile.mutedUserIds
+  };
+}
+function readProfile(nk, userId, fallbackName = "") {
+  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
+  if (objects.length === 0) return null;
+  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
+}
+function writeProfile(nk, userId, profile, version) {
+  nk.storageWrite([
+    {
+      collection: PLAYER_COLLECTION,
+      key: PROFILE_KEY,
+      userId,
+      value: profile,
+      version,
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+}
+function updateProfile(nk, userId, change, fallbackName = "") {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
+    const stored = readProfile(nk, userId, fallbackName);
+    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
+    try {
+      writeProfile(nk, userId, next, stored ? stored.version : "*");
+      return next;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+function profileFor(nk, userId, fallbackName = "") {
+  const stored = readProfile(nk, userId, fallbackName);
+  return stored ? stored.profile : defaultProfile(fallbackName);
+}
+
 // src/lobby/chat.ts
 var CHAT_BURST = 5;
 var CHAT_REFILL_MS = 1e3;
@@ -1973,6 +2159,22 @@ function parseMods(raw) {
     return null;
   }
 }
+function joinInfoOf(nk, presence, meta) {
+  const sentMods = parseMods(meta.mods);
+  const stored = readProfile(nk, presence.userId, presence.username);
+  if (stored && stored.profile.nakamaLogin) {
+    return {
+      displayName: displayNameOf(stored.profile),
+      preferredJoker: stored.profile.preferredJoker,
+      mods: sentMods !== null ? sentMods : stored.profile.mods
+    };
+  }
+  return {
+    displayName: meta.displayName || presence.username,
+    preferredJoker: meta.preferredJoker || null,
+    mods: sentMods
+  };
+}
 function otherLobbyOf(nk, ctx, userId) {
   const objects = nk.storageRead([
     { collection: CURRENT_LOBBY_COLLECTION, key: CURRENT_LOBBY_KEY, userId }
@@ -2002,11 +2204,7 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
       rejectMessage: `Already in lobby ${otherCode}`
     };
   }
-  const info = {
-    displayName: meta.displayName || presence.username,
-    preferredJoker: meta.preferredJoker || null,
-    mods: parseMods(meta.mods)
-  };
+  const info = joinInfoOf(nk, presence, meta);
   return {
     state: __spreadProps(__spreadValues({}, state), {
       pendingInfo: __spreadProps(__spreadValues({}, state.pendingInfo), { [presence.userId]: info })
@@ -2171,6 +2369,17 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
       dispatcher,
       state,
       chatPost(state.lobby, signal.userId, signal.text)
+    );
+    return { state: next || state, data: "ok" };
+  }
+  if (signal.type === "player_info") {
+    const next = apply(
+      ctx,
+      logger,
+      nk,
+      dispatcher,
+      state,
+      setPlayerInfo(state.lobby, signal.userId, signal.info)
     );
     return { state: next || state, data: "ok" };
   }
@@ -2363,27 +2572,23 @@ function callModeration(nk, logger, env, request) {
 }
 
 // src/chat/rpc.ts
-var PREFS_COLLECTION = "chat_prefs";
-var PREFS_KEY = "chat";
-function isEnabled(nk, userId) {
-  const objects = nk.storageRead([
-    { collection: PREFS_COLLECTION, key: PREFS_KEY, userId }
-  ]);
-  return objects.length > 0 && objects[0].value.enabled === true;
+function tosAccepted(profile, config) {
+  return profile.tosAcceptedVersion >= config.tosVersion;
 }
 function rpcChatEnable(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  nk.storageWrite([
-    {
-      collection: PREFS_COLLECTION,
-      key: PREFS_KEY,
-      userId,
-      value: { enabled: true },
-      permissionRead: 1,
-      permissionWrite: 0
-    }
-  ]);
-  return JSON.stringify({ enabled: true });
+  const config = readConfig(nk);
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, "Chat access is permanently restricted");
+      if (!tosAccepted(current, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
+      return __spreadProps(__spreadValues({}, current), { chatEnabled: true });
+    },
+    ctx.username
+  );
+  return JSON.stringify({ enabled: true, player: playerView(userId, profile) });
 }
 function rpcChatSend(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -2392,7 +2597,12 @@ function rpcChatSend(ctx, logger, nk, payload) {
     throw runtimeError(INVALID_ARGUMENT, "Message is empty");
   if (message.length > MAX_MESSAGE_LENGTH)
     throw runtimeError(INVALID_ARGUMENT, `Message is over ${MAX_MESSAGE_LENGTH} characters`);
-  if (!isEnabled(nk, userId)) throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
+  const config = readConfig(nk);
+  if (!config.chatEnabled) throw runtimeError(UNAVAILABLE, "Chat is turned off");
+  const profile = profileFor(nk, userId, ctx.username);
+  if (profile.chatBlocked || !profile.chatEnabled)
+    throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
+  if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
   const current = currentLobby(nk, userId);
   if (!current) throw runtimeError(INVALID_ARGUMENT, "Not in a lobby");
   const check = JSON.parse(
@@ -2577,138 +2787,6 @@ function writeBans(nk, userId, bans) {
   ]);
 }
 
-// src/shared/jokers.ts
-var PRIVILEGE_JOKERS = {
-  virtualized: "j_perkeo",
-  bean: "j_turtle_bean",
-  vagabond: "j_vagabond",
-  sizaak: "j_dusk",
-  lava: "j_burnt",
-  twelve: "j_stone"
-};
-var DEFAULT_JOKER = "j_joker";
-function privilegeTable(privileges) {
-  const jokers = privileges.map((p) => PRIVILEGE_JOKERS[p]).filter((j) => !!j);
-  return jokers.length > 0 ? { jokers } : {};
-}
-
-// src/player/profile.ts
-var PLAYER_COLLECTION = "player";
-var PROFILE_KEY = "profile";
-var MAX_NAME_LENGTH = 64;
-var WRITE_ATTEMPTS2 = 3;
-function cleanName(name) {
-  if (typeof name !== "string") return "";
-  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
-}
-function defaultProfile(steamName) {
-  return {
-    steamName,
-    useDiscordName: false,
-    preferredJoker: DEFAULT_JOKER,
-    mods: null,
-    discordIdHash: null,
-    discordUsername: null,
-    privileges: [],
-    tosAcceptedVersion: 0,
-    chatEnabled: false,
-    chatBlocked: false,
-    mutedUserIds: [],
-    unresolvedMutedPlayerIds: [],
-    legacyPlayerId: null,
-    synced: false
-  };
-}
-function stringList(value) {
-  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
-}
-function profileOf(value, fallbackName) {
-  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
-  return __spreadProps(__spreadValues({}, base), {
-    useDiscordName: value.useDiscordName === true,
-    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
-    mods: value.mods === void 0 ? null : value.mods,
-    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
-    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
-    privileges: stringList(value.privileges),
-    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
-    chatEnabled: value.chatEnabled === true,
-    chatBlocked: value.chatBlocked === true,
-    mutedUserIds: stringList(value.mutedUserIds),
-    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
-    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
-    synced: value.synced === true
-  });
-}
-function withSync(profile, sync) {
-  var _a, _b;
-  return __spreadProps(__spreadValues({}, profile), {
-    useDiscordName: sync.useDiscordName === true,
-    preferredJoker: typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker,
-    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
-    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
-    privileges: stringList(sync.privileges),
-    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
-    chatEnabled: sync.chatEnabled === true,
-    chatBlocked: sync.chatBlocked === true,
-    mutedUserIds: stringList(sync.mutedUserIds),
-    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
-    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
-    synced: true
-  });
-}
-function displayNameOf(profile) {
-  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
-  return profile.steamName;
-}
-function playerView(userId, profile) {
-  return {
-    id: userId,
-    steamName: profile.steamName,
-    displayName: displayNameOf(profile),
-    useDiscordName: profile.useDiscordName,
-    preferredJoker: profile.preferredJoker,
-    discordLinked: profile.discordIdHash !== null,
-    discordUsername: profile.discordUsername,
-    privileges: privilegeTable(profile.privileges),
-    chatEnabled: profile.chatEnabled,
-    chatBlocked: profile.chatBlocked,
-    mutedPlayerIds: profile.mutedUserIds
-  };
-}
-function readProfile(nk, userId, fallbackName = "") {
-  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
-  if (objects.length === 0) return null;
-  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
-}
-function writeProfile(nk, userId, profile, version) {
-  nk.storageWrite([
-    {
-      collection: PLAYER_COLLECTION,
-      key: PROFILE_KEY,
-      userId,
-      value: profile,
-      version,
-      permissionRead: 1,
-      permissionWrite: 0
-    }
-  ]);
-}
-function updateProfile(nk, userId, change, fallbackName = "") {
-  let lastError = null;
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
-    const stored = readProfile(nk, userId, fallbackName);
-    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
-    try {
-      writeProfile(nk, userId, next, stored ? stored.version : "*");
-      return next;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError;
-}
-
 // src/player/session.ts
 var STEAM_CUSTOM_ID = /^steam:(\d+)$/;
 function steamIdOf(nk, userId) {
@@ -2742,9 +2820,11 @@ function withResolvedMutes(profile, resolved) {
   });
 }
 function loginResponse(userId, profile, config) {
+  const tosRequired = profile.tosAcceptedVersion < config.tosVersion;
   return {
-    tosRequired: profile.tosAcceptedVersion < config.tosVersion,
-    tosUpdate: profile.tosAcceptedVersion > 0,
+    tosRequired,
+    // An update to a ToS the player accepted before (only with tosRequired).
+    tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
     player: playerView(userId, profile),
     serverConfig: config
   };
@@ -2770,7 +2850,7 @@ function rpcSessionInit(ctx, logger, nk, payload) {
     nk,
     userId,
     (current) => {
-      let next = __spreadProps(__spreadValues({}, current), { steamName });
+      let next = __spreadProps(__spreadValues({}, current), { steamName, nakamaLogin: true });
       if (sync) next = withSync(next, sync);
       else if (!steamId) next.synced = true;
       return withResolvedMutes(next, resolved);
@@ -2810,6 +2890,86 @@ function rpcTosAccept(ctx, logger, nk, payload) {
   return JSON.stringify(loginResponse(userId, profile, config));
 }
 
+// src/player/rpc.ts
+var MAX_MODS = 300;
+var MAX_MOD_LENGTH = 128;
+var MAX_MUTES = 1e3;
+var USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function pushToLobby(nk, userId, info) {
+  const current = currentLobby(nk, userId);
+  if (!current) return;
+  const signal = { type: "player_info", userId, info };
+  nk.matchSignal(current.matchId, JSON.stringify(signal));
+}
+function accountUpdated(nk, userId, profile) {
+  notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, "account_updated", { player: playerView(userId, profile) });
+}
+function rpcProfileSetDisplay(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const value = parsePayload(payload).useDiscordName;
+  if (typeof value !== "boolean") throw runtimeError(INVALID_ARGUMENT, "Missing or invalid useDiscordName (boolean)");
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      if (value && !current.discordIdHash) throw runtimeError(FAILED_PRECONDITION, "Discord account not linked");
+      return __spreadProps(__spreadValues({}, current), { useDiscordName: value });
+    },
+    ctx.username
+  );
+  syncDisplayName(nk, userId, profile);
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcProfileSetJoker(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const joker = parsePayload(payload).preferredJoker;
+  if (typeof joker !== "string" || !joker) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid preferredJoker (string)");
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      if (!isValidJoker(joker, current.privileges)) throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
+      return __spreadProps(__spreadValues({}, current), { preferredJoker: joker });
+    },
+    ctx.username
+  );
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcProfileSetMods(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const mods = parsePayload(payload).mods;
+  if (!Array.isArray(mods) || mods.some((m) => typeof m !== "string"))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid mods (array of strings)");
+  const list = mods.slice(0, MAX_MODS).map((m) => m.slice(0, MAX_MOD_LENGTH));
+  updateProfile(nk, userId, (current) => __spreadProps(__spreadValues({}, current), { mods: list }), ctx.username);
+  pushToLobby(nk, userId, { mods: list });
+  return JSON.stringify({ mods: list });
+}
+function rpcMuteSet(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const body = parsePayload(payload);
+  const target = body.userId;
+  if (typeof target !== "string" || !USER_ID.test(target)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
+  if (target === userId) throw runtimeError(INVALID_ARGUMENT, "Cannot mute yourself");
+  if (typeof body.muted !== "boolean") throw runtimeError(INVALID_ARGUMENT, "Missing or invalid muted (boolean)");
+  const muted = body.muted;
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      const rest = current.mutedUserIds.filter((id) => id !== target);
+      if (muted && rest.length >= MAX_MUTES) throw runtimeError(FAILED_PRECONDITION, "Too many muted players");
+      return __spreadProps(__spreadValues({}, current), { mutedUserIds: muted ? rest.concat([target]) : rest });
+    },
+    ctx.username
+  );
+  return JSON.stringify({ mutedPlayerIds: profile.mutedUserIds });
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
@@ -2831,6 +2991,10 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerMatchmakerMatched(matchmakerMatched);
   initializer.registerRpc("session_init", rpcSessionInit);
   initializer.registerRpc("tos_accept", rpcTosAccept);
+  initializer.registerRpc("profile_set_display", rpcProfileSetDisplay);
+  initializer.registerRpc("profile_set_joker", rpcProfileSetJoker);
+  initializer.registerRpc("profile_set_mods", rpcProfileSetMods);
+  initializer.registerRpc("mute_set", rpcMuteSet);
   initializer.registerRpc("chat_enable", rpcChatEnable);
   initializer.registerRpc("chat_send", rpcChatSend);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);

@@ -5,11 +5,12 @@
 import {
 	INVALID_ARGUMENT,
 	PERMISSION_DENIED,
-	UNAUTHENTICATED,
 	UNAVAILABLE,
 	runtimeError,
 } from '../errors'
+import { readConfig, type ServerConfig } from '../config'
 import { currentLobby } from '../lobby/rpc'
+import { playerView, profileFor, updateProfile, type Profile } from '../player/profile'
 import { parsePayload, requireUser } from '../rpc'
 import type { LobbySignal } from '../lobby/protocol'
 import {
@@ -18,17 +19,13 @@ import {
 	decideModerationOutcome,
 } from './moderation'
 
-const PREFS_COLLECTION = 'chat_prefs'
-const PREFS_KEY = 'chat'
-
-function isEnabled(nk: nkruntime.Nakama, userId: string): boolean {
-	const objects = nk.storageRead([
-		{ collection: PREFS_COLLECTION, key: PREFS_KEY, userId },
-	])
-	return objects.length > 0 && objects[0].value.enabled === true
+function tosAccepted(profile: Profile, config: ServerConfig): boolean {
+	return profile.tosAcceptedVersion >= config.tosVersion
 }
 
-// {} -> turns chat on for the caller (the ToS step of the API's /auth/chat/enable).
+// {} -> {enabled, player}: turns chat on for the caller (the API's
+// /auth/chat/enable). Refused for a chat-blocked account (the age check at
+// ToS time) and before the current ToS is accepted.
 export function rpcChatEnable(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -36,17 +33,18 @@ export function rpcChatEnable(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	nk.storageWrite([
-		{
-			collection: PREFS_COLLECTION,
-			key: PREFS_KEY,
-			userId,
-			value: { enabled: true },
-			permissionRead: 1,
-			permissionWrite: 0,
+	const config = readConfig(nk)
+	const profile = updateProfile(
+		nk,
+		userId,
+		(current) => {
+			if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, 'Chat access is permanently restricted')
+			if (!tosAccepted(current, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
+			return { ...current, chatEnabled: true }
 		},
-	])
-	return JSON.stringify({ enabled: true })
+		ctx.username,
+	)
+	return JSON.stringify({ enabled: true, player: playerView(userId, profile) })
 }
 
 // {message} -> {} once it has been posted to the caller's lobby, or an error:
@@ -64,7 +62,12 @@ export function rpcChatSend(
 		throw runtimeError(INVALID_ARGUMENT, 'Message is empty')
 	if (message.length > MAX_MESSAGE_LENGTH)
 		throw runtimeError(INVALID_ARGUMENT, `Message is over ${MAX_MESSAGE_LENGTH} characters`)
-	if (!isEnabled(nk, userId)) throw runtimeError(PERMISSION_DENIED, 'Chat is not enabled for this account')
+	const config = readConfig(nk)
+	if (!config.chatEnabled) throw runtimeError(UNAVAILABLE, 'Chat is turned off')
+	const profile = profileFor(nk, userId, ctx.username)
+	if (profile.chatBlocked || !profile.chatEnabled)
+		throw runtimeError(PERMISSION_DENIED, 'Chat is not enabled for this account')
+	if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
 
 	const current = currentLobby(nk, userId)
 	if (!current) throw runtimeError(INVALID_ARGUMENT, 'Not in a lobby')

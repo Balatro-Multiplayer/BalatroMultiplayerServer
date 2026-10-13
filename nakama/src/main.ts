@@ -31,6 +31,7 @@ import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
+import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -60,6 +61,10 @@ function InitModule(
 	initializer.registerMatchmakerMatched(matchmakerMatched)
 	initializer.registerRpc('session_init', rpcSessionInit)
 	initializer.registerRpc('tos_accept', rpcTosAccept)
+	initializer.registerRpc('profile_set_display', rpcProfileSetDisplay)
+	initializer.registerRpc('profile_set_joker', rpcProfileSetJoker)
+	initializer.registerRpc('profile_set_mods', rpcProfileSetMods)
+	initializer.registerRpc('mute_set', rpcMuteSet)
 	initializer.registerRpc('chat_enable', rpcChatEnable)
 	initializer.registerRpc('chat_send', rpcChatSend)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)

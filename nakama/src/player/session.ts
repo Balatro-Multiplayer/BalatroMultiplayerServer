@@ -74,9 +74,11 @@ export function withResolvedMutes(profile: Profile, resolved: { [playerId: strin
 // The login response: the API's gameLoginPayload, minus its tokens (the
 // client already holds a Nakama session).
 export function loginResponse(userId: string, profile: Profile, config: ServerConfig) {
+	const tosRequired = profile.tosAcceptedVersion < config.tosVersion
 	return {
-		tosRequired: profile.tosAcceptedVersion < config.tosVersion,
-		tosUpdate: profile.tosAcceptedVersion > 0,
+		tosRequired,
+		// An update to a ToS the player accepted before (only with tosRequired).
+		tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
 		player: playerView(userId, profile),
 		serverConfig: config,
 	}
@@ -114,7 +116,7 @@ export function rpcSessionInit(
 		nk,
 		userId,
 		(current) => {
-			let next: Profile = { ...current, steamName }
+			let next: Profile = { ...current, steamName, nakamaLogin: true }
 			if (sync) next = withSync(next, sync)
 			else if (!steamId) next.synced = true // device login: nothing to sync
 			return withResolvedMutes(next, resolved)

@@ -234,6 +234,8 @@ export type LobbySignal =
 	// match loop: check the sender may talk and fetch the context, then post.
 	| { type: 'chat_check'; userId: string }
 	| { type: 'chat_post'; userId: string; text: string }
+	// A profile change (player/rpc.ts) reaching the player's lobby.
+	| { type: 'player_info'; userId: string; info: Partial<PlayerInfo> }
 
 // Storage object (per user) naming the lobby they are in, for reconnect after
 // a game restart. Written and removed by the match only.

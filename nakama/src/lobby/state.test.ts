@@ -15,6 +15,7 @@ import {
 	snapshotFor,
 	setMetadata,
 	setOwnState,
+	setPlayerInfo,
 	tick,
 } from './state'
 
@@ -289,5 +290,25 @@ describe('tick', () => {
 		})
 		expect(tick(lobby, CREATOR_JOIN_TIMEOUT_MS - 1).lobby.closed).toBe(false)
 		expect(tick(lobby, CREATOR_JOIN_TIMEOUT_MS).lobby.closed).toBe(true)
+	})
+})
+
+describe('setPlayerInfo', () => {
+	it('updates the player and tells everyone, the player too', () => {
+		const step = setPlayerInfo(lobbyWith('a', 'b'), 'b', { displayName: 'Bee', preferredJoker: 'j_mime' })
+		expect(step.lobby.players.find((p) => p.id === 'b')!.info).toEqual({ displayName: 'Bee', preferredJoker: 'j_mime', mods: null })
+		expect(step.out).toEqual([
+			{
+				kind: 'send',
+				op: ServerOp.PLAYER_INFO,
+				payload: { playerId: 'b', info: { displayName: 'Bee', preferredJoker: 'j_mime', mods: null } },
+				to: ['a', 'b'],
+			},
+		])
+	})
+
+	it('ignores players not in the lobby', () => {
+		const lobby = lobbyWith('a')
+		expect(setPlayerInfo(lobby, 'z', { displayName: 'Z' })).toEqual({ lobby, out: [] })
 	})
 })
