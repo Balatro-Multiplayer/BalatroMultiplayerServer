@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_CONFIG, writeConfig } from '../config'
+import { fakeNk } from '../testing/fake_nk'
 import { carriedOver, configureSeason, currentSeason, decayedRating } from './season'
 
 const DAY = 24 * 60 * 60 * 1000
@@ -40,14 +42,21 @@ describe('carriedOver', () => {
 	})
 })
 
-describe('configureSeason', () => {
-	it('takes positive integers and ignores the rest', () => {
+describe('the current season', () => {
+	it('falls back to RATING_SEASON, taking positive integers only', () => {
+		const nk = fakeNk() as never
 		configureSeason('3')
-		expect(currentSeason()).toBe(3)
+		expect(currentSeason(nk)).toBe(3)
 		configureSeason('nope')
 		configureSeason('-1')
 		configureSeason(undefined)
-		expect(currentSeason()).toBe(3)
+		expect(currentSeason(nk)).toBe(3)
 		configureSeason('1')
+	})
+
+	it("is the API's once it has pushed one", () => {
+		const nk = fakeNk()
+		writeConfig(nk as never, { ...DEFAULT_CONFIG, season: 7 })
+		expect(currentSeason(nk as never)).toBe(7)
 	})
 })

@@ -1619,12 +1619,15 @@ var DEFAULT_CONFIG = {
   lobbyCreationEnabled: true,
   testingMode: false,
   integrityEnforced: false,
-  chatAllowlist: []
+  chatAllowlist: [],
+  season: 0
 };
 function mergeConfig(current, update) {
   const next = __spreadValues({}, current);
   const tos = update.tosVersion;
   if (typeof tos === "number" && Number.isInteger(tos) && tos >= 0) next.tosVersion = tos;
+  const season = update.season;
+  if (typeof season === "number" && Number.isInteger(season) && season > 0) next.season = season;
   const flags = [
     "chatEnabled",
     "rankedEnabled",
@@ -1697,15 +1700,15 @@ function withoutBan(bans, banId) {
   return next;
 }
 function withoutExpired(bans, now) {
-  let changed2 = false;
+  let changed = false;
   const next = {};
   for (const type of BAN_TYPES) {
     const ban = bans[type];
     if (!ban) continue;
     if (activeBan(bans, type, now)) next[type] = ban;
-    else changed2 = true;
+    else changed = true;
   }
-  return changed2 ? next : bans;
+  return changed ? next : bans;
 }
 function bansFromList(list) {
   let bans = {};
@@ -3523,13 +3526,14 @@ function nextSeasonBest(modId, reported, current) {
 var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
 var DECAY_RATE_PER_DAY = 5;
 var DAY_MS = 24 * 60 * 60 * 1e3;
-var season = 1;
-function currentSeason() {
-  return season;
+var bootSeason = 1;
+function currentSeason(nk) {
+  const pushed = readConfig(nk).season;
+  return pushed > 0 ? pushed : bootSeason;
 }
 function configureSeason(value) {
   const parsed = value === void 0 ? NaN : Number(value);
-  if (Number.isInteger(parsed) && parsed > 0) season = parsed;
+  if (Number.isInteger(parsed) && parsed > 0) bootSeason = parsed;
 }
 function decayedRating(record, now) {
   if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
@@ -3544,8 +3548,8 @@ function carriedOver(previous, now) {
 }
 
 // src/rating/apply.ts
-function boardId(modId, mode, season2 = currentSeason()) {
-  return `${modId}:${mode}:${season2}`;
+function boardId(modId, mode, season) {
+  return `${modId}:${mode}:${season}`;
 }
 function newRating() {
   return {
@@ -3595,8 +3599,8 @@ function planRatings(run, flags, current) {
   return plan;
 }
 var WRITE_ATTEMPTS2 = 5;
-function loadRatings(nk, modId, mode, playerIds, now) {
-  const key = boardId(modId, mode);
+function loadRatings(nk, modId, mode, playerIds, now, season) {
+  const key = boardId(modId, mode, season);
   const current = {};
   const versions = {};
   for (const object of nk.storageRead(
@@ -3606,13 +3610,12 @@ function loadRatings(nk, modId, mode, playerIds, now) {
     current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
     versions[object.userId] = object.version;
   }
-  const season2 = currentSeason();
   const fresh = playerIds.filter((id) => !current[id]);
-  if (season2 > 1 && fresh.length > 0) {
+  if (season > 1 && fresh.length > 0) {
     const previous = nk.storageRead(
       fresh.map((id) => ({
         collection: RATINGS_COLLECTION,
-        key: boardId(modId, mode, season2 - 1),
+        key: boardId(modId, mode, season - 1),
         userId: id
       }))
     );
@@ -3624,14 +3627,16 @@ function loadRatings(nk, modId, mode, playerIds, now) {
   return { current, versions };
 }
 function applyRatings(nk, logger, run, mode, flags) {
-  const key = boardId(run.modId, mode);
+  const season = currentSeason(nk);
+  const key = boardId(run.modId, mode, season);
   for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
     const { current, versions } = loadRatings(
       nk,
       run.modId,
       mode,
       run.players.map((p) => p.id),
-      run.endedAt
+      run.endedAt,
+      season
     );
     const plan = planRatings(run, flags, current);
     const ids = Object.keys(plan.updates);
@@ -3653,14 +3658,13 @@ function applyRatings(nk, logger, run, mode, flags) {
       logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
       continue;
     }
-    mirrorToLeaderboard(nk, logger, run, mode, plan, flags);
+    mirrorToLeaderboard(nk, logger, run, key, mode, plan);
     return plan.results;
   }
   logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS2);
   return {};
 }
-function mirrorToLeaderboard(nk, logger, run, mode, plan, _flags) {
-  const id = boardId(run.modId, mode);
+function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
   try {
     nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
     for (const player of run.players) {
@@ -4669,7 +4673,7 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
           kind: "run",
           at: Date.now(),
           runId: run.runId,
-          rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason() } : null
+          rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason(nk) } : null
         });
         for (const playerId in run.flags) {
           logger.warn("Lobby %s: run %s: %s is flagged (%s)", lobby.code, run.runId, playerId, run.flags[playerId]);
@@ -5537,7 +5541,7 @@ function rpcRatingGet(ctx, logger, nk, payload) {
   const playerId = input.playerId === void 0 ? ctx.userId : input.playerId;
   if (typeof playerId !== "string" || !USER_ID_PATTERN3.test(playerId))
     throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
-  const rating = loadRatings(nk, modId, mode, [playerId], Date.now()).current[playerId] || newRating();
+  const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating();
   return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
 }
 function rpcLeaderboardGet(ctx, logger, nk, payload) {
@@ -5546,7 +5550,7 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   const cursor = typeof input.cursor === "string" ? input.cursor : "";
   let page;
   try {
-    page = nk.leaderboardRecordsList(boardId(modId, mode), null, BOARD_PAGE, cursor, 0);
+    page = nk.leaderboardRecordsList(boardId(modId, mode, currentSeason(nk)), null, BOARD_PAGE, cursor, 0);
   } catch (e) {
     return JSON.stringify({ entries: [], cursor: "" });
   }
@@ -5578,6 +5582,11 @@ function pushToLobby(nk, userId, info) {
 }
 function accountUpdated(nk, userId, profile) {
   notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, "account_updated", { player: playerView(userId, profile) });
+}
+function profileChanged(nk, userId, profile) {
+  syncDisplayName(nk, userId, profile);
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
 }
 function rpcProfileSetDisplay(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -5643,6 +5652,160 @@ function rpcMuteSet(ctx, logger, nk, payload) {
     ctx.username
   );
   return JSON.stringify({ mutedPlayerIds: profile.mutedUserIds });
+}
+
+// src/player/discord.ts
+var DISCORD_INDEX_COLLECTION = "discord_index";
+var USER_ID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var HASH = /^[A-Za-z0-9_-]{8,128}$/;
+var MAX_NAME = 64;
+function indexKey(hash) {
+  return { collection: DISCORD_INDEX_COLLECTION, key: hash, userId: SYSTEM_USER_ID };
+}
+function discordOwner(nk, hash) {
+  const objects = nk.storageRead([indexKey(hash)]);
+  return objects.length > 0 ? String(objects[0].value.userId) : null;
+}
+function claimDiscord(nk, userId, hash) {
+  const owner = discordOwner(nk, hash);
+  if (owner === userId) return;
+  if (owner !== null) throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
+  try {
+    nk.storageWrite([__spreadProps(__spreadValues({}, indexKey(hash)), { value: { userId }, version: "*", permissionRead: 0, permissionWrite: 0 })]);
+  } catch (e) {
+    throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
+  }
+}
+function releaseDiscord(nk, userId, hash) {
+  if (hash && discordOwner(nk, hash) === userId) nk.storageDelete([indexKey(hash)]);
+}
+function withDiscord(profile, hash, username) {
+  return __spreadProps(__spreadValues({}, profile), { discordIdHash: hash, discordUsername: username });
+}
+function withoutDiscord(profile) {
+  return __spreadProps(__spreadValues({}, profile), { discordIdHash: null, discordUsername: null, useDiscordName: false });
+}
+function rpcDiscordLinkStart(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const reply = callExpress(nk, logger, ctx.env, "/discord/link-url", { nakamaUserId: userId });
+  const url = reply && reply.status === 200 ? reply.body.url : null;
+  if (typeof url !== "string") throw runtimeError(UNAVAILABLE, "Discord linking is unavailable right now");
+  return JSON.stringify({ url });
+}
+function rpcDiscordUnlink(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  let previous = null;
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      previous = current.discordIdHash;
+      return withoutDiscord(current);
+    },
+    ctx.username
+  );
+  releaseDiscord(nk, userId, previous);
+  profileChanged(nk, userId, profile);
+  callExpress(nk, logger, ctx.env, "/discord/unlinked", { nakamaUserId: userId });
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcAdminDiscordSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const { userId, discordIdHash, discordUsername } = parsePayload(payload);
+  if (typeof userId !== "string" || !USER_ID2.test(userId)) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid userId");
+  if (typeof discordIdHash !== "string" || !HASH.test(discordIdHash))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid discordIdHash");
+  const name = typeof discordUsername === "string" && discordUsername ? discordUsername.slice(0, MAX_NAME) : null;
+  nk.accountGetId(userId);
+  claimDiscord(nk, userId, discordIdHash);
+  let previous = null;
+  const profile = updateProfile(nk, userId, (current) => {
+    previous = current.discordIdHash;
+    return withDiscord(current, discordIdHash, name);
+  });
+  if (previous !== discordIdHash) releaseDiscord(nk, userId, previous);
+  profileChanged(nk, userId, profile);
+  logger.info("Linked Discord to %s", userId);
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+
+// src/player/admin.ts
+var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var PRIVILEGE = /^[a-z0-9_-]{1,64}$/i;
+function requireAccount(nk, userId) {
+  if (typeof userId !== "string" || !USER_ID3.test(userId)) throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  try {
+    nk.accountGetId(userId);
+  } catch (e) {
+    throw runtimeError(NOT_FOUND, "No such user");
+  }
+  return userId;
+}
+function parseEdit(input) {
+  const edit = {};
+  const { privileges, useDiscordName, preferredJoker, discord } = input;
+  if (privileges !== void 0) {
+    if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
+      throw runtimeError(INVALID_ARGUMENT, "privileges must be an array of privilege names");
+    edit.privileges = privileges;
+  }
+  if (useDiscordName !== void 0) {
+    if (typeof useDiscordName !== "boolean") throw runtimeError(INVALID_ARGUMENT, "useDiscordName must be a boolean");
+    edit.useDiscordName = useDiscordName;
+  }
+  if (preferredJoker !== void 0) {
+    if (typeof preferredJoker !== "string" || !preferredJoker)
+      throw runtimeError(INVALID_ARGUMENT, "preferredJoker must be a joker id");
+    edit.preferredJoker = preferredJoker;
+  }
+  if (discord !== void 0) {
+    if (discord !== null) throw runtimeError(INVALID_ARGUMENT, "discord can only be null (unlink)");
+    edit.discord = null;
+  }
+  return edit;
+}
+function applyEdit(profile, edit) {
+  let next = __spreadValues({}, profile);
+  if (edit.privileges !== void 0) next.privileges = edit.privileges;
+  if (edit.discord === null) next = withoutDiscord(next);
+  if (edit.useDiscordName !== void 0) {
+    if (edit.useDiscordName && !next.discordIdHash) throw runtimeError(FAILED_PRECONDITION, "Discord account not linked");
+    next.useDiscordName = edit.useDiscordName;
+  }
+  if (edit.preferredJoker !== void 0) {
+    if (!isValidJoker(edit.preferredJoker, next.privileges)) throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
+    next.preferredJoker = edit.preferredJoker;
+  }
+  return next;
+}
+function rpcAdminProfileSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireAccount(nk, input.userId);
+  const edit = parseEdit(input);
+  let previousDiscord = null;
+  const profile = updateProfile(nk, userId, (current) => {
+    previousDiscord = current.discordIdHash;
+    return applyEdit(current, edit);
+  });
+  if (edit.discord === null) releaseDiscord(nk, userId, previousDiscord);
+  profileChanged(nk, userId, profile);
+  logger.info("Profile of %s updated by the API: %v", userId, JSON.stringify(Object.keys(edit)));
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcAdminAccountDelete(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const userId = requireAccount(nk, parsePayload(payload).userId);
+  const lobby = currentLobby(nk, userId);
+  if (lobby) {
+    const signal = { type: "admin_remove", userId, reason: "account_deleted", onlyIfStarted: false };
+    nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+  }
+  releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash);
+  nk.sessionLogout(userId, "", "");
+  nk.accountDeleteId(userId, false);
+  logger.info("Deleted account %s", userId);
+  return JSON.stringify({ deleted: true });
 }
 
 // src/moderation/report.ts
@@ -5718,86 +5881,6 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   return JSON.stringify({ ok: true, reportId: reply.body.reportId });
 }
 
-// src/player/discord.ts
-var DISCORD_INDEX_COLLECTION = "discord_index";
-var USER_ID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var HASH = /^[A-Za-z0-9_-]{8,128}$/;
-var MAX_NAME = 64;
-function indexKey(hash) {
-  return { collection: DISCORD_INDEX_COLLECTION, key: hash, userId: SYSTEM_USER_ID };
-}
-function discordOwner(nk, hash) {
-  const objects = nk.storageRead([indexKey(hash)]);
-  return objects.length > 0 ? String(objects[0].value.userId) : null;
-}
-function claimDiscord(nk, userId, hash) {
-  const owner = discordOwner(nk, hash);
-  if (owner === userId) return;
-  if (owner !== null) throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
-  try {
-    nk.storageWrite([__spreadProps(__spreadValues({}, indexKey(hash)), { value: { userId }, version: "*", permissionRead: 0, permissionWrite: 0 })]);
-  } catch (e) {
-    throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
-  }
-}
-function releaseDiscord(nk, userId, hash) {
-  if (hash && discordOwner(nk, hash) === userId) nk.storageDelete([indexKey(hash)]);
-}
-function withDiscord(profile, hash, username) {
-  return __spreadProps(__spreadValues({}, profile), { discordIdHash: hash, discordUsername: username });
-}
-function withoutDiscord(profile) {
-  return __spreadProps(__spreadValues({}, profile), { discordIdHash: null, discordUsername: null, useDiscordName: false });
-}
-function changed(nk, userId, profile) {
-  syncDisplayName(nk, userId, profile);
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
-  accountUpdated(nk, userId, profile);
-}
-function rpcDiscordLinkStart(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const reply = callExpress(nk, logger, ctx.env, "/discord/link-url", { nakamaUserId: userId });
-  const url = reply && reply.status === 200 ? reply.body.url : null;
-  if (typeof url !== "string") throw runtimeError(UNAVAILABLE, "Discord linking is unavailable right now");
-  return JSON.stringify({ url });
-}
-function rpcDiscordUnlink(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  let previous = null;
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      previous = current.discordIdHash;
-      return withoutDiscord(current);
-    },
-    ctx.username
-  );
-  releaseDiscord(nk, userId, previous);
-  changed(nk, userId, profile);
-  callExpress(nk, logger, ctx.env, "/discord/unlinked", { nakamaUserId: userId });
-  return JSON.stringify({ player: playerView(userId, profile) });
-}
-function rpcAdminDiscordSet(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const { userId, discordIdHash, discordUsername } = parsePayload(payload);
-  if (typeof userId !== "string" || !USER_ID2.test(userId)) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid userId");
-  if (typeof discordIdHash !== "string" || !HASH.test(discordIdHash))
-    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid discordIdHash");
-  const name = typeof discordUsername === "string" && discordUsername ? discordUsername.slice(0, MAX_NAME) : null;
-  nk.accountGetId(userId);
-  claimDiscord(nk, userId, discordIdHash);
-  let previous = null;
-  const profile = updateProfile(nk, userId, (current) => {
-    previous = current.discordIdHash;
-    return withDiscord(current, discordIdHash, name);
-  });
-  if (previous !== discordIdHash) releaseDiscord(nk, userId, previous);
-  changed(nk, userId, profile);
-  logger.info("Linked Discord to %s", userId);
-  return JSON.stringify({ player: playerView(userId, profile) });
-}
-
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
@@ -5861,6 +5944,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_queue_cancel", rpcAdminQueueCancel);
   initializer.registerRpc("admin_mirror_pull", rpcAdminMirrorPull);
   initializer.registerRpc("admin_mirror_ack", rpcAdminMirrorAck);
+  initializer.registerRpc("admin_profile_set", rpcAdminProfileSet);
+  initializer.registerRpc("admin_account_delete", rpcAdminAccountDelete);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

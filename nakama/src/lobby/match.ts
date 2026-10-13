@@ -215,7 +215,7 @@ function runEffect(
 					kind: 'run',
 					at: Date.now(),
 					runId: run.runId,
-					rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason() } : null,
+					rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason(nk) } : null,
 				})
 				for (const playerId in run.flags) {
 					logger.warn('Lobby %s: run %s: %s is flagged (%s)', lobby.code, run.runId, playerId, run.flags[playerId])

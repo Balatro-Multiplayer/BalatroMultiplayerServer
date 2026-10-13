@@ -1,9 +1,18 @@
+import { desc, isNull } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { serverConfig, modVersions, chatAllowlist } from '../db/schema.js'
+import { serverConfig, modVersions, chatAllowlist, seasons } from '../db/schema.js'
 import type { AppConfig } from '../../state/config.js'
 import { setConfig } from '../../state/config.js'
 import { env } from '../../env.js'
 import { pushConfigToNakama } from '../nakama/config-sync.js'
+
+// The active season (ended_at IS NULL), else the latest between seasons.
+async function ratingSeason(): Promise<number | undefined> {
+	const [active] = await db.select({ id: seasons.id }).from(seasons).where(isNull(seasons.endedAt)).limit(1)
+	if (active) return active.id
+	const [latest] = await db.select({ id: seasons.id }).from(seasons).orderBy(desc(seasons.id)).limit(1)
+	return latest?.id
+}
 
 export async function loadConfigFromDb(): Promise<AppConfig> {
 	await db
@@ -26,6 +35,7 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 	const chatAllowlistSet = new Set(allowlistRows.map((r) => r.message))
 
 	const config: AppConfig = {
+		season: await ratingSeason(),
 		tosVersion,
 		mods,
 		chatAllowlist: chatAllowlistSet,

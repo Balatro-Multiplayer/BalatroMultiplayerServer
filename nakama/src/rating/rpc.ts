@@ -1,6 +1,7 @@
 // Rating read RPCs: a player's own rating on a board, and a board's top.
 import { INVALID_ARGUMENT, UNAUTHENTICATED, runtimeError } from '../errors'
 import { boardId, loadRatings, newRating } from './apply'
+import { currentSeason } from './season'
 import { PLACEMENT_GAMES } from './elo'
 
 const BOARD_PAGE = 50
@@ -36,7 +37,7 @@ export function rpcRatingGet(
 	const playerId = input.playerId === undefined ? ctx.userId : input.playerId
 	if (typeof playerId !== 'string' || !USER_ID_PATTERN.test(playerId))
 		throw runtimeError(INVALID_ARGUMENT, 'playerId is not a user id')
-	const rating = loadRatings(nk, modId, mode, [playerId], Date.now()).current[playerId] || newRating()
+	const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating()
 	return JSON.stringify({ ...rating, isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
 }
 
@@ -54,7 +55,7 @@ export function rpcLeaderboardGet(
 	const cursor = typeof input.cursor === 'string' ? input.cursor : ''
 	let page: ReturnType<nkruntime.Nakama['leaderboardRecordsList']>
 	try {
-		page = nk.leaderboardRecordsList(boardId(modId, mode), null, BOARD_PAGE, cursor, 0)
+		page = nk.leaderboardRecordsList(boardId(modId, mode, currentSeason(nk)), null, BOARD_PAGE, cursor, 0)
 	} catch (e) {
 		// The board is created by the first rated game.
 		return JSON.stringify({ entries: [], cursor: '' })

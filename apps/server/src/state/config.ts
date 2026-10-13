@@ -26,6 +26,9 @@ export interface AppConfig {
 	// matchmaking system auto-creates on match found -- see rankedEnabled/
 	// casualQueueEnabled for that.
 	lobbyCreationEnabled: boolean
+	// The rating season (seasons table): the active one, else the latest.
+	// Pushed to Nakama, which rates games into it. Unset: no seasons yet.
+	season?: number
 }
 
 let _config: AppConfig = {

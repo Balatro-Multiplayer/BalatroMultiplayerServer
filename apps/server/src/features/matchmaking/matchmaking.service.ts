@@ -27,6 +27,7 @@ import type { PlayerSession } from '../../state/player.js'
 import { launcherIntegrityService } from '../launcher-integrity/launcher-integrity.service.js'
 import type { RankedReadinessFailureReason } from '../launcher-integrity/launcher-integrity.service.js'
 import { replayLogService } from '../replay-log/replay-log.service.js'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { MIN_MS_PER_HAND } from './anti-cheat.config.js'
 import {
 	INITIAL_HIDDEN_RATING,
@@ -125,9 +126,12 @@ function runDailyTasks(): void {
 			runDecay().catch((err) =>
 				console.error('[matchmaking] runDecay error:', err),
 			)
-			checkSeasonRollover().catch((err) =>
-				console.error('[matchmaking] checkSeasonRollover error:', err),
-			)
+			// A new season reaches Nakama with the reloaded config.
+			checkSeasonRollover()
+				.then(async (rolled) => {
+					if (rolled > 0) await loadConfigFromDb()
+				})
+				.catch((err) => console.error('[matchmaking] checkSeasonRollover error:', err))
 		})
 		.catch((err) =>
 			console.error('[matchmaking] runDailyTasks import error:', err),

@@ -2,23 +2,27 @@
 // gateway. Neither needs a scheduler: a new season's rating is seeded from the
 // previous one the first time it is read, and decay is computed from
 // lastMatchAt whenever a rating is read (and stored with the player's next game).
+import { readConfig } from '../config'
 import { applySoftReset, PLACEMENT_GAMES, RATING_FLOOR } from './elo'
 
 export const DECAY_INACTIVE_THRESHOLD_DAYS = 7
 export const DECAY_RATE_PER_DAY = 5
 const DAY_MS = 24 * 60 * 60 * 1000
 
-let season = 1
+let bootSeason = 1
 
-export function currentSeason(): number {
-	return season
+// The season ratings count toward: the API's active season (its seasons
+// table, pushed with the server config), else RATING_SEASON from boot.
+export function currentSeason(nk: nkruntime.Nakama): number {
+	const pushed = readConfig(nk).season
+	return pushed > 0 ? pushed : bootSeason
 }
 
 // RATING_SEASON is the runtime env value; anything that isn't a positive
-// integer keeps the current season.
+// integer keeps the current fallback.
 export function configureSeason(value: string | undefined): void {
 	const parsed = value === undefined ? NaN : Number(value)
-	if (Number.isInteger(parsed) && parsed > 0) season = parsed
+	if (Number.isInteger(parsed) && parsed > 0) bootSeason = parsed
 }
 
 interface Rated {

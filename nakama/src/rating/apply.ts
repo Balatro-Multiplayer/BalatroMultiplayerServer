@@ -22,7 +22,7 @@ export interface RatingRecord {
 	lastMatchAt: number
 }
 
-export function boardId(modId: string, mode: string, season: number = currentSeason()): string {
+export function boardId(modId: string, mode: string, season: number): string {
 	return `${modId}:${mode}:${season}`
 }
 
@@ -102,8 +102,9 @@ export function loadRatings(
 	mode: string,
 	playerIds: string[],
 	now: number,
+	season: number,
 ): { current: { [userId: string]: RatingRecord }; versions: { [userId: string]: string | undefined } } {
-	const key = boardId(modId, mode)
+	const key = boardId(modId, mode, season)
 	const current: { [userId: string]: RatingRecord } = {}
 	const versions: { [userId: string]: string | undefined } = {}
 	for (const object of nk.storageRead(
@@ -113,7 +114,6 @@ export function loadRatings(
 		current[object.userId] = { ...record, rating: decayedRating(record, now) }
 		versions[object.userId] = object.version
 	}
-	const season = currentSeason()
 	const fresh = playerIds.filter((id) => !current[id])
 	if (season > 1 && fresh.length > 0) {
 		const previous = nk.storageRead(
@@ -141,7 +141,8 @@ export function applyRatings(
 	mode: string,
 	flags: { [userId: string]: FlagReason },
 ): { [userId: string]: RatingResult } {
-	const key = boardId(run.modId, mode)
+	const season = currentSeason(nk)
+	const key = boardId(run.modId, mode, season)
 	for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
 		const { current, versions } = loadRatings(
 			nk,
@@ -149,6 +150,7 @@ export function applyRatings(
 			mode,
 			run.players.map((p) => p.id),
 			run.endedAt,
+			season,
 		)
 		const plan = planRatings(run, flags, current)
 		const ids = Object.keys(plan.updates)
@@ -170,7 +172,7 @@ export function applyRatings(
 			logger.warn('Rating write for run %s conflicted (attempt %d): %v', run.runId, attempt + 1, e)
 			continue
 		}
-		mirrorToLeaderboard(nk, logger, run, mode, plan, flags)
+		mirrorToLeaderboard(nk, logger, run, key, mode, plan)
 		return plan.results
 	}
 	logger.error('Could not rate run %s after %d attempts', run.runId, WRITE_ATTEMPTS)
@@ -183,11 +185,10 @@ function mirrorToLeaderboard(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
 	run: RunRecord,
+	id: string,
 	mode: string,
 	plan: RatingPlan,
-	_flags: { [userId: string]: FlagReason },
 ) {
-	const id = boardId(run.modId, mode)
 	try {
 		nk.leaderboardCreate(id, true, 'desc', 'set', null, { modId: run.modId, mode })
 		for (const player of run.players) {

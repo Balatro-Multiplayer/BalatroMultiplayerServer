@@ -8,9 +8,8 @@ import { ALREADY_EXISTS, INVALID_ARGUMENT, UNAVAILABLE, runtimeError } from '../
 import { callExpress } from '../express'
 import { SYSTEM_USER_ID } from '../lobby/protocol'
 import { parsePayload, requireServer, requireUser } from '../rpc'
-import { displayNameOf, playerView, updateProfile, type Profile } from './profile'
-import { accountUpdated, pushToLobby } from './rpc'
-import { syncDisplayName } from './session'
+import { playerView, updateProfile, type Profile } from './profile'
+import { profileChanged } from './rpc'
 
 export const DISCORD_INDEX_COLLECTION = 'discord_index'
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -39,7 +38,7 @@ export function claimDiscord(nk: nkruntime.Nakama, userId: string, hash: string)
 	}
 }
 
-function releaseDiscord(nk: nkruntime.Nakama, userId: string, hash: string | null) {
+export function releaseDiscord(nk: nkruntime.Nakama, userId: string, hash: string | null) {
 	if (hash && discordOwner(nk, hash) === userId) nk.storageDelete([indexKey(hash)])
 }
 
@@ -51,12 +50,6 @@ export function withDiscord(profile: Profile, hash: string, username: string | n
 // Pure: the profile with Discord unlinked, back on the Steam name.
 export function withoutDiscord(profile: Profile): Profile {
 	return { ...profile, discordIdHash: null, discordUsername: null, useDiscordName: false }
-}
-
-function changed(nk: nkruntime.Nakama, userId: string, profile: Profile) {
-	syncDisplayName(nk, userId, profile)
-	pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker })
-	accountUpdated(nk, userId, profile)
 }
 
 // {} -> {url}: where to send the player to link their Discord.
@@ -92,7 +85,7 @@ export function rpcDiscordUnlink(
 		ctx.username,
 	)
 	releaseDiscord(nk, userId, previous)
-	changed(nk, userId, profile)
+	profileChanged(nk, userId, profile)
 	callExpress(nk, logger, ctx.env, '/discord/unlinked', { nakamaUserId: userId })
 	return JSON.stringify({ player: playerView(userId, profile) })
 }
@@ -119,7 +112,7 @@ export function rpcAdminDiscordSet(
 		return withDiscord(current, discordIdHash, name)
 	})
 	if (previous !== discordIdHash) releaseDiscord(nk, userId, previous)
-	changed(nk, userId, profile)
+	profileChanged(nk, userId, profile)
 	logger.info('Linked Discord to %s', userId)
 	return JSON.stringify({ player: playerView(userId, profile) })
 }

@@ -50,6 +50,7 @@ import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
+import { rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 import { rpcReportSubmit } from './moderation/report'
@@ -132,6 +133,8 @@ function InitModule(
 	initializer.registerRpc('admin_queue_cancel', rpcAdminQueueCancel)
 	initializer.registerRpc('admin_mirror_pull', rpcAdminMirrorPull)
 	initializer.registerRpc('admin_mirror_ack', rpcAdminMirrorAck)
+	initializer.registerRpc('admin_profile_set', rpcAdminProfileSet)
+	initializer.registerRpc('admin_account_delete', rpcAdminAccountDelete)
 	logger.info('BMP lobby module loaded')
 }
 

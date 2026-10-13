@@ -71,6 +71,7 @@ router.post('/set-season', async (req, res, next) => {
 			await tx.update(seasons).set({ endedAt: null }).where(eq(seasons.id, season))
 		})
 
+		await loadConfigFromDb()
 		console.log(`[admin] Active season set to ${season}`)
 		res.json({ currentSeason: season })
 	} catch (err) {

@@ -705,7 +705,8 @@ export async function runDecay(): Promise<void> {
 	}
 }
 
-export async function checkSeasonRollover(): Promise<void> {
+// Returns how many seasons were rolled over.
+export async function checkSeasonRollover(): Promise<number> {
 	const now = new Date()
 
 	const expiredSeasons = await db
@@ -767,4 +768,5 @@ export async function checkSeasonRollover(): Promise<void> {
 				.where(eq(seasons.id, expiredSeason.id))
 		})
 	}
+	return expiredSeasons.length
 }

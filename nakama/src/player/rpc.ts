@@ -29,6 +29,14 @@ export function accountUpdated(nk: nkruntime.Nakama, userId: string, profile: Pr
 	notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, 'account_updated', { player: playerView(userId, profile) })
 }
 
+// After a change to anything others see: the account's name, the lobby and
+// the player's own sessions all catch up.
+export function profileChanged(nk: nkruntime.Nakama, userId: string, profile: Profile) {
+	syncDisplayName(nk, userId, profile)
+	pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker })
+	accountUpdated(nk, userId, profile)
+}
+
 // {useDiscordName} -> {player}. Using the Discord name needs a linked Discord.
 export function rpcProfileSetDisplay(
 	ctx: nkruntime.Context,

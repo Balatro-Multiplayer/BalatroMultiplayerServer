@@ -21,6 +21,8 @@ export interface ServerConfig {
 	// Chat messages that skip moderation, as webadmin lists them (looked up by
 	// chat/filter.ts normalizeForAllowlist).
 	chatAllowlist: string[]
+	// The API's active rating season (rating/season.ts); 0 until pushed.
+	season: number
 }
 
 // Until the API's first push: everything Nakama already did stays allowed.
@@ -33,6 +35,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	testingMode: false,
 	integrityEnforced: false,
 	chatAllowlist: [],
+	season: 0,
 }
 
 // current with every valid field of update applied; unknown keys and wrongly
@@ -41,6 +44,8 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 	const next: ServerConfig = { ...current }
 	const tos = update.tosVersion
 	if (typeof tos === 'number' && Number.isInteger(tos) && tos >= 0) next.tosVersion = tos
+	const season = update.season
+	if (typeof season === 'number' && Number.isInteger(season) && season > 0) next.season = season
 	const flags: (keyof ServerConfig)[] = [
 		'chatEnabled',
 		'rankedEnabled',

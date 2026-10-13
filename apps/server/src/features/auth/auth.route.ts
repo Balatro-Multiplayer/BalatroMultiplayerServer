@@ -10,6 +10,7 @@ import { fetchNakamaAccount, isNakamaAuthEnabled } from './nakama.js'
 import type { NakamaAccountError } from './nakama.js'
 import { generateLinkState, verifyLinkState } from './link-state.js'
 import { discordLinkService } from '../nakama/discord-link.js'
+import { deleteNakamaAccount, editNakamaProfile, linkNakamaDiscord } from '../../infrastructure/nakama/profile-sync.js'
 import { cancelGracePeriod } from '../../infrastructure/mqtt/grace-period.service.js'
 import { getConfig } from '../../state/config.js'
 import { issueRefreshToken, redeemRefreshToken } from '../../infrastructure/gateways/refresh-token.gateway.js'
@@ -408,7 +409,8 @@ export function createAuthRouter(service: AuthService): Router {
 					return
 				}
 				if (linked) {
-					const { token } = await service.linkDiscordToPlayer(linked.playerId, discordId, discordName)
+					const { session, token } = await service.linkDiscordToPlayer(linked.playerId, discordId, discordName)
+					if (session.discordIdHash) await linkNakamaDiscord(linked.playerId, session.discordIdHash, discordName)
 
 					await mqttService.publishToPlayer(linked.playerId, 'account/discord_linked', {
 						discordName,
@@ -481,6 +483,7 @@ h1{color:#5865f2;margin-bottom:0.5rem}p{color:#a0a0b0}</style>
 	router.post('/unlink/discord', authenticate, async (req, res, next) => {
 		try {
 			const { session, token } = await service.unlinkDiscordFromPlayer(req.player!.playerId)
+			await editNakamaProfile(req.player!.playerId, { discord: null })
 
 			await mqttService.publishToPlayer(req.player!.playerId, 'account/discord_unlinked', {})
 
@@ -501,6 +504,7 @@ h1{color:#5865f2;margin-bottom:0.5rem}p{color:#a0a0b0}</style>
 			}
 
 			const { session, token } = await service.setUseDiscordName(req.player!.playerId, useDiscordName)
+			await editNakamaProfile(req.player!.playerId, { useDiscordName })
 
 			await mqttService.publishToPlayer(req.player!.playerId, 'account/display_name_changed', {
 				displayName: session.getDisplayName(),
@@ -573,6 +577,7 @@ h1{color:#5865f2;margin-bottom:0.5rem}p{color:#a0a0b0}</style>
 			}
 
 			const { session, token } = await service.setPreferredJoker(req.player!.playerId, preferredJoker)
+			await editNakamaProfile(req.player!.playerId, { preferredJoker: session.preferredJoker })
 
 			await mqttService.publishToPlayer(req.player!.playerId, 'account/preferred_joker_changed', {
 				preferredJoker: session.preferredJoker,
@@ -626,6 +631,7 @@ h1{color:#5865f2;margin-bottom:0.5rem}p{color:#a0a0b0}</style>
 			const playerId = req.player!.playerId
 
 			await service.deleteAccount(playerId)
+			await deleteNakamaAccount(playerId)
 			removeSession(playerId)
 
 			res.json({ ok: true })

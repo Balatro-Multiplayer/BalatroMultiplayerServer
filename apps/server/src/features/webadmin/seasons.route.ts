@@ -2,10 +2,12 @@ import { Router } from 'express'
 import { and, asc, eq, isNull, ne } from 'drizzle-orm'
 import { db } from '../../infrastructure/db/index.js'
 import { seasons } from '../../infrastructure/db/schema.js'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 
 // Season model: the active season is the row with ended_at IS NULL.
-// Exactly one season is active at a time.
+// Exactly one season is active at a time. Every change reloads the config,
+// which pushes the season to Nakama (it rates games into it).
 const router = Router()
 
 router.get('/seasons', async (_req, res, next) => {
@@ -52,6 +54,7 @@ router.post('/seasons', async (req, res, next) => {
 				.returning()
 			return row!
 		})
+		await loadConfigFromDb()
 
 		console.log(`[webadmin] ${req.player!.playerId} started season ${created.id} (${created.name})`)
 		res.status(201).json({ season: created })
@@ -80,6 +83,7 @@ router.post('/seasons/:id/activate', async (req, res, next) => {
 			await tx.update(seasons).set({ endedAt: null }).where(eq(seasons.id, id))
 		})
 
+		await loadConfigFromDb()
 		console.log(`[webadmin] ${req.player!.playerId} activated season ${id}`)
 		res.json({ ok: true })
 	} catch (err) {
@@ -98,6 +102,7 @@ router.post('/seasons/:id/end', async (req, res, next) => {
 			.where(and(eq(seasons.id, id), isNull(seasons.endedAt)))
 			.returning()
 		if (!row) throw new AppError('Season not found or already ended', 404)
+		await loadConfigFromDb()
 
 		console.log(`[webadmin] ${req.player!.playerId} ended season ${id}`)
 		res.json({ season: row })

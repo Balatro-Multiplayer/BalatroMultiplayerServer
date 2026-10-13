@@ -135,8 +135,10 @@ declare namespace nkruntime {
 		// Banned users can't log in or refresh a session.
 		usersBanId(userIds: string[]): void
 		usersUnbanId(userIds: string[]): void
-		// Ends the user's session(s); null tokens mean all of them.
-		sessionLogout(userId: string, token: string | null, refreshToken: string | null): void
+		// Revokes the user's session tokens; '' for both revokes every one.
+		sessionLogout(userId: string, token: string, refreshToken: string): void
+		// Deletes the user and everything they own (recorded: keep a tombstone).
+		accountDeleteId(userId: string, recorded?: boolean): void
 		// code must be positive (Nakama reserves zero and below).
 		notificationSend(
 			userId: string,

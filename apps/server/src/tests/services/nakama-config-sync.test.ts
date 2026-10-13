@@ -37,6 +37,7 @@ describe('pushing config to Nakama', () => {
 			integrityEnforced: false,
 			chatAllowlist: ['gg'],
 		})
+		expect(nakamaConfigOf({ ...config, season: 4 }).season).toBe(4)
 		setIntegrityEnforced(true)
 		expect(nakamaConfigOf(config).integrityEnforced).toBe(true)
 		setIntegrityEnforced(false)

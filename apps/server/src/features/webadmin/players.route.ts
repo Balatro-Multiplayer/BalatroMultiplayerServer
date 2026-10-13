@@ -7,6 +7,7 @@ import { isBanType, liftBan, listBans } from '../../infrastructure/gateways/ban.
 import { AppError } from '../../shared/utils/errors.js'
 import { parseExpiresAt } from '../../shared/utils/parse-expires-at.js'
 import { liftBanInNakama } from '../../infrastructure/nakama/moderation-sync.js'
+import { editNakamaProfile } from '../../infrastructure/nakama/profile-sync.js'
 import { issueBan } from './ban.service.js'
 
 // Privilege names are free-form identifiers (a lowercase letter followed by
@@ -98,6 +99,7 @@ router.patch('/players/:id/privileges', async (req, res, next) => {
 			.returning({ id: players.id, privileges: players.privileges })
 
 		if (!updated) throw new AppError('Player not found', 404)
+		await editNakamaProfile(updated.id, { privileges })
 		console.log(`[webadmin] ${req.player!.playerId} updated privileges for ${req.params.id}: ${JSON.stringify(privileges)}`)
 		res.json(updated)
 	} catch (err) {

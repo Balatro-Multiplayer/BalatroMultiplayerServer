@@ -7,7 +7,7 @@ import { callNakamaRpc, isNakamaAdminEnabled } from './admin-client.js'
 // in force and acts on them at once. Best effort: a failure is logged, and the
 // ban is still in Postgres for the next player sync.
 
-async function nakamaUserIdOf(playerId: string): Promise<string | null> {
+export async function nakamaUserIdOf(playerId: string): Promise<string | null> {
 	if (!isNakamaAdminEnabled()) return null
 	const player = await findPlayerById(playerId)
 	return player?.nakamaUserId ?? null
