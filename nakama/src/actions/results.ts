@@ -146,6 +146,7 @@ export function finishGame(
 		status,
 		placements,
 		reports: game.reports,
+		reportOrder: game.reportOrder,
 		players: started.players,
 		rankedMode: lobby.rankedMode,
 		gameMode: lobby.gameMode,

@@ -99,6 +99,45 @@ describe('runRowsOf', () => {
 	})
 })
 
+describe('runRowsOf: flags and disputes', () => {
+	it('takes the run\'s own flags over its log checks', () => {
+		const rows = runRowsOf(run({ flags: { na: 'elapsed_time_gate' } }), ids)
+		expect(rows.logs.map((l) => l.flagReason)).toEqual(['elapsed_time_gate', null])
+		expect(rows.flagged).toEqual([{ playerId: 'pg-a', reason: 'elapsed_time_gate' }])
+	})
+
+	it('files each report that differs from a disputed matchmade result', () => {
+		const ab = [
+			{ playerId: 'na', place: 1 },
+			{ playerId: 'nb', place: 2 },
+		]
+		const ba = [
+			{ playerId: 'na', place: 2 },
+			{ playerId: 'nb', place: 1 },
+		]
+		const disputed = run({ status: 'disputed', placements: ab, reports: { nb: ba, na: ab }, reportOrder: ['nb', 'na'] })
+		expect(runRowsOf(disputed, ids).conflicts).toEqual([
+			{
+				matchId: disputed.run.runId,
+				lobbyCode: 'ABCDE',
+				firstReporterId: 'pg-a',
+				firstPlacements: [
+					{ playerId: 'pg-a', place: 1 },
+					{ playerId: 'pg-b', place: 2 },
+				],
+				conflictingReporterId: 'pg-b',
+				conflictingPlacements: [
+					{ playerId: 'pg-a', place: 2 },
+					{ playerId: 'pg-b', place: 1 },
+				],
+			},
+		])
+		// Not for an agreed game, nor a private one.
+		expect(runRowsOf(run({ reports: { na: ab, nb: ba } }), ids).conflicts).toEqual([])
+		expect(runRowsOf(run({ status: 'disputed', gameMode: undefined, reports: { na: ab, nb: ba } }), ids).conflicts).toEqual([])
+	})
+})
+
 describe('chatRowsOf', () => {
 	const line = (flagged: boolean): PulledChat => ({
 		key: 'k-chat',
@@ -129,7 +168,11 @@ function deps() {
 		linkNakamaUser: vi.fn(async () => undefined),
 		createPlayer: vi.fn(async (data: { id: string }) => ({ id: data.id })),
 	}
-	const store = { storeRun: vi.fn(async () => undefined), storeChat: vi.fn(async () => undefined) }
+	const store = {
+		storeRun: vi.fn(async () => undefined),
+		storeChat: vi.fn(async () => undefined),
+		storeForfeit: vi.fn(async () => undefined),
+	}
 	const service = createMirrorService({ players, store, hashSteamId: (s) => `hash:${s}` })
 	return { players, store, service }
 }
@@ -167,6 +210,23 @@ describe('the mirror service', () => {
 		})
 		expect(result).toEqual({ stored: ['k-chat'], failed: ['k-run'] })
 		expect(store.storeChat).toHaveBeenCalledWith(expect.objectContaining({ chat: expect.objectContaining({ moderationId: 'hash:1' }) }))
+	})
+})
+
+describe('a forfeit entry', () => {
+	it('becomes a reconciliation flag for the player', async () => {
+		const { store, service } = deps()
+		await service.storePull({
+			entries: [{ key: 'k-f', kind: 'forfeit', at: T0 + 30_000, userId: 'na', runId: 'r1', code: 'ABCDE', forfeitedAt: T0 }],
+			players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+		})
+		expect(store.storeForfeit).toHaveBeenCalledWith({
+			matchId: 'r1',
+			lobbyCode: 'ABCDE',
+			playerId: 'pg-a',
+			forfeitedAt: new Date(T0),
+			reconnectedAt: new Date(T0 + 30_000),
+		})
 	})
 })
 

@@ -332,6 +332,17 @@ describe('replay logs', () => {
 		expect(step.lobby.game.logs.a.lines).toEqual(['[1,"play",[1]]', '[2,"play",[2]]'])
 	})
 
+	it('drops an event sent for a run the server has restarted', () => {
+		const lobby = started('a', 'b')
+		const runId = lobby.game.started!.runId
+		const stale = send(lobby, 'a', 'mpapi_log_event', { t: 9, opcode: 'play', run: 'old-run' })
+		expect(rejection(stale)).toBeUndefined()
+		expect(stale.lobby.game.logs.a).toBeUndefined()
+		expect(stale.out.filter((o) => o.kind === 'send')).toEqual([])
+		const current = send(lobby, 'a', 'mpapi_log_event', { t: 9, opcode: 'play', run: runId })
+		expect(current.lobby.game.logs.a.lines).toEqual(['[9,"play",null]'])
+	})
+
 	it('refuses events outside a game, or malformed ones', () => {
 		const idle = newLobby({ code: 'X', modId: 'm', maxPlayers: 2, creatorId: 'a', now: 0, graceMs: 1 })
 		const joined = join(idle, 'a', 's', info('a')).lobby

@@ -21,6 +21,7 @@ import {
 	type LobbySignal,
 } from './protocol'
 import { resumeLobby } from './checkpoint'
+import { noteReturn } from './forfeits'
 import { MAX_PLAYERS, MIN_PLAYERS } from './state'
 import { spectatableLobbies } from './spectate'
 
@@ -221,7 +222,9 @@ export function rpcLobbyCurrent(
 	payload: string,
 ) {
 	// {resuming: true}: the lobby is coming back from a restart; ask again.
-	const seat = seatOf(nk, logger, requireUser(ctx))
+	const userId = requireUser(ctx)
+	noteReturn(nk, logger, userId, Date.now())
+	const seat = seatOf(nk, logger, userId)
 	if (seat === 'resuming') return JSON.stringify({ resuming: true })
 	return JSON.stringify(seat || {})
 }

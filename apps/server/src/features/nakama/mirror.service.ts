@@ -12,6 +12,7 @@ import { compressToBase64 } from '../../shared/utils/compression.js'
 // ---------------------------------------------------------------------------
 
 export type LogCheck = 'match' | 'mismatch' | 'unavailable'
+export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
 
 export interface NakamaRun {
 	runId: string
@@ -22,11 +23,13 @@ export interface NakamaRun {
 	status: 'agreed' | 'partial' | 'disputed' | 'abandoned' | 'restarted'
 	placements: { playerId: string; place: number; performance?: number; metric?: number }[]
 	reports: { [userId: string]: { playerId: string; place: number }[] }
+	reportOrder?: string[]
 	players: { id: string; displayName: string }[]
 	rankedMode?: string
 	gameMode?: string
 	lobbyType?: 'public' | 'private'
 	logChecks?: { [userId: string]: LogCheck }
+	flags?: { [userId: string]: FlagReason }
 }
 
 export interface NakamaLog {
@@ -63,7 +66,18 @@ export interface PulledChat {
 	line: { lobbyCode: string; userId: string; message: string; flagged: boolean; verdict: unknown }
 }
 
-export type PulledEntry = PulledRun | PulledChat
+// A player back right after timing out of a matchmade game.
+export interface PulledForfeit {
+	key: string
+	kind: 'forfeit'
+	at: number
+	userId: string
+	runId: string
+	code: string
+	forfeitedAt: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit
 
 export interface MirrorPlayer {
 	steamId: string | null
@@ -105,7 +119,7 @@ export interface RunRows {
 		carbonHash: string | null
 		eventCount: number
 		status: 'complete' | 'partial'
-		flagReason: 'hash_mismatch' | null
+		flagReason: FlagReason | null
 		finalizedAt: Date
 		expiresAt: Date | null
 	}[]
@@ -136,8 +150,64 @@ export interface RunRows {
 		seasonBest: number | null
 		lastMatchAt: Date | null
 	}[]
-	// Players whose log failed its check: an anti_cheat service-queue item.
-	flagged: { playerId: string; reason: 'hash_mismatch' }[]
+	// Flagged players: an anti_cheat service-queue item.
+	flagged: { playerId: string; reason: FlagReason }[]
+	// A disputed matchmade game: each report that differs from the result,
+	// against the first report that agrees with it (match_result_conflicts).
+	conflicts: {
+		matchId: string
+		lobbyCode: string
+		firstReporterId: string
+		firstPlacements: { playerId: string; place: number }[]
+		conflictingReporterId: string
+		conflictingPlacements: { playerId: string; place: number }[]
+	}[]
+}
+
+function placesKey(placements: { playerId: string; place: number }[]): string {
+	return JSON.stringify(
+		placements
+			.map((p) => [p.playerId, p.place] as const)
+			.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0)),
+	)
+}
+
+function conflictsOf(run: NakamaRun, ids: Map<string, string>): RunRows['conflicts'] {
+	if (run.status !== 'disputed' || !run.gameMode) return []
+	const order = (run.reportOrder ?? Object.keys(run.reports)).filter((id) => run.reports[id] && ids.has(id))
+	const result = placesKey(run.placements)
+	const first = order.find((id) => placesKey(run.reports[id]) === result)
+	if (!first) return []
+	const inPg = (placements: { playerId: string; place: number }[]) =>
+		placements.filter((p) => ids.has(p.playerId)).map((p) => ({ playerId: ids.get(p.playerId) as string, place: p.place }))
+	return order
+		.filter((id) => placesKey(run.reports[id]) !== result)
+		.map((id) => ({
+			matchId: run.runId,
+			lobbyCode: run.code,
+			firstReporterId: ids.get(first) as string,
+			firstPlacements: inPg(run.reports[first]),
+			conflictingReporterId: ids.get(id) as string,
+			conflictingPlacements: inPg(run.reports[id]),
+		}))
+}
+
+export interface ForfeitRow {
+	matchId: string
+	lobbyCode: string
+	playerId: string
+	forfeitedAt: Date
+	reconnectedAt: Date
+}
+
+export function forfeitRowOf(entry: PulledForfeit, playerId: string): ForfeitRow {
+	return {
+		matchId: entry.runId,
+		lobbyCode: entry.code,
+		playerId,
+		forfeitedAt: new Date(entry.forfeitedAt),
+		reconnectedAt: new Date(entry.at),
+	}
 }
 
 function runStatusOf(status: NakamaRun['status']): RunRows['lobbyRun']['status'] {
@@ -158,7 +228,12 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	for (const player of seated) {
 		const log = entry.logs[player.id]
 		const check = (run.logChecks && run.logChecks[player.id]) || (log ? log.check : 'unavailable')
-		const flagReason = check === 'mismatch' ? 'hash_mismatch' : null
+		// Runs stored before flags existed have only their log checks.
+		const flagReason: FlagReason | null = run.flags
+			? run.flags[player.id] || null
+			: check === 'mismatch'
+				? 'hash_mismatch'
+				: null
 		if (flagReason) flagged.push({ playerId: pg(player.id), reason: flagReason })
 		logs.push({
 			runId: run.runId,
@@ -215,6 +290,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	}
 
 	return {
+		conflicts: conflictsOf(run, ids),
 		lobbyRun: {
 			id: run.runId,
 			lobbyCode: run.code,
@@ -306,6 +382,7 @@ export interface MirrorDeps {
 	store: {
 		storeRun(rows: RunRows): Promise<void>
 		storeChat(rows: ChatRows): Promise<void>
+		storeForfeit(row: ForfeitRow): Promise<void>
 	}
 	hashSteamId(steamId: string): string
 }
@@ -355,6 +432,9 @@ export function createMirrorService(deps: MirrorDeps) {
 			try {
 				if (entry.kind === 'run') {
 					await store.storeRun(runRowsOf(entry, ids))
+				} else if (entry.kind === 'forfeit') {
+					const playerId = ids.get(entry.userId)
+					if (playerId) await store.storeForfeit(forfeitRowOf(entry, playerId))
 				} else {
 					const playerId = ids.get(entry.line.userId)
 					if (playerId) {

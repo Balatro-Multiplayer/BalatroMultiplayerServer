@@ -50,6 +50,8 @@ import {
 	removeSpectator,
 	spectateRejection,
 } from './spectate'
+import { runFlags } from './anticheat'
+import { recordForfeit } from './forfeits'
 import { logChecksOf, saveRun } from './storage'
 
 const TICK_RATE = 5
@@ -149,22 +151,24 @@ function apply(
 	return { ...state, lobby: step.lobby, presences, label }
 }
 
-// A ranked game is rated before it's stored, so the run and each player's
-// pointer carry what it did to their rating. A rating failure must not lose
-// the run, so it leaves the run unrated instead.
-function withRatings(
+// A finished run is flagged (lobby/anticheat.ts) and, for a ranked game,
+// rated before it's stored, so the run and each player's pointer carry what
+// it did to their rating. A rating failure must not lose the run, so it
+// leaves the run unrated instead.
+function judged(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
 	run: RunRecord,
 	logs: { [userId: string]: PlayerLog },
 ): RunRecord {
-	if (!run.rankedMode) return run
+	const flags = runFlags(run, logs, logChecksOf(run, logs, (input) => nk.sha256Hash(input)))
+	const flagged = { ...run, flags }
+	if (!run.rankedMode) return flagged
 	try {
-		const checks = logChecksOf(run, logs, (input) => nk.sha256Hash(input))
-		return { ...run, ratings: applyRatings(nk, logger, run, run.rankedMode, checks) }
+		return { ...flagged, ratings: applyRatings(nk, logger, run, run.rankedMode, flags) }
 	} catch (e) {
 		logger.error('Could not rate run %s: %v', run.runId, e)
-		return run
+		return flagged
 	}
 }
 
@@ -205,22 +209,16 @@ function runEffect(
 			return
 		case 'saveRun':
 			try {
-				const run = withRatings(nk, logger, effect.run, effect.logs)
-				const { logChecks } = saveRun(nk, run, effect.logs)
+				const run = judged(nk, logger, effect.run, effect.logs)
+				saveRun(nk, run, effect.logs)
 				enqueue(nk, {
 					kind: 'run',
 					at: Date.now(),
 					runId: run.runId,
 					rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason() } : null,
 				})
-				for (const playerId in logChecks) {
-					if (logChecks[playerId] === 'mismatch')
-						logger.warn(
-							'Lobby %s: run %s: %s\'s replay log does not match its hash',
-							lobby.code,
-							effect.run.runId,
-							playerId,
-						)
+				for (const playerId in run.flags) {
+					logger.warn('Lobby %s: run %s: %s is flagged (%s)', lobby.code, run.runId, playerId, run.flags[playerId])
 				}
 			} catch (e) {
 				logger.error(
@@ -229,6 +227,13 @@ function runEffect(
 					effect.run.runId,
 					e,
 				)
+			}
+			return
+		case 'forfeited':
+			try {
+				recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at })
+			} catch (e) {
+				logger.warn('Lobby %s: could not record %s timing out: %v', lobby.code, effect.userId, e)
 			}
 			return
 		case 'clearCurrent':

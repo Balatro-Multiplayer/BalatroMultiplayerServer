@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { LogCheck, RunRecord } from '../lobby/protocol'
+import type { FlagReason, RunRecord } from '../lobby/protocol'
 import { type RatingRecord, applyRatings, newRating, planRatings } from './apply'
 import { nextSeasonBest } from './metrics'
 import { configureSeason } from './season'
@@ -29,7 +29,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 	}
 }
 
-const clean: { [id: string]: LogCheck } = { a: 'match', b: 'match' }
+const clean: { [id: string]: FlagReason } = {}
 
 function seasoned(rating: number): RatingRecord {
 	return { ...newRating(), rating, gamesPlayed: 10 }
@@ -61,7 +61,7 @@ describe('planRatings', () => {
 	})
 
 	it('leaves out a player whose log does not match its hash, and everyone if that leaves one', () => {
-		const plan = planRatings(run(), { a: 'match', b: 'mismatch' }, { a: seasoned(600), b: seasoned(600) })
+		const plan = planRatings(run(), { b: 'hash_mismatch' }, { a: seasoned(600), b: seasoned(600) })
 		expect(plan).toEqual({ updates: {}, results: {} })
 	})
 
@@ -79,7 +79,7 @@ describe('planRatings', () => {
 			],
 		})
 		const current = { a: seasoned(600), b: seasoned(600), c: seasoned(600) }
-		const plan = planRatings(three, { a: 'match', b: 'match', c: 'mismatch' }, current)
+		const plan = planRatings(three, { c: 'elapsed_time_gate' }, current)
 		expect(Object.keys(plan.updates).sort()).toEqual(['a', 'b'])
 		expect(plan.updates.a.rating).toBe(620)
 	})

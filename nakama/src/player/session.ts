@@ -4,6 +4,7 @@
 // At a Steam account's first call the player's Postgres data is synced over
 // through the API (player-sync); if that fails the login still succeeds and
 // the sync is tried again next time.
+import { noteReturn } from '../lobby/forfeits'
 import { readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
 import { UNVERIFIED, writeIntegrity } from '../integrity'
@@ -104,6 +105,7 @@ export function rpcSessionInit(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
+	noteReturn(nk, logger, userId, Date.now())
 	const steamName = cleanName(parsePayload(payload).steamName) || ctx.username
 	const stored = readProfile(nk, userId, steamName)
 	const steamId = steamIdOf(nk, userId)

@@ -166,6 +166,8 @@ export interface RunRecord {
 	status: RunStatus
 	placements: Placement[]
 	reports: { [userId: string]: Placement[] }
+	// Who reported, first first (whose report a dispute is measured against).
+	reportOrder?: string[]
 	players: Participant[]
 	// Set for a ranked lobby: the rating board (mode) the game counted on.
 	rankedMode?: string
@@ -176,7 +178,11 @@ export interface RunRecord {
 	lobbyType?: 'public' | 'private'
 	// Each rated player's result, once the game was rated.
 	ratings?: { [userId: string]: RatingResult }
+	// Players whose result is suspect (lobby/anticheat.ts); never rated.
+	flags?: { [userId: string]: FlagReason }
 }
+
+export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
 
 // A game a player is still in, as run_active answers it: their own replay
 // events so far, for a client that restarted mid-game to play catch-up.

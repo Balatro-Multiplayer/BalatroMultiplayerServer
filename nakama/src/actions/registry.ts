@@ -225,7 +225,7 @@ export const MAX_LOG_EVENTS = 20_000
 export const MAX_LOG_BYTES = 1024 * 1024
 const MAX_OPCODE_LENGTH = 64
 
-// {t, opcode, args?} -- one replay event from a participant, kept for the
+// {t, opcode, args?, run?} -- one replay event from a participant, kept for the
 // stored run and passed on to the others (who track how far each player's
 // stream has got).
 const logEvent: AuthoritativeAction = {
@@ -241,6 +241,12 @@ const logEvent: AuthoritativeAction = {
 			params.opcode.length > MAX_OPCODE_LENGTH
 		)
 			return { reject: 'bad_params' }
+		// An event the client sent for a run the server has since restarted
+		// (it was in flight as the restart went out) belongs to no stored
+		// log: kept, it would sit ahead of the new run's manifest and fail
+		// the new run's hash check. Clients tag events with their run.
+		if (typeof params.run === 'string' && params.run !== lobby.game.started.runId)
+			return { game: lobby.game, params: null, to: 'none' }
 		const args = params.args === undefined ? null : params.args
 		const line = JSON.stringify([params.t, params.opcode, args])
 		const size = line.length

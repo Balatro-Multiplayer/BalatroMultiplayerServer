@@ -1,7 +1,16 @@
 import { eq, sql } from 'drizzle-orm'
-import type { ChatRows, RunRows } from '../../features/nakama/mirror.service.js'
+import type { ChatRows, ForfeitRow, RunRows } from '../../features/nakama/mirror.service.js'
 import { db } from '../db/index.js'
-import { chatLogs, flaggedMessages, lobbyRuns, matchRunLogs, matchmakingMatches, matchmakingRatings } from '../db/schema.js'
+import {
+	chatLogs,
+	flaggedMessages,
+	lobbyRuns,
+	matchResultConflicts,
+	matchRunLogs,
+	matchmakingMatches,
+	matchmakingRatings,
+} from '../db/schema.js'
+import { hasOpenForfeitReconciliationFlag, insertForfeitReconciliationFlag } from './forfeit-reconciliation.gateway.js'
 import { enqueueServiceQueueItem } from './service-queue.gateway.js'
 
 // Writes what the Nakama mirror pulled (features/nakama/mirror.service.ts).
@@ -61,6 +70,15 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 					},
 				})
 		}
+		// Once per run: a retried entry finds them already there.
+		if (rows.conflicts.length > 0) {
+			const [existing] = await tx
+				.select({ id: matchResultConflicts.id })
+				.from(matchResultConflicts)
+				.where(eq(matchResultConflicts.matchId, rows.lobbyRun.id))
+				.limit(1)
+			if (!existing) await tx.insert(matchResultConflicts).values(rows.conflicts)
+		}
 	})
 	// After the commit: the queue item points at rows that now exist. One
 	// item per run, as replay-log.service.ts files it (sourceId = run id).
@@ -72,6 +90,25 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 			summary: `Anti-cheat flag (${flag.reason})`,
 		})
 	}
+	if (rows.conflicts.length > 0) {
+		const conflicts = await db
+			.select({ id: matchResultConflicts.id })
+			.from(matchResultConflicts)
+			.where(eq(matchResultConflicts.matchId, rows.lobbyRun.id))
+		for (const conflict of conflicts) {
+			await enqueueServiceQueueItem({
+				itemType: 'match_conflict',
+				sourceId: String(conflict.id),
+				subjectPlayerId: null,
+				summary: `Match result conflict — lobby ${rows.lobbyRun.lobbyCode}`,
+			})
+		}
+	}
+}
+
+export async function storeMirroredForfeit(row: ForfeitRow): Promise<void> {
+	if (await hasOpenForfeitReconciliationFlag(row.matchId, row.playerId)) return
+	await insertForfeitReconciliationFlag(row)
 }
 
 export async function storeMirroredChat(rows: ChatRows): Promise<void> {

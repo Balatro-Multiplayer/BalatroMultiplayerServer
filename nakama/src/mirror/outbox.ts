@@ -17,6 +17,8 @@ export const MIRROR_COLLECTION = 'mirror_outbox'
 export type MirrorEntry =
 	| { kind: 'run'; at: number; runId: string; rating: RatingBoard | null }
 	| { kind: 'chat'; at: number; line: ChatLogLine }
+	// A player back right after timing out of a matchmade game (lobby/forfeits.ts).
+	| { kind: 'forfeit'; at: number; userId: string; runId: string; code: string; forfeitedAt: number }
 
 // The rating board a ranked run counted on.
 export interface RatingBoard {
@@ -80,7 +82,17 @@ export interface PulledChat {
 	line: ChatLogLine
 }
 
-export type PulledEntry = PulledRun | PulledChat
+export interface PulledForfeit {
+	key: string
+	kind: 'forfeit'
+	at: number
+	userId: string
+	runId: string
+	code: string
+	forfeitedAt: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit
 
 function expandRun(nk: nkruntime.Nakama, key: string, entry: Extract<MirrorEntry, { kind: 'run' }>): PulledRun | null {
 	const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }])
@@ -142,6 +154,9 @@ export function pullEntries(
 		} else if (entry.kind === 'chat') {
 			userIds[entry.line.userId] = true
 			entries.push({ key: object.key, kind: 'chat', at: entry.at, line: entry.line })
+		} else if (entry.kind === 'forfeit') {
+			userIds[entry.userId] = true
+			entries.push({ key: object.key, ...entry })
 		} else {
 			dropped.push(object.key)
 		}

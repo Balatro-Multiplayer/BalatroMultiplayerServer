@@ -84,6 +84,8 @@ export type Outbound =
 	| { kind: 'kick'; userId: string }
 	| { kind: 'setCurrent'; userId: string }
 	| { kind: 'clearCurrent'; userId: string }
+	// A matchmade game's participant timed out (lobby/forfeits.ts).
+	| { kind: 'forfeited'; userId: string; runId: string; code: string; at: number }
 	| {
 			kind: 'saveRun'
 			run: RunRecord
@@ -605,8 +607,13 @@ export function tick(lobby: Lobby, now: number): Step {
 	for (const p of lobby.players) {
 		if (step.lobby.closed) break
 		if (p.awaySince !== null && now - p.awaySince >= lobby.graceMs) {
+			const started = step.lobby.game.started
+			const forfeited: Outbound[] =
+				started && lobby.gameMode && started.players.some((q) => q.id === p.id)
+					? [{ kind: 'forfeited', userId: p.id, runId: started.runId, code: lobby.code, at: now }]
+					: []
 			const removed = remove(step.lobby, p.id, 'player_left')
-			step = { lobby: removed.lobby, out: step.out.concat(removed.out) }
+			step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) }
 		}
 	}
 	return step

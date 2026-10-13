@@ -9,7 +9,7 @@ import {
 } from './elo'
 import { nextSeasonBest } from './metrics'
 import { carriedOver, currentSeason, decayedRating } from './season'
-import type { LogCheck, RunRecord } from '../lobby/protocol'
+import type { FlagReason, RunRecord } from '../lobby/protocol'
 import { RATINGS_COLLECTION, type RatingResult } from '../lobby/protocol'
 
 // A player's rating on one (mod, mode, season) board: the stored object.
@@ -43,16 +43,16 @@ export interface RatingPlan {
 }
 
 // Who is rated: an agreed or partial result (a disputed one isn't trusted),
-// leaving out players whose replay log doesn't match its hash. Fewer than two
+// leaving out flagged players (lobby/anticheat.ts). Fewer than two
 // players left rates nobody.
 export function planRatings(
 	run: RunRecord,
-	checks: { [userId: string]: LogCheck },
+	flags: { [userId: string]: FlagReason },
 	current: { [userId: string]: RatingRecord | undefined },
 ): RatingPlan {
 	const plan: RatingPlan = { updates: {}, results: {} }
 	if (run.status !== 'agreed' && run.status !== 'partial') return plan
-	const placements = run.placements.filter((p) => checks[p.playerId] !== 'mismatch')
+	const placements = run.placements.filter((p) => !flags[p.playerId])
 	if (placements.length < 2) return plan
 
 	const ratings = new Map<string, RatingRecord>()
@@ -139,7 +139,7 @@ export function applyRatings(
 	logger: nkruntime.Logger,
 	run: RunRecord,
 	mode: string,
-	checks: { [userId: string]: LogCheck },
+	flags: { [userId: string]: FlagReason },
 ): { [userId: string]: RatingResult } {
 	const key = boardId(run.modId, mode)
 	for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
@@ -150,7 +150,7 @@ export function applyRatings(
 			run.players.map((p) => p.id),
 			run.endedAt,
 		)
-		const plan = planRatings(run, checks, current)
+		const plan = planRatings(run, flags, current)
 		const ids = Object.keys(plan.updates)
 		if (ids.length === 0) return {}
 		try {
@@ -170,7 +170,7 @@ export function applyRatings(
 			logger.warn('Rating write for run %s conflicted (attempt %d): %v', run.runId, attempt + 1, e)
 			continue
 		}
-		mirrorToLeaderboard(nk, logger, run, mode, plan, checks)
+		mirrorToLeaderboard(nk, logger, run, mode, plan, flags)
 		return plan.results
 	}
 	logger.error('Could not rate run %s after %d attempts', run.runId, WRITE_ATTEMPTS)
@@ -185,7 +185,7 @@ function mirrorToLeaderboard(
 	run: RunRecord,
 	mode: string,
 	plan: RatingPlan,
-	_checks: { [userId: string]: LogCheck },
+	_flags: { [userId: string]: FlagReason },
 ) {
 	const id = boardId(run.modId, mode)
 	try {

@@ -1,7 +1,7 @@
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
-import { storeMirroredChat, storeMirroredRun } from '../../infrastructure/gateways/nakama-mirror.gateway.js'
+import { storeMirroredChat, storeMirroredForfeit, storeMirroredRun } from '../../infrastructure/gateways/nakama-mirror.gateway.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 import type { Result } from '../../shared/utils/result.js'
 import { type MirrorPull, type MirrorService, createMirrorService } from './mirror.service.js'
@@ -43,7 +43,7 @@ export async function drainMirror(rpc: Rpc, mirror: MirrorService): Promise<numb
 export function startMirrorJob(): () => void {
 	const mirror = createMirrorService({
 		players: playerGateway,
-		store: { storeRun: storeMirroredRun, storeChat: storeMirroredChat },
+		store: { storeRun: storeMirroredRun, storeChat: storeMirroredChat, storeForfeit: storeMirroredForfeit },
 		hashSteamId: hashProviderId,
 	})
 	let running = false
