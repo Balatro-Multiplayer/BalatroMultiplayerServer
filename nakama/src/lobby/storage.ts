@@ -17,12 +17,12 @@ import {
 
 // Newest-first key order, so a player's first storageList page is their most
 // recent games (listing is in key order, and a run id is a random uuid).
-function myRunKey(run: RunRecord): string {
+export function myRunKey(run: RunRecord): string {
 	const reversed = String(9_999_999_999_999 - run.endedAt).padStart(13, '0')
 	return `${reversed}:${run.runId}`
 }
 
-function logKey(runId: string, playerId: string): string {
+export function logKey(runId: string, playerId: string): string {
 	return `${runId}:${playerId}`
 }
 

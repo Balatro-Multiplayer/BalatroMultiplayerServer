@@ -228,6 +228,33 @@ describe('disconnect and grace period', () => {
 		})
 	})
 
+	it("sends a rejoining participant the others' logs of the running game", () => {
+		const lobby = lobbyWith('a', 'b')
+		const started = {
+			...lobby,
+			game: {
+				...lobby.game,
+				started: { runId: 'r1', players: [{ id: 'a' }, { id: 'b' }] } as any,
+				logs: {
+					a: { lines: ['[1,"hand_result",["10",3]]'], bytes: 0, truncated: false },
+					b: { lines: ['[2,"hand_result",["50",2]]'], bytes: 0, truncated: false },
+				},
+			},
+		}
+		const back = join(disconnect(started, 'a', 'a-s1', 1000).lobby, 'a', 'a-s2', info('a'))
+		const tail = back.out.find((o) => o.kind === 'send' && o.op === ServerOp.REPLAY_TAIL)
+		expect(tail).toEqual({
+			kind: 'send',
+			op: ServerOp.REPLAY_TAIL,
+			payload: { runId: 'r1', tails: [{ playerId: 'b', events: [{ t: 2, opcode: 'hand_result', args: ['50', 2] }] }] },
+			to: ['a'],
+		})
+		// Not on a plain re-join, and not with no game running.
+		expect(join(started, 'a', 'a-s2', info('a')).out.some((o) => o.kind === 'send' && o.op === ServerOp.REPLAY_TAIL)).toBe(false)
+		const idle = join(disconnect(lobby, 'a', 'a-s1', 1000).lobby, 'a', 'a-s2', info('a'))
+		expect(idle.out.some((o) => o.kind === 'send' && o.op === ServerOp.REPLAY_TAIL)).toBe(false)
+	})
+
 	it("ignores a stale session's leave after the player already rejoined", () => {
 		let lobby = lobbyWith('a', 'b')
 		lobby = join(lobby, 'b', 'b-s2', info('b')).lobby

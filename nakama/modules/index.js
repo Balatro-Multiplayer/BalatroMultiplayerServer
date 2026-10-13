@@ -1531,7 +1531,10 @@ var ServerOp = {
   SPECTATE_EVENT: 109,
   // {graceSeconds}, to everyone: the server is restarting. The lobby comes
   // back under the same code; rejoin once the server is up.
-  SERVER_RESTARTING: 110
+  SERVER_RESTARTING: 110,
+  // ReplayTail, to a participant rejoining a running game: what the others
+  // logged, so its view of them catches up.
+  REPLAY_TAIL: 111
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -2507,6 +2510,33 @@ function noteReturn(nk, logger, userId, now) {
   }
 }
 
+// src/lobby/active.ts
+function activeRunOf(lobby, userId) {
+  const started = lobby.game.started;
+  if (!started || lobby.closed) return null;
+  if (!started.players.some((p) => p.id === userId)) return null;
+  if (!lobby.players.some((p) => p.id === userId)) return null;
+  return {
+    runId: started.runId,
+    code: lobby.code,
+    modId: lobby.modId,
+    events: eventsOf(lobby.game.logs[userId])
+  };
+}
+function replayTailOf(lobby, userId) {
+  const started = lobby.game.started;
+  if (!started || lobby.closed) return null;
+  if (!started.players.some((p) => p.id === userId)) return null;
+  const tails = started.players.filter((p) => p.id !== userId).map((p) => ({ playerId: p.id, events: eventsOf(lobby.game.logs[p.id]) })).filter((tail) => tail.events.length > 0);
+  return tails.length > 0 ? { runId: started.runId, tails } : null;
+}
+function eventsOf(log) {
+  return (log ? log.lines : []).map((line) => {
+    const [t, opcode, args] = JSON.parse(line);
+    return { t, opcode, args };
+  });
+}
+
 // src/lobby/state.ts
 var DEFAULT_GRACE_MS = 12e4;
 var DEFAULT_RESULT_TIMEOUT_MS = 6e4;
@@ -2656,6 +2686,8 @@ function join(lobby, userId, sessionId, info) {
           othersThan(next2, userId)
         )
       );
+      const tail = replayTailOf(next2, userId);
+      if (tail) out.push({ kind: "send", op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] });
     }
     return { lobby: next2, out };
   }
@@ -4221,24 +4253,6 @@ function seedFromHex(hex) {
   return seed;
 }
 
-// src/lobby/active.ts
-function activeRunOf(lobby, userId) {
-  const started = lobby.game.started;
-  if (!started || lobby.closed) return null;
-  if (!started.players.some((p) => p.id === userId)) return null;
-  if (!lobby.players.some((p) => p.id === userId)) return null;
-  const log = lobby.game.logs[userId];
-  return {
-    runId: started.runId,
-    code: lobby.code,
-    modId: lobby.modId,
-    events: (log ? log.lines : []).map((line) => {
-      const [t, opcode, args] = JSON.parse(line);
-      return { t, opcode, args };
-    })
-  };
-}
-
 // src/lobby/relay.ts
 var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 var MAX_PARAMS_BYTES = 16 * 1024;
@@ -5569,6 +5583,54 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   });
 }
 
+// src/lobby/retention.ts
+var RUN_RETENTION_DAYS = 180;
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var LIST_PAGE2 = 100;
+var PURGE_MAX = 500;
+function isKept(run) {
+  return Object.keys(run.flags || {}).length > 0 || run.status === "disputed";
+}
+function isPurgeable(run, cutoff) {
+  return run.endedAt < cutoff && !isKept(run);
+}
+function runObjects(run) {
+  const objects = [
+    { collection: RUNS_COLLECTION, key: run.runId, userId: SYSTEM_USER_ID }
+  ];
+  for (const player of run.players) {
+    objects.push({ collection: LOGS_COLLECTION, key: logKey(run.runId, player.id), userId: SYSTEM_USER_ID });
+    objects.push({ collection: MY_RUNS_COLLECTION, key: myRunKey(run), userId: player.id });
+  }
+  return objects;
+}
+function purgeRuns(nk, cutoff, max) {
+  let deleted = 0;
+  let cursor = "";
+  do {
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE2, cursor);
+    for (const o of page.objects || []) {
+      const run = o.value;
+      if (!isPurgeable(run, cutoff)) continue;
+      if (deleted >= max) return { deleted, more: true };
+      nk.storageDelete(runObjects(run));
+      deleted++;
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  return { deleted, more: false };
+}
+function rpcAdminRunsPurge(ctx, logger, nk, payload) {
+  var _a;
+  requireServer(ctx);
+  const days = (_a = parsePayload(payload).olderThanDays) != null ? _a : RUN_RETENTION_DAYS;
+  if (typeof days !== "number" || !Number.isInteger(days) || days < 1)
+    throw runtimeError(INVALID_ARGUMENT, "olderThanDays must be a positive whole number");
+  const result = purgeRuns(nk, Date.now() - days * DAY_MS2, PURGE_MAX);
+  if (result.deleted > 0) logger.info("Purged %d runs older than %d days", result.deleted, days);
+  return JSON.stringify(result);
+}
+
 // src/player/rpc.ts
 var MAX_MODS = 300;
 var MAX_MOD_LENGTH = 128;
@@ -5946,6 +6008,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_mirror_ack", rpcAdminMirrorAck);
   initializer.registerRpc("admin_profile_set", rpcAdminProfileSet);
   initializer.registerRpc("admin_account_delete", rpcAdminAccountDelete);
+  initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

@@ -6,6 +6,7 @@
 //
 // Parity source: the API's MQTT lobbies (apps/server/src/features/lobby/
 // lobby.service.ts and infrastructure/mqtt/grace-period.service.ts).
+import { replayTailOf } from './active'
 import {
 	type GameState,
 	type LobbyEventMessage,
@@ -293,6 +294,10 @@ export function join(
 					othersThan(next, userId),
 				),
 			)
+			// The others' events it missed while away (grace-period.service.ts's
+			// pushReplayCatchUp).
+			const tail = replayTailOf(next, userId)
+			if (tail) out.push({ kind: 'send', op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] })
 		}
 		return { lobby: next, out }
 	}

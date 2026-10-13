@@ -30,6 +30,7 @@ import router, { matchmakingService } from './routes/index.js'
 import type { RegisterPrivateDeps } from './shared/types/index.js'
 import { nakamaIntegrityService } from './features/nakama/integrity.js'
 import { startMirrorJob } from './features/nakama/mirror.job.js'
+import { startRetentionJob } from './features/nakama/retention.job.js'
 import type { ChallengeStrategy } from './shared/types/index.js'
 import { getConfig } from './state/config.js'
 import { startSessionCleanup, stopSessionCleanup } from './state/index.js'
@@ -236,6 +237,8 @@ async function start() {
 
 		// Nakama games reach the website and webadmin through the mirror.
 		startMirrorJob()
+		// ...and Nakama drops what they no longer keep.
+		startRetentionJob()
 
 		void purgeExpiredDeletedPlayerHashesJob()
 		setInterval(

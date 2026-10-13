@@ -42,6 +42,9 @@ export const ServerOp = {
 	// {graceSeconds}, to everyone: the server is restarting. The lobby comes
 	// back under the same code; rejoin once the server is up.
 	SERVER_RESTARTING: 110,
+	// ReplayTail, to a participant rejoining a running game: what the others
+	// logged, so its view of them catches up.
+	REPLAY_TAIL: 111,
 } as const
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included,
@@ -186,11 +189,23 @@ export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
 
 // A game a player is still in, as run_active answers it: their own replay
 // events so far, for a client that restarted mid-game to play catch-up.
+export interface ReplayEvent {
+	t: unknown
+	opcode: unknown
+	args: unknown
+}
+
 export interface ActiveRun {
 	runId: string
 	code: string
 	modId: string
-	events: { t: unknown; opcode: unknown; args: unknown }[]
+	events: ReplayEvent[]
+}
+
+// The other participants' logs so far, each as ActiveRun's events.
+export interface ReplayTail {
+	runId: string
+	tails: { playerId: string; events: ReplayEvent[] }[]
 }
 
 // What a spectator joining mid-game has to start from: each participant's
