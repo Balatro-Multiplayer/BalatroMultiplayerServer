@@ -110,6 +110,19 @@ export async function findNakamaUserIds(playerIds: string[]): Promise<Map<string
 	return found
 }
 
+// Nakama user id -> playerId, for those of the given Nakama users that have a
+// player row.
+export async function findPlayerIdsByNakamaUserIds(nakamaUserIds: string[]): Promise<Map<string, string>> {
+	if (nakamaUserIds.length === 0) return new Map()
+	const rows = await db
+		.select({ id: players.id, nakamaUserId: players.nakamaUserId })
+		.from(players)
+		.where(inArray(players.nakamaUserId, nakamaUserIds))
+	const found = new Map<string, string>()
+	for (const row of rows) if (row.nakamaUserId) found.set(row.nakamaUserId, row.id)
+	return found
+}
+
 export async function findPlayerByNakamaUserId(nakamaUserId: string): Promise<PlayerRecord | null> {
 	const row = await db.query.players.findFirst({
 		where: eq(players.nakamaUserId, nakamaUserId),

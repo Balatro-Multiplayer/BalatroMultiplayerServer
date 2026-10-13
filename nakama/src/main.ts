@@ -49,6 +49,7 @@ import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
+import { rpcReportSubmit } from './moderation/report'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -88,6 +89,7 @@ function InitModule(
 	initializer.registerRpc('mute_set', rpcMuteSet)
 	initializer.registerRpc('chat_enable', rpcChatEnable)
 	initializer.registerRpc('chat_send', rpcChatSend)
+	initializer.registerRpc('report_submit', rpcReportSubmit)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)
 	initializer.registerRpc('lobby_find', rpcLobbyFind)
 	initializer.registerRpc('lobby_current', rpcLobbyCurrent)

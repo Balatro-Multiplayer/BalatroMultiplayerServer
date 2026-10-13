@@ -150,7 +150,7 @@ export function finishGame(
 		rankedMode: lobby.rankedMode,
 	}
 
-	const next = { ...lobby, game: emptyGame() }
+	const next = { ...lobby, lastRunId: started.runId, game: emptyGame() }
 	const out: Outbound[] = [{ kind: 'saveRun', run, logs: game.logs }]
 	if (!override || override.announce) {
 		const ended: GameEnded = { runId: started.runId, status, placements }

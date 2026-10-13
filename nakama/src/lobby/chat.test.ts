@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CHAT_BURST, chatCheck, chatPost } from './chat'
+import { CHAT_BURST, chatCheck, chatPost, reportEvidence } from './chat'
 import { ServerOp } from './protocol'
 import { join, newLobby } from './state'
 
@@ -34,7 +34,7 @@ describe('chatCheck', () => {
 
 describe('chatPost', () => {
 	it('sends the line to everyone seated, the sender included', () => {
-		const step = chatPost(lobbyOf('a', 'b'), 'a', 'hello')
+		const step = chatPost(lobbyOf('a', 'b'), 'a', 'hello', 0)
 		expect(step.out).toEqual([
 			{
 				kind: 'send',
@@ -45,8 +45,8 @@ describe('chatPost', () => {
 		])
 	})
 	it('keeps lines as moderation context, marking who sent each', () => {
-		let lobby = chatPost(lobbyOf('a', 'b'), 'a', 'one').lobby
-		lobby = chatPost(lobby, 'b', 'two').lobby
+		let lobby = chatPost(lobbyOf('a', 'b'), 'a', 'one', 0).lobby
+		lobby = chatPost(lobby, 'b', 'two', 0).lobby
 		const check = chatCheck(lobby, 'a', 0)
 		expect(check.ok && check.context).toEqual([
 			{ who: 'sender', text: 'one' },
@@ -54,6 +54,28 @@ describe('chatPost', () => {
 		])
 	})
 	it('drops a line from someone who has left', () => {
-		expect(chatPost(lobbyOf('a'), 'x', 'hi').out).toEqual([])
+		expect(chatPost(lobbyOf('a'), 'x', 'hi', 0).out).toEqual([])
+	})
+})
+
+describe('reportEvidence', () => {
+	it('gives the code, run and timestamped chat tail', () => {
+		let lobby = chatPost(lobbyOf('a', 'b'), 'b', 'rude', 7).lobby
+		lobby = { ...lobby, lastRunId: 'run-1' }
+		expect(reportEvidence(lobby, 'a', 'b')).toEqual({
+			ok: true,
+			evidence: { code: 'ABC123', runId: 'run-1', chat: [{ playerId: 'b', displayName: 'B', message: 'rude', sentAt: 7 }] },
+		})
+	})
+	it('prefers the running game, whose players may have left', () => {
+		const lobby = lobbyOf('a')
+		const started = { runId: 'run-2', seed: 's', stake: null, options: null, startedAt: 0, hostId: 'a', players: [{ id: 'gone', displayName: 'G' }] }
+		const check = reportEvidence({ ...lobby, game: { ...lobby.game, started } }, 'a', 'gone')
+		expect(check.ok && check.evidence.runId).toBe('run-2')
+	})
+	it('refuses outsiders, unknown players and self-reports', () => {
+		expect(reportEvidence(lobbyOf('a', 'b'), 'x', 'b')).toEqual({ ok: false, reason: 'not_in_lobby' })
+		expect(reportEvidence(lobbyOf('a', 'b'), 'a', 'x')).toEqual({ ok: false, reason: 'unknown_player' })
+		expect(reportEvidence(lobbyOf('a', 'b'), 'a', 'a')).toEqual({ ok: false, reason: 'self' })
 	})
 })

@@ -26,6 +26,7 @@ var INVALID_ARGUMENT = 3;
 var NOT_FOUND = 5;
 var ALREADY_EXISTS = 6;
 var PERMISSION_DENIED = 7;
+var RESOURCE_EXHAUSTED = 8;
 var FAILED_PRECONDITION = 9;
 var UNAVAILABLE = 14;
 var UNAUTHENTICATED = 16;
@@ -1901,7 +1902,7 @@ function finishGame(lobby, now, override) {
     players: started.players,
     rankedMode: lobby.rankedMode
   };
-  const next = __spreadProps(__spreadValues({}, lobby), { game: emptyGame() });
+  const next = __spreadProps(__spreadValues({}, lobby), { lastRunId: started.runId, game: emptyGame() });
   const out = [{ kind: "saveRun", run, logs: game.logs }];
   if (!override || override.announce) {
     const ended = { runId: started.runId, status, placements };
@@ -2285,10 +2286,11 @@ function chatCheck(lobby, userId, now) {
   }));
   return { ok: true, lobby: next, displayName: player.info.displayName, context };
 }
-function chatPost(lobby, userId, text) {
+function chatPost(lobby, userId, text, now) {
   const player = findPlayer(lobby, userId);
   if (!player || lobby.closed) return { lobby, out: [] };
-  const chat = (lobby.chat || []).concat([{ senderId: userId, text }]).slice(-CHAT_TAIL);
+  const line = { senderId: userId, text, displayName: player.info.displayName, at: now };
+  const chat = (lobby.chat || []).concat([line]).slice(-CHAT_TAIL);
   return {
     lobby: __spreadProps(__spreadValues({}, lobby), { chat }),
     out: [
@@ -2299,6 +2301,26 @@ function chatPost(lobby, userId, text) {
         to: lobby.players.map((p) => p.id)
       }
     ]
+  };
+}
+function reportEvidence(lobby, reporterId, reportedId) {
+  if (!findPlayer(lobby, reporterId) || lobby.closed) return { ok: false, reason: "not_in_lobby" };
+  if (reporterId === reportedId) return { ok: false, reason: "self" };
+  const started = lobby.game.started;
+  const known = !!findPlayer(lobby, reportedId) || !!started && started.players.some((p) => p.id === reportedId);
+  if (!known) return { ok: false, reason: "unknown_player" };
+  return {
+    ok: true,
+    evidence: {
+      code: lobby.code,
+      runId: started ? started.runId : lobby.lastRunId || null,
+      chat: (lobby.chat || []).filter((line) => line.at !== void 0).map((line) => ({
+        playerId: line.senderId,
+        displayName: line.displayName || "",
+        message: line.text,
+        sentAt: line.at
+      }))
+    }
   };
 }
 
@@ -2820,7 +2842,7 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
       nk,
       dispatcher,
       state,
-      chatPost(state.lobby, signal.userId, signal.text)
+      chatPost(state.lobby, signal.userId, signal.text, Date.now())
     );
     return { state: next || state, data: "ok" };
   }
@@ -2849,6 +2871,10 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
       state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
       data: member ? "ok" : "not_member"
     };
+  }
+  if (signal.type === "report_evidence") {
+    const check = reportEvidence(state.lobby, signal.reporterId, signal.reportedId);
+    return { state, data: JSON.stringify(check.ok ? check.evidence : { error: check.reason }) };
   }
   if (signal.type === "admin_view") return { state, data: JSON.stringify(adminView(state.lobby)) };
   if (signal.type === "admin_close") {
@@ -3478,6 +3504,79 @@ function rpcMuteSet(ctx, logger, nk, payload) {
   return JSON.stringify({ mutedPlayerIds: profile.mutedUserIds });
 }
 
+// src/moderation/report.ts
+var REPORT_TYPES = ["cheating", "chat_abuse", "griefing", "inappropriate_username", "other"];
+var MAX_REPORT_MESSAGE = 500;
+var REPORT_LIMIT = 5;
+var REPORT_WINDOW_MS = 10 * 6e4;
+var LIMIT_COLLECTION = "moderation";
+var LIMIT_KEY = "report_times";
+function parseReport(data) {
+  const { reportedUserId, type, message } = data;
+  if (typeof reportedUserId !== "string" || !reportedUserId) return "Missing or invalid reportedUserId";
+  if (typeof type !== "string" || REPORT_TYPES.indexOf(type) === -1) return "Invalid report type";
+  if (message !== void 0 && message !== null && (typeof message !== "string" || message.length > MAX_REPORT_MESSAGE))
+    return `Invalid message (max ${MAX_REPORT_MESSAGE} characters)`;
+  return { reportedUserId, type, message: typeof message === "string" && message ? message : void 0 };
+}
+function reportTimesAfter(times, now) {
+  const recent = times.filter((t) => now - t < REPORT_WINDOW_MS);
+  if (recent.length >= REPORT_LIMIT) return null;
+  return recent.concat([now]);
+}
+function readTimes(nk, userId) {
+  const objects = nk.storageRead([{ collection: LIMIT_COLLECTION, key: LIMIT_KEY, userId }]);
+  const times = objects.length > 0 ? objects[0].value.times : null;
+  return Array.isArray(times) ? times.filter((t) => typeof t === "number") : [];
+}
+function writeTimes(nk, userId, times) {
+  nk.storageWrite([
+    {
+      collection: LIMIT_COLLECTION,
+      key: LIMIT_KEY,
+      userId,
+      value: { times },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+var EVIDENCE_REFUSALS = {
+  not_in_lobby: "Not a member of this lobby",
+  unknown_player: "That player is not in this lobby",
+  self: "You cannot report yourself"
+};
+function rpcReportSubmit(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const report = parseReport(parsePayload(payload));
+  if (typeof report === "string") throw runtimeError(INVALID_ARGUMENT, report);
+  const now = Date.now();
+  const times = reportTimesAfter(readTimes(nk, userId), now);
+  if (!times) throw runtimeError(RESOURCE_EXHAUSTED, "Too many reports; try again later");
+  const lobby = currentLobby(nk, userId);
+  if (!lobby) throw runtimeError(NOT_FOUND, "Not in a lobby");
+  const signal = { type: "report_evidence", reporterId: userId, reportedId: report.reportedUserId };
+  const evidence = JSON.parse(nk.matchSignal(lobby.matchId, JSON.stringify(signal)) || "{}");
+  if ("error" in evidence) throw runtimeError(INVALID_ARGUMENT, EVIDENCE_REFUSALS[evidence.error] || evidence.error);
+  const reply = callExpress(nk, logger, ctx.env, "/reports", {
+    reporterId: userId,
+    reportedId: report.reportedUserId,
+    type: report.type,
+    message: report.message,
+    lobbyId: lobby.matchId.split(".")[0],
+    lobbyCode: evidence.code,
+    runId: evidence.runId,
+    chat: evidence.chat
+  });
+  if (!reply || reply.status !== 200 || typeof reply.body.reportId !== "number") {
+    logger.warn("Report by %s not filed (HTTP %v)", userId, reply ? reply.status : "none");
+    throw runtimeError(UNAVAILABLE, "Reports are unavailable right now");
+  }
+  writeTimes(nk, userId, times);
+  logger.info("Report %d filed by %s against %s", reply.body.reportId, userId, report.reportedUserId);
+  return JSON.stringify({ ok: true, reportId: reply.body.reportId });
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
@@ -3509,6 +3608,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("mute_set", rpcMuteSet);
   initializer.registerRpc("chat_enable", rpcChatEnable);
   initializer.registerRpc("chat_send", rpcChatSend);
+  initializer.registerRpc("report_submit", rpcReportSubmit);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);
   initializer.registerRpc("lobby_find", rpcLobbyFind);
   initializer.registerRpc("lobby_current", rpcLobbyCurrent);

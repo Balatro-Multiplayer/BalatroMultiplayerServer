@@ -4,8 +4,10 @@ import { env } from '../../env.js'
 import * as banGateway from '../../infrastructure/gateways/ban.gateway.js'
 import * as muteGateway from '../../infrastructure/gateways/mute.gateway.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
+import * as reportGateway from '../../infrastructure/gateways/report.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { createPlayerSyncService, type PlayerSyncService } from './player-sync.service.js'
+import { createReportRelayService, parseNakamaReport, type ReportRelayService } from './report-relay.service.js'
 
 // Routes only Nakama calls (nakama/src/express.ts), guarded by the shared
 // INTERNAL_API_KEY. With no key configured every request is refused.
@@ -32,7 +34,14 @@ function defaultSyncService(): PlayerSyncService {
 	return createPlayerSyncService({ players: playerGateway, bans: banGateway, mutes: muteGateway })
 }
 
-export function createInternalNakamaRouter(sync: PlayerSyncService = defaultSyncService()) {
+function defaultReportService(): ReportRelayService {
+	return createReportRelayService({ players: playerGateway, reports: reportGateway })
+}
+
+export function createInternalNakamaRouter(
+	sync: PlayerSyncService = defaultSyncService(),
+	reportRelay: ReportRelayService = defaultReportService(),
+) {
 	const router = Router()
 	router.use(requireInternalKey)
 
@@ -63,6 +72,17 @@ export function createInternalNakamaRouter(sync: PlayerSyncService = defaultSync
 				throw new AppError('Bad playerIds', 400)
 			const found = await playerGateway.findNakamaUserIds(ids)
 			res.json({ resolved: Object.fromEntries(found) })
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// NakamaReport -> {ok, reportId}: a report filed in a Nakama lobby.
+	router.post('/reports', async (req, res, next) => {
+		try {
+			const report = parseNakamaReport(req.body)
+			if (typeof report === 'string') throw new AppError(report, 400)
+			res.json({ ok: true, reportId: await reportRelay.fileReport(report) })
 		} catch (err) {
 			next(err)
 		}

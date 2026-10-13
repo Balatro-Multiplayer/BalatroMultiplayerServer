@@ -38,7 +38,7 @@ import {
 } from './state'
 import { displayNameOf, readProfile } from '../player/profile'
 import { applyRatings } from '../rating/apply'
-import { chatCheck, chatPost } from './chat'
+import { chatCheck, chatPost, reportEvidence } from './chat'
 import { logChecksOf, saveRun } from './storage'
 
 const TICK_RATE = 5
@@ -567,7 +567,7 @@ export function lobbyMatchSignal(
 			nk,
 			dispatcher,
 			state,
-			chatPost(state.lobby, signal.userId, signal.text),
+			chatPost(state.lobby, signal.userId, signal.text, Date.now()),
 		)
 		return { state: next || state, data: 'ok' }
 	}
@@ -596,6 +596,10 @@ export function lobbyMatchSignal(
 			state: next || { ...state, lobby: { ...state.lobby, closed: true } },
 			data: member ? 'ok' : 'not_member',
 		}
+	}
+	if (signal.type === 'report_evidence') {
+		const check = reportEvidence(state.lobby, signal.reporterId, signal.reportedId)
+		return { state, data: JSON.stringify(check.ok ? check.evidence : { error: check.reason }) }
 	}
 	if (signal.type === 'admin_view') return { state, data: JSON.stringify(adminView(state.lobby)) }
 	if (signal.type === 'admin_close') {

@@ -240,6 +240,8 @@ export type LobbySignal =
 	| { type: 'admin_remove'; userId: string; reason: string; onlyIfStarted?: boolean }
 	| { type: 'admin_close' }
 	| { type: 'admin_view' }
+	// report_submit (moderation/report.ts): the evidence a report carries.
+	| { type: 'report_evidence'; reporterId: string; reportedId: string }
 
 // Storage object (per user) naming the lobby they are in, for reconnect after
 // a game restart. Written and removed by the match only.

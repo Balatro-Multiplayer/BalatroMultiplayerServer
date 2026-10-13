@@ -27,6 +27,14 @@ export const CREATOR_JOIN_TIMEOUT_MS = 30_000
 export const MIN_PLAYERS = 2
 export const MAX_PLAYERS = 128
 
+export interface ChatLine {
+	senderId: string
+	text: string
+	// Absent on lines kept before reports needed them.
+	displayName?: string
+	at?: number
+}
+
 export interface LobbyPlayer {
 	id: string
 	// The presence currently attached; a stale session's leave is ignored.
@@ -62,8 +70,11 @@ export interface Lobby {
 	closed: boolean
 	// Owned by the authoritative actions (src/actions).
 	game: GameState
-	// The last few approved chat lines (chat.ts), the moderation context.
-	chat?: { senderId: string; text: string }[]
+	// The last few approved chat lines (chat.ts): the moderation context, and
+	// a report's evidence.
+	chat?: ChatLine[]
+	// The last finished game's run, for a report filed after it ended.
+	lastRunId?: string
 	// userId -> the sender's ACTION rate-limit bucket (relay.ts).
 	actionBudget: { [userId: string]: { tokens: number; at: number } }
 }

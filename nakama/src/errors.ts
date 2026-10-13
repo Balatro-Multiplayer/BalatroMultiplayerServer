@@ -3,6 +3,7 @@ export const INVALID_ARGUMENT = 3
 export const NOT_FOUND = 5
 export const ALREADY_EXISTS = 6
 export const PERMISSION_DENIED = 7
+export const RESOURCE_EXHAUSTED = 8
 export const FAILED_PRECONDITION = 9
 export const UNAVAILABLE = 14
 export const UNAUTHENTICATED = 16

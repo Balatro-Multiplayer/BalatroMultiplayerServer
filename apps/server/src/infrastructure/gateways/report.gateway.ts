@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { eq, max } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { reports, reportedLobbyMessages } from '../db/schema.js'
 import type { Lobby } from '../../state/lobby.js'
@@ -33,45 +33,90 @@ export async function submitReport(
 	// code; null if no match has started on this lobby yet.
 	const runId = await getMostRecentRunForLobbyCode(lobby.code)
 
+	// The first report flushes the in-memory message buffer to DB so the
+	// history leading up to the report is preserved alongside future messages.
+	const chat = lobby.isReported ? [] : lobby.messageBuffer
+	const id = await recordReport({
+		lobbyId: lobby.id,
+		lobbyCode: lobby.code,
+		reporterId,
+		reportedId,
+		type,
+		runId,
+		message,
+		chat,
+	})
+	lobby.isReported = true
+	return id
+}
+
+export interface ReportedChatLine {
+	playerId: string
+	displayName: string
+	message: string
+	sentAt: Date
+}
+
+export interface NewReport {
+	lobbyId: string
+	lobbyCode: string
+	reporterId: string
+	reportedId: string
+	type: ReportType
+	runId: string | null
+	message: string | undefined
+	chat: ReportedChatLine[]
+}
+
+/**
+ * A report filed in a Nakama lobby (features/nakama). The lobby sends its
+ * whole chat tail with every report, so only lines newer than those already
+ * kept for the lobby are stored.
+ */
+export async function submitNakamaReport(report: NewReport): Promise<number> {
+	const [kept] = await db
+		.select({ latest: max(reportedLobbyMessages.sentAt) })
+		.from(reportedLobbyMessages)
+		.where(eq(reportedLobbyMessages.lobbyId, report.lobbyId))
+	const latest = kept?.latest ?? null
+	const chat = latest ? report.chat.filter((line) => line.sentAt > latest) : report.chat
+	return recordReport({ ...report, chat })
+}
+
+async function recordReport(report: NewReport): Promise<number> {
 	const [row] = await db
 		.insert(reports)
 		.values({
-			lobbyId: lobby.id,
-			lobbyCode: lobby.code,
-			reporterId,
-			reportedId,
-			type,
-			runId,
-			message,
+			lobbyId: report.lobbyId,
+			lobbyCode: report.lobbyCode,
+			reporterId: report.reporterId,
+			reportedId: report.reportedId,
+			type: report.type,
+			runId: report.runId,
+			message: report.message,
 		})
 		.returning({ id: reports.id })
 
-	if (!lobby.isReported) {
-		lobby.isReported = true
-
-		// Flush the in-memory message buffer to DB so the history leading up to
-		// the report is preserved alongside future messages.
-		if (lobby.messageBuffer.length > 0) {
-			const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-			await db.insert(reportedLobbyMessages).values(
-				lobby.messageBuffer.map((entry) => ({
-					lobbyId: lobby.id,
-					lobbyCode: lobby.code,
-					playerId: entry.playerId,
-					displayName: entry.displayName,
-					message: entry.message,
-					sentAt: entry.sentAt,
-					expiresAt,
-				})),
-			)
-		}
+	if (report.chat.length > 0) {
+		const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+		await db.insert(reportedLobbyMessages).values(
+			report.chat.map((entry) => ({
+				lobbyId: report.lobbyId,
+				lobbyCode: report.lobbyCode,
+				playerId: entry.playerId,
+				displayName: entry.displayName,
+				message: entry.message,
+				sentAt: entry.sentAt,
+				expiresAt,
+			})),
+		)
 	}
 
 	await enqueueServiceQueueItem({
 		itemType: 'report',
 		sourceId: String(row!.id),
-		subjectPlayerId: reportedId,
-		summary: `${type} report — lobby ${lobby.code}`,
+		subjectPlayerId: report.reportedId,
+		summary: `${report.type} report — lobby ${report.lobbyCode}`,
 	})
 
 	return row!.id
