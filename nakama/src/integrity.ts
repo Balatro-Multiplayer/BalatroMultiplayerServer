@@ -1,12 +1,11 @@
 // Launcher integrity: whether the player's game was started by the real
 // launcher (BET), which only ranked play needs. The API (Express) keeps the
-// private challenge strategy and runs the challenges, as it does for MQTT
-// players: it sends each challenge here as a CHALLENGE notification, the
-// client answers through launcher_challenge_answer, and the API's verdict
-// comes back through admin_integrity_set. Nakama only keeps the latest
+// private challenge strategy and runs the challenges: it sends each challenge
+// here as a CHALLENGE notification, the client answers through
+// launcher_challenge_answer, and the API's verdict comes back through
+// admin_integrity_set. Nakama only keeps the latest
 // verdict and gates the ranked queue on it while config.integrityEnforced.
-//
-// Parity source: the API's launcher-integrity.service.ts.
+
 import type { ServerConfig } from './config'
 import { callExpress } from './express'
 import { INVALID_ARGUMENT, UNAVAILABLE, runtimeError } from './errors'

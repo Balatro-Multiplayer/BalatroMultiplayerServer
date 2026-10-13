@@ -15,7 +15,7 @@ import {
 	expectedScore,
 } from './elo'
 
-describe('elo.service', () => {
+describe('elo', () => {
 	describe('effectiveK', () => {
 		it('returns K_ESTABLISHED for players at or above PLACEMENT_GAMES', () => {
 			expect(effectiveK(PLACEMENT_GAMES, 0.5)).toBe(K_ESTABLISHED)

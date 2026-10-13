@@ -3,10 +3,6 @@
 // SPECTATE_SNAPSHOT to start from, then every participant's replay event as a
 // SPECTATE_EVENT. They are never seated, counted, readied or sent the
 // participants' own ops.
-//
-// Parity source: the API's GET /lobbies/:code/spectate (lobby.route.ts) and
-// getSpectatorSnapshot (replay-log.service.ts), which spectators then follow
-// over MQTT.
 import {
 	ServerOp,
 	type SpectateEvent,

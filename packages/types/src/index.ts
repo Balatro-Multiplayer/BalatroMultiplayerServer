@@ -33,8 +33,8 @@ export type ReportStatus = 'open' | 'resolved'
 
 // --- Launcher integrity challenge/response (see registerPrivate below) ---
 
-// 'ranked_readiness' is issued right after a Ranked queue join (see
-// matchmaking.service.ts::joinQueue), not at connect time or on the
+// 'ranked_readiness' is issued right after a Ranked queue join (Nakama's
+// queue hook), not at connect time or on the
 // periodic interval like the other two - it answers "is the launcher and
 // every active Ranked-legal mod still current *right now*", forcing a
 // fresh check on the launcher side rather than trusting anything cached

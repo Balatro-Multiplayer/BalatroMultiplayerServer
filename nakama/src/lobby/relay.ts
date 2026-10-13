@@ -1,9 +1,9 @@
 // ClientOp.ACTION: relays an action between players, or runs it when it is
 // authoritative (src/actions/registry.ts). Pure, like state.ts.
 //
-// The server stamps `from` with the sender, so -- unlike MQTT, where the
-// payload's `from` is whatever the client wrote -- a player can't pose as
-// another, and only the server can send an authoritative action's result.
+// The server stamps `from` with the sender rather than trusting the payload's,
+// so a player can't pose as another, and only the server can send an
+// authoritative action's result.
 import {
 	type ActionContext,
 	LOG_EVENT_KEY,

@@ -31,9 +31,9 @@ export interface Profile {
 	legacyPlayerId: string | null
 	// True once the Postgres sync ran (or there was nothing to sync).
 	synced: boolean
-	// True once the player has logged in through session_init (nakama_only).
-	// Until then the API owns the account (names included), and this profile
-	// only holds what Nakama's own checks need (ToS, chat consent).
+	// True once the player has logged in through session_init. Until then
+	// the profile only holds what Nakama's own checks need (ToS, chat
+	// consent), and the names still come from the Postgres sync.
 	nakamaLogin: boolean
 }
 

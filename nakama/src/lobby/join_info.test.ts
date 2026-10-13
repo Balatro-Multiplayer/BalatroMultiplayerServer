@@ -16,7 +16,7 @@ describe('joinInfoOf', () => {
 		expect(joinInfoOf(nk as any, presence, meta).displayName).toBe('Sent')
 	})
 
-	it('takes the name and joker from a nakama_only profile', () => {
+	it('takes the name and joker from a profile that has logged in through session_init', () => {
 		const nk = fakeNk()
 		writeProfile(nk as any, USER, { ...defaultProfile('Alice'), preferredJoker: 'j_mime', mods: ['B-2'], nakamaLogin: true })
 		expect(joinInfoOf(nk as any, presence, meta)).toEqual({ displayName: 'Alice', preferredJoker: 'j_mime', mods: ['A-1'] })

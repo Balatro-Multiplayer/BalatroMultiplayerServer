@@ -47,8 +47,8 @@ export const ServerOp = {
 	REPLAY_TAIL: 111,
 } as const
 
-// Where an ACTION goes: a player id, '*' for everyone (the sender included,
-// as over MQTT), or SERVER_TARGET for an authoritative action.
+// Where an ACTION goes: a player id, '*' for everyone (the sender included),
+// or SERVER_TARGET for an authoritative action.
 export const BROADCAST_TARGET = '*'
 export const SERVER_TARGET = 'server'
 

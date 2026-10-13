@@ -12,8 +12,8 @@ function authHeader(playerId: string, steamName: string) {
 	return `Bearer ${signJwt({ playerId, steamName })}`
 }
 
-// Mirrors the drizzle chain-mocking pattern used in matchmaking.service.test.ts
-// (`db.select().from().where()`), since replay-log.gateway.ts isn't otherwise
+// Mocks the drizzle chain (`db.select().from().where()`), since
+// replay-log.gateway.ts isn't otherwise
 // injectable at the route layer -- it's consumed via the replayLogService
 // singleton.
 function mockSelectChain(rows: unknown[]) {

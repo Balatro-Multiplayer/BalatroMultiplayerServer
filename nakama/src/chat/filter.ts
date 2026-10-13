@@ -1,7 +1,6 @@
-// What chat_send does before (or instead of) the moderation service, as in the
-// API's features/chat/{normalization,obscenity}.ts: messages on the webadmin
-// allowlist skip moderation entirely, and with the service switched off
-// (MODERATION_REMOTE=off) a local word list judges instead.
+// What chat_send does before (or instead of) the moderation service: messages
+// on the webadmin allowlist skip moderation entirely, and with the service
+// switched off (MODERATION_REMOTE=off) a local word list judges instead.
 import { RegExpMatcher, englishDataset, englishRecommendedTransformers } from 'obscenity'
 
 // The allowlist key for a message: trimmed, lowercased, one trailing . ! or ?

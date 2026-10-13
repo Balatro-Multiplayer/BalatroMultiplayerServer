@@ -3,9 +3,6 @@
 // instead of mutating. Nakama round-trips match state through Go between
 // calls, where Set/Map values are lost and in-place nested mutation can
 // silently not stick, so the state holds only plain objects and arrays.
-//
-// Parity source: the API's MQTT lobbies (apps/server/src/features/lobby/
-// lobby.service.ts and infrastructure/mqtt/grace-period.service.ts).
 import { replayTailOf } from './active'
 import {
 	type GameState,
@@ -294,8 +291,7 @@ export function join(
 					othersThan(next, userId),
 				),
 			)
-			// The others' events it missed while away (grace-period.service.ts's
-			// pushReplayCatchUp).
+			// The others' events it missed while away.
 			const tail = replayTailOf(next, userId)
 			if (tail) out.push({ kind: 'send', op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] })
 		}
@@ -349,8 +345,7 @@ export function logBudgetKey(userId: string): string {
 	return `${userId}:log`
 }
 
-// Next host after `leavingId`: the earliest-joined player still connected
-// (grace-period.service.ts findNextHost).
+// Next host after `leavingId`: the earliest-joined player still connected.
 function nextHost(lobby: Lobby, leavingId: string): string | null {
 	for (const p of lobby.players) {
 		if (p.id !== leavingId && p.awaySince === null) return p.id
@@ -381,7 +376,7 @@ export function close(lobby: Lobby): Step {
 }
 
 // A lobby nobody is connected to any more is closed straight away rather than
-// waiting out every player's grace period (grace-period.service.ts, "§7.8").
+// waiting out every player's grace period.
 function closeIfAbandoned(step: Step): Step {
 	const lobby = step.lobby
 	if (lobby.closed) return step

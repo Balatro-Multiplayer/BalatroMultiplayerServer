@@ -1,5 +1,5 @@
 // Secondary leaderboard metrics: a per-mod personal best tracked alongside
-// the rating. Ported from apps/server's features/matchmaking/metrics.config.ts
+// the rating. The same table as apps/server's features/ratings/metrics.config.ts
 // (client-reported and plausibility-bounded, never re-simulated).
 export type MetricKind = 'score' | 'time_ms'
 

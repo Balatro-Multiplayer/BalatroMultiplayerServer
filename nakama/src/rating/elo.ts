@@ -1,5 +1,6 @@
-// Ported from apps/server's features/matchmaking/elo.service.ts (the numbers
-// must stay identical: elo.test.ts pins them). Pure -- no storage.
+// The same Elo as apps/server's features/ratings/elo.ts, which the void
+// replay re-rates with (the numbers must stay identical: elo.test.ts pins
+// them). Pure -- no storage.
 
 // One player's finishing position in a game being rated.
 export interface PlacementEntry {

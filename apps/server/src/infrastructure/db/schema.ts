@@ -370,10 +370,9 @@ export const serviceQueueItems = pgTable(
 )
 
 // Unused since the move to Nakama (which holds disconnect grace itself); kept
-// so the MQTT-era rows survive. Was a disconnected player's 2-minute countdown
-// before auto-forfeit, durable across a bmp-api restart. No FK on playerId, same precedent as
-// forfeitReconciliationFlags above: a grace period can involve a temp/dev
-// account never written to `players` (see authenticateAsTemp).
+// so the old rows survive. Was a disconnected player's 2-minute countdown
+// before auto-forfeit, durable across a bmp-api restart. No FK on playerId, same
+// precedent as forfeitReconciliationFlags above.
 export const gracePeriods = pgTable('grace_periods', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	playerId: uuid('player_id').notNull(),

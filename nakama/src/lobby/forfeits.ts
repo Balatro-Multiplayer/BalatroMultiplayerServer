@@ -1,8 +1,8 @@
 // A player whose grace period ran out mid-game in a matchmade lobby is out
 // of it: the others' reports place them. If they come back moments later,
 // the timeout may have been wrongful (their reconnect lost a race), so a
-// moderator gets to look (the API's forfeit_reconciliation_flags, as its
-// grace-period.service.ts checkForWrongfulForfeit filed them). The timeout
+// moderator gets to look (the API's forfeit_reconciliation_flags, through
+// the mirror). The timeout
 // is kept on the player; noteReturn, on their next session_init or
 // lobby_current, files it through the mirror if they're back in time.
 import { enqueue } from '../mirror/outbox'

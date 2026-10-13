@@ -1,5 +1,4 @@
-// The remote moderation bridge, as in the API's features/chat/moderation.ts and
-// infrastructure/gateways/moderation.gateway.ts: a pure decision over the
+// The remote moderation bridge (apps/moderation): a pure decision over the
 // service's answer, and the one HTTP call.
 
 export type ModerationAttempt = { status: number; body: unknown } | null

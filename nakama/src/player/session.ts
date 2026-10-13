@@ -1,6 +1,6 @@
-// session_init: the Nakama-only login (MPAPI config nakama_only). The client
-// calls it right after authenticating and gets back what the API's
-// /api/auth/nakama answered: the player, the ToS gate and the server config.
+// session_init: the game client's login. The client calls it right after
+// authenticating and gets back the player, the ToS gate and the server
+// config.
 // At a Steam account's first call the player's Postgres data is synced over
 // through the API (player-sync); if that fails the login still succeeds and
 // the sync is tried again next time.
