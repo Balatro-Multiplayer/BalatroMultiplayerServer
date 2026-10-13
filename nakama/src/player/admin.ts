@@ -98,9 +98,12 @@ export function rpcAdminProfileSet(
 
 // {userId} -> {deleted: true}: the account deleted from the website. The
 // player leaves their lobby, and the account and everything it owns is
-// deleted. Its session tokens are revoked first ('' tokens: all of them). Bans outlive it: they are indexed by login
-// id (moderation/enforce.ts) and kept in Postgres, which a new account for
-// the same Steam id syncs from.
+// deleted. Its refresh tokens are revoked first ('' tokens: all of them); an
+// already-issued session token can't be revoked in Nakama and lives out its
+// expiry (session.token_expiry_sec), but its account is gone so it owns no
+// storage. Bans outlive the account: they are indexed by login id
+// (moderation/enforce.ts) and kept in Postgres, which a new account for the
+// same Steam id syncs from.
 export function rpcAdminAccountDelete(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
