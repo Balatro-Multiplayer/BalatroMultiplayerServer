@@ -5,7 +5,7 @@
 // through the API (player-sync); if that fails the login still succeeds and
 // the sync is tried again next time.
 import { noteReturn } from '../lobby/forfeits'
-import { readConfig, type ServerConfig } from '../config'
+import { clientConfig, readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
 import { UNVERIFIED, writeIntegrity } from '../integrity'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
@@ -85,7 +85,7 @@ export function loginResponse(userId: string, profile: Profile, config: ServerCo
 		// An update to a ToS the player accepted before (only with tosRequired).
 		tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
 		player: playerView(userId, profile),
-		serverConfig: config,
+		serverConfig: clientConfig(config),
 	}
 }
 

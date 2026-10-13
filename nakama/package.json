@@ -9,6 +9,7 @@
 	},
 	"devDependencies": {
 		"esbuild": "^0.25.0",
+		"obscenity": "0.4.6",
 		"typescript": "^5.7.0",
 		"vitest": "^3.0.0"
 	}

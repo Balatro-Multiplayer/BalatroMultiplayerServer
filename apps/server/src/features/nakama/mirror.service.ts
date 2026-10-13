@@ -332,12 +332,12 @@ export interface ChatRows {
 
 // The verdict the moderation service gave, as flagged_messages records a
 // remote flag ({source, band}).
+// flagged_messages.matches as the API's own filters wrote it: the local word
+// filter's matches, or the remote service's band.
 function flagMatchesOf(verdict: unknown): unknown {
-	const band =
-		typeof verdict === 'object' && verdict !== null && typeof (verdict as { band?: unknown }).band === 'string'
-			? (verdict as { band: string }).band
-			: 'unknown'
-	return { source: 'remote', band }
+	const record = typeof verdict === 'object' && verdict !== null ? (verdict as { [key: string]: unknown }) : {}
+	if (record.source === 'local' && Array.isArray(record.matches)) return record.matches
+	return { source: 'remote', band: typeof record.band === 'string' ? record.band : 'unknown' }
 }
 
 export function chatRowsOf(entry: PulledChat, playerId: string, steamIdHash: string | null): ChatRows {

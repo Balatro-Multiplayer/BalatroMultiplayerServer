@@ -32,8 +32,13 @@ export interface ChatLogLine {
 	userId: string
 	message: string
 	flagged: boolean
-	verdict: unknown
+	// Why a flagged line was blocked; null for a posted one.
+	verdict: ChatVerdict | null
 }
+
+export type ChatVerdict =
+	| { source: 'remote'; band: string }
+	| { source: 'local'; matches: { word: string; startIndex: number; endIndex: number }[] }
 
 // Key order is pull order: the time, zero-padded, then a uuid for entries
 // written in the same millisecond.

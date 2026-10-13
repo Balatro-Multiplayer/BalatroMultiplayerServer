@@ -18,6 +18,9 @@ export interface ServerConfig {
 	testingMode: boolean
 	// Ranked needs a launcher-integrity verdict from the API.
 	integrityEnforced: boolean
+	// Chat messages that skip moderation, as webadmin lists them (looked up by
+	// chat/filter.ts normalizeForAllowlist).
+	chatAllowlist: string[]
 }
 
 // Until the API's first push: everything Nakama already did stays allowed.
@@ -29,6 +32,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	lobbyCreationEnabled: true,
 	testingMode: false,
 	integrityEnforced: false,
+	chatAllowlist: [],
 }
 
 // current with every valid field of update applied; unknown keys and wrongly
@@ -49,7 +53,17 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 		const value = update[flag]
 		if (typeof value === 'boolean') (next as unknown as { [k: string]: unknown })[flag] = value
 	}
+	const allowlist = update.chatAllowlist
+	if (Array.isArray(allowlist) && allowlist.every((m) => typeof m === 'string'))
+		next.chatAllowlist = allowlist as string[]
 	return next
+}
+
+// What a client is shown (the login response): the switches, not the
+// moderators' allowlist.
+export function clientConfig(config: ServerConfig): Omit<ServerConfig, 'chatAllowlist'> {
+	const { chatAllowlist, ...shown } = config
+	return shown
 }
 
 export function readConfig(nk: nkruntime.Nakama): ServerConfig {

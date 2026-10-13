@@ -143,7 +143,7 @@ describe('chatRowsOf', () => {
 		key: 'k-chat',
 		kind: 'chat',
 		at: T0,
-		line: { lobbyCode: 'ABC123', userId: 'na', message: 'hi', flagged, verdict: flagged ? { band: 'high' } : null },
+		line: { lobbyCode: 'ABC123', userId: 'na', message: 'hi', flagged, verdict: flagged ? { source: 'remote', band: 'high' } : null },
 	})
 
 	it('keeps a clean line for 90 days', () => {
@@ -157,6 +157,13 @@ describe('chatRowsOf', () => {
 		const rows = chatRowsOf(line(true), 'pg-a', null)
 		expect(rows.chat.expiresAt).toBeNull()
 		expect(rows.flaggedMessage).toMatchObject({ matches: { source: 'remote', band: 'high' }, mirrorKey: 'k-chat' })
+	})
+
+	it('keeps what the local word filter matched as the API wrote it', () => {
+		const matches = [{ word: 'fuck', startIndex: 0, endIndex: 3 }]
+		const entry = line(true)
+		const rows = chatRowsOf({ ...entry, line: { ...entry.line, verdict: { source: 'local', matches } } }, 'pg-a', null)
+		expect(rows.flaggedMessage?.matches).toEqual(matches)
 	})
 })
 

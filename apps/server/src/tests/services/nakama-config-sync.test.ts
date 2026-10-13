@@ -6,7 +6,7 @@ import type { AppConfig } from '../../state/config.js'
 const config: AppConfig = {
 	tosVersion: 4,
 	mods: [],
-	chatAllowlist: new Set(),
+	chatAllowlist: new Set(['gg']),
 	chatEnabled: false,
 	testingMode: undefined,
 	rankedEnabled: true,
@@ -35,6 +35,7 @@ describe('pushing config to Nakama', () => {
 			lobbyCreationEnabled: true,
 			testingMode: false,
 			integrityEnforced: false,
+			chatAllowlist: ['gg'],
 		})
 		setIntegrityEnforced(true)
 		expect(nakamaConfigOf(config).integrityEnforced).toBe(true)

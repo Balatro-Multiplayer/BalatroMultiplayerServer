@@ -26,6 +26,8 @@ describe('server config', () => {
 		expect(next).toEqual({ ...DEFAULT_CONFIG, tosVersion: 3, chatEnabled: false })
 		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: -1 }).tosVersion).toBe(1)
 		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: 1.5 }).tosVersion).toBe(1)
+		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 'glhf'] }).chatAllowlist).toEqual(['gg', 'glhf'])
+		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 3] }).chatAllowlist).toEqual([])
 	})
 
 	it('admin_config_set stores the merged config and returns it', () => {

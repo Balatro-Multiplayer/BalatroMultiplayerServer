@@ -20,6 +20,8 @@ import {
 	callModeration,
 	decideModerationOutcome,
 } from './moderation'
+import { isAllowlisted, obscenityMatches, remoteModerationEnabled } from './filter'
+import { type ChatVerdict, enqueue } from '../mirror/outbox'
 
 function tosAccepted(profile: Profile, config: ServerConfig): boolean {
 	return profile.tosAcceptedVersion >= config.tosVersion
@@ -50,8 +52,10 @@ export function rpcChatEnable(
 }
 
 // {message} -> {} once it has been posted to the caller's lobby, or an error:
-// PERMISSION_DENIED for a message the moderation service blocked (or chat not
-// enabled), UNAVAILABLE when it cannot be judged (fails closed).
+// PERMISSION_DENIED for a message moderation blocked (or chat not enabled),
+// UNAVAILABLE when it cannot be judged (fails closed). A message on the
+// allowlist skips moderation; with the service switched off
+// (MODERATION_REMOTE=off) the local word filter judges instead.
 export function rpcChatSend(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -82,23 +86,62 @@ export function rpcChatSend(
 	if (check.error === 'rate_limited') throw runtimeError(UNAVAILABLE, 'You are sending messages too fast')
 	if (check.error) throw runtimeError(INVALID_ARGUMENT, 'Not in a lobby')
 
-	const outcome = decideModerationOutcome(
-		callModeration(nk, logger, ctx.env, {
-			playerId: userId,
-			lobbyCode: check.code,
-			message,
-			context: check.context,
-		}),
-	)
-	if (!outcome.allowed) {
-		if (outcome.reason === 'moderated') throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
-		throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
+	let text = message
+	if (!isAllowlisted(message, config.chatAllowlist)) {
+		if (remoteModerationEnabled(ctx.env)) {
+			const outcome = decideModerationOutcome(
+				callModeration(nk, logger, ctx.env, {
+					playerId: userId,
+					lobbyCode: check.code,
+					message,
+					context: check.context,
+				}),
+			)
+			if (!outcome.allowed) {
+				if (outcome.reason === 'moderated') {
+					// The service keeps no message content, so this is the only
+					// record of what was blocked.
+					logChat(nk, logger, check.code, userId, message, { source: 'remote', band: outcome.band || 'unknown' })
+					throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
+				}
+				throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
+			}
+			if (outcome.publishText !== null) text = outcome.publishText
+		} else {
+			const matches = obscenityMatches(message)
+			if (matches.length > 0) {
+				logChat(nk, logger, check.code, userId, message, { source: 'local', matches })
+				throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
+			}
+		}
 	}
-	const text = outcome.publishText === null ? message : outcome.publishText
 
 	nk.matchSignal(
 		current.matchId,
 		JSON.stringify({ type: 'chat_post', userId, text } as LobbySignal),
 	)
+	// What the player typed, never the rewrite: a rewrite must not launder it.
+	logChat(nk, logger, check.code, userId, message, null)
 	return JSON.stringify({ text })
+}
+
+// Queues a chat line for the API's chat log (mirror/outbox.ts). A blocked line
+// carries why. Never fails the send: losing a log line beats losing the chat.
+function logChat(
+	nk: nkruntime.Nakama,
+	logger: nkruntime.Logger,
+	lobbyCode: string,
+	userId: string,
+	message: string,
+	blocked: ChatVerdict | null,
+) {
+	try {
+		enqueue(nk, {
+			kind: 'chat',
+			at: Date.now(),
+			line: { lobbyCode, userId, message, flagged: blocked !== null, verdict: blocked },
+		})
+	} catch (e) {
+		logger.error('Could not queue a chat line for the API: %v', e)
+	}
 }

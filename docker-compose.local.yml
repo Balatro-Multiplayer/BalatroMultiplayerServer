@@ -111,6 +111,7 @@ services:
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
+          --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
           --runtime.env "EXPRESS_INTERNAL_URL=$$EXPRESS_INTERNAL_URL" \
           --runtime.env "EXPRESS_INTERNAL_KEY=$$EXPRESS_INTERNAL_KEY"
     environment:
@@ -133,6 +134,9 @@ services:
       # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
       # missing model from blocking.
       MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
+      # "off" judges chat with the local word filter (nakama/src/chat/filter.ts)
+      # instead, with no moderation service needed.
+      MODERATION_REMOTE: ${MODERATION_REMOTE:-on}
       # The API's internal routes (nakama/src/express.ts), through nginx so a
       # blue/green swap is invisible here. Same placeholder key as the API's
       # INTERNAL_API_KEY above.

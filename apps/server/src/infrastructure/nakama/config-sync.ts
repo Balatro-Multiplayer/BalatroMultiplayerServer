@@ -21,6 +21,7 @@ export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 		lobbyCreationEnabled: config.lobbyCreationEnabled,
 		testingMode: config.testingMode === true,
 		integrityEnforced,
+		chatAllowlist: [...config.chatAllowlist],
 	}
 }
 

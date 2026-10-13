@@ -121,11 +121,13 @@ export async function storeMirroredChat(rows: ChatRows): Promise<void> {
 		.from(flaggedMessages)
 		.where(eq(flaggedMessages.mirrorKey, flagged.mirrorKey))
 	if (!row) return
-	const band = (flagged.matches as { band?: string }).band ?? 'unknown'
+	const { matches } = flagged
 	await enqueueServiceQueueItem({
 		itemType: 'flagged_chat',
 		sourceId: String(row.id),
 		subjectPlayerId: flagged.playerId,
-		summary: `Flagged chat — remote moderation (band: ${band})`,
+		summary: Array.isArray(matches)
+			? `Flagged chat — ${matches.length} match${matches.length === 1 ? '' : 'es'}`
+			: `Flagged chat — remote moderation (band: ${(matches as { band?: string }).band ?? 'unknown'})`,
 	})
 }
