@@ -9,6 +9,8 @@ import {
 	rpcAdminLobbyGet,
 	rpcAdminLobbyKick,
 	rpcAdminLobbyList,
+	rpcAdminMirrorAck,
+	rpcAdminMirrorPull,
 	rpcAdminNotify,
 	rpcAdminPing,
 	rpcAdminPlayerGet,
@@ -128,6 +130,8 @@ function InitModule(
 	initializer.registerRpc('admin_discord_set', rpcAdminDiscordSet)
 	initializer.registerRpc('admin_integrity_set', rpcAdminIntegritySet)
 	initializer.registerRpc('admin_queue_cancel', rpcAdminQueueCancel)
+	initializer.registerRpc('admin_mirror_pull', rpcAdminMirrorPull)
+	initializer.registerRpc('admin_mirror_ack', rpcAdminMirrorAck)
 	logger.info('BMP lobby module loaded')
 }
 

@@ -101,6 +101,8 @@ export const chatLogs = pgTable('chat_logs', {
 	expiresAt: timestamp('expires_at', { withTimezone: true }),
 	moderationVerdict: jsonb('moderation_verdict'),
 	sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+	// The Nakama outbox entry a mirrored line came from (unique when set).
+	mirrorKey: varchar('mirror_key', { length: 64 }),
 })
 
 export const actionLogs = pgTable('action_logs', {
@@ -155,6 +157,8 @@ export const flaggedMessages = pgTable('flagged_messages', {
 		.notNull()
 		.defaultNow(),
 	expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+	// The Nakama outbox entry a mirrored message came from (unique when set).
+	mirrorKey: varchar('mirror_key', { length: 64 }),
 })
 
 export const reports = pgTable('reports', {
@@ -208,7 +212,8 @@ export const chatAllowlist = pgTable('chat_allowlist', {
 
 export const matchmakingMatches = pgTable('matchmaking_matches', {
 	matchId: varchar('match_id', { length: 36 }).primaryKey(),
-	lobbyCode: varchar('lobby_code', { length: 5 }).notNull().unique(),
+	// Not unique: Nakama reuses lobby codes (migration 0047).
+	lobbyCode: varchar('lobby_code', { length: 6 }).notNull(),
 	modId: varchar('mod_id', { length: 128 }).notNull(),
 	gameMode: varchar('game_mode', { length: 128 }).notNull(),
 	players: jsonb('players').notNull(),

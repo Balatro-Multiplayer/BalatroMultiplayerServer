@@ -40,6 +40,8 @@ import {
 } from './state'
 import { displayNameOf, readProfile } from '../player/profile'
 import { applyRatings } from '../rating/apply'
+import { currentSeason } from '../rating/season'
+import { enqueue } from '../mirror/outbox'
 import { chatCheck, chatPost, reportEvidence } from './chat'
 import {
 	SPECTATOR_ROLE,
@@ -205,6 +207,12 @@ function runEffect(
 			try {
 				const run = withRatings(nk, logger, effect.run, effect.logs)
 				const { logChecks } = saveRun(nk, run, effect.logs)
+				enqueue(nk, {
+					kind: 'run',
+					at: Date.now(),
+					runId: run.runId,
+					rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason() } : null,
+				})
 				for (const playerId in logChecks) {
 					if (logChecks[playerId] === 'mismatch')
 						logger.warn(

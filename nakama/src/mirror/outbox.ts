@@ -1,0 +1,157 @@
+// The Nakama -> Postgres mirror. Postgres (the BMP API) still backs the
+// website, webadmin and the moderators' service queue, so what Nakama games
+// produce -- finished runs with their logs and ratings, chat lines -- is
+// copied there. Nakama never pushes it: a finished game is stored from the
+// match loop, where an HTTP call would block the VM, and the API may be down.
+// Instead each fact is written to a system-owned outbox, and the API pulls
+// it (admin_mirror_pull) and deletes what it has stored (admin_mirror_ack).
+// An entry stays until it is acked, so nothing is lost while the API is away.
+import { readProfile } from '../player/profile'
+import { steamIdOf } from '../player/session'
+import { LOGS_COLLECTION, RATINGS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from '../lobby/protocol'
+
+export const MIRROR_COLLECTION = 'mirror_outbox'
+
+// A finished run (its record, logs and ratings are read at pull time), or one
+// chat line.
+export type MirrorEntry =
+	| { kind: 'run'; at: number; runId: string; rating: RatingBoard | null }
+	| { kind: 'chat'; at: number; line: ChatLogLine }
+
+// The rating board a ranked run counted on.
+export interface RatingBoard {
+	modId: string
+	mode: string
+	season: number
+}
+
+export interface ChatLogLine {
+	lobbyCode: string
+	userId: string
+	message: string
+	flagged: boolean
+	verdict: unknown
+}
+
+// Key order is pull order: the time, zero-padded, then a uuid for entries
+// written in the same millisecond.
+export function entryKey(at: number, unique: string): string {
+	return `${String(at).padStart(15, '0')}-${unique}`
+}
+
+export function enqueue(nk: nkruntime.Nakama, entry: MirrorEntry) {
+	nk.storageWrite([
+		{
+			collection: MIRROR_COLLECTION,
+			key: entryKey(entry.at, nk.uuidv4()),
+			userId: SYSTEM_USER_ID,
+			value: entry as unknown as { [key: string]: unknown },
+			permissionRead: 0,
+			permissionWrite: 0,
+		},
+	])
+}
+
+// Who a Nakama user is in Postgres terms: the player row the API linked at
+// their first login (legacyPlayerId), else their Steam id for the API to
+// find or create the row by.
+export interface MirrorPlayer {
+	steamId: string | null
+	legacyPlayerId: string | null
+	displayName: string
+}
+
+export interface PulledRun {
+	key: string
+	kind: 'run'
+	at: number
+	run: RunRecord & { logChecks?: { [userId: string]: string } }
+	// userId -> the stored log ({events, eventCount, truncated, carbonHash, check}).
+	logs: { [userId: string]: unknown }
+	rating: RatingBoard | null
+	// userId -> their rating on that board as it stands now.
+	ratings: { [userId: string]: unknown }
+}
+
+export interface PulledChat {
+	key: string
+	kind: 'chat'
+	at: number
+	line: ChatLogLine
+}
+
+export type PulledEntry = PulledRun | PulledChat
+
+function expandRun(nk: nkruntime.Nakama, key: string, entry: Extract<MirrorEntry, { kind: 'run' }>): PulledRun | null {
+	const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }])
+	if (runs.length === 0) return null
+	const run = runs[0].value as unknown as PulledRun['run']
+	const logs: { [userId: string]: unknown } = {}
+	const stored = nk.storageRead(
+		run.players.map((p) => ({ collection: LOGS_COLLECTION, key: `${run.runId}:${p.id}`, userId: SYSTEM_USER_ID })),
+	)
+	for (const object of stored) logs[object.key.slice(run.runId.length + 1)] = object.value
+	const ratings: { [userId: string]: unknown } = {}
+	if (entry.rating) {
+		const board = `${entry.rating.modId}:${entry.rating.mode}:${entry.rating.season}`
+		for (const object of nk.storageRead(
+			run.players.map((p) => ({ collection: RATINGS_COLLECTION, key: board, userId: p.id })),
+		))
+			ratings[object.userId] = object.value
+	}
+	return { key, kind: 'run', at: entry.at, run, logs, rating: entry.rating, ratings }
+}
+
+function mirrorPlayer(nk: nkruntime.Nakama, userId: string): MirrorPlayer {
+	let steamId: string | null = null
+	try {
+		steamId = steamIdOf(nk, userId)
+	} catch (e) {
+		// The account is gone; the API keeps whatever row it already has.
+	}
+	const stored = readProfile(nk, userId)
+	const profile = stored ? stored.profile : null
+	return {
+		steamId,
+		legacyPlayerId: profile ? profile.legacyPlayerId : null,
+		displayName: profile ? profile.steamName : '',
+	}
+}
+
+// The oldest `limit` entries, expanded, and every player they name. A run
+// whose record is gone (it can't be, short of manual deletion) comes back as
+// a bare key, so it is acked and dropped rather than blocking the outbox.
+export function pullEntries(
+	nk: nkruntime.Nakama,
+	limit: number,
+): { entries: PulledEntry[]; dropped: string[]; players: { [userId: string]: MirrorPlayer } } {
+	const page = nk.storageList(SYSTEM_USER_ID, MIRROR_COLLECTION, limit, '')
+	const entries: PulledEntry[] = []
+	const dropped: string[] = []
+	const userIds: { [userId: string]: boolean } = {}
+	for (const object of page.objects || []) {
+		const entry = object.value as unknown as MirrorEntry
+		if (entry.kind === 'run') {
+			const pulled = expandRun(nk, object.key, entry)
+			if (!pulled) {
+				dropped.push(object.key)
+				continue
+			}
+			for (const p of pulled.run.players) userIds[p.id] = true
+			entries.push(pulled)
+		} else if (entry.kind === 'chat') {
+			userIds[entry.line.userId] = true
+			entries.push({ key: object.key, kind: 'chat', at: entry.at, line: entry.line })
+		} else {
+			dropped.push(object.key)
+		}
+	}
+	const players: { [userId: string]: MirrorPlayer } = {}
+	for (const userId in userIds) players[userId] = mirrorPlayer(nk, userId)
+	return { entries, dropped, players }
+}
+
+export function ackEntries(nk: nkruntime.Nakama, keys: string[]) {
+	if (keys.length === 0) return
+	nk.storageDelete(keys.map((key) => ({ collection: MIRROR_COLLECTION, key, userId: SYSTEM_USER_ID })))
+}

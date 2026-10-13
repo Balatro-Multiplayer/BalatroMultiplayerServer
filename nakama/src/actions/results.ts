@@ -148,6 +148,8 @@ export function finishGame(
 		reports: game.reports,
 		players: started.players,
 		rankedMode: lobby.rankedMode,
+		gameMode: lobby.gameMode,
+		lobbyType: lobby.rankedMode || lobby.allowedIds ? 'public' : 'private',
 	}
 
 	const next = { ...lobby, lastRunId: started.runId, game: emptyGame() }

@@ -29,6 +29,7 @@ import { errorHandler } from './middleware/errorHandler.js'
 import router, { matchmakingService } from './routes/index.js'
 import type { RegisterPrivateDeps } from './shared/types/index.js'
 import { nakamaIntegrityService } from './features/nakama/integrity.js'
+import { startMirrorJob } from './features/nakama/mirror.job.js'
 import type { ChallengeStrategy } from './shared/types/index.js'
 import { getConfig } from './state/config.js'
 import { startSessionCleanup, stopSessionCleanup } from './state/index.js'
@@ -232,6 +233,9 @@ async function start() {
 
 		void purgeExpiredChatLogsJob()
 		setInterval(() => void purgeExpiredChatLogsJob(), 60 * 60 * 1000).unref()
+
+		// Nakama games reach the website and webadmin through the mirror.
+		startMirrorJob()
 
 		void purgeExpiredDeletedPlayerHashesJob()
 		setInterval(

@@ -12,6 +12,7 @@ import { mergeConfig, readConfig, writeConfig } from './config'
 import { callExpress } from './express'
 import { isNotifyCode, notify } from './notify'
 import { parsePayload, requireServer } from './rpc'
+import { ackEntries, pullEntries } from './mirror/outbox'
 
 const USER_ID_PATTERN = /^[0-9a-f-]{36}$/
 
@@ -250,4 +251,49 @@ export function rpcAdminPlayerGet(
 		lobby: currentLobby(nk, userId),
 		online,
 	})
+}
+
+// ---------------------------------------------------------------------------
+// The Postgres mirror (mirror/outbox.ts)
+// ---------------------------------------------------------------------------
+
+const MIRROR_PULL_DEFAULT = 10
+const MIRROR_PULL_MAX = 50
+const MIRROR_ACK_MAX = 500
+
+// {limit?} -> {entries, players}: the oldest outbox entries, expanded. Entries
+// that can no longer be expanded are deleted here.
+export function rpcAdminMirrorPull(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	requireServer(ctx)
+	const limit = parsePayload(payload).limit
+	const count =
+		typeof limit === 'number' && Number.isInteger(limit) && limit > 0
+			? Math.min(limit, MIRROR_PULL_MAX)
+			: MIRROR_PULL_DEFAULT
+	const pulled = pullEntries(nk, count)
+	if (pulled.dropped.length > 0) {
+		logger.warn('Mirror: dropping %d entries that no longer resolve', pulled.dropped.length)
+		ackEntries(nk, pulled.dropped)
+	}
+	return JSON.stringify({ entries: pulled.entries, players: pulled.players })
+}
+
+// {keys} -> {acked}: the entries the API has stored.
+export function rpcAdminMirrorAck(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	requireServer(ctx)
+	const keys = parsePayload(payload).keys
+	if (!Array.isArray(keys) || keys.length > MIRROR_ACK_MAX || !keys.every((k) => typeof k === 'string' && k !== ''))
+		throw runtimeError(INVALID_ARGUMENT, 'keys must be a list of entry keys')
+	ackEntries(nk, keys as string[])
+	return JSON.stringify({ acked: keys.length })
 }

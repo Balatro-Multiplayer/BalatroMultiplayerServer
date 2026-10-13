@@ -1380,8 +1380,298 @@ function callExpress(nk, logger, env, path, body) {
   return { status: response.code, body: parsed };
 }
 
-// src/admin.ts
+// src/integrity.ts
+var INTEGRITY_COLLECTION = "integrity";
+var INTEGRITY_KEY = "status";
+var INTEGRITY_TTL_MS = 6 * 60 * 1e3;
+var INTEGRITY_REQUIRED = "Launcher integrity verification required for ranked matchmaking";
 var USER_ID_PATTERN = /^[0-9a-f-]{36}$/;
+var CHALLENGE_ID_PATTERN = /^[0-9A-Za-z-]{1,64}$/;
+var MAX_RESPONSE_BYTES = 8 * 1024;
+var UNVERIFIED = { verified: false, expiresAt: null };
+function verdictRecord(verified, permanent, now) {
+  if (!verified) return UNVERIFIED;
+  return { verified: true, expiresAt: permanent ? null : now + INTEGRITY_TTL_MS };
+}
+function isVerified(record, now) {
+  return record.verified && (record.expiresAt === null || record.expiresAt > now);
+}
+function integrityRefusal(config, record, now) {
+  if (!config.integrityEnforced || isVerified(record, now)) return null;
+  return INTEGRITY_REQUIRED;
+}
+function readIntegrity(nk, userId) {
+  const objects = nk.storageRead([{ collection: INTEGRITY_COLLECTION, key: INTEGRITY_KEY, userId }]);
+  const value = objects.length > 0 ? objects[0].value : null;
+  if (!value || value.verified !== true) return UNVERIFIED;
+  return { verified: true, expiresAt: typeof value.expiresAt === "number" ? value.expiresAt : null };
+}
+function writeIntegrity(nk, userId, record) {
+  nk.storageWrite([
+    {
+      collection: INTEGRITY_COLLECTION,
+      key: INTEGRITY_KEY,
+      userId,
+      value: record,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function rpcLauncherSessionStart(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  writeIntegrity(nk, userId, UNVERIFIED);
+  const reply = callExpress(nk, logger, ctx.env, "/integrity/session-start", { nakamaUserId: userId });
+  return JSON.stringify({ started: reply !== null && reply.status >= 200 && reply.status < 300 });
+}
+function checkRankedReadiness(ctx, logger, nk, userId) {
+  callExpress(nk, logger, ctx.env, "/integrity/ranked-readiness", { nakamaUserId: userId });
+}
+function rpcLauncherChallengeAnswer(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  if (typeof input.challengeId !== "string" || !CHALLENGE_ID_PATTERN.test(input.challengeId))
+    throw runtimeError(INVALID_ARGUMENT, "challengeId is required");
+  const body = { nakamaUserId: userId, challengeId: input.challengeId };
+  if (input.refused === true) body.refused = true;
+  else if (input.response !== void 0) {
+    if (JSON.stringify(input.response).length > MAX_RESPONSE_BYTES)
+      throw runtimeError(INVALID_ARGUMENT, "response is too large");
+    body.response = input.response;
+  }
+  const reply = callExpress(nk, logger, ctx.env, "/integrity/answer", body);
+  if (!reply || reply.status < 200 || reply.status >= 300)
+    throw runtimeError(UNAVAILABLE, "The integrity service is unavailable");
+  return JSON.stringify({});
+}
+function requireUserId(input) {
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
+    throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  return input.userId;
+}
+function optionalString(value) {
+  return typeof value === "string" ? value.slice(0, 200) : null;
+}
+function rpcAdminIntegritySet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId(input);
+  if (typeof input.verified !== "boolean") throw runtimeError(INVALID_ARGUMENT, "verified is required");
+  writeIntegrity(nk, userId, verdictRecord(input.verified, input.permanent === true, Date.now()));
+  notify(nk, userId, NotifyCode.INTEGRITY, "integrity", {
+    verified: input.verified,
+    reason: optionalString(input.reason),
+    message: optionalString(input.message)
+  });
+  return JSON.stringify({});
+}
+function rpcAdminQueueCancel(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId(input);
+  const reason = optionalString(input.reason);
+  if (!reason) throw runtimeError(INVALID_ARGUMENT, "reason is required");
+  notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+    modId: optionalString(input.modId),
+    mode: optionalString(input.mode),
+    reason,
+    requeue: false
+  });
+  return JSON.stringify({});
+}
+
+// src/player/session.ts
+var STEAM_CUSTOM_ID = /^steam:(\d+)$/;
+function steamIdOf(nk, userId) {
+  const match = STEAM_CUSTOM_ID.exec(nk.accountGetId(userId).customId || "");
+  return match ? match[1] : null;
+}
+function isPlayerSync(value) {
+  return typeof value.playerId === "string" && Array.isArray(value.bans);
+}
+function fetchSync(ctx, logger, nk, userId, steamId, steamName) {
+  const reply = callExpress(nk, logger, ctx.env, "/player-sync", { steamId, nakamaUserId: userId, steamName });
+  if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
+    logger.warn("Player sync for %s failed (HTTP %v); retrying next login", userId, reply && reply.status);
+    return null;
+  }
+  return reply.body;
+}
+function resolveMutes(ctx, logger, nk, profile) {
+  const reply = callExpress(nk, logger, ctx.env, "/resolve-players", { playerIds: profile.unresolvedMutedPlayerIds });
+  const resolved = reply && reply.status === 200 ? reply.body.resolved : null;
+  return resolved && typeof resolved === "object" ? resolved : {};
+}
+function withResolvedMutes(profile, resolved) {
+  const found = profile.unresolvedMutedPlayerIds.filter((id) => typeof resolved[id] === "string");
+  if (found.length === 0) return profile;
+  const muted = profile.mutedUserIds.slice();
+  for (const id of found) if (muted.indexOf(resolved[id]) === -1) muted.push(resolved[id]);
+  return __spreadProps(__spreadValues({}, profile), {
+    mutedUserIds: muted,
+    unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
+  });
+}
+function loginResponse(userId, profile, config) {
+  const tosRequired = profile.tosAcceptedVersion < config.tosVersion;
+  return {
+    tosRequired,
+    // An update to a ToS the player accepted before (only with tosRequired).
+    tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
+    player: playerView(userId, profile),
+    serverConfig: config
+  };
+}
+function syncDisplayName(nk, userId, profile) {
+  const name = displayNameOf(profile);
+  if (nk.accountGetId(userId).user.displayName !== name)
+    nk.accountUpdateId(userId, null, name, null, null, null, null, null);
+}
+function rpcSessionInit(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const steamName = cleanName(parsePayload(payload).steamName) || ctx.username;
+  const stored = readProfile(nk, userId, steamName);
+  const steamId = steamIdOf(nk, userId);
+  let sync = null;
+  let resolved = {};
+  if (!stored || !stored.profile.synced) {
+    if (steamId) sync = fetchSync(ctx, logger, nk, userId, steamId, steamName);
+  } else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
+    resolved = resolveMutes(ctx, logger, nk, stored.profile);
+  }
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      let next = __spreadProps(__spreadValues({}, current), { steamName, nakamaLogin: true });
+      if (sync) next = withSync(next, sync);
+      else if (!steamId) next.synced = true;
+      return withResolvedMutes(next, resolved);
+    },
+    steamName
+  );
+  if (sync) {
+    let bans = readBans(nk, userId);
+    const synced = bansFromList(sync.bans);
+    for (const type of BAN_TYPES) {
+      const ban = synced[type];
+      if (ban) bans = withBan(bans, type, ban);
+    }
+    writeBans(nk, userId, bans);
+    logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
+  }
+  const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
+  if (accountBan) {
+    enforceAccountBan(nk, userId, accountBan);
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
+  }
+  syncDisplayName(nk, userId, profile);
+  writeIntegrity(nk, userId, UNVERIFIED);
+  return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
+}
+function rpcTosAccept(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const eligible = parsePayload(payload).chatEligible;
+  const config = readConfig(nk);
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: config.tosVersion });
+      if (typeof eligible === "boolean") {
+        next.chatEnabled = eligible;
+        next.chatBlocked = !eligible;
+      }
+      return next;
+    },
+    ctx.username
+  );
+  return JSON.stringify(loginResponse(userId, profile, config));
+}
+
+// src/mirror/outbox.ts
+var MIRROR_COLLECTION = "mirror_outbox";
+function entryKey(at, unique) {
+  return `${String(at).padStart(15, "0")}-${unique}`;
+}
+function enqueue(nk, entry) {
+  nk.storageWrite([
+    {
+      collection: MIRROR_COLLECTION,
+      key: entryKey(entry.at, nk.uuidv4()),
+      userId: SYSTEM_USER_ID,
+      value: entry,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function expandRun(nk, key, entry) {
+  const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }]);
+  if (runs.length === 0) return null;
+  const run = runs[0].value;
+  const logs = {};
+  const stored = nk.storageRead(
+    run.players.map((p) => ({ collection: LOGS_COLLECTION, key: `${run.runId}:${p.id}`, userId: SYSTEM_USER_ID }))
+  );
+  for (const object of stored) logs[object.key.slice(run.runId.length + 1)] = object.value;
+  const ratings = {};
+  if (entry.rating) {
+    const board = `${entry.rating.modId}:${entry.rating.mode}:${entry.rating.season}`;
+    for (const object of nk.storageRead(
+      run.players.map((p) => ({ collection: RATINGS_COLLECTION, key: board, userId: p.id }))
+    ))
+      ratings[object.userId] = object.value;
+  }
+  return { key, kind: "run", at: entry.at, run, logs, rating: entry.rating, ratings };
+}
+function mirrorPlayer(nk, userId) {
+  let steamId = null;
+  try {
+    steamId = steamIdOf(nk, userId);
+  } catch (e) {
+  }
+  const stored = readProfile(nk, userId);
+  const profile = stored ? stored.profile : null;
+  return {
+    steamId,
+    legacyPlayerId: profile ? profile.legacyPlayerId : null,
+    displayName: profile ? profile.steamName : ""
+  };
+}
+function pullEntries(nk, limit) {
+  const page = nk.storageList(SYSTEM_USER_ID, MIRROR_COLLECTION, limit, "");
+  const entries = [];
+  const dropped = [];
+  const userIds = {};
+  for (const object of page.objects || []) {
+    const entry = object.value;
+    if (entry.kind === "run") {
+      const pulled = expandRun(nk, object.key, entry);
+      if (!pulled) {
+        dropped.push(object.key);
+        continue;
+      }
+      for (const p of pulled.run.players) userIds[p.id] = true;
+      entries.push(pulled);
+    } else if (entry.kind === "chat") {
+      userIds[entry.line.userId] = true;
+      entries.push({ key: object.key, kind: "chat", at: entry.at, line: entry.line });
+    } else {
+      dropped.push(object.key);
+    }
+  }
+  const players = {};
+  for (const userId in userIds) players[userId] = mirrorPlayer(nk, userId);
+  return { entries, dropped, players };
+}
+function ackEntries(nk, keys) {
+  if (keys.length === 0) return;
+  nk.storageDelete(keys.map((key) => ({ collection: MIRROR_COLLECTION, key, userId: SYSTEM_USER_ID })));
+}
+
+// src/admin.ts
+var USER_ID_PATTERN2 = /^[0-9a-f-]{36}$/;
 function rpcAdminPing(ctx, logger, nk, payload) {
   requireServer(ctx);
   const reply = callExpress(nk, logger, ctx.env, "/ping", {});
@@ -1397,7 +1687,7 @@ function isOnline(nk, userId) {
 function rpcAdminNotify(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN2.test(input.userId))
     throw runtimeError(INVALID_ARGUMENT, "userId is required");
   if (!isNotifyCode(input.code)) throw runtimeError(INVALID_ARGUMENT, "Unknown notification code");
   const content = typeof input.content === "object" && input.content !== null && !Array.isArray(input.content) ? input.content : {};
@@ -1418,8 +1708,8 @@ function rpcAdminConfigSet(ctx, logger, nk, payload) {
   logger.info("Server config updated: %v", JSON.stringify(config));
   return JSON.stringify(config);
 }
-function requireUserId(nk, input) {
-  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
+function requireUserId2(nk, input) {
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN2.test(input.userId))
     throw runtimeError(INVALID_ARGUMENT, "userId is required");
   try {
     nk.accountGetId(input.userId);
@@ -1440,7 +1730,7 @@ function parseExpiresAt(value) {
 function rpcAdminBanApply(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  const userId = requireUserId(nk, input);
+  const userId = requireUserId2(nk, input);
   if (!isBanType(input.type)) throw runtimeError(INVALID_ARGUMENT, "type must be 'chat', 'queue' or 'account'");
   if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
   const expiresAt = parseExpiresAt(input.expiresAt);
@@ -1452,7 +1742,7 @@ function rpcAdminBanApply(ctx, logger, nk, payload) {
 function rpcAdminBanLift(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  const userId = requireUserId(nk, input);
+  const userId = requireUserId2(nk, input);
   if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
   return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) });
 }
@@ -1515,7 +1805,7 @@ function rpcAdminLobbyClose(ctx, logger, nk, payload) {
 function rpcAdminPlayerGet(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  const userId = requireUserId(nk, input);
+  const userId = requireUserId2(nk, input);
   const profile = profileFor(nk, userId);
   const online = nk.streamUserList({ mode: 0, subject: userId }, true, true).length;
   return JSON.stringify({
@@ -1524,6 +1814,28 @@ function rpcAdminPlayerGet(ctx, logger, nk, payload) {
     lobby: currentLobby(nk, userId),
     online
   });
+}
+var MIRROR_PULL_DEFAULT = 10;
+var MIRROR_PULL_MAX = 50;
+var MIRROR_ACK_MAX = 500;
+function rpcAdminMirrorPull(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const limit = parsePayload(payload).limit;
+  const count = typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? Math.min(limit, MIRROR_PULL_MAX) : MIRROR_PULL_DEFAULT;
+  const pulled = pullEntries(nk, count);
+  if (pulled.dropped.length > 0) {
+    logger.warn("Mirror: dropping %d entries that no longer resolve", pulled.dropped.length);
+    ackEntries(nk, pulled.dropped);
+  }
+  return JSON.stringify({ entries: pulled.entries, players: pulled.players });
+}
+function rpcAdminMirrorAck(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const keys = parsePayload(payload).keys;
+  if (!Array.isArray(keys) || keys.length > MIRROR_ACK_MAX || !keys.every((k) => typeof k === "string" && k !== ""))
+    throw runtimeError(INVALID_ARGUMENT, "keys must be a list of entry keys");
+  ackEntries(nk, keys);
+  return JSON.stringify({ acked: keys.length });
 }
 
 // src/rating/elo.ts
@@ -2160,7 +2472,9 @@ function finishGame(lobby, now, override) {
     placements,
     reports: game.reports,
     players: started.players,
-    rankedMode: lobby.rankedMode
+    rankedMode: lobby.rankedMode,
+    gameMode: lobby.gameMode,
+    lobbyType: lobby.rankedMode || lobby.allowedIds ? "public" : "private"
   };
   const next = __spreadProps(__spreadValues({}, lobby), { lastRunId: started.runId, game: emptyGame() });
   const out = [{ kind: "saveRun", run, logs: game.logs }];
@@ -2824,6 +3138,12 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
       try {
         const run = withRatings(nk, logger, effect.run, effect.logs);
         const { logChecks } = saveRun(nk, run, effect.logs);
+        enqueue(nk, {
+          kind: "run",
+          at: Date.now(),
+          runId: run.runId,
+          rating: run.rankedMode ? { modId: run.modId, mode: run.rankedMode, season: currentSeason() } : null
+        });
         for (const playerId in logChecks) {
           if (logChecks[playerId] === "mismatch")
             logger.warn(
@@ -3331,106 +3651,6 @@ function rpcChatSend(ctx, logger, nk, payload) {
   return JSON.stringify({ text });
 }
 
-// src/integrity.ts
-var INTEGRITY_COLLECTION = "integrity";
-var INTEGRITY_KEY = "status";
-var INTEGRITY_TTL_MS = 6 * 60 * 1e3;
-var INTEGRITY_REQUIRED = "Launcher integrity verification required for ranked matchmaking";
-var USER_ID_PATTERN2 = /^[0-9a-f-]{36}$/;
-var CHALLENGE_ID_PATTERN = /^[0-9A-Za-z-]{1,64}$/;
-var MAX_RESPONSE_BYTES = 8 * 1024;
-var UNVERIFIED = { verified: false, expiresAt: null };
-function verdictRecord(verified, permanent, now) {
-  if (!verified) return UNVERIFIED;
-  return { verified: true, expiresAt: permanent ? null : now + INTEGRITY_TTL_MS };
-}
-function isVerified(record, now) {
-  return record.verified && (record.expiresAt === null || record.expiresAt > now);
-}
-function integrityRefusal(config, record, now) {
-  if (!config.integrityEnforced || isVerified(record, now)) return null;
-  return INTEGRITY_REQUIRED;
-}
-function readIntegrity(nk, userId) {
-  const objects = nk.storageRead([{ collection: INTEGRITY_COLLECTION, key: INTEGRITY_KEY, userId }]);
-  const value = objects.length > 0 ? objects[0].value : null;
-  if (!value || value.verified !== true) return UNVERIFIED;
-  return { verified: true, expiresAt: typeof value.expiresAt === "number" ? value.expiresAt : null };
-}
-function writeIntegrity(nk, userId, record) {
-  nk.storageWrite([
-    {
-      collection: INTEGRITY_COLLECTION,
-      key: INTEGRITY_KEY,
-      userId,
-      value: record,
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-function rpcLauncherSessionStart(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  writeIntegrity(nk, userId, UNVERIFIED);
-  const reply = callExpress(nk, logger, ctx.env, "/integrity/session-start", { nakamaUserId: userId });
-  return JSON.stringify({ started: reply !== null && reply.status >= 200 && reply.status < 300 });
-}
-function checkRankedReadiness(ctx, logger, nk, userId) {
-  callExpress(nk, logger, ctx.env, "/integrity/ranked-readiness", { nakamaUserId: userId });
-}
-function rpcLauncherChallengeAnswer(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const input = parsePayload(payload);
-  if (typeof input.challengeId !== "string" || !CHALLENGE_ID_PATTERN.test(input.challengeId))
-    throw runtimeError(INVALID_ARGUMENT, "challengeId is required");
-  const body = { nakamaUserId: userId, challengeId: input.challengeId };
-  if (input.refused === true) body.refused = true;
-  else if (input.response !== void 0) {
-    if (JSON.stringify(input.response).length > MAX_RESPONSE_BYTES)
-      throw runtimeError(INVALID_ARGUMENT, "response is too large");
-    body.response = input.response;
-  }
-  const reply = callExpress(nk, logger, ctx.env, "/integrity/answer", body);
-  if (!reply || reply.status < 200 || reply.status >= 300)
-    throw runtimeError(UNAVAILABLE, "The integrity service is unavailable");
-  return JSON.stringify({});
-}
-function requireUserId2(input) {
-  if (typeof input.userId !== "string" || !USER_ID_PATTERN2.test(input.userId))
-    throw runtimeError(INVALID_ARGUMENT, "userId is required");
-  return input.userId;
-}
-function optionalString(value) {
-  return typeof value === "string" ? value.slice(0, 200) : null;
-}
-function rpcAdminIntegritySet(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const input = parsePayload(payload);
-  const userId = requireUserId2(input);
-  if (typeof input.verified !== "boolean") throw runtimeError(INVALID_ARGUMENT, "verified is required");
-  writeIntegrity(nk, userId, verdictRecord(input.verified, input.permanent === true, Date.now()));
-  notify(nk, userId, NotifyCode.INTEGRITY, "integrity", {
-    verified: input.verified,
-    reason: optionalString(input.reason),
-    message: optionalString(input.message)
-  });
-  return JSON.stringify({});
-}
-function rpcAdminQueueCancel(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const input = parsePayload(payload);
-  const userId = requireUserId2(input);
-  const reason = optionalString(input.reason);
-  if (!reason) throw runtimeError(INVALID_ARGUMENT, "reason is required");
-  notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
-    modId: optionalString(input.modId),
-    mode: optionalString(input.mode),
-    reason,
-    requeue: false
-  });
-  return JSON.stringify({});
-}
-
 // src/matchmaking/gate.ts
 function queueRefusalFor(nk, userId, ranked, now) {
   const config = readConfig(nk);
@@ -3734,115 +3954,6 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   });
 }
 
-// src/player/session.ts
-var STEAM_CUSTOM_ID = /^steam:(\d+)$/;
-function steamIdOf(nk, userId) {
-  const match = STEAM_CUSTOM_ID.exec(nk.accountGetId(userId).customId || "");
-  return match ? match[1] : null;
-}
-function isPlayerSync(value) {
-  return typeof value.playerId === "string" && Array.isArray(value.bans);
-}
-function fetchSync(ctx, logger, nk, userId, steamId, steamName) {
-  const reply = callExpress(nk, logger, ctx.env, "/player-sync", { steamId, nakamaUserId: userId, steamName });
-  if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
-    logger.warn("Player sync for %s failed (HTTP %v); retrying next login", userId, reply && reply.status);
-    return null;
-  }
-  return reply.body;
-}
-function resolveMutes(ctx, logger, nk, profile) {
-  const reply = callExpress(nk, logger, ctx.env, "/resolve-players", { playerIds: profile.unresolvedMutedPlayerIds });
-  const resolved = reply && reply.status === 200 ? reply.body.resolved : null;
-  return resolved && typeof resolved === "object" ? resolved : {};
-}
-function withResolvedMutes(profile, resolved) {
-  const found = profile.unresolvedMutedPlayerIds.filter((id) => typeof resolved[id] === "string");
-  if (found.length === 0) return profile;
-  const muted = profile.mutedUserIds.slice();
-  for (const id of found) if (muted.indexOf(resolved[id]) === -1) muted.push(resolved[id]);
-  return __spreadProps(__spreadValues({}, profile), {
-    mutedUserIds: muted,
-    unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
-  });
-}
-function loginResponse(userId, profile, config) {
-  const tosRequired = profile.tosAcceptedVersion < config.tosVersion;
-  return {
-    tosRequired,
-    // An update to a ToS the player accepted before (only with tosRequired).
-    tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
-    player: playerView(userId, profile),
-    serverConfig: config
-  };
-}
-function syncDisplayName(nk, userId, profile) {
-  const name = displayNameOf(profile);
-  if (nk.accountGetId(userId).user.displayName !== name)
-    nk.accountUpdateId(userId, null, name, null, null, null, null, null);
-}
-function rpcSessionInit(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const steamName = cleanName(parsePayload(payload).steamName) || ctx.username;
-  const stored = readProfile(nk, userId, steamName);
-  const steamId = steamIdOf(nk, userId);
-  let sync = null;
-  let resolved = {};
-  if (!stored || !stored.profile.synced) {
-    if (steamId) sync = fetchSync(ctx, logger, nk, userId, steamId, steamName);
-  } else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
-    resolved = resolveMutes(ctx, logger, nk, stored.profile);
-  }
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      let next = __spreadProps(__spreadValues({}, current), { steamName, nakamaLogin: true });
-      if (sync) next = withSync(next, sync);
-      else if (!steamId) next.synced = true;
-      return withResolvedMutes(next, resolved);
-    },
-    steamName
-  );
-  if (sync) {
-    let bans = readBans(nk, userId);
-    const synced = bansFromList(sync.bans);
-    for (const type of BAN_TYPES) {
-      const ban = synced[type];
-      if (ban) bans = withBan(bans, type, ban);
-    }
-    writeBans(nk, userId, bans);
-    logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
-  }
-  const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
-  if (accountBan) {
-    enforceAccountBan(nk, userId, accountBan);
-    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
-  }
-  syncDisplayName(nk, userId, profile);
-  writeIntegrity(nk, userId, UNVERIFIED);
-  return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
-}
-function rpcTosAccept(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const eligible = parsePayload(payload).chatEligible;
-  const config = readConfig(nk);
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: config.tosVersion });
-      if (typeof eligible === "boolean") {
-        next.chatEnabled = eligible;
-        next.chatBlocked = !eligible;
-      }
-      return next;
-    },
-    ctx.username
-  );
-  return JSON.stringify(loginResponse(userId, profile, config));
-}
-
 // src/player/rpc.ts
 var MAX_MODS = 300;
 var MAX_MOD_LENGTH = 128;
@@ -4137,6 +4248,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_discord_set", rpcAdminDiscordSet);
   initializer.registerRpc("admin_integrity_set", rpcAdminIntegritySet);
   initializer.registerRpc("admin_queue_cancel", rpcAdminQueueCancel);
+  initializer.registerRpc("admin_mirror_pull", rpcAdminMirrorPull);
+  initializer.registerRpc("admin_mirror_ack", rpcAdminMirrorAck);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

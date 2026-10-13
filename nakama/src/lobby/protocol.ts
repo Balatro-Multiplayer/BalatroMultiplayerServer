@@ -169,6 +169,11 @@ export interface RunRecord {
 	players: Participant[]
 	// Set for a ranked lobby: the rating board (mode) the game counted on.
 	rankedMode?: string
+	// Set for a matchmade lobby: the queue it came from ('mode' or 'ranked:mode').
+	gameMode?: string
+	// 'public' for a matchmade or ranked lobby, else 'private' (the API's
+	// lobby_runs.lobby_type).
+	lobbyType?: 'public' | 'private'
 	// Each rated player's result, once the game was rated.
 	ratings?: { [userId: string]: RatingResult }
 }
