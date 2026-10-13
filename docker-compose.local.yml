@@ -94,6 +94,8 @@ services:
   nakama:
     image: heroiclabs/nakama:3.41.0
     container_name: bmp-nakama
+    # Longer than local.yml's shutdown_grace_sec, so lobbies get to checkpoint.
+    stop_grace_period: 30s
     entrypoint:
       - /bin/sh
       - -ec

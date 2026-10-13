@@ -39,6 +39,9 @@ export const ServerOp = {
 	SPECTATE_SNAPSHOT: 108,
 	// SpectateEvent: one participant's replay event, to every spectator.
 	SPECTATE_EVENT: 109,
+	// {graceSeconds}, to everyone: the server is restarting. The lobby comes
+	// back under the same code; rejoin once the server is up.
+	SERVER_RESTARTING: 110,
 } as const
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included,
@@ -294,6 +297,12 @@ export const CURRENT_LOBBY_KEY = 'current'
 // only succeeds if the code is free, which makes reserving one atomic.
 export const LOBBY_CODE_COLLECTION = 'lobby_codes'
 export const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
+// code -> Checkpoint (lobby/checkpoint.ts), owned by the system user: a lobby
+// stopped by a server restart, until a player's return resumes it.
+export const LOBBY_CHECKPOINT_COLLECTION = 'lobby_checkpoints'
+// A checkpoint nobody came back for in this long is dropped.
+export const CHECKPOINT_TTL_MS = 10 * 60 * 1000
 
 // Finished games (src/lobby/storage.ts). Runs and logs are owned by the
 // system user; each participant gets a pointer in MY_RUNS_COLLECTION.

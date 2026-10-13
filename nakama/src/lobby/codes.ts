@@ -1,7 +1,12 @@
 // The lobby code registry (see LOBBY_CODE_COLLECTION). A code is reserved
 // before its match exists (matchId ''), bound once matchCreate returns, and
 // released by the match when the lobby closes.
-import { LOBBY_CODE_COLLECTION, SYSTEM_USER_ID } from './protocol'
+import {
+	CHECKPOINT_TTL_MS,
+	LOBBY_CHECKPOINT_COLLECTION,
+	LOBBY_CODE_COLLECTION,
+	SYSTEM_USER_ID,
+} from './protocol'
 
 interface CodeEntry {
 	matchId: string
@@ -43,13 +48,24 @@ function read(nk: nkruntime.Nakama, code: string): CodeEntry | null {
 	}
 }
 
+// True while the code belongs to a lobby stopped by a restart that may still
+// be resumed (lobby/checkpoint.ts).
+function heldByCheckpoint(nk: nkruntime.Nakama, code: string): boolean {
+	const objects = nk.storageRead([
+		{ collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID },
+	])
+	return objects.length > 0 && Date.now() - Number(objects[0].value.at) < CHECKPOINT_TTL_MS
+}
+
 // Claims a free code; false if it's taken. An entry left behind by a match
-// that no longer exists (e.g. after a Nakama restart) counts as free.
+// that no longer exists counts as free, unless a restart checkpoint still
+// holds it.
 export function reserveCode(
 	nk: nkruntime.Nakama,
 	code: string,
 	modId: string,
 ): boolean {
+	if (heldByCheckpoint(nk, code)) return false
 	const existing = read(nk, code)
 	if (existing) {
 		if (!existing.matchId || nk.matchGet(existing.matchId)) return false

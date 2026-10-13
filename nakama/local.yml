@@ -8,6 +8,10 @@
 # be committed.
 name: bmp-local
 data_dir: /nakama/data
+# On shutdown, lobby matches get this long to checkpoint themselves (their
+# matchTerminate) so they come back after the restart (lobby/checkpoint.ts).
+# docker-compose.local.yml's stop_grace_period must outlast it.
+shutdown_grace_sec: 20
 
 logger:
   level: INFO

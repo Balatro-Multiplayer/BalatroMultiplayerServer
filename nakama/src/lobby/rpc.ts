@@ -20,6 +20,7 @@ import {
 	LOBBY_MATCH,
 	type LobbySignal,
 } from './protocol'
+import { resumeLobby } from './checkpoint'
 import { MAX_PLAYERS, MIN_PLAYERS } from './state'
 import { spectatableLobbies } from './spectate'
 
@@ -42,12 +43,21 @@ export function generateCode(length: number = CODE_LENGTH): string {
 	return code
 }
 
-// The lobby the user is still seated in, per their current-lobby record, or
-// null (clearing a record that no longer holds).
-export function currentLobby(
+export interface Seat {
+	matchId: string
+	code: string
+	modId: string
+}
+
+// The lobby the user is still seated in, per their current-lobby record:
+// 'resuming' while another caller brings it back after a server restart, else
+// null (clearing a record that no longer holds). A record whose match is gone
+// is resumed from its restart checkpoint, if one is there.
+export function seatOf(
 	nk: nkruntime.Nakama,
+	logger: nkruntime.Logger | null,
 	userId: string,
-): { matchId: string; code: string; modId: string } | null {
+): Seat | 'resuming' | null {
 	const key = {
 		collection: CURRENT_LOBBY_COLLECTION,
 		key: CURRENT_LOBBY_KEY,
@@ -55,9 +65,17 @@ export function currentLobby(
 	}
 	const objects = nk.storageRead([key])
 	if (objects.length === 0) return null
-	const matchId = objects[0].value.matchId
+	let matchId = objects[0].value.matchId
 	const code = objects[0].value.code
-	const modId = String(objects[0].value.modId || '')
+	let modId = String(objects[0].value.modId || '')
+	if (typeof matchId === 'string' && typeof code === 'string' && !nk.matchGet(matchId)) {
+		const resumed = resumeLobby(nk, logger, code, Date.now())
+		if (resumed.kind === 'resuming') return 'resuming'
+		if (resumed.kind === 'resumed') {
+			matchId = resumed.matchId
+			modId = resumed.modId
+		}
+	}
 	if (
 		typeof matchId === 'string' &&
 		typeof code === 'string' &&
@@ -69,6 +87,12 @@ export function currentLobby(
 	}
 	nk.storageDelete([key])
 	return null
+}
+
+// The lobby the user is still seated in, or null.
+export function currentLobby(nk: nkruntime.Nakama, userId: string): Seat | null {
+	const seat = seatOf(nk, null, userId)
+	return seat === 'resuming' ? null : seat
 }
 
 export function rpcLobbyCreate(
@@ -156,8 +180,13 @@ export function rpcLobbyFind(
 		throw runtimeError(INVALID_ARGUMENT, 'Invalid lobby code')
 
 	const entry = lookupCode(nk, code)
-	if (!entry) throw runtimeError(NOT_FOUND, 'Lobby not found')
-	return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId })
+	if (entry) return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId })
+	// A lobby stopped by a server restart comes back under its code.
+	const resumed = resumeLobby(nk, logger, code, Date.now())
+	if (resumed.kind === 'resuming')
+		throw runtimeError(UNAVAILABLE, 'The lobby is resuming, try again')
+	if (resumed.kind === 'none') throw runtimeError(NOT_FOUND, 'Lobby not found')
+	return JSON.stringify({ matchId: resumed.matchId, code, modId: resumed.modId })
 }
 
 const SPECTATE_LIST_LIMIT = 100
@@ -191,8 +220,10 @@ export function rpcLobbyCurrent(
 	nk: nkruntime.Nakama,
 	payload: string,
 ) {
-	const current = currentLobby(nk, requireUser(ctx))
-	return JSON.stringify(current || {})
+	// {resuming: true}: the lobby is coming back from a restart; ask again.
+	const seat = seatOf(nk, logger, requireUser(ctx))
+	if (seat === 'resuming') return JSON.stringify({ resuming: true })
+	return JSON.stringify(seat || {})
 }
 
 // {} when the caller isn't in a running game, else {active: {runId, code,

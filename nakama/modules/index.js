@@ -70,7 +70,10 @@ var ServerOp = {
   // SpectateSnapshot, to a spectator once it has joined.
   SPECTATE_SNAPSHOT: 108,
   // SpectateEvent: one participant's replay event, to every spectator.
-  SPECTATE_EVENT: 109
+  SPECTATE_EVENT: 109,
+  // {graceSeconds}, to everyone: the server is restarting. The lobby comes
+  // back under the same code; rejoin once the server is up.
+  SERVER_RESTARTING: 110
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -78,6 +81,8 @@ var CURRENT_LOBBY_COLLECTION = "lobby";
 var CURRENT_LOBBY_KEY = "current";
 var LOBBY_CODE_COLLECTION = "lobby_codes";
 var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
+var LOBBY_CHECKPOINT_COLLECTION = "lobby_checkpoints";
+var CHECKPOINT_TTL_MS = 10 * 60 * 1e3;
 var RUNS_COLLECTION = "match_runs";
 var LOGS_COLLECTION = "match_logs";
 var MY_RUNS_COLLECTION = "my_runs";
@@ -110,7 +115,14 @@ function read(nk, code) {
     modId: String(value.modId || "")
   };
 }
+function heldByCheckpoint(nk, code) {
+  const objects = nk.storageRead([
+    { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID }
+  ]);
+  return objects.length > 0 && Date.now() - Number(objects[0].value.at) < CHECKPOINT_TTL_MS;
+}
 function reserveCode(nk, code, modId) {
+  if (heldByCheckpoint(nk, code)) return false;
   const existing = read(nk, code);
   if (existing) {
     if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
@@ -478,6 +490,90 @@ function parsePayload(payload) {
   } catch (e) {
   }
   throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+}
+
+// src/lobby/checkpoint.ts
+var CLAIM_TIMEOUT_MS = 3e4;
+function checkpointOf(lobby, now) {
+  if (lobby.closed || lobby.players.length === 0) return null;
+  return { lobby, at: now, claimedAt: null };
+}
+function isExpired(checkpoint, now) {
+  return now - checkpoint.at >= CHECKPOINT_TTL_MS;
+}
+function isClaimable(checkpoint, now) {
+  return !isExpired(checkpoint, now) && (checkpoint.claimedAt === null || now - checkpoint.claimedAt >= CLAIM_TIMEOUT_MS);
+}
+function resumeFrom(checkpoint, now) {
+  const lobby = checkpoint.lobby;
+  const downtime = Math.max(0, now - checkpoint.at);
+  const settleFrom = lobby.game.settleFrom;
+  return __spreadProps(__spreadValues({}, lobby), {
+    createdAt: now,
+    players: lobby.players.map((p) => __spreadProps(__spreadValues({}, p), { sessionId: "", awaySince: now })),
+    spectators: [],
+    actionBudget: {},
+    game: __spreadProps(__spreadValues({}, lobby.game), {
+      settleFrom: settleFrom === null ? null : settleFrom + downtime
+    })
+  });
+}
+function keyOf2(code) {
+  return { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID };
+}
+function write2(nk, code, checkpoint, version) {
+  nk.storageWrite([
+    __spreadProps(__spreadValues({}, keyOf2(code)), {
+      value: checkpoint,
+      permissionRead: 0,
+      permissionWrite: 0,
+      version
+    })
+  ]);
+}
+function saveCheckpoint(nk, checkpoint) {
+  write2(nk, checkpoint.lobby.code, checkpoint);
+}
+function readCheckpoint(nk, code) {
+  const objects = nk.storageRead([keyOf2(code)]);
+  if (objects.length === 0) return null;
+  return { checkpoint: objects[0].value, version: objects[0].version || "" };
+}
+function deleteCheckpoint(nk, code) {
+  nk.storageDelete([keyOf2(code)]);
+}
+function resumeLobby(nk, logger, code, now) {
+  const found = readCheckpoint(nk, code);
+  if (!found) return { kind: "none" };
+  const checkpoint = found.checkpoint;
+  if (isExpired(checkpoint, now)) {
+    deleteCheckpoint(nk, code);
+    return { kind: "none" };
+  }
+  if (!isClaimable(checkpoint, now)) return { kind: "resuming" };
+  try {
+    write2(nk, code, __spreadProps(__spreadValues({}, checkpoint), { claimedAt: now }), found.version);
+  } catch (e) {
+    return { kind: "resuming" };
+  }
+  const lobby = checkpoint.lobby;
+  const matchId = nk.matchCreate(LOBBY_MATCH, { resumeCode: code });
+  bindCode(nk, code, matchId, lobby.modId);
+  for (const p of lobby.players) {
+    nk.storageWrite([
+      {
+        collection: CURRENT_LOBBY_COLLECTION,
+        key: CURRENT_LOBBY_KEY,
+        userId: p.id,
+        value: { matchId, code, modId: lobby.modId },
+        permissionRead: 0,
+        permissionWrite: 0
+      }
+    ]);
+  }
+  deleteCheckpoint(nk, code);
+  if (logger) logger.info("Lobby %s resumed from its checkpoint as %s", code, matchId);
+  return { kind: "resumed", matchId, modId: lobby.modId };
 }
 
 // src/lobby/state.ts
@@ -1014,7 +1110,7 @@ function generateCode(length = CODE_LENGTH) {
   }
   return code;
 }
-function currentLobby(nk, userId) {
+function seatOf(nk, logger, userId) {
   const key = {
     collection: CURRENT_LOBBY_COLLECTION,
     key: CURRENT_LOBBY_KEY,
@@ -1022,9 +1118,17 @@ function currentLobby(nk, userId) {
   };
   const objects = nk.storageRead([key]);
   if (objects.length === 0) return null;
-  const matchId = objects[0].value.matchId;
+  let matchId = objects[0].value.matchId;
   const code = objects[0].value.code;
-  const modId = String(objects[0].value.modId || "");
+  let modId = String(objects[0].value.modId || "");
+  if (typeof matchId === "string" && typeof code === "string" && !nk.matchGet(matchId)) {
+    const resumed = resumeLobby(nk, logger, code, Date.now());
+    if (resumed.kind === "resuming") return "resuming";
+    if (resumed.kind === "resumed") {
+      matchId = resumed.matchId;
+      modId = resumed.modId;
+    }
+  }
   if (typeof matchId === "string" && typeof code === "string" && nk.matchGet(matchId)) {
     const signal = { type: "has_player", userId };
     if (nk.matchSignal(matchId, JSON.stringify(signal)) === "yes")
@@ -1032,6 +1136,10 @@ function currentLobby(nk, userId) {
   }
   nk.storageDelete([key]);
   return null;
+}
+function currentLobby(nk, userId) {
+  const seat = seatOf(nk, null, userId);
+  return seat === "resuming" ? null : seat;
 }
 function rpcLobbyCreate(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -1091,8 +1199,12 @@ function rpcLobbyFind(ctx, logger, nk, payload) {
   if (!CODE_PATTERN.test(code))
     throw runtimeError(INVALID_ARGUMENT, "Invalid lobby code");
   const entry = lookupCode(nk, code);
-  if (!entry) throw runtimeError(NOT_FOUND, "Lobby not found");
-  return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
+  if (entry) return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
+  const resumed = resumeLobby(nk, logger, code, Date.now());
+  if (resumed.kind === "resuming")
+    throw runtimeError(UNAVAILABLE, "The lobby is resuming, try again");
+  if (resumed.kind === "none") throw runtimeError(NOT_FOUND, "Lobby not found");
+  return JSON.stringify({ matchId: resumed.matchId, code, modId: resumed.modId });
 }
 var SPECTATE_LIST_LIMIT = 100;
 function rpcSpectateList(ctx, logger, nk, payload) {
@@ -1108,8 +1220,9 @@ function rpcSpectateList(ctx, logger, nk, payload) {
   return JSON.stringify({ lobbies: spectatableLobbies(labels) });
 }
 function rpcLobbyCurrent(ctx, logger, nk, payload) {
-  const current = currentLobby(nk, requireUser(ctx));
-  return JSON.stringify(current || {});
+  const seat = seatOf(nk, logger, requireUser(ctx));
+  if (seat === "resuming") return JSON.stringify({ resuming: true });
+  return JSON.stringify(seat || {});
 }
 function rpcRunActive(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -2748,7 +2861,9 @@ function stringParam(params, key) {
   return typeof value === "string" ? value : "";
 }
 function lobbyMatchInit(ctx, logger, nk, params) {
-  const lobby = newLobby({
+  const resumeCode = stringParam(params, "resumeCode");
+  const found = resumeCode ? readCheckpoint(nk, resumeCode) : null;
+  const lobby = found ? resumeFrom(found.checkpoint, Date.now()) : newLobby({
     code: stringParam(params, "code"),
     modId: stringParam(params, "modId"),
     maxPlayers: Number(params.maxPlayers),
@@ -2771,7 +2886,8 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     pendingInfo: {},
     label
   };
-  logger.info("Lobby %s created for %s", lobby.code, lobby.modId);
+  if (found) logger.info("Lobby %s resumed for %s", lobby.code, lobby.modId);
+  else logger.info("Lobby %s created for %s", lobby.code, lobby.modId);
   return { state, tickRate: TICK_RATE, label };
 }
 function parseMods(raw) {
@@ -2949,6 +3065,7 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
   }
 }
 function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages) {
+  if (state.stopping) return null;
   let current = state;
   for (const message of messages) {
     if (!current) break;
@@ -3077,6 +3194,27 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
   return { state, data: "bad_signal" };
 }
 function lobbyMatchTerminate(ctx, logger, nk, dispatcher, tickNumber, state, graceSeconds) {
+  if (graceSeconds > 0) {
+    const checkpoint = checkpointOf(state.lobby, Date.now());
+    if (checkpoint) {
+      try {
+        saveCheckpoint(nk, checkpoint);
+        const targets = Object.keys(state.presences).map((id) => state.presences[id]);
+        if (targets.length > 0)
+          dispatcher.broadcastMessage(
+            ServerOp.SERVER_RESTARTING,
+            JSON.stringify({ graceSeconds }),
+            targets,
+            null,
+            true
+          );
+        logger.info("Lobby %s checkpointed for the restart", state.lobby.code);
+        return { state: __spreadProps(__spreadValues({}, state), { stopping: true }) };
+      } catch (e) {
+        logger.error("Lobby %s: could not checkpoint: %v", state.lobby.code, e);
+      }
+    }
+  }
   apply(ctx, logger, nk, dispatcher, state, close(state.lobby));
   return { state };
 }

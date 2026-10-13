@@ -4,11 +4,13 @@
 import { seedFromHex } from '../actions/registry'
 import { finishGame, settle } from '../actions/results'
 import { activeRunOf } from './active'
+import { checkpointOf, readCheckpoint, resumeFrom, saveCheckpoint } from './checkpoint'
 import { releaseCode } from './codes'
 import {
 	CURRENT_LOBBY_COLLECTION,
 	CURRENT_LOBBY_KEY,
 	ClientOp,
+	ServerOp,
 	type LobbySignal,
 	type PlayerInfo,
 	type PlayerLog,
@@ -61,6 +63,9 @@ export interface LobbyMatchState extends nkruntime.MatchState {
 	// Users let in as spectators by matchJoinAttempt, until matchJoin.
 	pendingSpectators?: string[]
 	label: string
+	// Set once the lobby has checkpointed for a server restart: the next loop
+	// ends the match (matchTerminate itself must hand back a state).
+	stopping?: boolean
 }
 
 function secondsFromEnv(
@@ -244,7 +249,9 @@ export function lobbyMatchInit(
 	nk: nkruntime.Nakama,
 	params: { [key: string]: unknown },
 ) {
-	const lobby = newLobby({
+	const resumeCode = stringParam(params, 'resumeCode')
+	const found = resumeCode ? readCheckpoint(nk, resumeCode) : null
+	const lobby = found ? resumeFrom(found.checkpoint, Date.now()) : newLobby({
 		code: stringParam(params, 'code'),
 		modId: stringParam(params, 'modId'),
 		maxPlayers: Number(params.maxPlayers),
@@ -269,7 +276,8 @@ export function lobbyMatchInit(
 		pendingInfo: {},
 		label,
 	}
-	logger.info('Lobby %s created for %s', lobby.code, lobby.modId)
+	if (found) logger.info('Lobby %s resumed for %s', lobby.code, lobby.modId)
+	else logger.info('Lobby %s created for %s', lobby.code, lobby.modId)
 	return { state, tickRate: TICK_RATE, label }
 }
 
@@ -524,6 +532,7 @@ export function lobbyMatchLoop(
 	state: LobbyMatchState,
 	messages: nkruntime.MatchMessage[],
 ) {
+	if (state.stopping) return null
 	let current: LobbyMatchState | null = state
 	for (const message of messages) {
 		if (!current) break
@@ -673,6 +682,30 @@ export function lobbyMatchTerminate(
 	state: LobbyMatchState,
 	graceSeconds: number,
 ) {
+	// A server shutdown (shutdown_grace_sec > 0): keep the lobby for the
+	// server that comes back (lobby/checkpoint.ts) rather than closing it,
+	// so a running game isn't ended as abandoned.
+	if (graceSeconds > 0) {
+		const checkpoint = checkpointOf(state.lobby, Date.now())
+		if (checkpoint) {
+			try {
+				saveCheckpoint(nk, checkpoint)
+				const targets = Object.keys(state.presences).map((id) => state.presences[id])
+				if (targets.length > 0)
+					dispatcher.broadcastMessage(
+						ServerOp.SERVER_RESTARTING,
+						JSON.stringify({ graceSeconds }),
+						targets,
+						null,
+						true,
+					)
+				logger.info('Lobby %s checkpointed for the restart', state.lobby.code)
+				return { state: { ...state, stopping: true } }
+			} catch (e) {
+				logger.error('Lobby %s: could not checkpoint: %v', state.lobby.code, e)
+			}
+		}
+	}
 	apply(ctx, logger, nk, dispatcher, state, close(state.lobby))
 	return { state }
 }
