@@ -1,14 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-	Lobby,
 	cleanupExpiredSessions,
 	createSession,
 	discordIndex,
 	findByProvider,
-	getLobby,
 	getSession,
 	linkProvider,
-	lobbies,
 	removeSession,
 	sessions,
 	steamIndex,
@@ -110,31 +107,11 @@ describe('state helpers', () => {
 		})
 	})
 
-	describe('getLobby', () => {
-		it('returns undefined for unknown code', () => {
-			expect(getLobby('ZZZZZ')).toBeUndefined()
-		})
-
-		it('returns the lobby for a known code', () => {
-			const lobby = new Lobby('ABCDE', 'mod1', 'host1')
-			lobbies.set('ABCDE', lobby)
-			expect(getLobby('ABCDE')).toBe(lobby)
-		})
-
-		it('is case-insensitive', () => {
-			const lobby = new Lobby('ABCDE', 'mod1', 'host1')
-			lobbies.set('ABCDE', lobby)
-			expect(getLobby('abcde')).toBe(lobby)
-		})
-	})
-
 	describe('cleanupExpiredSessions', () => {
 		it('removes sessions older than TTL', () => {
 			const session = createSession('Alice', { steamIdHash: 'steam1' })
 			// Backdate connectedAt to exceed the 24h default TTL
-			;(session as any).connectedAt = new Date(
-				Date.now() - 25 * 60 * 60 * 1000,
-			)
+			;(session as any).connectedAt = new Date(Date.now() - 25 * 60 * 60 * 1000)
 
 			const removed = cleanupExpiredSessions()
 
@@ -153,27 +130,12 @@ describe('state helpers', () => {
 			expect(getSession(session.playerId)).toBe(session)
 		})
 
-		it('skips sessions in a lobby even if expired', () => {
-			const session = createSession('Alice', { steamIdHash: 'steam1' })
-			;(session as any).connectedAt = new Date(
-				Date.now() - 25 * 60 * 60 * 1000,
-			)
-			session.lobbyCode = 'ABCDE'
-
-			const removed = cleanupExpiredSessions()
-
-			expect(removed).toBe(0)
-			expect(getSession(session.playerId)).toBe(session)
-		})
-
 		it('cleans up provider indexes for removed sessions', () => {
 			const session = createSession('Alice', {
 				steamIdHash: 'steam1',
 				discordIdHash: 'disc1',
 			})
-			;(session as any).connectedAt = new Date(
-				Date.now() - 25 * 60 * 60 * 1000,
-			)
+			;(session as any).connectedAt = new Date(Date.now() - 25 * 60 * 60 * 1000)
 
 			cleanupExpiredSessions()
 
@@ -183,9 +145,7 @@ describe('state helpers', () => {
 
 		it('handles mixed expired and active sessions', () => {
 			const expired = createSession('Expired', { steamIdHash: 'steam1' })
-			;(expired as any).connectedAt = new Date(
-				Date.now() - 25 * 60 * 60 * 1000,
-			)
+			;(expired as any).connectedAt = new Date(Date.now() - 25 * 60 * 60 * 1000)
 
 			const active = createSession('Active', { steamIdHash: 'steam2' })
 

@@ -1,21 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { IGracePeriodService } from '../../contracts/IGracePeriodService.js'
-import type { IMatchSessionRestorer } from '../../contracts/IMatchSessionRestorer.js'
 import type {
 	IPlayerRepository,
 	PlayerRecord,
 } from '../../contracts/IPlayerRepository.js'
-import {
-	authenticateAsTemp,
-	createAuthService,
-} from '../../features/auth/auth.service.js'
+import { createAuthService } from '../../features/auth/auth.service.js'
 import { signJwt, verifyJwt } from '../../features/auth/jwt.js'
 import {
 	generateLinkState,
 	linkStateNonces,
 	verifyLinkState,
 } from '../../features/auth/link-state.js'
-import { validateSteamTicket } from '../../features/auth/steam.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 import {
 	createSession,
@@ -62,31 +56,10 @@ function makeMockPlayerRepository(): IPlayerRepository {
 	}
 }
 
-function makeMockGracePeriodService(): Pick<
-	IGracePeriodService,
-	'cancelGracePeriod'
-> {
-	return {
-		cancelGracePeriod: vi.fn().mockResolvedValue(true),
-	}
-}
-
-function makeMockMatchSessionRestorer(): IMatchSessionRestorer {
-	return {
-		restorePlayerMatchSession: vi.fn().mockResolvedValue(undefined),
-	}
-}
-
 function makeAuthService() {
 	const playerRepository = makeMockPlayerRepository()
-	const gracePeriodService = makeMockGracePeriodService()
-	const matchSessionRestorer = makeMockMatchSessionRestorer()
-	const service = createAuthService({
-		playerRepository,
-		gracePeriodService,
-		matchSessionRestorer,
-	})
-	return { service, playerRepository, gracePeriodService, matchSessionRestorer }
+	const service = createAuthService({ playerRepository })
+	return { service, playerRepository }
 }
 
 describe('auth.service', () => {
@@ -148,15 +121,6 @@ describe('auth.service', () => {
 			expect(playerRepository.createPlayer).not.toHaveBeenCalled()
 		})
 
-		it('does not attempt match-session restore for a brand new account', async () => {
-			// A freshly-generated player ID can't already have an active match
-			// row -- reattachRestoredSession is only for the "server forgot me"
-			// DB-restore case, not brand new signups.
-			const { service, matchSessionRestorer } = makeAuthService()
-			await service.authenticateWithSteam('steam1', 'Alice')
-			expect(matchSessionRestorer.restorePlayerMatchSession).not.toHaveBeenCalled()
-		})
-
 		it('reuses existing in-memory session on re-auth', async () => {
 			const { service } = makeAuthService()
 			const first = await service.authenticateWithSteam('steam1', 'Alice')
@@ -177,8 +141,7 @@ describe('auth.service', () => {
 		})
 
 		it('restores from DB when not in memory', async () => {
-			const { service, playerRepository, gracePeriodService, matchSessionRestorer } =
-				makeAuthService()
+			const { service, playerRepository } = makeAuthService()
 			const steamIdHash = hashProviderId('steam1')
 			vi.mocked(playerRepository.findPlayerBySteamIdHash).mockResolvedValueOnce(
 				{
@@ -193,43 +156,7 @@ describe('auth.service', () => {
 			expect(session.playerId).toBe('db-player-id')
 			expect(session.steamIdHash).toBe(steamIdHash)
 			expect(session.discordIdHash).toBe('some-discord-hash')
-			// A session rebuilt from a DB row (none existed in memory) means this
-			// could be a post-restart reconnect -- see auth.service.ts's
-			// reattachRestoredSession.
-			expect(gracePeriodService.cancelGracePeriod).toHaveBeenCalledWith('db-player-id')
-			expect(matchSessionRestorer.restorePlayerMatchSession).toHaveBeenCalledWith(session)
 			expect(session.steamName).toBe('Alice')
-		})
-	})
-
-	describe('authenticateWithNakama', () => {
-		const account = { userId: '11111111-2222-4333-8444-555555555555', steamId: 'steam-nk' }
-
-		it('finds the player by the Nakama account\'s Steam ID and records the Nakama user id', async () => {
-			const { service, playerRepository } = makeAuthService()
-			const { session } = await service.authenticateWithNakama(account, 'Alice')
-
-			expect(session.steamIdHash).toBe(hashProviderId('steam-nk'))
-			expect(session.nakamaUserId).toBe(account.userId)
-			expect(playerRepository.linkNakamaUser).toHaveBeenCalledWith(session.playerId, account.userId)
-		})
-
-		it('reuses the session a /steam login created for the same Steam ID', async () => {
-			const { service } = makeAuthService()
-			const first = await service.authenticateWithSteam('steam-nk', 'Alice')
-			const { session } = await service.authenticateWithNakama(account, 'Alice')
-
-			expect(session).toBe(first.session)
-		})
-
-		it('stores the Nakama user id when a new player accepts the ToS', async () => {
-			const { service, playerRepository } = makeAuthService()
-			const { session } = await service.authenticateWithNakama(account, 'Alice')
-			await service.acceptTos(session.playerId)
-
-			expect(playerRepository.createPlayer).toHaveBeenCalledWith(
-				expect.objectContaining({ id: session.playerId, nakamaUserId: account.userId }),
-			)
 		})
 	})
 
@@ -250,12 +177,6 @@ describe('auth.service', () => {
 			expect(decoded?.playerId).toBe(session.playerId)
 		})
 
-		it('does not attempt match-session restore for a brand new account', async () => {
-			const { service, matchSessionRestorer } = makeAuthService()
-			await service.authenticateWithDiscord('disc1', 'Bob')
-			expect(matchSessionRestorer.restorePlayerMatchSession).not.toHaveBeenCalled()
-		})
-
 		it('reuses existing in-memory session on re-auth', async () => {
 			const { service } = makeAuthService()
 			const first = await service.authenticateWithDiscord('disc1', 'Bob')
@@ -266,8 +187,7 @@ describe('auth.service', () => {
 		})
 
 		it('restores from DB when not in memory', async () => {
-			const { service, playerRepository, gracePeriodService, matchSessionRestorer } =
-				makeAuthService()
+			const { service, playerRepository } = makeAuthService()
 			const discordIdHash = hashProviderId('disc1')
 			vi.mocked(
 				playerRepository.findPlayerByDiscordIdHash,
@@ -282,8 +202,6 @@ describe('auth.service', () => {
 			expect(session.playerId).toBe('db-player-id')
 			expect(session.discordIdHash).toBe(discordIdHash)
 			expect(session.steamIdHash).toBe('some-steam-hash')
-			expect(gracePeriodService.cancelGracePeriod).toHaveBeenCalledWith('db-player-id')
-			expect(matchSessionRestorer.restorePlayerMatchSession).toHaveBeenCalledWith(session)
 		})
 
 		it('propagates DB errors from createPlayer', async () => {
@@ -295,57 +213,6 @@ describe('auth.service', () => {
 			await expect(
 				service.authenticateWithDiscord('disc1', 'Bob'),
 			).rejects.toThrow('DB connection failed')
-		})
-	})
-
-	describe('linkSteamToPlayer', () => {
-		it('links steam to an existing session', async () => {
-			const { service } = makeAuthService()
-			const session = createSession('Alice', { discordIdHash: 'disc1' })
-
-			const result = await service.linkSteamToPlayer(session.playerId, 'steam1')
-
-			expect(result.session.steamIdHash).toBe(hashProviderId('steam1'))
-			expect(findByProvider('steam', hashProviderId('steam1'))).toBe(session)
-		})
-
-		it('throws if session not found', async () => {
-			const { service } = makeAuthService()
-			await expect(
-				service.linkSteamToPlayer('unknown', 'steam1'),
-			).rejects.toThrow('Player not found')
-		})
-
-		it('throws if steam already linked to another player', async () => {
-			const { service } = makeAuthService()
-			createSession('Alice', { steamIdHash: hashProviderId('steam1') })
-			const bob = createSession('Bob', { discordIdHash: 'disc1' })
-
-			await expect(
-				service.linkSteamToPlayer(bob.playerId, 'steam1'),
-			).rejects.toThrow('Steam account already linked to another player')
-		})
-
-		it('allows re-linking same steam to same player', async () => {
-			const { service } = makeAuthService()
-			const session = createSession('Alice', {
-				steamIdHash: hashProviderId('steam1'),
-			})
-
-			const result = await service.linkSteamToPlayer(session.playerId, 'steam1')
-			expect(result.session.steamIdHash).toBe(hashProviderId('steam1'))
-		})
-
-		it('propagates DB errors from linkSteam', async () => {
-			const { service, playerRepository } = makeAuthService()
-			const session = createSession('Alice', { discordIdHash: 'disc1' })
-			vi.mocked(playerRepository.linkSteam).mockRejectedValueOnce(
-				new Error('DB write failed'),
-			)
-
-			await expect(
-				service.linkSteamToPlayer(session.playerId, 'steam1'),
-			).rejects.toThrow('DB write failed')
 		})
 	})
 
@@ -390,95 +257,6 @@ describe('auth.service', () => {
 			await expect(
 				service.linkDiscordToPlayer(session.playerId, 'disc1'),
 			).rejects.toThrow('DB write failed')
-		})
-	})
-
-	describe('authenticateAsTemp', () => {
-		it('creates a session with random UUID and no providers', () => {
-			const { session, token } = authenticateAsTemp('DevUser')
-
-			expect(session.playerId).toBeDefined()
-			expect(session.steamName).toBe('DevUser')
-			expect(session.steamIdHash).toBeUndefined()
-			expect(session.discordIdHash).toBeUndefined()
-			expect(sessions.has(session.playerId)).toBe(true)
-
-			const decoded = verifyJwt(token)
-			expect(decoded?.playerId).toBe(session.playerId)
-			expect(decoded?.isTemp).toBe(true)
-		})
-
-		it('creates unique player IDs for each call', () => {
-			const first = authenticateAsTemp('Dev1')
-			const second = authenticateAsTemp('Dev2')
-
-			expect(first.session.playerId).not.toBe(second.session.playerId)
-		})
-
-		it('does not populate provider indexes', () => {
-			authenticateAsTemp('DevUser')
-
-			expect(steamIndex.size).toBe(0)
-			expect(discordIndex.size).toBe(0)
-		})
-	})
-
-	describe('validateSteamTicket', () => {
-		afterEach(() => {
-			vi.restoreAllMocks()
-		})
-
-		it('returns steamId for valid ticket', async () => {
-			vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-				new Response(
-					JSON.stringify({
-						response: {
-							params: {
-								result: 'OK',
-								steamid: '76561198012345',
-								ownersteamid: '76561198012345',
-								vacbanned: false,
-								publisherbanned: false,
-							},
-						},
-					}),
-					{ status: 200 },
-				),
-			)
-
-			const result = await validateSteamTicket('hex-ticket')
-			expect(result).toEqual({ ok: true, value: { steamId: '76561198012345' } })
-		})
-
-		it('returns invalid_ticket error for rejected ticket', async () => {
-			vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-				new Response(
-					JSON.stringify({
-						response: {
-							params: {
-								result: 'FAIL',
-								steamid: '',
-								ownersteamid: '',
-								vacbanned: false,
-								publisherbanned: false,
-							},
-						},
-					}),
-					{ status: 200 },
-				),
-			)
-
-			const result = await validateSteamTicket('bad-ticket')
-			expect(result).toEqual({ ok: false, error: 'invalid_ticket' })
-		})
-
-		it('returns api_error for Steam API HTTP error', async () => {
-			vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-				new Response('', { status: 500 }),
-			)
-
-			const result = await validateSteamTicket('ticket')
-			expect(result).toEqual({ ok: false, error: 'api_error' })
 		})
 	})
 

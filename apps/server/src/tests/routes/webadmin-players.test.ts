@@ -3,11 +3,19 @@ import { describe, expect, it, vi } from 'vitest'
 import { signJwt } from '../../features/auth/jwt.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import { insertBan } from '../../infrastructure/gateways/ban.gateway.js'
-import { kickClient } from '../../infrastructure/emqx/emqx-admin.service.js'
 import { db } from '../../infrastructure/db/index.js'
+import { banInNakama } from '../../infrastructure/nakama/moderation-sync.js'
 import { createSession } from '../../state/index.js'
-import { playerQueues } from '../../state/matchmaking.js'
 import { createTestApp } from './app.js'
+
+vi.mock(
+	'../../infrastructure/nakama/moderation-sync.js',
+	async (importOriginal) => ({
+		...(await importOriginal<object>()),
+		banInNakama: vi.fn().mockResolvedValue(true),
+		nakamaUserIdOf: vi.fn().mockResolvedValue(null),
+	}),
+)
 
 const app = createTestApp()
 
@@ -43,7 +51,9 @@ describe('PATCH /api/webadmin/players/:id/privileges', () => {
 		;(db as any).update = vi.fn().mockReturnValue({
 			set: vi.fn().mockReturnValue({
 				where: vi.fn().mockReturnValue({
-					returning: vi.fn().mockResolvedValue([{ id: 'target-1', privileges: ['moderator'] }]),
+					returning: vi
+						.fn()
+						.mockResolvedValue([{ id: 'target-1', privileges: ['moderator'] }]),
 				}),
 			}),
 		})
@@ -58,37 +68,21 @@ describe('PATCH /api/webadmin/players/:id/privileges', () => {
 	})
 })
 
-describe('POST /api/webadmin/players/:id/bans — mid-match/mid-queue enforcement (§21.3)', () => {
-	it('dequeues an actively-searching player instantly on a queue ban', async () => {
-		const modToken = authAsAdmin('admin-3', 'Admin3')
-		createSession('Searcher', { id: 'searcher-1' })
-		vi.mocked(insertBan).mockResolvedValue({
-			id: 'ban-1', playerId: 'searcher-1', banType: 'queue', expiresAt: null,
-			issuedBy: 'admin:admin-3', issuedAt: new Date(), reason: 'test', liftedAt: null, liftedBy: null,
-		})
-
-		await request(app)
-			.post('/api/matchmaking/queue')
-			.set('Authorization', `Bearer ${signJwt({ playerId: 'searcher-1', steamName: 'Searcher' })}`)
-			.send({ modId: 'mod1', gameMode: 'mode1', minPlayers: 2, maxPlayers: 4 })
-		expect(playerQueues.get('searcher-1')?.size).toBe(1)
-
-		const res = await request(app)
-			.post('/api/webadmin/players/searcher-1/bans')
-			.set('Authorization', modToken)
-			.send({ type: 'queue', reason: 'test' })
-
-		expect(res.status).toBe(201)
-		expect(playerQueues.get('searcher-1')?.size ?? 0).toBe(0)
-	})
-
-	it('still notifies and force-disconnects a connected player on an account ban', async () => {
+describe('POST /api/webadmin/players/:id/bans (§21.3)', () => {
+	it('records the ban and has Nakama enforce it at once', async () => {
 		const modToken = authAsAdmin('admin-4', 'Admin4')
-		createSession('Target', { id: 'target-2' })
-		vi.mocked(insertBan).mockResolvedValue({
-			id: 'ban-2', playerId: 'target-2', banType: 'account', expiresAt: null,
-			issuedBy: 'admin:admin-4', issuedAt: new Date(), reason: 'test', liftedAt: null, liftedBy: null,
-		})
+		const ban = {
+			id: 'ban-2',
+			playerId: 'target-2',
+			banType: 'account' as const,
+			expiresAt: null,
+			issuedBy: 'admin:admin-4',
+			issuedAt: new Date(),
+			reason: 'test',
+			liftedAt: null,
+			liftedBy: null,
+		}
+		vi.mocked(insertBan).mockResolvedValue(ban)
 
 		const res = await request(app)
 			.post('/api/webadmin/players/target-2/bans')
@@ -96,7 +90,7 @@ describe('POST /api/webadmin/players/:id/bans — mid-match/mid-queue enforcemen
 			.send({ type: 'account', reason: 'test' })
 
 		expect(res.status).toBe(201)
-		expect(vi.mocked(kickClient)).toHaveBeenCalledWith('target-2')
+		expect(vi.mocked(banInNakama)).toHaveBeenCalledWith(ban)
 	})
 })
 
@@ -113,7 +107,9 @@ describe('duplicate ban route removal', () => {
 		// listBans is mocked to [] by the global ban.gateway.js mock (tests/setup.ts);
 		// findPlayerById's persistent mock (set by authAsAdmin) covers both the
 		// webAdmin gate's own lookup and this route's target-player lookup.
-		const res = await request(app).get('/api/webadmin/players/some-id').set('Authorization', token)
+		const res = await request(app)
+			.get('/api/webadmin/players/some-id')
+			.set('Authorization', token)
 		expect(res.status).not.toBe(404)
 	})
 })

@@ -1,35 +1,20 @@
 import { createHmac } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// kickClient does a real fetch to EMQX's management API -- mocked so tests
-// stay unit-level (asserting it was/wasn't called) instead of hitting a
-// broker that doesn't exist in this environment.
-vi.mock('../../infrastructure/emqx/emqx-admin.service.js', () => ({
-	kickClient: vi.fn().mockResolvedValue(true),
-}))
-
 import type { ILauncherIntegrityRepository } from '../../contracts/ILauncherIntegrityRepository.js'
-import type { IMessageBus } from '../../contracts/IMessageBus.js'
 import { LOGIN_CHALLENGE_TIMEOUT_MS } from '../../features/launcher-integrity/launcher-integrity.config.js'
-import { createLauncherIntegrityService } from '../../features/launcher-integrity/launcher-integrity.service.js'
-import { kickClient } from '../../infrastructure/emqx/emqx-admin.service.js'
+import {
+	type ChallengeSender,
+	createLauncherIntegrityService,
+} from '../../features/launcher-integrity/launcher-integrity.service.js'
 import type {
 	ChallengeIssuance,
 	ChallengeStrategy,
 } from '../../shared/types/index.js'
 import { integritySessions } from '../../state/launcher-integrity.js'
 
-function makeMockMessageBus(): IMessageBus {
-	return {
-		publishEvent: vi.fn().mockResolvedValue(undefined),
-		publishMetadata: vi.fn().mockResolvedValue(undefined),
-		publishPlayerInfo: vi.fn().mockResolvedValue(undefined),
-		publishToPlayer: vi.fn().mockResolvedValue(undefined),
-		clearPlayerInfo: vi.fn().mockResolvedValue(undefined),
-		cleanupLobbyTopics: vi.fn().mockResolvedValue(undefined),
-		cleanupPlayerState: vi.fn().mockResolvedValue(undefined),
-		publishChatMessage: vi.fn().mockResolvedValue(undefined),
-	}
+function makeSendChallenge() {
+	return vi.fn<ChallengeSender>().mockResolvedValue(undefined)
 }
 
 function makeMockRepository(): ILauncherIntegrityRepository {
@@ -84,14 +69,13 @@ function makeHmacStrategy(secret: string): ChallengeStrategy {
 	}
 }
 
-async function getIssuedChallengeId(messageBus: IMessageBus): Promise<string> {
-	const call = (
-		messageBus.publishToPlayer as ReturnType<typeof vi.fn>
-	).mock.calls.find(
-		([, subtopic, payload]) =>
-			subtopic === 'challenge' && payload.type === 'issued',
+async function getIssuedChallengeId(
+	sendChallenge: ReturnType<typeof makeSendChallenge>,
+): Promise<string> {
+	const call = sendChallenge.mock.calls.find(
+		([, payload]) => payload.type === 'issued',
 	)
-	return call![2].challengeId as string
+	return call![1].challengeId as string
 }
 
 afterEach(() => {
@@ -102,9 +86,9 @@ afterEach(() => {
 describe('launcher-integrity.service', () => {
 	describe('when no ChallengeStrategy is registered', () => {
 		it('is disabled and never issues a challenge', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 
@@ -112,105 +96,116 @@ describe('launcher-integrity.service', () => {
 
 			await service.handleClientConnected('player1')
 
-			expect(messageBus.publishToPlayer).not.toHaveBeenCalled()
+			expect(sendChallenge).not.toHaveBeenCalled()
 			expect(service.isLauncherVerified('player1')).toBe(false)
 		})
 	})
 
 	describe('login challenge', () => {
 		it('issues a login challenge once a ChallengeStrategy is set', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
 
 			await service.handleClientConnected('player1')
 
-			expect(messageBus.publishToPlayer).toHaveBeenCalledWith(
+			expect(sendChallenge).toHaveBeenCalledWith(
 				'player1',
-				'challenge',
 				expect.objectContaining({ type: 'issued', kind: 'login' }),
 			)
 		})
 
 		it('marks the session verified on a correct response and does not disconnect', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeFakeStrategy())
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				response: 'anything',
 			})
 
 			expect(service.isLauncherVerified('player1')).toBe(true)
-			expect(kickClient).not.toHaveBeenCalled()
 		})
 
 		it('publishes a verified acknowledgement on a correct response', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeFakeStrategy())
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				response: 'anything',
 			})
 
-			expect(messageBus.publishToPlayer).toHaveBeenCalledWith(
+			expect(sendChallenge).toHaveBeenCalledWith(
 				'player1',
-				'challenge',
-				expect.objectContaining({ type: 'verified', challengeId, kind: 'login' }),
+				expect.objectContaining({
+					type: 'verified',
+					challengeId,
+					kind: 'login',
+				}),
 			)
 		})
 
 		it('does not publish a verified acknowledgement on a wrong response', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			const strategy = makeFakeStrategy()
 			strategy.answerIsCorrect = false
 			service.setChallengeStrategy(strategy)
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				response: 'wrong',
 			})
 
-			expect(messageBus.publishToPlayer).not.toHaveBeenCalledWith(
+			expect(sendChallenge).not.toHaveBeenCalledWith(
 				'player1',
-				'challenge',
 				expect.objectContaining({ type: 'verified' }),
 			)
 		})
 
 		it('unverifies the player on a wrong response without disconnecting, even before ever passing', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			const strategy = makeFakeStrategy()
 			strategy.answerIsCorrect = false
 			service.setChallengeStrategy(strategy)
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				response: 'wrong',
 			})
 
 			expect(service.isLauncherVerified('player1')).toBe(false)
-			expect(kickClient).not.toHaveBeenCalled()
 			expect(repository.insertEvent).toHaveBeenCalledWith(
 				'player1',
 				'login',
@@ -219,44 +214,47 @@ describe('launcher-integrity.service', () => {
 		})
 
 		it('unverifies on an explicit login refusal, with a forewarning message, without disconnecting', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeFakeStrategy())
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				refused: true,
 			})
 
 			expect(service.isLauncherVerified('player1')).toBe(false)
-			expect(kickClient).not.toHaveBeenCalled()
 			expect(repository.insertEvent).toHaveBeenCalledWith(
 				'player1',
 				'login',
 				'refused',
 			)
-			expect(messageBus.publishToPlayer).toHaveBeenCalledWith(
+			expect(sendChallenge).toHaveBeenCalledWith(
 				'player1',
-				'challenge',
 				expect.objectContaining({ type: 'failed', reason: 'refused' }),
 			)
 		})
 
 		it('unverifies on an unanswered (timed-out) login challenge without disconnecting', async () => {
 			vi.useFakeTimers()
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeFakeStrategy())
 
 			await service.handleClientConnected('player1')
 			await vi.advanceTimersByTimeAsync(LOGIN_CHALLENGE_TIMEOUT_MS + 100)
 
 			expect(service.isLauncherVerified('player1')).toBe(false)
-			expect(kickClient).not.toHaveBeenCalled()
 			expect(repository.insertEvent).toHaveBeenCalledWith(
 				'player1',
 				'login',
@@ -267,15 +265,18 @@ describe('launcher-integrity.service', () => {
 
 	describe('periodic challenge failure after an earlier pass', () => {
 		it('revokes verification on a failed periodic challenge without disconnecting', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			const strategy = makeFakeStrategy()
 			service.setChallengeStrategy(strategy)
 
 			// Pass the login challenge first.
 			await service.handleClientConnected('player1')
-			const loginChallengeId = await getIssuedChallengeId(messageBus)
+			const loginChallengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId: loginChallengeId,
 				response: 'ok',
@@ -304,15 +305,13 @@ describe('launcher-integrity.service', () => {
 			})
 
 			expect(service.isLauncherVerified('player1')).toBe(false)
-			expect(kickClient).not.toHaveBeenCalled()
 			expect(repository.insertEvent).toHaveBeenCalledWith(
 				'player1',
 				'periodic',
 				'wrong_response',
 			)
-			expect(messageBus.publishToPlayer).toHaveBeenCalledWith(
+			expect(sendChallenge).toHaveBeenCalledWith(
 				'player1',
-				'challenge',
 				expect.objectContaining({ type: 'failed', reason: 'wrong_response' }),
 			)
 		})
@@ -322,13 +321,16 @@ describe('launcher-integrity.service', () => {
 		const secret = 'test-login-secret'
 
 		it('verifies a bare nonce:playerId signature', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeHmacStrategy(secret))
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				response: hmacHex(secret, 'fixed-test-nonce:player1'),
@@ -338,13 +340,16 @@ describe('launcher-integrity.service', () => {
 		})
 
 		it('rejects a signature-object response', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeHmacStrategy(secret))
 
 			await service.handleClientConnected('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				response: { signature: hmacHex(secret, 'fixed-test-nonce:player1') },
@@ -356,26 +361,25 @@ describe('launcher-integrity.service', () => {
 
 	describe('ranked_readiness challenge', () => {
 		it('issues a ranked_readiness challenge on demand', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
 
 			await service.issueRankedReadinessChallenge('player1')
 
-			expect(messageBus.publishToPlayer).toHaveBeenCalledWith(
+			expect(sendChallenge).toHaveBeenCalledWith(
 				'player1',
-				'challenge',
 				expect.objectContaining({ type: 'issued', kind: 'ranked_readiness' }),
 			)
 		})
 
 		it('does not touch isLauncherVerified or publish anything when both are current', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
@@ -383,25 +387,28 @@ describe('launcher-integrity.service', () => {
 			service.onRankedReadinessFailed(onFailed)
 
 			await service.issueRankedReadinessChallenge('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
-				response: { signature: 'sig', launcherCurrent: true, modsCurrent: true },
+				response: {
+					signature: 'sig',
+					launcherCurrent: true,
+					modsCurrent: true,
+				},
 			})
 
 			expect(onFailed).not.toHaveBeenCalled()
 			expect(service.isLauncherVerified('player1')).toBe(false)
-			expect(messageBus.publishToPlayer).not.toHaveBeenCalledWith(
+			expect(sendChallenge).not.toHaveBeenCalledWith(
 				'player1',
-				'challenge',
 				expect.objectContaining({ type: 'verified' }),
 			)
 		})
 
 		it('reports launcher_outdated when the verdict says the launcher itself is stale', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
@@ -409,19 +416,23 @@ describe('launcher-integrity.service', () => {
 			service.onRankedReadinessFailed(onFailed)
 
 			await service.issueRankedReadinessChallenge('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
-				response: { signature: 'sig', launcherCurrent: false, modsCurrent: true },
+				response: {
+					signature: 'sig',
+					launcherCurrent: false,
+					modsCurrent: true,
+				},
 			})
 
 			expect(onFailed).toHaveBeenCalledWith('player1', 'launcher_outdated')
 		})
 
 		it('reports mods_outdated when only the mods are stale', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
@@ -429,19 +440,23 @@ describe('launcher-integrity.service', () => {
 			service.onRankedReadinessFailed(onFailed)
 
 			await service.issueRankedReadinessChallenge('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
-				response: { signature: 'sig', launcherCurrent: true, modsCurrent: false },
+				response: {
+					signature: 'sig',
+					launcherCurrent: true,
+					modsCurrent: false,
+				},
 			})
 
 			expect(onFailed).toHaveBeenCalledWith('player1', 'mods_outdated')
 		})
 
 		it('reports launcher_outdated on an explicit refusal', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
@@ -449,7 +464,7 @@ describe('launcher-integrity.service', () => {
 			service.onRankedReadinessFailed(onFailed)
 
 			await service.issueRankedReadinessChallenge('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
 				refused: true,
@@ -459,9 +474,9 @@ describe('launcher-integrity.service', () => {
 		})
 
 		it('reports launcher_outdated when the base signature fails to verify', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			const strategy = makeFakeStrategy()
@@ -471,10 +486,14 @@ describe('launcher-integrity.service', () => {
 			service.onRankedReadinessFailed(onFailed)
 
 			await service.issueRankedReadinessChallenge('player1')
-			const challengeId = await getIssuedChallengeId(messageBus)
+			const challengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId,
-				response: { signature: 'wrong', launcherCurrent: true, modsCurrent: true },
+				response: {
+					signature: 'wrong',
+					launcherCurrent: true,
+					modsCurrent: true,
+				},
 			})
 
 			expect(onFailed).toHaveBeenCalledWith('player1', 'launcher_outdated')
@@ -482,9 +501,12 @@ describe('launcher-integrity.service', () => {
 
 		it('reports launcher_outdated on timeout, without disconnecting or touching launcherVerified', async () => {
 			vi.useFakeTimers()
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const repository = makeMockRepository()
-			const service = createLauncherIntegrityService({ messageBus, repository })
+			const service = createLauncherIntegrityService({
+				sendChallenge,
+				repository,
+			})
 			service.setChallengeStrategy(makeFakeStrategy())
 			const onFailed = vi.fn()
 			service.onRankedReadinessFailed(onFailed)
@@ -493,14 +515,13 @@ describe('launcher-integrity.service', () => {
 			await vi.advanceTimersByTimeAsync(60_000)
 
 			expect(onFailed).toHaveBeenCalledWith('player1', 'launcher_outdated')
-			expect(kickClient).not.toHaveBeenCalled()
 			expect(service.isLauncherVerified('player1')).toBe(false)
 		})
 
 		it('does not affect a separately-verified login session', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())
@@ -509,7 +530,7 @@ describe('launcher-integrity.service', () => {
 
 			// Pass login first.
 			await service.handleClientConnected('player1')
-			const loginChallengeId = await getIssuedChallengeId(messageBus)
+			const loginChallengeId = await getIssuedChallengeId(sendChallenge)
 			await service.handleChallengeResponse('player1', {
 				challengeId: loginChallengeId,
 				response: 'ok',
@@ -523,18 +544,18 @@ describe('launcher-integrity.service', () => {
 			// by now is the login one from above - find the readiness one
 			// specifically instead.
 			await service.issueRankedReadinessChallenge('player1')
-			const readinessCall = (
-				messageBus.publishToPlayer as ReturnType<typeof vi.fn>
-			).mock.calls.find(
-				([, subtopic, payload]) =>
-					subtopic === 'challenge' &&
-					payload.type === 'issued' &&
-					payload.kind === 'ranked_readiness',
+			const readinessCall = sendChallenge.mock.calls.find(
+				([, payload]) =>
+					payload.type === 'issued' && payload.kind === 'ranked_readiness',
 			)
-			const readinessChallengeId = readinessCall![2].challengeId as string
+			const readinessChallengeId = readinessCall![1].challengeId as string
 			await service.handleChallengeResponse('player1', {
 				challengeId: readinessChallengeId,
-				response: { signature: 'sig', launcherCurrent: true, modsCurrent: false },
+				response: {
+					signature: 'sig',
+					launcherCurrent: true,
+					modsCurrent: false,
+				},
 			})
 
 			expect(onFailed).toHaveBeenCalledWith('player1', 'mods_outdated')
@@ -544,9 +565,9 @@ describe('launcher-integrity.service', () => {
 
 	describe('clearSession / clearAll', () => {
 		it('clearSession removes all state for a player', async () => {
-			const messageBus = makeMockMessageBus()
+			const sendChallenge = makeSendChallenge()
 			const service = createLauncherIntegrityService({
-				messageBus,
+				sendChallenge,
 				repository: makeMockRepository(),
 			})
 			service.setChallengeStrategy(makeFakeStrategy())

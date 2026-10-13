@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import { db } from '../../infrastructure/db/index.js'
-import { mqttService } from '../../infrastructure/mqtt/mqtt.service.js'
 import {
 	enqueueServiceQueueItem,
 	getServiceQueueItemById,
@@ -24,7 +23,7 @@ const SAMPLE_ROW = {
 
 describe('service-queue.gateway', () => {
 	describe('enqueueServiceQueueItem', () => {
-		it('inserts a row and publishes the admin queue event', async () => {
+		it('inserts a row', async () => {
 			let captured: unknown
 			;(db as any).insert = vi.fn().mockReturnValue({
 				values: vi.fn().mockImplementation((row: unknown) => {
@@ -51,13 +50,9 @@ describe('service-queue.gateway', () => {
 				summary: 'cheating report — lobby ABCDE',
 			})
 			expect(result).toEqual(SAMPLE_ROW)
-			expect(vi.mocked(mqttService.publishAdminQueueEvent)).toHaveBeenCalledWith(
-				'queue_item_created',
-				expect.objectContaining({ id: 1, itemType: 'report', sourceId: '42' }),
-			)
 		})
 
-		it('is a no-op (and does not publish) on a duplicate (itemType, sourceId)', async () => {
+		it('is a no-op on a duplicate (itemType, sourceId)', async () => {
 			;(db as any).insert = vi.fn().mockReturnValue({
 				values: vi.fn().mockReturnValue({
 					onConflictDoNothing: vi.fn().mockReturnValue({
@@ -74,7 +69,6 @@ describe('service-queue.gateway', () => {
 			})
 
 			expect(result).toBeNull()
-			expect(vi.mocked(mqttService.publishAdminQueueEvent)).not.toHaveBeenCalled()
 		})
 	})
 
@@ -194,13 +188,19 @@ describe('service-queue.gateway', () => {
 					captured = patch
 					return {
 						where: vi.fn().mockReturnValue({
-							returning: vi.fn().mockResolvedValue([{ ...SAMPLE_ROW, status: 'resolved' }]),
+							returning: vi
+								.fn()
+								.mockResolvedValue([{ ...SAMPLE_ROW, status: 'resolved' }]),
 						}),
 					}
 				}),
 			})
 
-			const result = await markServiceQueueItemResolved(1, 'moderator:mod-1', 'resolve')
+			const result = await markServiceQueueItemResolved(
+				1,
+				'moderator:mod-1',
+				'resolve',
+			)
 
 			expect(result?.status).toBe('resolved')
 			expect(captured).toMatchObject({

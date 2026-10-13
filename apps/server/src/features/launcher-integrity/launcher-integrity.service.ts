@@ -380,8 +380,8 @@ export function createLauncherIntegrityService(
 		// answer from a right one). Best-effort like the 'failed' publish
 		// below - a lost notification just means the client's gate stays
 		// closed until the next periodic challenge succeeds, not a security
-		// hole (the server-side joinQueue() guard is the actual enforcement
-		// point either way).
+		// hole (Nakama's ranked queue hook is the actual enforcement point
+		// either way).
 		await sendChallenge(playerId, {
 			type: 'verified',
 			challengeId: active.challengeId,

@@ -3,7 +3,7 @@ import {
 	getMetricConfig,
 	isBetterMetric,
 	withinMetricBounds,
-} from '../../features/matchmaking/metrics.config.js'
+} from '../../features/ratings/metrics.config.js'
 
 describe('metrics.config', () => {
 	describe('getMetricConfig', () => {
@@ -54,8 +54,16 @@ describe('metrics.config', () => {
 	})
 
 	describe('isBetterMetric', () => {
-		const score = { kind: 'score', direction: 'desc', serverMeasured: false } as const
-		const time = { kind: 'time_ms', direction: 'asc', serverMeasured: true } as const
+		const score = {
+			kind: 'score',
+			direction: 'desc',
+			serverMeasured: false,
+		} as const
+		const time = {
+			kind: 'time_ms',
+			direction: 'asc',
+			serverMeasured: true,
+		} as const
 
 		it('treats any value as better than a null personal best', () => {
 			expect(isBetterMetric(score, 10, null)).toBe(true)

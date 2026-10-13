@@ -1,221 +1,214 @@
 import request from 'supertest'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Lobbies live in Nakama; the route only relays to these admin RPC wrappers.
+vi.mock(
+	'../../infrastructure/nakama/moderation-sync.js',
+	async (importOriginal) => ({
+		...(await importOriginal<object>()),
+		listNakamaLobbies: vi.fn(),
+		getNakamaLobby: vi.fn(),
+		kickFromNakamaLobby: vi.fn(),
+		closeNakamaLobby: vi.fn(),
+	}),
+)
+
 import { signJwt } from '../../features/auth/jwt.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
+import {
+	closeNakamaLobby,
+	getNakamaLobby,
+	kickFromNakamaLobby,
+	listNakamaLobbies,
+} from '../../infrastructure/nakama/moderation-sync.js'
+import type {
+	NakamaLobbyDetail,
+	NakamaLobbySummary,
+} from '../../infrastructure/nakama/moderation-sync.js'
 import { createSession } from '../../state/index.js'
 import { createTestApp } from './app.js'
 
 const app = createTestApp()
 
-function authHeader(playerId: string, steamName: string) {
-	createSession(steamName, { id: playerId })
-	return `Bearer ${signJwt({ playerId, steamName })}`
-}
-
-function authAsModerator(playerId: string, steamName: string) {
+function authWith(privileges: string[], playerId: string, steamName: string) {
 	createSession(steamName, { id: playerId })
 	vi.mocked(playerGateway.findPlayerById).mockResolvedValue({
-		privileges: ['moderator'],
+		privileges,
 	} as any)
 	return `Bearer ${signJwt({ playerId, steamName })}`
 }
 
-function authAsAdmin(playerId: string, steamName: string) {
-	createSession(steamName, { id: playerId })
-	vi.mocked(playerGateway.findPlayerById).mockResolvedValue({
-		privileges: ['admin'],
-	} as any)
-	return `Bearer ${signJwt({ playerId, steamName })}`
+function summary(code: string): NakamaLobbySummary {
+	return {
+		code,
+		modId: 'mod1',
+		type: 'private',
+		mode: 'default',
+		started: false,
+		size: 2,
+		max: 4,
+		matchId: `match-${code}`,
+	}
 }
 
-async function createRealLobby(
-	hostId: string,
-	steamName: string,
-	modId = 'mod1',
-) {
-	const res = await request(app)
-		.post('/api/lobbies')
-		.set('Authorization', authHeader(hostId, steamName))
-		.send({ modId })
-	return res.body.lobby.code as string
+const DETAIL: NakamaLobbyDetail = {
+	code: 'ABCDE',
+	modId: 'mod1',
+	hostId: 'host-1',
+	maxPlayers: 4,
+	createdAt: Date.UTC(2026, 0, 1),
+	metadata: { ruleset: 'standard' },
+	started: true,
+	players: [
+		{ id: 'host-1', displayName: 'Host', connected: true },
+		{ id: 'guest-1', displayName: 'Guest', connected: false },
+	],
+	spectators: [],
+	matchId: 'match-ABCDE',
 }
+
+beforeEach(() => {
+	vi.mocked(listNakamaLobbies).mockResolvedValue([])
+	vi.mocked(getNakamaLobby).mockResolvedValue(null)
+	vi.mocked(kickFromNakamaLobby).mockResolvedValue(false)
+	vi.mocked(closeNakamaLobby).mockResolvedValue(false)
+})
 
 describe('GET /api/webadmin/lobbies', () => {
 	it('returns 403 for a non-admin/moderator', async () => {
-		const token = authHeader('plain-1', 'Plain')
-		vi.mocked(playerGateway.findPlayerById).mockResolvedValue({
-			privileges: [],
-		} as any)
-
 		const res = await request(app)
 			.get('/api/webadmin/lobbies')
-			.set('Authorization', token)
+			.set('Authorization', authWith([], 'plain-1', 'Plain'))
 		expect(res.status).toBe(403)
 	})
 
-	it('finds a lobby by code', async () => {
-		const code = await createRealLobby('host-search-1', 'HostSearch1')
-		const token = authAsAdmin('admin-search-1', 'AdminSearch1')
+	it("lists Nakama's lobbies", async () => {
+		vi.mocked(listNakamaLobbies).mockResolvedValue([
+			summary('ABCDE'),
+			summary('FGHIJ'),
+		])
 
 		const res = await request(app)
-			.get(`/api/webadmin/lobbies?search=${code}`)
-			.set('Authorization', token)
+			.get('/api/webadmin/lobbies')
+			.set('Authorization', authWith(['moderator'], 'mod-1', 'Mod'))
 
 		expect(res.status).toBe(200)
-		expect(
-			res.body.lobbies.some((l: { code: string }) => l.code === code),
-		).toBe(true)
+		expect(res.body.total).toBe(2)
+		expect(res.body.lobbies[0]).toMatchObject({
+			source: 'nakama',
+			code: 'ABCDE',
+			playerCount: 2,
+			maxPlayers: 4,
+		})
 	})
 
-	it('finds a lobby by a member username, case-insensitively', async () => {
-		const code = await createRealLobby('host-search-2', 'FindMeByName')
-		const token = authAsAdmin('admin-search-2', 'AdminSearch2')
+	it('filters by code, case-insensitively', async () => {
+		vi.mocked(listNakamaLobbies).mockResolvedValue([
+			summary('ABCDE'),
+			summary('FGHIJ'),
+		])
 
 		const res = await request(app)
-			.get('/api/webadmin/lobbies?search=findmeby')
-			.set('Authorization', token)
+			.get('/api/webadmin/lobbies?search=fgh')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
 
-		expect(res.status).toBe(200)
-		expect(
-			res.body.lobbies.some((l: { code: string }) => l.code === code),
-		).toBe(true)
+		expect(res.body.total).toBe(1)
+		expect(res.body.lobbies[0].code).toBe('FGHIJ')
 	})
 
-	it('a moderator (not just an admin) can search', async () => {
-		const code = await createRealLobby('host-search-3', 'HostSearch3')
-		const token = authAsModerator('mod-search-1', 'ModSearch1')
+	it('pages the list', async () => {
+		vi.mocked(listNakamaLobbies).mockResolvedValue(
+			['AAAAA', 'BBBBB', 'CCCCC'].map(summary),
+		)
 
 		const res = await request(app)
-			.get(`/api/webadmin/lobbies?search=${code}`)
-			.set('Authorization', token)
+			.get('/api/webadmin/lobbies?page=2&limit=2')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
 
-		expect(res.status).toBe(200)
-		expect(
-			res.body.lobbies.some((l: { code: string }) => l.code === code),
-		).toBe(true)
+		expect(res.body.total).toBe(3)
+		expect(res.body.lobbies.map((l: { code: string }) => l.code)).toEqual([
+			'CCCCC',
+		])
 	})
 })
 
 describe('GET /api/webadmin/lobbies/:code', () => {
 	it('returns lobby detail including players', async () => {
-		const code = await createRealLobby('host-detail-1', 'HostDetail1')
-		const token = authAsAdmin('admin-detail-1', 'AdminDetail1')
+		vi.mocked(getNakamaLobby).mockResolvedValue(DETAIL)
 
 		const res = await request(app)
-			.get(`/api/webadmin/lobbies/${code}`)
-			.set('Authorization', token)
+			.get('/api/webadmin/lobbies/ABCDE')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
 
 		expect(res.status).toBe(200)
-		expect(res.body.lobby.code).toBe(code)
-		expect(res.body.lobby.hostId).toBe('host-detail-1')
-		expect(res.body.players).toEqual([
-			expect.objectContaining({
-				id: 'host-detail-1',
-				displayName: 'HostDetail1',
-			}),
-		])
+		expect(getNakamaLobby).toHaveBeenCalledWith('ABCDE')
+		expect(res.body.lobby).toMatchObject({
+			code: 'ABCDE',
+			hostId: 'host-1',
+			playerCount: 2,
+			started: true,
+			createdAt: '2026-01-01T00:00:00.000Z',
+		})
+		expect(res.body.players).toHaveLength(2)
 	})
 
 	it('returns 404 for a lobby that does not exist', async () => {
-		const token = authAsAdmin('admin-detail-2', 'AdminDetail2')
 		const res = await request(app)
-			.get('/api/webadmin/lobbies/ZZZZZZ')
-			.set('Authorization', token)
+			.get('/api/webadmin/lobbies/ZZZZZ')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
 		expect(res.status).toBe(404)
 	})
 })
 
 describe('POST /api/webadmin/lobbies/:code/kick/:playerId', () => {
-	it('removes the target player and returns ok', async () => {
-		const code = await createRealLobby('host-kick-1', 'HostKick1')
-		await request(app)
-			.post(`/api/lobbies/${code}/join`)
-			.set('Authorization', authHeader('guest-kick-1', 'GuestKick1'))
-		const token = authAsAdmin('admin-kick-1', 'AdminKick1')
+	it('kicks through Nakama, naming the acting moderator', async () => {
+		vi.mocked(kickFromNakamaLobby).mockResolvedValue(true)
 
 		const res = await request(app)
-			.post(`/api/webadmin/lobbies/${code}/kick/guest-kick-1`)
-			.set('Authorization', token)
+			.post('/api/webadmin/lobbies/ABCDE/kick/guest-1')
+			.set('Authorization', authWith(['moderator'], 'mod-1', 'Mod'))
 
 		expect(res.status).toBe(200)
-		expect(res.body.ok).toBe(true)
-
-		const detail = await request(app)
-			.get(`/api/webadmin/lobbies/${code}`)
-			.set('Authorization', token)
-		expect(
-			detail.body.players.some((p: { id: string }) => p.id === 'guest-kick-1'),
-		).toBe(false)
+		expect(res.body).toEqual({ ok: true })
+		expect(kickFromNakamaLobby).toHaveBeenCalledWith(
+			'ABCDE',
+			'guest-1',
+			'admin:mod-1',
+		)
 	})
 
-	it('a moderator (not just an admin) can kick', async () => {
-		const code = await createRealLobby('host-kick-2', 'HostKick2')
-		await request(app)
-			.post(`/api/lobbies/${code}/join`)
-			.set('Authorization', authHeader('guest-kick-2', 'GuestKick2'))
-		const token = authAsModerator('mod-kick-1', 'ModKick1')
-
+	it('returns 404 when Nakama has no such lobby or player', async () => {
 		const res = await request(app)
-			.post(`/api/webadmin/lobbies/${code}/kick/guest-kick-2`)
-			.set('Authorization', token)
-
-		expect(res.status).toBe(200)
+			.post('/api/webadmin/lobbies/ABCDE/kick/nobody')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
+		expect(res.status).toBe(404)
 	})
 
-	it('can kick the host, who is not the acting admin', async () => {
-		const code = await createRealLobby('host-kick-3', 'HostKick3')
-		const token = authAsAdmin('admin-kick-2', 'AdminKick2')
-
+	it('returns 403 for a non-admin/moderator', async () => {
 		const res = await request(app)
-			.post(`/api/webadmin/lobbies/${code}/kick/host-kick-3`)
-			.set('Authorization', token)
-
-		expect(res.status).toBe(200)
-		// The lobby had one member (the host) -- kicking them closes it.
-		const detail = await request(app)
-			.get(`/api/webadmin/lobbies/${code}`)
-			.set('Authorization', token)
-		expect(detail.status).toBe(404)
-	})
-
-	it('returns 400 for a player not in the lobby', async () => {
-		const code = await createRealLobby('host-kick-4', 'HostKick4')
-		const token = authAsAdmin('admin-kick-3', 'AdminKick3')
-
-		const res = await request(app)
-			.post(`/api/webadmin/lobbies/${code}/kick/nobody`)
-			.set('Authorization', token)
-
-		expect(res.status).toBe(400)
+			.post('/api/webadmin/lobbies/ABCDE/kick/guest-1')
+			.set('Authorization', authWith([], 'plain-1', 'Plain'))
+		expect(res.status).toBe(403)
+		expect(kickFromNakamaLobby).not.toHaveBeenCalled()
 	})
 })
 
 describe('POST /api/webadmin/lobbies/:code/close', () => {
-	it('removes every member and the lobby subsequently 404s', async () => {
-		const code = await createRealLobby('host-close-1', 'HostClose1')
-		await request(app)
-			.post(`/api/lobbies/${code}/join`)
-			.set('Authorization', authHeader('guest-close-1', 'GuestClose1'))
-		const token = authAsAdmin('admin-close-1', 'AdminClose1')
+	it('closes through Nakama', async () => {
+		vi.mocked(closeNakamaLobby).mockResolvedValue(true)
 
 		const res = await request(app)
-			.post(`/api/webadmin/lobbies/${code}/close`)
-			.set('Authorization', token)
+			.post('/api/webadmin/lobbies/ABCDE/close')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
 
 		expect(res.status).toBe(200)
-		expect(res.body.ok).toBe(true)
-
-		const detail = await request(app)
-			.get(`/api/webadmin/lobbies/${code}`)
-			.set('Authorization', token)
-		expect(detail.status).toBe(404)
+		expect(closeNakamaLobby).toHaveBeenCalledWith('ABCDE')
 	})
 
 	it('returns 404 for a lobby that does not exist', async () => {
-		const token = authAsAdmin('admin-close-2', 'AdminClose2')
 		const res = await request(app)
-			.post('/api/webadmin/lobbies/ZZZZZZ/close')
-			.set('Authorization', token)
+			.post('/api/webadmin/lobbies/ZZZZZ/close')
+			.set('Authorization', authWith(['admin'], 'admin-1', 'Admin'))
 		expect(res.status).toBe(404)
 	})
 })
