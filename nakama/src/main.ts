@@ -52,6 +52,12 @@ import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 import { rpcReportSubmit } from './moderation/report'
 import { rpcAdminDiscordSet, rpcDiscordLinkStart, rpcDiscordUnlink } from './player/discord'
+import {
+	rpcAdminIntegritySet,
+	rpcAdminQueueCancel,
+	rpcLauncherChallengeAnswer,
+	rpcLauncherSessionStart,
+} from './integrity'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -94,6 +100,8 @@ function InitModule(
 	initializer.registerRpc('chat_enable', rpcChatEnable)
 	initializer.registerRpc('chat_send', rpcChatSend)
 	initializer.registerRpc('report_submit', rpcReportSubmit)
+	initializer.registerRpc('launcher_session_start', rpcLauncherSessionStart)
+	initializer.registerRpc('launcher_challenge_answer', rpcLauncherChallengeAnswer)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)
 	initializer.registerRpc('lobby_find', rpcLobbyFind)
 	initializer.registerRpc('spectate_list', rpcSpectateList)
@@ -118,6 +126,8 @@ function InitModule(
 	initializer.registerRpc('admin_lobby_close', rpcAdminLobbyClose)
 	initializer.registerRpc('admin_player_get', rpcAdminPlayerGet)
 	initializer.registerRpc('admin_discord_set', rpcAdminDiscordSet)
+	initializer.registerRpc('admin_integrity_set', rpcAdminIntegritySet)
+	initializer.registerRpc('admin_queue_cancel', rpcAdminQueueCancel)
 	logger.info('BMP lobby module loaded')
 }
 

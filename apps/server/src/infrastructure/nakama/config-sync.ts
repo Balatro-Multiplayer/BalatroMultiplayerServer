@@ -3,6 +3,14 @@ import { callNakamaRpc, isNakamaAdminEnabled } from './admin-client.js'
 
 const RETRY_DELAYS_MS = [2000, 5000, 10000, 30000, 60000]
 
+// Whether ranked needs a launcher-integrity verdict: set at boot, once it is
+// known whether a challenge strategy was registered.
+let integrityEnforced = false
+
+export function setIntegrityEnforced(enforced: boolean): void {
+	integrityEnforced = enforced
+}
+
 // The server switches Nakama enforces (nakama/src/config.ts ServerConfig).
 export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 	return {
@@ -12,6 +20,7 @@ export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 		casualQueueEnabled: config.casualQueueEnabled,
 		lobbyCreationEnabled: config.lobbyCreationEnabled,
 		testingMode: config.testingMode === true,
+		integrityEnforced,
 	}
 }
 

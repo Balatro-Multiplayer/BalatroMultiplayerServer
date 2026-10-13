@@ -115,3 +115,27 @@ describe('/internal/nakama/player-sync', () => {
 		expect(res.status).toBe(400)
 	})
 })
+
+describe('/internal/nakama/integrity', () => {
+	const KEY = 'secret-key'
+	const NAKAMA_ID = '11111111-1111-4111-8111-111111111111'
+	afterEach(() => {
+		env.INTERNAL_API_KEY = original
+	})
+
+	it('accepts session starts, answers and readiness checks for a Nakama user', async () => {
+		env.INTERNAL_API_KEY = KEY
+		for (const path of ['session-start', 'answer', 'ranked-readiness']) {
+			const res = await request(app)
+				.post(`/internal/nakama/integrity/${path}`)
+				.set('X-BMP-Internal-Key', KEY)
+				.send({ nakamaUserId: NAKAMA_ID, challengeId: 'c-1', refused: true })
+			expect(res.status).toBe(202)
+			const bad = await request(app)
+				.post(`/internal/nakama/integrity/${path}`)
+				.set('X-BMP-Internal-Key', KEY)
+				.send({ nakamaUserId: 'nope' })
+			expect(bad.status).toBe(400)
+		}
+	})
+})

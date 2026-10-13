@@ -80,6 +80,12 @@ export const env = {
 	// setting can never enable this in production.
 	DEV_AUTO_VERIFY_LAUNCHER:
 		!IS_PRODUCTION && optionalBool('DEV_AUTO_VERIFY_LAUNCHER', false),
+	// Dev-only stand-in for the private launcher-integrity strategy
+	// (features/launcher-integrity/dev-strategy.ts), so the challenge round
+	// trip runs locally. Only used when no private strategy registered;
+	// forced off in production like DEV_AUTO_VERIFY_LAUNCHER.
+	DEV_FAKE_LAUNCHER_STRATEGY:
+		!IS_PRODUCTION && optionalBool('DEV_FAKE_LAUNCHER_STRATEGY', false),
 
 	// On/off switch for the hourly mod-registry sync (features/mods/mods-sync.service.ts,
 	// which fetches https://thunderstore.io/c/balatro/api/v1/package/ directly

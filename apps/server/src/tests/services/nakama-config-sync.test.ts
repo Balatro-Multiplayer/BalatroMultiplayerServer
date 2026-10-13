@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../../env.js'
-import { nakamaConfigOf, pushConfigToNakama } from '../../infrastructure/nakama/config-sync.js'
+import { nakamaConfigOf, pushConfigToNakama, setIntegrityEnforced } from '../../infrastructure/nakama/config-sync.js'
 import type { AppConfig } from '../../state/config.js'
 
 const config: AppConfig = {
@@ -34,7 +34,11 @@ describe('pushing config to Nakama', () => {
 			casualQueueEnabled: false,
 			lobbyCreationEnabled: true,
 			testingMode: false,
+			integrityEnforced: false,
 		})
+		setIntegrityEnforced(true)
+		expect(nakamaConfigOf(config).integrityEnforced).toBe(true)
+		setIntegrityEnforced(false)
 	})
 
 	it('is dormant without a Nakama URL and http key', async () => {

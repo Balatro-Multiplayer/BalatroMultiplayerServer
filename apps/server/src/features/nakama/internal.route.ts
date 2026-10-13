@@ -10,6 +10,8 @@ import { getDiscordAuthUrl } from '../auth/discord.js'
 import { generateLinkState } from '../auth/link-state.js'
 import { discordLinkService } from './discord-link.js'
 import type { DiscordLinkService } from './discord-link.service.js'
+import type { LauncherIntegrityService } from '../launcher-integrity/launcher-integrity.service.js'
+import { nakamaIntegrityService } from './integrity.js'
 import { createPlayerSyncService, type PlayerSyncService } from './player-sync.service.js'
 import { createReportRelayService, parseNakamaReport, type ReportRelayService } from './report-relay.service.js'
 
@@ -46,6 +48,7 @@ export function createInternalNakamaRouter(
 	sync: PlayerSyncService = defaultSyncService(),
 	reportRelay: ReportRelayService = defaultReportService(),
 	discordLink: DiscordLinkService = discordLinkService,
+	integrity: LauncherIntegrityService = nakamaIntegrityService,
 ) {
 	const router = Router()
 	router.use(requireInternalKey)
@@ -117,5 +120,53 @@ export function createInternalNakamaRouter(
 		}
 	})
 
+	// Launcher integrity for Nakama players (./integrity.ts). Each answers 202
+	// at once and does the work afterwards: its verdict reaches Nakama
+	// through admin_integrity_set, which must not wait on Nakama's own call
+	// here to return.
+	const background = (what: string, work: Promise<void>) =>
+		work.catch((err) => console.error(`[launcher-integrity] ${what} failed:`, err))
+
+	// {nakamaUserId}: the player's socket is open; start challenging it.
+	router.post('/integrity/session-start', (req, res, next) => {
+		try {
+			const userId = nakamaUserIdOf(req.body)
+			void background('Session start', integrity.handleClientConnected(userId))
+			res.status(202).json({ ok: true })
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// {nakamaUserId, challengeId, response?, refused?}: the launcher's answer.
+	router.post('/integrity/answer', (req, res, next) => {
+		try {
+			const userId = nakamaUserIdOf(req.body)
+			const { challengeId, response, refused } = req.body
+			void background('Challenge answer', integrity.handleChallengeResponse(userId, { challengeId, response, refused }))
+			res.status(202).json({ ok: true })
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// {nakamaUserId}: a ranked ticket was let in; check the launcher and mods
+	// are current (a failure cancels the queue through admin_queue_cancel).
+	router.post('/integrity/ranked-readiness', (req, res, next) => {
+		try {
+			const userId = nakamaUserIdOf(req.body)
+			if (integrity.isEnabled()) void background('Ranked readiness', integrity.issueRankedReadinessChallenge(userId))
+			res.status(202).json({ ok: true })
+		} catch (err) {
+			next(err)
+		}
+	})
+
 	return router
+}
+
+function nakamaUserIdOf(body: unknown): string {
+	const nakamaUserId = (body as { nakamaUserId?: unknown } | undefined)?.nakamaUserId
+	if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
+	return nakamaUserId
 }

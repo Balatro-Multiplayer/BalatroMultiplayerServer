@@ -1,7 +1,9 @@
 // Who may queue: the server switches (ranked/casual queues, testing mode)
-// and queue bans (moderation/access.ts), checked when a ticket is added and
+// queue bans (moderation/access.ts) and, for ranked, launcher integrity
+// (integrity.ts), checked when a ticket is added and
 // again when a group is matched (a ban or switch can land in between).
 import { readConfig } from '../config'
+import { checkRankedReadiness, integrityRefusal, readIntegrity } from '../integrity'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
 import { queueRefusal } from '../moderation/access'
 import { readBans } from '../moderation/bans'
@@ -10,7 +12,10 @@ import { profileFor } from '../player/profile'
 import type { MatchPlan } from './matched'
 
 export function queueRefusalFor(nk: nkruntime.Nakama, userId: string, ranked: boolean, now: number): string | null {
-	return queueRefusal(readConfig(nk), profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now)
+	const config = readConfig(nk)
+	const refused = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now)
+	if (refused || !ranked) return refused
+	return integrityRefusal(config, readIntegrity(nk, userId), now)
 }
 
 function stringProperties(envelope: nkruntime.Envelope): { [key: string]: unknown } {
@@ -29,6 +34,7 @@ export function beforeMatchmakerAdd(
 	const ranked = stringProperties(envelope).kind === 'ranked'
 	const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now())
 	if (refused) throw runtimeError(PERMISSION_DENIED, refused)
+	if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId)
 	return envelope
 }
 

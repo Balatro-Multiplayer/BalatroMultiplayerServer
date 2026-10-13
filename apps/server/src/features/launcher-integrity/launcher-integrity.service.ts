@@ -3,6 +3,7 @@ import type { ILauncherIntegrityRepository } from '../../contracts/ILauncherInte
 import type { IMessageBus } from '../../contracts/IMessageBus.js'
 import { env } from '../../env.js'
 import * as launcherIntegrityGateway from '../../infrastructure/gateways/launcher-integrity.gateway.js'
+import { mirrorIntegrityToNakama } from '../../infrastructure/nakama/integrity-sync.js'
 import { mqttService } from '../../infrastructure/mqtt/mqtt.service.js'
 import type {
 	ChallengeKind,
@@ -21,10 +22,25 @@ import {
 	PERIODIC_MIN_MS,
 } from './launcher-integrity.config.js'
 
+// The service's verdict on a player, each time it changes: passed a
+// challenge, failed one, or (permanent) dev auto-verified with no
+// re-challenges to come.
+export interface IntegrityVerdict {
+	verified: boolean
+	permanent: boolean
+	reason?: LauncherIntegrityFailureReason
+	message?: string
+}
+
 interface LauncherIntegrityServiceDeps {
 	messageBus: IMessageBus
 	repository: ILauncherIntegrityRepository
+	// Told every verdict (best effort, errors are logged): Nakama keeps its
+	// own copy to gate its ranked queue on - see features/nakama/integrity.ts.
+	onVerdict?: (playerId: string, verdict: IntegrityVerdict) => Promise<void>
 }
+
+const FAILED_MESSAGE = "Anti-cheat check failed. You'll need to pass it to queue for Ranked."
 
 export type LauncherIntegrityService = ReturnType<
 	typeof createLauncherIntegrityService
@@ -82,12 +98,19 @@ function extractReadinessVerdict(
 export function createLauncherIntegrityService(
 	deps: LauncherIntegrityServiceDeps,
 ) {
-	const { messageBus, repository } = deps
+	const { messageBus, repository, onVerdict } = deps
 	let strategy: ChallengeStrategy | null = null
 	let rankedReadinessFailureHandler: RankedReadinessFailureHandler | null = null
 
 	function setChallengeStrategy(s: ChallengeStrategy): void {
 		strategy = s
+	}
+
+	async function reportVerdict(playerId: string, verdict: IntegrityVerdict): Promise<void> {
+		if (!onVerdict) return
+		await onVerdict(playerId, verdict).catch((err) => {
+			console.error('[launcher-integrity] Failed to report verdict:', err)
+		})
 	}
 
 	function isEnabled(): boolean {
@@ -194,6 +217,7 @@ export function createLauncherIntegrityService(
 		if (env.DEV_AUTO_VERIFY_LAUNCHER) {
 			const session = getOrCreateSession(playerId)
 			session.launcherVerified = true
+			await reportVerdict(playerId, { verified: true, permanent: true })
 			return
 		}
 
@@ -250,9 +274,10 @@ export function createLauncherIntegrityService(
 			.publishToPlayer(playerId, 'challenge', {
 				type: 'failed',
 				reason,
-				message: "Anti-cheat check failed. You'll need to pass it to queue for Ranked.",
+				message: FAILED_MESSAGE,
 			})
 			.catch(() => {})
+		await reportVerdict(playerId, { verified: false, permanent: false, reason, message: FAILED_MESSAGE })
 	}
 
 	// Fired by the setTimeout armed in issueChallenge -- looks the challenge up
@@ -357,6 +382,7 @@ export function createLauncherIntegrityService(
 				kind: active.kind,
 			})
 			.catch(() => {})
+		await reportVerdict(playerId, { verified: true, permanent: false })
 
 		scheduleNextPeriodicChallenge(playerId)
 	}
@@ -436,4 +462,5 @@ export function createLauncherIntegrityService(
 export const launcherIntegrityService = createLauncherIntegrityService({
 	messageBus: mqttService,
 	repository: launcherIntegrityGateway,
+	onVerdict: mirrorIntegrityToNakama,
 })

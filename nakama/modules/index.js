@@ -1274,6 +1274,13 @@ function rpcAdminPing(ctx, logger, nk, payload) {
   const reply = callExpress(nk, logger, ctx.env, "/ping", {});
   return JSON.stringify({ ok: true, express: reply !== null && reply.status === 200 });
 }
+function isOnline(nk, userId) {
+  try {
+    return nk.streamUserList({ mode: 0, subject: userId }).length > 0;
+  } catch (e) {
+    return true;
+  }
+}
 function rpcAdminNotify(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
@@ -1289,7 +1296,7 @@ function rpcAdminNotify(ctx, logger, nk, payload) {
     content,
     input.persistent === true
   );
-  return JSON.stringify({});
+  return JSON.stringify({ online: isOnline(nk, input.userId) });
 }
 function rpcAdminConfigSet(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -3186,9 +3193,112 @@ function rpcChatSend(ctx, logger, nk, payload) {
   return JSON.stringify({ text });
 }
 
+// src/integrity.ts
+var INTEGRITY_COLLECTION = "integrity";
+var INTEGRITY_KEY = "status";
+var INTEGRITY_TTL_MS = 6 * 60 * 1e3;
+var INTEGRITY_REQUIRED = "Launcher integrity verification required for ranked matchmaking";
+var USER_ID_PATTERN2 = /^[0-9a-f-]{36}$/;
+var CHALLENGE_ID_PATTERN = /^[0-9A-Za-z-]{1,64}$/;
+var MAX_RESPONSE_BYTES = 8 * 1024;
+var UNVERIFIED = { verified: false, expiresAt: null };
+function verdictRecord(verified, permanent, now) {
+  if (!verified) return UNVERIFIED;
+  return { verified: true, expiresAt: permanent ? null : now + INTEGRITY_TTL_MS };
+}
+function isVerified(record, now) {
+  return record.verified && (record.expiresAt === null || record.expiresAt > now);
+}
+function integrityRefusal(config, record, now) {
+  if (!config.integrityEnforced || isVerified(record, now)) return null;
+  return INTEGRITY_REQUIRED;
+}
+function readIntegrity(nk, userId) {
+  const objects = nk.storageRead([{ collection: INTEGRITY_COLLECTION, key: INTEGRITY_KEY, userId }]);
+  const value = objects.length > 0 ? objects[0].value : null;
+  if (!value || value.verified !== true) return UNVERIFIED;
+  return { verified: true, expiresAt: typeof value.expiresAt === "number" ? value.expiresAt : null };
+}
+function writeIntegrity(nk, userId, record) {
+  nk.storageWrite([
+    {
+      collection: INTEGRITY_COLLECTION,
+      key: INTEGRITY_KEY,
+      userId,
+      value: record,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function rpcLauncherSessionStart(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  writeIntegrity(nk, userId, UNVERIFIED);
+  const reply = callExpress(nk, logger, ctx.env, "/integrity/session-start", { nakamaUserId: userId });
+  return JSON.stringify({ started: reply !== null && reply.status >= 200 && reply.status < 300 });
+}
+function checkRankedReadiness(ctx, logger, nk, userId) {
+  callExpress(nk, logger, ctx.env, "/integrity/ranked-readiness", { nakamaUserId: userId });
+}
+function rpcLauncherChallengeAnswer(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  if (typeof input.challengeId !== "string" || !CHALLENGE_ID_PATTERN.test(input.challengeId))
+    throw runtimeError(INVALID_ARGUMENT, "challengeId is required");
+  const body = { nakamaUserId: userId, challengeId: input.challengeId };
+  if (input.refused === true) body.refused = true;
+  else if (input.response !== void 0) {
+    if (JSON.stringify(input.response).length > MAX_RESPONSE_BYTES)
+      throw runtimeError(INVALID_ARGUMENT, "response is too large");
+    body.response = input.response;
+  }
+  const reply = callExpress(nk, logger, ctx.env, "/integrity/answer", body);
+  if (!reply || reply.status < 200 || reply.status >= 300)
+    throw runtimeError(UNAVAILABLE, "The integrity service is unavailable");
+  return JSON.stringify({});
+}
+function requireUserId2(input) {
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN2.test(input.userId))
+    throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  return input.userId;
+}
+function optionalString(value) {
+  return typeof value === "string" ? value.slice(0, 200) : null;
+}
+function rpcAdminIntegritySet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId2(input);
+  if (typeof input.verified !== "boolean") throw runtimeError(INVALID_ARGUMENT, "verified is required");
+  writeIntegrity(nk, userId, verdictRecord(input.verified, input.permanent === true, Date.now()));
+  notify(nk, userId, NotifyCode.INTEGRITY, "integrity", {
+    verified: input.verified,
+    reason: optionalString(input.reason),
+    message: optionalString(input.message)
+  });
+  return JSON.stringify({});
+}
+function rpcAdminQueueCancel(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId2(input);
+  const reason = optionalString(input.reason);
+  if (!reason) throw runtimeError(INVALID_ARGUMENT, "reason is required");
+  notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+    modId: optionalString(input.modId),
+    mode: optionalString(input.mode),
+    reason,
+    requeue: false
+  });
+  return JSON.stringify({});
+}
+
 // src/matchmaking/gate.ts
 function queueRefusalFor(nk, userId, ranked, now) {
-  return queueRefusal(readConfig(nk), profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
+  const config = readConfig(nk);
+  const refused = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
+  if (refused || !ranked) return refused;
+  return integrityRefusal(config, readIntegrity(nk, userId), now);
 }
 function stringProperties(envelope) {
   const add = envelope.matchmakerAdd || envelope.matchmaker_add;
@@ -3199,6 +3309,7 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
   const ranked = stringProperties(envelope).kind === "ranked";
   const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
   if (refused) throw runtimeError(PERMISSION_DENIED, refused);
+  if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
   return envelope;
 }
 function refuseMatchedGroup(nk, logger, plan) {
@@ -3436,7 +3547,7 @@ function matchmakerMatched(ctx, logger, nk, matches) {
 
 // src/rating/rpc.ts
 var BOARD_PAGE = 50;
-var USER_ID_PATTERN2 = /^[0-9a-f-]{36}$/;
+var USER_ID_PATTERN3 = /^[0-9a-f-]{36}$/;
 var MODE_PATTERN = /^[A-Za-z0-9_:.-]{1,64}$/;
 function boardOf(payload) {
   let input = {};
@@ -3455,7 +3566,7 @@ function rpcRatingGet(ctx, logger, nk, payload) {
   if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
   const { modId, mode, input } = boardOf(payload);
   const playerId = input.playerId === void 0 ? ctx.userId : input.playerId;
-  if (typeof playerId !== "string" || !USER_ID_PATTERN2.test(playerId))
+  if (typeof playerId !== "string" || !USER_ID_PATTERN3.test(playerId))
     throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
   const rating = loadRatings(nk, modId, mode, [playerId], Date.now()).current[playerId] || newRating();
   return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
@@ -3571,6 +3682,7 @@ function rpcSessionInit(ctx, logger, nk, payload) {
     throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
   }
   syncDisplayName(nk, userId, profile);
+  writeIntegrity(nk, userId, UNVERIFIED);
   return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
 }
 function rpcTosAccept(ctx, logger, nk, payload) {
@@ -3860,6 +3972,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("chat_enable", rpcChatEnable);
   initializer.registerRpc("chat_send", rpcChatSend);
   initializer.registerRpc("report_submit", rpcReportSubmit);
+  initializer.registerRpc("launcher_session_start", rpcLauncherSessionStart);
+  initializer.registerRpc("launcher_challenge_answer", rpcLauncherChallengeAnswer);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);
   initializer.registerRpc("lobby_find", rpcLobbyFind);
   initializer.registerRpc("spectate_list", rpcSpectateList);
@@ -3883,6 +3997,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_lobby_close", rpcAdminLobbyClose);
   initializer.registerRpc("admin_player_get", rpcAdminPlayerGet);
   initializer.registerRpc("admin_discord_set", rpcAdminDiscordSet);
+  initializer.registerRpc("admin_integrity_set", rpcAdminIntegritySet);
+  initializer.registerRpc("admin_queue_cancel", rpcAdminQueueCancel);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

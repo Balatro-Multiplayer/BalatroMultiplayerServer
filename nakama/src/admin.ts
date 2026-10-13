@@ -28,7 +28,17 @@ export function rpcAdminPing(
 	return JSON.stringify({ ok: true, express: reply !== null && reply.status === 200 })
 }
 
-// {userId, code, subject?, content?, persistent?} -> {}.
+// Whether the player has a socket open (Nakama's notification stream).
+function isOnline(nk: nkruntime.Nakama, userId: string): boolean {
+	try {
+		return nk.streamUserList({ mode: 0, subject: userId }).length > 0
+	} catch (e) {
+		return true
+	}
+}
+
+// {userId, code, subject?, content?, persistent?} -> {online}: online is
+// whether a transient notification could have reached anyone.
 export function rpcAdminNotify(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -52,7 +62,7 @@ export function rpcAdminNotify(
 		content,
 		input.persistent === true,
 	)
-	return JSON.stringify({})
+	return JSON.stringify({ online: isOnline(nk, input.userId) })
 }
 
 // {<any ServerConfig fields>} -> the whole config after the update.

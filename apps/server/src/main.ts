@@ -3,6 +3,7 @@ import { lt } from 'drizzle-orm'
 import express from 'express'
 import type { Express, Request, Response } from 'express'
 import { env } from './env.js'
+import { createDevChallengeStrategy } from './features/launcher-integrity/dev-strategy.js'
 import { launcherIntegrityService } from './features/launcher-integrity/launcher-integrity.service.js'
 import {
 	startDailyJob,
@@ -15,6 +16,7 @@ import { chatLogs, flaggedMessages } from './infrastructure/db/schema.js'
 import { provisionEmqxWebhook } from './infrastructure/emqx/emqx-provision.service.js'
 import { forceReconnectStalePlayers } from './infrastructure/emqx/reconnect-recovery.service.js'
 import { loadConfigFromDb } from './infrastructure/gateways/config.gateway.js'
+import { pushConfigToNakama, setIntegrityEnforced } from './infrastructure/nakama/config-sync.js'
 import { purgeExpiredDeletedPlayerHashes } from './infrastructure/gateways/player.gateway.js'
 import { purgeExpiredRunLogs } from './infrastructure/gateways/replay-log.gateway.js'
 import {
@@ -26,6 +28,9 @@ import { clearAllSpectatorGrants } from './infrastructure/mqtt/spectator-registr
 import { errorHandler } from './middleware/errorHandler.js'
 import router, { matchmakingService } from './routes/index.js'
 import type { RegisterPrivateDeps } from './shared/types/index.js'
+import { nakamaIntegrityService } from './features/nakama/integrity.js'
+import type { ChallengeStrategy } from './shared/types/index.js'
+import { getConfig } from './state/config.js'
 import { startSessionCleanup, stopSessionCleanup } from './state/index.js'
 
 const app = express()
@@ -148,15 +153,26 @@ async function start() {
 		// The real ChallengeStrategy (launcher-integrity.service.ts) lives here
 		// too -- see that module's doc comment for why running without it is
 		// expected and simply disables the feature, not an error.
+		// One strategy serves both the MQTT and the Nakama players.
+		const setChallengeStrategy = (strategy: ChallengeStrategy) => {
+			launcherIntegrityService.setChallengeStrategy(strategy)
+			nakamaIntegrityService.setChallengeStrategy(strategy)
+		}
 		const privatePath: string = '@v-rtualized/bmp-internal'
 		try {
 			const { registerPrivate } = (await import(privatePath)) as PrivateModule
-			await registerPrivate(app, {
-				setChallengeStrategy: launcherIntegrityService.setChallengeStrategy,
-			})
+			await registerPrivate(app, { setChallengeStrategy })
 		} catch {
 			// running without private features
 		}
+		if (!launcherIntegrityService.isEnabled() && env.DEV_FAKE_LAUNCHER_STRATEGY) {
+			console.warn('[launcher-integrity] Using the dev challenge strategy (DEV_FAKE_LAUNCHER_STRATEGY)')
+			setChallengeStrategy(createDevChallengeStrategy())
+		}
+		// Nakama gates ranked on integrity only when there is a strategy to
+		// check it with, as the MQTT queue does.
+		setIntegrityEnforced(launcherIntegrityService.isEnabled())
+		void pushConfigToNakama(getConfig())
 
 		app.use(errorHandler)
 

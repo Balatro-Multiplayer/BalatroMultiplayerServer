@@ -6,6 +6,7 @@
 // the sync is tried again next time.
 import { readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
+import { UNVERIFIED, writeIntegrity } from '../integrity'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
 import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
 import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
@@ -144,6 +145,8 @@ export function rpcSessionInit(
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan))
 	}
 	syncDisplayName(nk, userId, profile)
+	// A new login is unverified until launcher_session_start's challenge passes.
+	writeIntegrity(nk, userId, UNVERIFIED)
 	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))
 }
 

@@ -61,11 +61,15 @@ services:
   # Nakama's server-only admin RPCs; INTERNAL_API_KEY is what Nakama sends
   # back on /internal/nakama/* (its EXPRESS_INTERNAL_KEY). Both are public
   # local-dev placeholders.
+  # DEV_FAKE_LAUNCHER_STRATEGY=true (from the shell) turns on the dev
+  # launcher-integrity strategy, so ranked needs a passed challenge
+  # (ClaudeControl e2e/nakama_integrity).
   api-blue: &api-local
     environment:
       NAKAMA_URL: http://nakama:7350
       NAKAMA_HTTP_KEY: local-dev-http-key
       INTERNAL_API_KEY: local-dev-internal-key
+      DEV_FAKE_LAUNCHER_STRATEGY: ${DEV_FAKE_LAUNCHER_STRATEGY:-false}
 
   api-green: *api-local
 
