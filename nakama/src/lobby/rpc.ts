@@ -9,6 +9,7 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from '../errors'
+import { parsePayload, requireUser } from '../rpc'
 import { bindCode, lookupCode, releaseCode, reserveCode } from './codes'
 import {
 	CURRENT_LOBBY_COLLECTION,
@@ -35,24 +36,6 @@ export function generateCode(length: number = CODE_LENGTH): string {
 		code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length))
 	}
 	return code
-}
-
-function requireUser(ctx: nkruntime.Context): string {
-	if (!ctx.userId)
-		throw runtimeError(UNAUTHENTICATED, 'Lobby RPCs need a player session')
-	return ctx.userId
-}
-
-function parsePayload(payload: string): { [key: string]: unknown } {
-	if (!payload) return {}
-	try {
-		const data = JSON.parse(payload)
-		if (typeof data === 'object' && data !== null && !Array.isArray(data))
-			return data
-	} catch (e) {
-		// Falls through to the error below.
-	}
-	throw runtimeError(INVALID_ARGUMENT, 'Payload must be a JSON object')
 }
 
 // The lobby the user is still seated in, per their current-lobby record, or

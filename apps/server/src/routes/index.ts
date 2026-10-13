@@ -10,6 +10,7 @@ import { createLobbyService } from '../features/lobby/lobby.service.js'
 import { createMatchmakingRouter } from '../features/matchmaking/matchmaking.route.js'
 import { createMatchmakingService } from '../features/matchmaking/matchmaking.service.js'
 import modsRouter from '../features/mods/mods.route.js'
+import { createInternalNakamaRouter } from '../features/nakama/internal.route.js'
 import { createMutesRouter } from '../features/mutes/mutes.route.js'
 import { createReplayLogRouter } from '../features/replay-log/replay-log.route.js'
 import { replayLogService } from '../features/replay-log/replay-log.service.js'
@@ -57,5 +58,6 @@ router.use('/api/r2modman/updates', r2modmanReleasesRouter)
 router.use('/api/webadmin', webadminRouter)
 router.use('/emqx', emqxRouter)
 router.use('/admin', adminRouter)
+router.use('/internal/nakama', createInternalNakamaRouter())
 
 export default router

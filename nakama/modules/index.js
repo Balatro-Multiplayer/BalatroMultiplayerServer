@@ -32,9 +32,657 @@ function runtimeError(code, message) {
   return { code, message };
 }
 
+// src/lobby/protocol.ts
+var LOBBY_MATCH = "bmp_lobby";
+var ClientOp = {
+  // {} -- leave for good (not a disconnect: no grace period).
+  LEAVE: 1,
+  // {playerId} -- host only.
+  KICK: 2,
+  // {metadata} -- host only; shallow-merged into the lobby metadata.
+  SET_METADATA: 3,
+  // {state} -- the sender's own state, handed back in the snapshot on rejoin.
+  SET_STATE: 4,
+  // ActionMessage -- a relayed action (to a player id or '*'), or an
+  // authoritative one (to 'server').
+  ACTION: 5
+};
+var ServerOp = {
+  // Snapshot, to the joining player only.
+  SNAPSHOT: 100,
+  // LobbyEventMessage, same shape as the API's lobby/{code}/events payloads.
+  EVENT: 101,
+  // The full metadata object.
+  METADATA: 102,
+  // {playerId, info} -- info is null when the player is gone.
+  PLAYER_INFO: 103,
+  // {message}, to the sender of a rejected op.
+  ERROR: 104,
+  // ActionEnvelope -- a relayed action, or an authoritative action's result
+  // (from 'server').
+  ACTION: 105,
+  // {cid, action, reason}, to the sender of a refused ACTION.
+  ACTION_REJECTED: 106,
+  // {senderId, displayName, message}: a chat line, to everyone seated.
+  CHAT: 107
+};
+var BROADCAST_TARGET = "*";
+var SERVER_TARGET = "server";
+var CURRENT_LOBBY_COLLECTION = "lobby";
+var CURRENT_LOBBY_KEY = "current";
+var LOBBY_CODE_COLLECTION = "lobby_codes";
+var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
+var RUNS_COLLECTION = "match_runs";
+var LOGS_COLLECTION = "match_logs";
+var MY_RUNS_COLLECTION = "my_runs";
+var RATINGS_COLLECTION = "ratings";
+
+// src/config.ts
+var CONFIG_COLLECTION = "server_config";
+var CONFIG_KEY = "global";
+var DEFAULT_CONFIG = {
+  tosVersion: 1,
+  chatEnabled: true,
+  rankedEnabled: true,
+  casualQueueEnabled: true,
+  lobbyCreationEnabled: true,
+  testingMode: false,
+  integrityEnforced: false
+};
+function mergeConfig(current, update) {
+  const next = __spreadValues({}, current);
+  const tos = update.tosVersion;
+  if (typeof tos === "number" && Number.isInteger(tos) && tos >= 0) next.tosVersion = tos;
+  const flags = [
+    "chatEnabled",
+    "rankedEnabled",
+    "casualQueueEnabled",
+    "lobbyCreationEnabled",
+    "testingMode",
+    "integrityEnforced"
+  ];
+  for (const flag of flags) {
+    const value = update[flag];
+    if (typeof value === "boolean") next[flag] = value;
+  }
+  return next;
+}
+function readConfig(nk) {
+  const objects = nk.storageRead([{ collection: CONFIG_COLLECTION, key: CONFIG_KEY, userId: SYSTEM_USER_ID }]);
+  return mergeConfig(DEFAULT_CONFIG, objects.length > 0 ? objects[0].value : {});
+}
+function writeConfig(nk, config) {
+  nk.storageWrite([
+    {
+      collection: CONFIG_COLLECTION,
+      key: CONFIG_KEY,
+      userId: SYSTEM_USER_ID,
+      value: config,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+
+// src/express.ts
+var TIMEOUT_MS = 3e3;
+function callExpress(nk, logger, env, path, body) {
+  const base = (env.EXPRESS_INTERNAL_URL || "").replace(/\/+$/, "");
+  if (!base) return null;
+  let response;
+  try {
+    response = nk.httpRequest(
+      `${base}/internal/nakama${path}`,
+      "post",
+      {
+        "Content-Type": "application/json",
+        "X-BMP-Internal-Key": env.EXPRESS_INTERNAL_KEY || ""
+      },
+      JSON.stringify(body),
+      TIMEOUT_MS
+    );
+  } catch (e) {
+    logger.warn("Express call %s failed: %v", path, e);
+    return null;
+  }
+  let parsed = {};
+  try {
+    const data = JSON.parse(response.body || "{}");
+    if (typeof data === "object" && data !== null) parsed = data;
+  } catch (e) {
+    logger.warn("Express call %s returned non-JSON (HTTP %d)", path, response.code);
+  }
+  return { status: response.code, body: parsed };
+}
+
+// src/notify.ts
+var NotifyCode = {
+  CHALLENGE: 100,
+  ACCOUNT_UPDATED: 101,
+  BANNED: 102,
+  QUEUE_CANCELLED: 103,
+  CONFIG: 104,
+  INTEGRITY: 105,
+  KICKED: 106
+};
+var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
+function isNotifyCode(code) {
+  return typeof code === "number" && CODES.indexOf(code) !== -1;
+}
+function notify(nk, userId, code, subject, content, persistent = false) {
+  nk.notificationSend(userId, subject, content, code, "", persistent);
+}
+
+// src/rpc.ts
+function requireUser(ctx) {
+  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "This RPC needs a player session");
+  return ctx.userId;
+}
+function requireServer(ctx) {
+  if (ctx.userId) throw runtimeError(PERMISSION_DENIED, "Only the server may call this RPC");
+}
+function parsePayload(payload) {
+  if (!payload) return {};
+  try {
+    const data = JSON.parse(payload);
+    if (Array.isArray(data) && data.length === 0) return {};
+    if (typeof data === "object" && data !== null && !Array.isArray(data)) return data;
+  } catch (e) {
+  }
+  throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+}
+
+// src/admin.ts
+var USER_ID_PATTERN = /^[0-9a-f-]{36}$/;
+function rpcAdminPing(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const reply = callExpress(nk, logger, ctx.env, "/ping", {});
+  return JSON.stringify({ ok: true, express: reply !== null && reply.status === 200 });
+}
+function rpcAdminNotify(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
+    throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  if (!isNotifyCode(input.code)) throw runtimeError(INVALID_ARGUMENT, "Unknown notification code");
+  const content = typeof input.content === "object" && input.content !== null && !Array.isArray(input.content) ? input.content : {};
+  notify(
+    nk,
+    input.userId,
+    input.code,
+    typeof input.subject === "string" ? input.subject : "",
+    content,
+    input.persistent === true
+  );
+  return JSON.stringify({});
+}
+function rpcAdminConfigSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const config = mergeConfig(readConfig(nk), parsePayload(payload));
+  writeConfig(nk, config);
+  logger.info("Server config updated: %v", JSON.stringify(config));
+  return JSON.stringify(config);
+}
+
+// src/rating/elo.ts
+var INITIAL_HIDDEN_RATING = 600;
+var PLACEMENT_GAMES = 5;
+var K_ESTABLISHED = 40;
+var RATING_FLOOR = 100;
+var SOFT_RESET_ANCHOR = 1200;
+var ELO_SCALE = 1e3;
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+function effectiveK(gamesPlayed, performance) {
+  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
+  const baseK = 200 - gamesPlayed * 40;
+  return baseK * (1 + clamp(performance, 0, 1));
+}
+function expectedScore(ratingA, ratingB) {
+  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
+}
+function compute1v1(a, b, outcome) {
+  const ea = expectedScore(a.rating, b.rating);
+  const eb = 1 - ea;
+  let sa;
+  let sb;
+  if (outcome === "a_wins") {
+    sa = 1;
+    sb = 0;
+  } else if (outcome === "b_wins") {
+    sa = 0;
+    sb = 1;
+  } else {
+    sa = 0.5;
+    sb = 0.5;
+  }
+  const ka = effectiveK(a.gamesPlayed, a.performance);
+  const kb = effectiveK(b.gamesPlayed, b.performance);
+  return {
+    deltaA: Math.round(ka * (sa - ea)),
+    deltaB: Math.round(kb * (sb - eb))
+  };
+}
+function computeFFA(players) {
+  const n = players.length;
+  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
+  const kDivisor = n - 1;
+  const deltas = /* @__PURE__ */ new Map();
+  for (const p of players) {
+    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
+    let sum = 0;
+    for (const q of players) {
+      if (q.playerId === p.playerId) continue;
+      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
+      const ep = expectedScore(p.rating, q.rating);
+      sum += kp * (score - ep);
+    }
+    deltas.set(p.playerId, Math.round(sum));
+  }
+  return deltas;
+}
+function computeTeam(teams, winnerTeamIndex) {
+  const deltas = /* @__PURE__ */ new Map();
+  if (teams.length !== 2) {
+    for (const team of teams) {
+      for (const p of team) deltas.set(p.playerId, 0);
+    }
+    return deltas;
+  }
+  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
+  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
+  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
+  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
+  const winner = teams[winnerTeamIndex];
+  const loser = teams[loserTeamIndex];
+  const winnerAvg = {
+    rating: avgRating(winner),
+    gamesPlayed: avgGamesPlayed(winner),
+    performance: avgPerformance(winner)
+  };
+  const loserAvg = {
+    rating: avgRating(loser),
+    gamesPlayed: avgGamesPlayed(loser),
+    performance: avgPerformance(loser)
+  };
+  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
+  for (const p of winner) deltas.set(p.playerId, deltaA);
+  for (const p of loser) deltas.set(p.playerId, deltaB);
+  return deltas;
+}
+function applySoftReset(rating) {
+  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
+  return Math.min(pulled, SOFT_RESET_ANCHOR);
+}
+function detectRatingMode(placements) {
+  if (placements.some((p) => p.teamId)) return "team";
+  if (placements.length === 2) return "solo";
+  return "ffa";
+}
+function computeRatingDeltas(mode, placements, ratings) {
+  var _a, _b;
+  if (mode === "solo") {
+    const [a, b] = placements;
+    const ra = ratings.get(a.playerId);
+    const rb = ratings.get(b.playerId);
+    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
+    const { deltaA, deltaB } = compute1v1(
+      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
+      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
+      outcome
+    );
+    return /* @__PURE__ */ new Map([
+      [a.playerId, deltaA],
+      [b.playerId, deltaB]
+    ]);
+  }
+  if (mode === "ffa") {
+    return computeFFA(
+      placements.map((p) => {
+        var _a2;
+        const r = ratings.get(p.playerId);
+        return {
+          playerId: p.playerId,
+          rating: r.rating,
+          gamesPlayed: r.gamesPlayed,
+          performance: (_a2 = p.performance) != null ? _a2 : 0,
+          place: p.place
+        };
+      })
+    );
+  }
+  const teamMap = /* @__PURE__ */ new Map();
+  for (const p of placements) {
+    const tid = p.teamId;
+    if (!teamMap.has(tid)) teamMap.set(tid, []);
+    teamMap.get(tid).push(p);
+  }
+  const teamEntries = Array.from(teamMap.entries());
+  const winnerTeamPlace = Math.min(
+    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
+  );
+  const winnerTeamIdx = teamEntries.findIndex(
+    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
+  );
+  const teams = teamEntries.map(
+    ([, members]) => members.map((m) => {
+      var _a2;
+      const r = ratings.get(m.playerId);
+      return {
+        playerId: m.playerId,
+        rating: r.rating,
+        gamesPlayed: r.gamesPlayed,
+        performance: (_a2 = m.performance) != null ? _a2 : 0
+      };
+    })
+  );
+  return computeTeam(teams, winnerTeamIdx);
+}
+
+// src/rating/metrics.ts
+var METRIC_CONFIG = {
+  MultiplayerPvP: { kind: "score", direction: "desc" },
+  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
+};
+var BOUNDS = {
+  score: { min: 0, max: 1e15 },
+  // A legitimate ranked run can't complete in under 10s nor take over 6h.
+  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
+};
+function nextSeasonBest(modId, reported, current) {
+  const config = METRIC_CONFIG[modId];
+  if (!config || reported === void 0) return current;
+  const bounds = BOUNDS[config.kind];
+  if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
+    return current;
+  if (current === null) return reported;
+  const better = config.direction === "asc" ? reported < current : reported > current;
+  return better ? reported : current;
+}
+
+// src/rating/season.ts
+var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
+var DECAY_RATE_PER_DAY = 5;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var season = 1;
+function currentSeason() {
+  return season;
+}
+function configureSeason(value) {
+  const parsed = value === void 0 ? NaN : Number(value);
+  if (Number.isInteger(parsed) && parsed > 0) season = parsed;
+}
+function decayedRating(record, now) {
+  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
+  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
+  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
+  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
+  return Math.max(RATING_FLOOR, record.rating - loss);
+}
+function carriedOver(previous, now) {
+  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
+  return applySoftReset(decayedRating(previous, now));
+}
+
+// src/rating/apply.ts
+function boardId(modId, mode, season2 = currentSeason()) {
+  return `${modId}:${mode}:${season2}`;
+}
+function newRating() {
+  return {
+    rating: INITIAL_HIDDEN_RATING,
+    wins: 0,
+    losses: 0,
+    gamesPlayed: 0,
+    seasonBest: null,
+    lastMatchAt: 0
+  };
+}
+function planRatings(run, checks, current) {
+  const plan = { updates: {}, results: {} };
+  if (run.status !== "agreed" && run.status !== "partial") return plan;
+  const placements = run.placements.filter((p) => checks[p.playerId] !== "mismatch");
+  if (placements.length < 2) return plan;
+  const ratings = /* @__PURE__ */ new Map();
+  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
+  const entries = placements.map((p) => ({
+    playerId: p.playerId,
+    place: p.place,
+    performance: p.performance
+  }));
+  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
+  const bestPlace = Math.min(...placements.map((p) => p.place));
+  for (const p of placements) {
+    const before = ratings.get(p.playerId);
+    const delta = deltas.get(p.playerId) || 0;
+    const won = p.place === bestPlace;
+    const after = {
+      rating: Math.max(RATING_FLOOR, before.rating + delta),
+      wins: before.wins + (won ? 1 : 0),
+      losses: before.losses + (won ? 0 : 1),
+      gamesPlayed: before.gamesPlayed + 1,
+      seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
+      lastMatchAt: run.endedAt
+    };
+    plan.updates[p.playerId] = after;
+    const placing = after.gamesPlayed < PLACEMENT_GAMES;
+    plan.results[p.playerId] = {
+      delta: placing ? null : after.rating - before.rating,
+      newRating: placing ? null : after.rating,
+      isPlacement: placing,
+      gamesPlayed: after.gamesPlayed
+    };
+  }
+  return plan;
+}
+var WRITE_ATTEMPTS = 5;
+function loadRatings(nk, modId, mode, playerIds, now) {
+  const key = boardId(modId, mode);
+  const current = {};
+  const versions = {};
+  for (const object of nk.storageRead(
+    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
+  )) {
+    const record = object.value;
+    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
+    versions[object.userId] = object.version;
+  }
+  const season2 = currentSeason();
+  const fresh = playerIds.filter((id) => !current[id]);
+  if (season2 > 1 && fresh.length > 0) {
+    const previous = nk.storageRead(
+      fresh.map((id) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(modId, mode, season2 - 1),
+        userId: id
+      }))
+    );
+    for (const object of previous) {
+      const rating = carriedOver(object.value, now);
+      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
+    }
+  }
+  return { current, versions };
+}
+function applyRatings(nk, logger, run, mode, checks) {
+  const key = boardId(run.modId, mode);
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+    const { current, versions } = loadRatings(
+      nk,
+      run.modId,
+      mode,
+      run.players.map((p) => p.id),
+      run.endedAt
+    );
+    const plan = planRatings(run, checks, current);
+    const ids = Object.keys(plan.updates);
+    if (ids.length === 0) return {};
+    try {
+      nk.storageWrite(
+        ids.map((id) => ({
+          collection: RATINGS_COLLECTION,
+          key,
+          userId: id,
+          value: plan.updates[id],
+          permissionRead: 2,
+          permissionWrite: 0,
+          // '*' = only if it doesn't exist yet.
+          version: versions[id] || "*"
+        }))
+      );
+    } catch (e) {
+      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
+      continue;
+    }
+    mirrorToLeaderboard(nk, logger, run, mode, plan, checks);
+    return plan.results;
+  }
+  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS);
+  return {};
+}
+function mirrorToLeaderboard(nk, logger, run, mode, plan, _checks) {
+  const id = boardId(run.modId, mode);
+  try {
+    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
+    for (const player of run.players) {
+      const after = plan.updates[player.id];
+      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
+      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
+        losses: after.losses,
+        gamesPlayed: after.gamesPlayed,
+        seasonBest: after.seasonBest
+      }, "set");
+    }
+  } catch (e) {
+    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
+  }
+}
+
+// src/rating/legacy.ts
+var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
+var STEAM_CUSTOM_ID_PREFIX = "steam:";
+var HASH_PATTERN = /^[0-9a-f]{64}$/;
+var IMPORT_BATCH_LIMIT = 100;
+function steamIdHash(nk, salt, steamId) {
+  return nk.sha256Hash(steamId + salt);
+}
+function isLegacyBoard(value) {
+  const b = value;
+  return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
+}
+function recordOf(board) {
+  return {
+    rating: board.rating,
+    wins: board.wins,
+    losses: board.losses,
+    gamesPlayed: board.gamesPlayed,
+    seasonBest: board.seasonBest,
+    lastMatchAt: board.lastMatchAt
+  };
+}
+function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  let players;
+  try {
+    players = JSON.parse(payload).players;
+  } catch (e) {
+    throw runtimeError(INVALID_ARGUMENT, "Payload must be {players: {<hash>: {boards: []}}}");
+  }
+  const hashes = Object.keys(players || {});
+  if (hashes.length === 0 || hashes.length > IMPORT_BATCH_LIMIT)
+    throw runtimeError(INVALID_ARGUMENT, `Send 1 to ${IMPORT_BATCH_LIMIT} players per call`);
+  const valid = [];
+  let skipped = 0;
+  for (const hash of hashes) {
+    const boards = players[hash].boards;
+    if (!HASH_PATTERN.test(hash) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
+      skipped++;
+      continue;
+    }
+    valid.push({ hash, boards });
+  }
+  const claimed = new Set(
+    nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID }))).filter((o) => o.value.claimedBy).map((o) => o.key)
+  );
+  const writes = valid.filter((p) => !claimed.has(p.hash)).map((p) => ({
+    collection: LEGACY_RATINGS_COLLECTION,
+    key: p.hash,
+    userId: SYSTEM_USER_ID,
+    value: { boards: p.boards },
+    permissionRead: 0,
+    permissionWrite: 0
+  }));
+  if (writes.length > 0) nk.storageWrite(writes);
+  logger.info("Legacy ratings import: %d written, %d already claimed, %d skipped", writes.length, claimed.size, skipped);
+  return JSON.stringify({ imported: writes.length, alreadyClaimed: claimed.size, skipped });
+}
+function claimLegacyRatings(nk, logger, userId, username, hash, now) {
+  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
+  const legacy = parked == null ? void 0 : parked.value;
+  if (!parked || !legacy || legacy.claimedBy) return 0;
+  const existing = new Set(
+    nk.storageRead(
+      legacy.boards.map((b) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(b.modId, b.mode, b.season),
+        userId
+      }))
+    ).map((o) => o.key)
+  );
+  const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
+  const writes = fresh.map((b) => ({
+    collection: RATINGS_COLLECTION,
+    key: boardId(b.modId, b.mode, b.season),
+    userId,
+    value: recordOf(b),
+    permissionRead: 2,
+    permissionWrite: 0,
+    version: "*"
+  }));
+  writes.push({
+    collection: LEGACY_RATINGS_COLLECTION,
+    key: hash,
+    userId: SYSTEM_USER_ID,
+    value: __spreadProps(__spreadValues({}, legacy), { claimedBy: userId, claimedAt: now }),
+    permissionRead: 0,
+    permissionWrite: 0,
+    version: parked.version
+  });
+  nk.storageWrite(writes);
+  for (const b of fresh) {
+    if (b.gamesPlayed < PLACEMENT_GAMES) continue;
+    const id = boardId(b.modId, b.mode, b.season);
+    try {
+      nk.leaderboardCreate(id, true, "desc", "set", null, { modId: b.modId, mode: b.mode });
+      nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
+        losses: b.losses,
+        gamesPlayed: b.gamesPlayed,
+        seasonBest: b.seasonBest
+      }, "set");
+    } catch (e) {
+      logger.warn("Legacy rating leaderboard write for %s failed: %v", userId, e);
+    }
+  }
+  logger.info("Claimed %d legacy rating boards for %s", fresh.length, userId);
+  return fresh.length;
+}
+function claimLegacyRatingsAtLogin(ctx, logger, nk) {
+  try {
+    const salt = ctx.env.PLAYER_ID_SALT;
+    if (!salt || !ctx.userId) return;
+    const account = nk.accountGetId(ctx.userId);
+    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX)) return;
+    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX.length));
+    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
+  } catch (e) {
+    logger.error("Legacy rating claim failed: %v", e);
+  }
+}
+
 // src/auth.ts
 var STEAM_AUTH_URL = "https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/";
-var STEAM_CUSTOM_ID_PREFIX = "steam:";
+var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
 var STEAM_TICKET_PATTERN = /^[0-9a-fA-F]{16,4096}$/;
 var STEAM_TIMEOUT_MS = 1e4;
 function verifySteamTicket(ctx, logger, nk, ticket) {
@@ -86,7 +734,7 @@ function beforeAuthenticateCustom(ctx, logger, nk, data) {
     );
   }
   const steamId = verifySteamTicket(ctx, logger, nk, ticket);
-  account.id = STEAM_CUSTOM_ID_PREFIX + steamId;
+  account.id = STEAM_CUSTOM_ID_PREFIX2 + steamId;
   delete vars.steam_ticket;
   account.vars = vars;
   data.account = account;
@@ -104,51 +752,9 @@ function beforeAuthenticateDevice(ctx, logger, nk, data) {
   }
   return data;
 }
-
-// src/lobby/protocol.ts
-var LOBBY_MATCH = "bmp_lobby";
-var ClientOp = {
-  // {} -- leave for good (not a disconnect: no grace period).
-  LEAVE: 1,
-  // {playerId} -- host only.
-  KICK: 2,
-  // {metadata} -- host only; shallow-merged into the lobby metadata.
-  SET_METADATA: 3,
-  // {state} -- the sender's own state, handed back in the snapshot on rejoin.
-  SET_STATE: 4,
-  // ActionMessage -- a relayed action (to a player id or '*'), or an
-  // authoritative one (to 'server').
-  ACTION: 5
-};
-var ServerOp = {
-  // Snapshot, to the joining player only.
-  SNAPSHOT: 100,
-  // LobbyEventMessage, same shape as the API's lobby/{code}/events payloads.
-  EVENT: 101,
-  // The full metadata object.
-  METADATA: 102,
-  // {playerId, info} -- info is null when the player is gone.
-  PLAYER_INFO: 103,
-  // {message}, to the sender of a rejected op.
-  ERROR: 104,
-  // ActionEnvelope -- a relayed action, or an authoritative action's result
-  // (from 'server').
-  ACTION: 105,
-  // {cid, action, reason}, to the sender of a refused ACTION.
-  ACTION_REJECTED: 106,
-  // {senderId, displayName, message}: a chat line, to everyone seated.
-  CHAT: 107
-};
-var BROADCAST_TARGET = "*";
-var SERVER_TARGET = "server";
-var CURRENT_LOBBY_COLLECTION = "lobby";
-var CURRENT_LOBBY_KEY = "current";
-var LOBBY_CODE_COLLECTION = "lobby_codes";
-var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
-var RUNS_COLLECTION = "match_runs";
-var LOGS_COLLECTION = "match_logs";
-var MY_RUNS_COLLECTION = "my_runs";
-var RATINGS_COLLECTION = "ratings";
+function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
+  claimLegacyRatingsAtLogin(ctx, logger, nk);
+}
 
 // src/lobby/state.ts
 var DEFAULT_GRACE_MS = 12e4;
@@ -1018,341 +1624,6 @@ function action(lobby, senderId, data, ctx) {
   };
 }
 
-// src/rating/elo.ts
-var INITIAL_HIDDEN_RATING = 600;
-var PLACEMENT_GAMES = 5;
-var K_ESTABLISHED = 40;
-var RATING_FLOOR = 100;
-var SOFT_RESET_ANCHOR = 1200;
-var ELO_SCALE = 1e3;
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-function effectiveK(gamesPlayed, performance) {
-  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
-  const baseK = 200 - gamesPlayed * 40;
-  return baseK * (1 + clamp(performance, 0, 1));
-}
-function expectedScore(ratingA, ratingB) {
-  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
-}
-function compute1v1(a, b, outcome) {
-  const ea = expectedScore(a.rating, b.rating);
-  const eb = 1 - ea;
-  let sa;
-  let sb;
-  if (outcome === "a_wins") {
-    sa = 1;
-    sb = 0;
-  } else if (outcome === "b_wins") {
-    sa = 0;
-    sb = 1;
-  } else {
-    sa = 0.5;
-    sb = 0.5;
-  }
-  const ka = effectiveK(a.gamesPlayed, a.performance);
-  const kb = effectiveK(b.gamesPlayed, b.performance);
-  return {
-    deltaA: Math.round(ka * (sa - ea)),
-    deltaB: Math.round(kb * (sb - eb))
-  };
-}
-function computeFFA(players) {
-  const n = players.length;
-  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
-  const kDivisor = n - 1;
-  const deltas = /* @__PURE__ */ new Map();
-  for (const p of players) {
-    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
-    let sum = 0;
-    for (const q of players) {
-      if (q.playerId === p.playerId) continue;
-      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
-      const ep = expectedScore(p.rating, q.rating);
-      sum += kp * (score - ep);
-    }
-    deltas.set(p.playerId, Math.round(sum));
-  }
-  return deltas;
-}
-function computeTeam(teams, winnerTeamIndex) {
-  const deltas = /* @__PURE__ */ new Map();
-  if (teams.length !== 2) {
-    for (const team of teams) {
-      for (const p of team) deltas.set(p.playerId, 0);
-    }
-    return deltas;
-  }
-  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
-  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
-  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
-  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
-  const winner = teams[winnerTeamIndex];
-  const loser = teams[loserTeamIndex];
-  const winnerAvg = {
-    rating: avgRating(winner),
-    gamesPlayed: avgGamesPlayed(winner),
-    performance: avgPerformance(winner)
-  };
-  const loserAvg = {
-    rating: avgRating(loser),
-    gamesPlayed: avgGamesPlayed(loser),
-    performance: avgPerformance(loser)
-  };
-  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
-  for (const p of winner) deltas.set(p.playerId, deltaA);
-  for (const p of loser) deltas.set(p.playerId, deltaB);
-  return deltas;
-}
-function applySoftReset(rating) {
-  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
-  return Math.min(pulled, SOFT_RESET_ANCHOR);
-}
-function detectRatingMode(placements) {
-  if (placements.some((p) => p.teamId)) return "team";
-  if (placements.length === 2) return "solo";
-  return "ffa";
-}
-function computeRatingDeltas(mode, placements, ratings) {
-  var _a, _b;
-  if (mode === "solo") {
-    const [a, b] = placements;
-    const ra = ratings.get(a.playerId);
-    const rb = ratings.get(b.playerId);
-    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
-    const { deltaA, deltaB } = compute1v1(
-      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
-      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
-      outcome
-    );
-    return /* @__PURE__ */ new Map([
-      [a.playerId, deltaA],
-      [b.playerId, deltaB]
-    ]);
-  }
-  if (mode === "ffa") {
-    return computeFFA(
-      placements.map((p) => {
-        var _a2;
-        const r = ratings.get(p.playerId);
-        return {
-          playerId: p.playerId,
-          rating: r.rating,
-          gamesPlayed: r.gamesPlayed,
-          performance: (_a2 = p.performance) != null ? _a2 : 0,
-          place: p.place
-        };
-      })
-    );
-  }
-  const teamMap = /* @__PURE__ */ new Map();
-  for (const p of placements) {
-    const tid = p.teamId;
-    if (!teamMap.has(tid)) teamMap.set(tid, []);
-    teamMap.get(tid).push(p);
-  }
-  const teamEntries = Array.from(teamMap.entries());
-  const winnerTeamPlace = Math.min(
-    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
-  );
-  const winnerTeamIdx = teamEntries.findIndex(
-    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
-  );
-  const teams = teamEntries.map(
-    ([, members]) => members.map((m) => {
-      var _a2;
-      const r = ratings.get(m.playerId);
-      return {
-        playerId: m.playerId,
-        rating: r.rating,
-        gamesPlayed: r.gamesPlayed,
-        performance: (_a2 = m.performance) != null ? _a2 : 0
-      };
-    })
-  );
-  return computeTeam(teams, winnerTeamIdx);
-}
-
-// src/rating/metrics.ts
-var METRIC_CONFIG = {
-  MultiplayerPvP: { kind: "score", direction: "desc" },
-  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
-};
-var BOUNDS = {
-  score: { min: 0, max: 1e15 },
-  // A legitimate ranked run can't complete in under 10s nor take over 6h.
-  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
-};
-function nextSeasonBest(modId, reported, current) {
-  const config = METRIC_CONFIG[modId];
-  if (!config || reported === void 0) return current;
-  const bounds = BOUNDS[config.kind];
-  if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
-    return current;
-  if (current === null) return reported;
-  const better = config.direction === "asc" ? reported < current : reported > current;
-  return better ? reported : current;
-}
-
-// src/rating/season.ts
-var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
-var DECAY_RATE_PER_DAY = 5;
-var DAY_MS = 24 * 60 * 60 * 1e3;
-var season = 1;
-function currentSeason() {
-  return season;
-}
-function configureSeason(value) {
-  const parsed = value === void 0 ? NaN : Number(value);
-  if (Number.isInteger(parsed) && parsed > 0) season = parsed;
-}
-function decayedRating(record, now) {
-  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
-  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
-  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
-  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
-  return Math.max(RATING_FLOOR, record.rating - loss);
-}
-function carriedOver(previous, now) {
-  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
-  return applySoftReset(decayedRating(previous, now));
-}
-
-// src/rating/apply.ts
-function boardId(modId, mode, season2 = currentSeason()) {
-  return `${modId}:${mode}:${season2}`;
-}
-function newRating() {
-  return {
-    rating: INITIAL_HIDDEN_RATING,
-    wins: 0,
-    losses: 0,
-    gamesPlayed: 0,
-    seasonBest: null,
-    lastMatchAt: 0
-  };
-}
-function planRatings(run, checks, current) {
-  const plan = { updates: {}, results: {} };
-  if (run.status !== "agreed" && run.status !== "partial") return plan;
-  const placements = run.placements.filter((p) => checks[p.playerId] !== "mismatch");
-  if (placements.length < 2) return plan;
-  const ratings = /* @__PURE__ */ new Map();
-  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
-  const entries = placements.map((p) => ({
-    playerId: p.playerId,
-    place: p.place,
-    performance: p.performance
-  }));
-  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
-  const bestPlace = Math.min(...placements.map((p) => p.place));
-  for (const p of placements) {
-    const before = ratings.get(p.playerId);
-    const delta = deltas.get(p.playerId) || 0;
-    const won = p.place === bestPlace;
-    const after = {
-      rating: Math.max(RATING_FLOOR, before.rating + delta),
-      wins: before.wins + (won ? 1 : 0),
-      losses: before.losses + (won ? 0 : 1),
-      gamesPlayed: before.gamesPlayed + 1,
-      seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
-      lastMatchAt: run.endedAt
-    };
-    plan.updates[p.playerId] = after;
-    const placing = after.gamesPlayed < PLACEMENT_GAMES;
-    plan.results[p.playerId] = {
-      delta: placing ? null : after.rating - before.rating,
-      newRating: placing ? null : after.rating,
-      isPlacement: placing,
-      gamesPlayed: after.gamesPlayed
-    };
-  }
-  return plan;
-}
-var WRITE_ATTEMPTS = 5;
-function loadRatings(nk, modId, mode, playerIds, now) {
-  const key = boardId(modId, mode);
-  const current = {};
-  const versions = {};
-  for (const object of nk.storageRead(
-    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
-  )) {
-    const record = object.value;
-    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
-    versions[object.userId] = object.version;
-  }
-  const season2 = currentSeason();
-  const fresh = playerIds.filter((id) => !current[id]);
-  if (season2 > 1 && fresh.length > 0) {
-    const previous = nk.storageRead(
-      fresh.map((id) => ({
-        collection: RATINGS_COLLECTION,
-        key: boardId(modId, mode, season2 - 1),
-        userId: id
-      }))
-    );
-    for (const object of previous) {
-      const rating = carriedOver(object.value, now);
-      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
-    }
-  }
-  return { current, versions };
-}
-function applyRatings(nk, logger, run, mode, checks) {
-  const key = boardId(run.modId, mode);
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
-    const { current, versions } = loadRatings(
-      nk,
-      run.modId,
-      mode,
-      run.players.map((p) => p.id),
-      run.endedAt
-    );
-    const plan = planRatings(run, checks, current);
-    const ids = Object.keys(plan.updates);
-    if (ids.length === 0) return {};
-    try {
-      nk.storageWrite(
-        ids.map((id) => ({
-          collection: RATINGS_COLLECTION,
-          key,
-          userId: id,
-          value: plan.updates[id],
-          permissionRead: 2,
-          permissionWrite: 0,
-          // '*' = only if it doesn't exist yet.
-          version: versions[id] || "*"
-        }))
-      );
-    } catch (e) {
-      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
-      continue;
-    }
-    mirrorToLeaderboard(nk, logger, run, mode, plan, checks);
-    return plan.results;
-  }
-  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS);
-  return {};
-}
-function mirrorToLeaderboard(nk, logger, run, mode, plan, _checks) {
-  const id = boardId(run.modId, mode);
-  try {
-    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
-    for (const player of run.players) {
-      const after = plan.updates[player.id];
-      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
-      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
-        losses: after.losses,
-        gamesPlayed: after.gamesPlayed,
-        seasonBest: after.seasonBest
-      }, "set");
-    }
-  } catch (e) {
-    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
-  }
-}
-
 // src/lobby/chat.ts
 var CHAT_BURST = 5;
 var CHAT_REFILL_MS = 1e3;
@@ -1496,22 +1767,6 @@ function saveRun(nk, run, logs) {
   nk.storageWrite(writes);
   return writes[0].value;
 }
-function requireUser(ctx) {
-  if (!ctx.userId)
-    throw runtimeError(UNAUTHENTICATED, "Run RPCs need a player session");
-  return ctx.userId;
-}
-function parseInput(payload) {
-  if (!payload) return {};
-  try {
-    const data = JSON.parse(payload);
-    if (Array.isArray(data) && data.length === 0) return {};
-    if (typeof data === "object" && data !== null && !Array.isArray(data))
-      return data;
-  } catch (e) {
-  }
-  throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
-}
 function readRun(nk, runId) {
   if (typeof runId !== "string" || runId === "")
     throw runtimeError(INVALID_ARGUMENT, "runId is required");
@@ -1523,11 +1778,11 @@ function readRun(nk, runId) {
 }
 function rpcRunGet(ctx, logger, nk, payload) {
   requireUser(ctx);
-  return JSON.stringify(readRun(nk, parseInput(payload).runId));
+  return JSON.stringify(readRun(nk, parsePayload(payload).runId));
 }
 function rpcRunLogs(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  const input = parseInput(payload);
+  const input = parsePayload(payload);
   const run = readRun(nk, input.runId);
   if (!run.players.some((p) => p.id === userId))
     throw runtimeError(NOT_FOUND, "Run not found");
@@ -1550,7 +1805,7 @@ function rpcRunLogs(ctx, logger, nk, payload) {
 var RUNS_PAGE = 20;
 function rpcRunsMine(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  const input = parseInput(payload);
+  const input = parsePayload(payload);
   const cursor = typeof input.cursor === "string" ? input.cursor : "";
   const page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
   return JSON.stringify({
@@ -1956,21 +2211,6 @@ function generateCode(length = CODE_LENGTH) {
   }
   return code;
 }
-function requireUser2(ctx) {
-  if (!ctx.userId)
-    throw runtimeError(UNAUTHENTICATED, "Lobby RPCs need a player session");
-  return ctx.userId;
-}
-function parsePayload(payload) {
-  if (!payload) return {};
-  try {
-    const data = JSON.parse(payload);
-    if (typeof data === "object" && data !== null && !Array.isArray(data))
-      return data;
-  } catch (e) {
-  }
-  throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
-}
 function currentLobby(nk, userId) {
   const key = {
     collection: CURRENT_LOBBY_COLLECTION,
@@ -1991,7 +2231,7 @@ function currentLobby(nk, userId) {
   return null;
 }
 function rpcLobbyCreate(ctx, logger, nk, payload) {
-  const userId = requireUser2(ctx);
+  const userId = requireUser(ctx);
   const input = parsePayload(payload);
   const modId = input.modId;
   if (typeof modId !== "string" || !MOD_ID_PATTERN.test(modId)) {
@@ -2040,7 +2280,7 @@ function rpcLobbyCreate(ctx, logger, nk, payload) {
   throw runtimeError(UNAVAILABLE, "Could not allocate a lobby code");
 }
 function rpcLobbyFind(ctx, logger, nk, payload) {
-  requireUser2(ctx);
+  requireUser(ctx);
   const input = parsePayload(payload);
   const code = typeof input.code === "string" ? input.code.toUpperCase() : "";
   if (!CODE_PATTERN.test(code))
@@ -2050,11 +2290,11 @@ function rpcLobbyFind(ctx, logger, nk, payload) {
   return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
 }
 function rpcLobbyCurrent(ctx, logger, nk, payload) {
-  const current = currentLobby(nk, requireUser2(ctx));
+  const current = currentLobby(nk, requireUser(ctx));
   return JSON.stringify(current || {});
 }
 function rpcRunActive(ctx, logger, nk, payload) {
-  const userId = requireUser2(ctx);
+  const userId = requireUser(ctx);
   const current = currentLobby(nk, userId);
   if (!current) return JSON.stringify({});
   const signal = { type: "get_active", userId };
@@ -2062,7 +2302,7 @@ function rpcRunActive(ctx, logger, nk, payload) {
   return JSON.stringify(active ? { active } : {});
 }
 function rpcLobbyLeave(ctx, logger, nk, payload) {
-  const userId = requireUser2(ctx);
+  const userId = requireUser(ctx);
   const current = currentLobby(nk, userId);
   if (current) {
     const signal = { type: "leave", userId };
@@ -2125,10 +2365,6 @@ function callModeration(nk, logger, env, request) {
 // src/chat/rpc.ts
 var PREFS_COLLECTION = "chat_prefs";
 var PREFS_KEY = "chat";
-function requireUser3(ctx) {
-  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Chat needs a player session");
-  return ctx.userId;
-}
 function isEnabled(nk, userId) {
   const objects = nk.storageRead([
     { collection: PREFS_COLLECTION, key: PREFS_KEY, userId }
@@ -2136,7 +2372,7 @@ function isEnabled(nk, userId) {
   return objects.length > 0 && objects[0].value.enabled === true;
 }
 function rpcChatEnable(ctx, logger, nk, payload) {
-  const userId = requireUser3(ctx);
+  const userId = requireUser(ctx);
   nk.storageWrite([
     {
       collection: PREFS_COLLECTION,
@@ -2150,13 +2386,8 @@ function rpcChatEnable(ctx, logger, nk, payload) {
   return JSON.stringify({ enabled: true });
 }
 function rpcChatSend(ctx, logger, nk, payload) {
-  const userId = requireUser3(ctx);
-  let message;
-  try {
-    message = JSON.parse(payload || "{}").message;
-  } catch (e) {
-    throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
-  }
+  const userId = requireUser(ctx);
+  const message = parsePayload(payload).message;
   if (typeof message !== "string" || !message.trim())
     throw runtimeError(INVALID_ARGUMENT, "Message is empty");
   if (message.length > MAX_MESSAGE_LENGTH)
@@ -2248,7 +2479,7 @@ function matchmakerMatched(ctx, logger, nk, matches) {
 
 // src/rating/rpc.ts
 var BOARD_PAGE = 50;
-var USER_ID_PATTERN = /^[0-9a-f-]{36}$/;
+var USER_ID_PATTERN2 = /^[0-9a-f-]{36}$/;
 var MODE_PATTERN = /^[A-Za-z0-9_:.-]{1,64}$/;
 function boardOf(payload) {
   let input = {};
@@ -2267,7 +2498,7 @@ function rpcRatingGet(ctx, logger, nk, payload) {
   if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
   const { modId, mode, input } = boardOf(payload);
   const playerId = input.playerId === void 0 ? ctx.userId : input.playerId;
-  if (typeof playerId !== "string" || !USER_ID_PATTERN.test(playerId))
+  if (typeof playerId !== "string" || !USER_ID_PATTERN2.test(playerId))
     throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
   const rating = loadRatings(nk, modId, mode, [playerId], Date.now()).current[playerId] || newRating();
   return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
@@ -2295,128 +2526,6 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
     })),
     cursor: page.nextCursor || ""
   });
-}
-
-// src/rating/legacy.ts
-var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
-var SYSTEM_USER_ID2 = "00000000-0000-0000-0000-000000000000";
-var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
-var HASH_PATTERN = /^[0-9a-f]{64}$/;
-var IMPORT_BATCH_LIMIT = 100;
-function steamIdHash(nk, salt, steamId) {
-  return nk.sha256Hash(steamId + salt);
-}
-function isLegacyBoard(value) {
-  const b = value;
-  return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
-}
-function recordOf(board) {
-  return {
-    rating: board.rating,
-    wins: board.wins,
-    losses: board.losses,
-    gamesPlayed: board.gamesPlayed,
-    seasonBest: board.seasonBest,
-    lastMatchAt: board.lastMatchAt
-  };
-}
-function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
-  if (ctx.userId) throw runtimeError(PERMISSION_DENIED, "Only the server may import ratings");
-  let players;
-  try {
-    players = JSON.parse(payload).players;
-  } catch (e) {
-    throw runtimeError(INVALID_ARGUMENT, "Payload must be {players: {<hash>: {boards: []}}}");
-  }
-  const hashes = Object.keys(players || {});
-  if (hashes.length === 0 || hashes.length > IMPORT_BATCH_LIMIT)
-    throw runtimeError(INVALID_ARGUMENT, `Send 1 to ${IMPORT_BATCH_LIMIT} players per call`);
-  const valid = [];
-  let skipped = 0;
-  for (const hash of hashes) {
-    const boards = players[hash].boards;
-    if (!HASH_PATTERN.test(hash) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
-      skipped++;
-      continue;
-    }
-    valid.push({ hash, boards });
-  }
-  const claimed = new Set(
-    nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID2 }))).filter((o) => o.value.claimedBy).map((o) => o.key)
-  );
-  const writes = valid.filter((p) => !claimed.has(p.hash)).map((p) => ({
-    collection: LEGACY_RATINGS_COLLECTION,
-    key: p.hash,
-    userId: SYSTEM_USER_ID2,
-    value: { boards: p.boards },
-    permissionRead: 0,
-    permissionWrite: 0
-  }));
-  if (writes.length > 0) nk.storageWrite(writes);
-  logger.info("Legacy ratings import: %d written, %d already claimed, %d skipped", writes.length, claimed.size, skipped);
-  return JSON.stringify({ imported: writes.length, alreadyClaimed: claimed.size, skipped });
-}
-function claimLegacyRatings(nk, logger, userId, username, hash, now) {
-  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID2 }]);
-  const legacy = parked == null ? void 0 : parked.value;
-  if (!parked || !legacy || legacy.claimedBy) return 0;
-  const existing = new Set(
-    nk.storageRead(
-      legacy.boards.map((b) => ({
-        collection: RATINGS_COLLECTION,
-        key: boardId(b.modId, b.mode, b.season),
-        userId
-      }))
-    ).map((o) => o.key)
-  );
-  const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
-  const writes = fresh.map((b) => ({
-    collection: RATINGS_COLLECTION,
-    key: boardId(b.modId, b.mode, b.season),
-    userId,
-    value: recordOf(b),
-    permissionRead: 2,
-    permissionWrite: 0,
-    version: "*"
-  }));
-  writes.push({
-    collection: LEGACY_RATINGS_COLLECTION,
-    key: hash,
-    userId: SYSTEM_USER_ID2,
-    value: __spreadProps(__spreadValues({}, legacy), { claimedBy: userId, claimedAt: now }),
-    permissionRead: 0,
-    permissionWrite: 0,
-    version: parked.version
-  });
-  nk.storageWrite(writes);
-  for (const b of fresh) {
-    if (b.gamesPlayed < PLACEMENT_GAMES) continue;
-    const id = boardId(b.modId, b.mode, b.season);
-    try {
-      nk.leaderboardCreate(id, true, "desc", "set", null, { modId: b.modId, mode: b.mode });
-      nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
-        losses: b.losses,
-        gamesPlayed: b.gamesPlayed,
-        seasonBest: b.seasonBest
-      }, "set");
-    } catch (e) {
-      logger.warn("Legacy rating leaderboard write for %s failed: %v", userId, e);
-    }
-  }
-  logger.info("Claimed %d legacy rating boards for %s", fresh.length, userId);
-  return fresh.length;
-}
-function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
-  try {
-    const salt = ctx.env.PLAYER_ID_SALT;
-    if (!salt || !ctx.userId) return;
-    const account = nk.accountGetId(ctx.userId);
-    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX2)) return;
-    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX2.length));
-    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
-  } catch (e) {
-    logger.error("Legacy rating claim failed: %v", e);
-  }
 }
 
 // src/main.ts
@@ -2451,6 +2560,9 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("legacy_ratings_import", rpcLegacyRatingsImport);
   initializer.registerRpc("rating_get", rpcRatingGet);
   initializer.registerRpc("leaderboard_get", rpcLeaderboardGet);
+  initializer.registerRpc("admin_ping", rpcAdminPing);
+  initializer.registerRpc("admin_notify", rpcAdminNotify);
+  initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

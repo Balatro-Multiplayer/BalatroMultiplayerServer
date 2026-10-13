@@ -18,6 +18,7 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from './errors'
+import { claimLegacyRatingsAtLogin } from './rating/legacy'
 
 const STEAM_AUTH_URL =
 	'https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/'
@@ -124,4 +125,16 @@ export function beforeAuthenticateDevice(
 		throw runtimeError(PERMISSION_DENIED, 'Device login is disabled')
 	}
 	return data
+}
+
+// After every Steam login (Nakama allows one after-hook per message, so all
+// login-time work hangs off this one). Never fails the login.
+export function afterAuthenticateCustom(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	_session: { created?: boolean },
+	_request: nkruntime.AuthenticateCustomRequest,
+) {
+	claimLegacyRatingsAtLogin(ctx, logger, nk)
 }

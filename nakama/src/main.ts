@@ -1,7 +1,9 @@
 // Nakama JavaScript runtime entry point (bundled to modules/index.js by
 // build.mjs). Nakama resolves every function registered here by its name in
 // the script's global scope, so they are passed as plain identifiers.
+import { rpcAdminConfigSet, rpcAdminNotify, rpcAdminPing } from './admin'
 import {
+	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
 	beforeAuthenticateDevice,
 	refuseCustomIdChange,
@@ -26,7 +28,7 @@ import { rpcChatEnable, rpcChatSend } from './chat/rpc'
 import { matchmakerMatched } from './matchmaking/matched'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
-import { afterAuthenticateCustom, rpcLegacyRatingsImport } from './rating/legacy'
+import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
 
 function InitModule(
@@ -68,6 +70,10 @@ function InitModule(
 	initializer.registerRpc('legacy_ratings_import', rpcLegacyRatingsImport)
 	initializer.registerRpc('rating_get', rpcRatingGet)
 	initializer.registerRpc('leaderboard_get', rpcLeaderboardGet)
+	// Server to server only (http key); see admin.ts.
+	initializer.registerRpc('admin_ping', rpcAdminPing)
+	initializer.registerRpc('admin_notify', rpcAdminNotify)
+	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	logger.info('BMP lobby module loaded')
 }
 

@@ -3,6 +3,7 @@
 // can list their own runs. Written by the bmp_lobby match; read by the run
 // RPCs below.
 import { INVALID_ARGUMENT, NOT_FOUND, UNAUTHENTICATED, runtimeError } from '../errors'
+import { parsePayload, requireUser } from '../rpc'
 import { checkLog } from './log_check'
 import {
 	type LogCheck,
@@ -109,26 +110,6 @@ export function saveRun(
 	return writes[0].value as { logChecks: { [userId: string]: LogCheck } }
 }
 
-function requireUser(ctx: nkruntime.Context): string {
-	if (!ctx.userId)
-		throw runtimeError(UNAUTHENTICATED, 'Run RPCs need a player session')
-	return ctx.userId
-}
-
-function parseInput(payload: string): { [key: string]: unknown } {
-	if (!payload) return {}
-	try {
-		const data = JSON.parse(payload)
-		// Lua clients encode an empty table as [].
-		if (Array.isArray(data) && data.length === 0) return {}
-		if (typeof data === 'object' && data !== null && !Array.isArray(data))
-			return data
-	} catch (e) {
-		// Falls through to the error below.
-	}
-	throw runtimeError(INVALID_ARGUMENT, 'Payload must be a JSON object')
-}
-
 function readRun(nk: nkruntime.Nakama, runId: unknown): RunRecord {
 	if (typeof runId !== 'string' || runId === '')
 		throw runtimeError(INVALID_ARGUMENT, 'runId is required')
@@ -147,7 +128,7 @@ export function rpcRunGet(
 	payload: string,
 ) {
 	requireUser(ctx)
-	return JSON.stringify(readRun(nk, parseInput(payload).runId))
+	return JSON.stringify(readRun(nk, parsePayload(payload).runId))
 }
 
 // {runId, playerId?} -> {logs: {playerId: {events, eventCount, truncated}}}.
@@ -159,7 +140,7 @@ export function rpcRunLogs(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	const input = parseInput(payload)
+	const input = parsePayload(payload)
 	const run = readRun(nk, input.runId)
 	if (!run.players.some((p) => p.id === userId))
 		throw runtimeError(NOT_FOUND, 'Run not found')
@@ -191,7 +172,7 @@ export function rpcRunsMine(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	const input = parseInput(payload)
+	const input = parsePayload(payload)
 	const cursor = typeof input.cursor === 'string' ? input.cursor : ''
 	const page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor)
 	return JSON.stringify({

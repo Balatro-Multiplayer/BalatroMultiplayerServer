@@ -10,6 +10,7 @@ import {
 	runtimeError,
 } from '../errors'
 import { currentLobby } from '../lobby/rpc'
+import { parsePayload, requireUser } from '../rpc'
 import type { LobbySignal } from '../lobby/protocol'
 import {
 	MAX_MESSAGE_LENGTH,
@@ -19,11 +20,6 @@ import {
 
 const PREFS_COLLECTION = 'chat_prefs'
 const PREFS_KEY = 'chat'
-
-function requireUser(ctx: nkruntime.Context): string {
-	if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, 'Chat needs a player session')
-	return ctx.userId
-}
 
 function isEnabled(nk: nkruntime.Nakama, userId: string): boolean {
 	const objects = nk.storageRead([
@@ -63,12 +59,7 @@ export function rpcChatSend(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	let message: unknown
-	try {
-		message = JSON.parse(payload || '{}').message
-	} catch (e) {
-		throw runtimeError(INVALID_ARGUMENT, 'Payload must be a JSON object')
-	}
+	const message = parsePayload(payload).message
 	if (typeof message !== 'string' || !message.trim())
 		throw runtimeError(INVALID_ARGUMENT, 'Message is empty')
 	if (message.length > MAX_MESSAGE_LENGTH)

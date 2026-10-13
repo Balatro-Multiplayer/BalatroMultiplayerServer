@@ -3,6 +3,7 @@ import { serverConfig, modVersions, chatAllowlist } from '../db/schema.js'
 import type { AppConfig } from '../../state/config.js'
 import { setConfig } from '../../state/config.js'
 import { env } from '../../env.js'
+import { pushConfigToNakama } from '../nakama/config-sync.js'
 
 export async function loadConfigFromDb(): Promise<AppConfig> {
 	await db
@@ -35,5 +36,7 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 		lobbyCreationEnabled: configRow?.lobbyCreationEnabled ?? true,
 	}
 	setConfig(config)
+	// Every config load (boot, admin refresh, webadmin edits) reaches Nakama.
+	void pushConfigToNakama(config)
 	return config
 }

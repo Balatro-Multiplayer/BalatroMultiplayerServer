@@ -4,14 +4,13 @@
 // import parks each player's ratings in a system-owned collection keyed by
 // that hash, and the player claims them at their first Nakama login, when
 // their Steam id is known and can be hashed the same way.
-import { INVALID_ARGUMENT, PERMISSION_DENIED, runtimeError } from '../errors'
-import { RATINGS_COLLECTION } from '../lobby/protocol'
+import { INVALID_ARGUMENT, runtimeError } from '../errors'
+import { RATINGS_COLLECTION, SYSTEM_USER_ID } from '../lobby/protocol'
+import { requireServer } from '../rpc'
 import { boardId, type RatingRecord } from './apply'
 import { PLACEMENT_GAMES } from './elo'
 
 export const LEGACY_RATINGS_COLLECTION = 'legacy_ratings'
-// Nakama's owner id for objects that belong to no player.
-const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
 const STEAM_CUSTOM_ID_PREFIX = 'steam:'
 const HASH_PATTERN = /^[0-9a-f]{64}$/
 const IMPORT_BATCH_LIMIT = 100
@@ -77,7 +76,7 @@ export function rpcLegacyRatingsImport(
 	nk: nkruntime.Nakama,
 	payload: string,
 ) {
-	if (ctx.userId) throw runtimeError(PERMISSION_DENIED, 'Only the server may import ratings')
+	requireServer(ctx)
 	let players: { [hash: string]: { boards?: unknown } }
 	try {
 		players = JSON.parse(payload).players
@@ -186,12 +185,10 @@ export function claimLegacyRatings(
 
 // After a Steam login: claim whatever was parked under the player's hash.
 // Never fails the login.
-export function afterAuthenticateCustom(
+export function claimLegacyRatingsAtLogin(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
 	nk: nkruntime.Nakama,
-	_session: { created?: boolean },
-	_request: nkruntime.AuthenticateCustomRequest,
 ) {
 	try {
 		const salt = ctx.env.PLAYER_ID_SALT

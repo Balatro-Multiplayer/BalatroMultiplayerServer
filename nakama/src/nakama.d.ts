@@ -109,8 +109,51 @@ declare namespace nkruntime {
 			expiry: number,
 		): { records?: LeaderboardRecord[]; nextCursor?: string }
 		uuidv4(): string
-		accountGetId(userId: string): { user: { username: string }; customId: string }
+		accountGetId(userId: string): Account
+		// Every argument but userId may be null to leave that field unchanged.
+		accountUpdateId(
+			userId: string,
+			username: string | null,
+			displayName: string | null,
+			timezone: string | null,
+			location: string | null,
+			langTag: string | null,
+			avatarUrl: string | null,
+			metadata: { [key: string]: unknown } | null,
+		): void
 		sha256Hash(input: string): string
+		// Banned users can't log in or refresh a session.
+		usersBanId(userIds: string[]): void
+		usersUnbanId(userIds: string[]): void
+		// Ends the user's session(s); null tokens mean all of them.
+		sessionLogout(userId: string, token: string | null, refreshToken: string | null): void
+		// code must be positive (Nakama reserves zero and below).
+		notificationSend(
+			userId: string,
+			subject: string,
+			content: { [key: string]: unknown },
+			code: number,
+			senderId: string,
+			persistent: boolean,
+		): void
+	}
+
+	interface Account {
+		user: {
+			id: string
+			username: string
+			displayName?: string
+			metadata?: { [key: string]: unknown }
+		}
+		customId: string
+	}
+
+	// A realtime message from a client socket (registerRtBefore/After).
+	type Envelope = { [key: string]: unknown }
+
+	interface SessionEvent {
+		properties: { [key: string]: string }
+		timestamp: number
 	}
 
 	interface LeaderboardRecord {
@@ -265,6 +308,26 @@ declare namespace nkruntime {
 		registerBeforeLinkCustom(fn: BeforeHookFunction<AccountCustom>): void
 		registerBeforeUnlinkCustom(fn: BeforeHookFunction<AccountCustom>): void
 		registerRpc(id: string, fn: RpcFunction): void
+		registerBeforeSessionRefresh(
+			fn: BeforeHookFunction<{ token?: string; vars?: { [key: string]: string } }>,
+		): void
+		registerEventSessionStart(
+			fn: (ctx: Context, logger: Logger, nk: Nakama, event: SessionEvent) => void,
+		): void
+		registerEventSessionEnd(
+			fn: (ctx: Context, logger: Logger, nk: Nakama, event: SessionEvent) => void,
+		): void
+		// id is the envelope's message name, e.g. 'MatchmakerAdd'. Returning
+		// nothing (or throwing) drops the message.
+		registerRtBefore(
+			id: string,
+			fn: (ctx: Context, logger: Logger, nk: Nakama, envelope: Envelope) => Envelope | void,
+		): void
+		registerRtAfter(
+			id: string,
+			fn: (ctx: Context, logger: Logger, nk: Nakama, output: Envelope | null, input: Envelope) => void,
+		): void
+		registerShutdown(fn: (ctx: Context, logger: Logger, nk: Nakama) => void): void
 		registerMatchmakerMatched(
 			fn: (
 				ctx: Context,

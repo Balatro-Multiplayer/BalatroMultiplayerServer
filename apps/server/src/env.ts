@@ -111,6 +111,12 @@ export const env = {
 	// route; set to the Nakama HTTP API base, e.g. http://nakama:7350 on the local
 	// compose network (docker-compose.local.yml).
 	NAKAMA_URL: optional('NAKAMA_URL', '').replace(/\/+$/, ''),
+	// Nakama's runtime.http_key. With NAKAMA_URL set, the API drives Nakama
+	// through its server-only admin RPCs (features/nakama). Unset = dormant.
+	NAKAMA_HTTP_KEY: optional('NAKAMA_HTTP_KEY', ''),
+	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
+	// Unset = those routes refuse everything.
+	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),
 
 	MODERATION_BEARER_TOKEN: optional('MODERATION_BEARER_TOKEN', ''),
 	// Must exceed the moderation service's own judgement deadline plus margin.

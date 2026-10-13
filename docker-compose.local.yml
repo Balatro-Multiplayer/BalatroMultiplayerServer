@@ -57,13 +57,17 @@ services:
   # Game login through Nakama (POST /api/auth/nakama): the API asks Nakama
   # who a session token belongs to. Local dev only -- the base file (and so
   # prod) has no NAKAMA_URL, which leaves that route disabled.
-  api-blue:
+  # NAKAMA_HTTP_KEY (= nakama/local.yml runtime.http_key) lets the API call
+  # Nakama's server-only admin RPCs; INTERNAL_API_KEY is what Nakama sends
+  # back on /internal/nakama/* (its EXPRESS_INTERNAL_KEY). Both are public
+  # local-dev placeholders.
+  api-blue: &api-local
     environment:
       NAKAMA_URL: http://nakama:7350
+      NAKAMA_HTTP_KEY: local-dev-http-key
+      INTERNAL_API_KEY: local-dev-internal-key
 
-  api-green:
-    environment:
-      NAKAMA_URL: http://nakama:7350
+  api-green: *api-local
 
   # One moderation replica instead of five (nginx/local/moderation-upstream.conf):
   # each holds a ~3GB model. Only moderation-1 is started locally, and
@@ -100,7 +104,9 @@ services:
           --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
-          --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN"
+          --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
+          --runtime.env "EXPRESS_INTERNAL_URL=$$EXPRESS_INTERNAL_URL" \
+          --runtime.env "EXPRESS_INTERNAL_KEY=$$EXPRESS_INTERNAL_KEY"
     environment:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
@@ -121,6 +127,11 @@ services:
       # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
       # missing model from blocking.
       MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
+      # The API's internal routes (nakama/src/express.ts), through nginx so a
+      # blue/green swap is invisible here. Same placeholder key as the API's
+      # INTERNAL_API_KEY above.
+      EXPRESS_INTERNAL_URL: http://nginx:8788
+      EXPRESS_INTERNAL_KEY: local-dev-internal-key
     volumes:
       - ./nakama/local.yml:/nakama/data/local.yml:ro
       - ./nakama/modules:/nakama/data/modules:ro
