@@ -4,6 +4,7 @@
 import { generateCode, CODE_ATTEMPTS, MATCHMADE_CODE_LENGTH } from '../lobby/rpc'
 import { bindCode, releaseCode, reserveCode } from '../lobby/codes'
 import { LOBBY_MATCH } from '../lobby/protocol'
+import { refuseMatchedGroup } from './gate'
 import { clearMatched } from './queue'
 
 export interface MatchedEntry {
@@ -70,6 +71,8 @@ export function matchmakerMatched(
 		logger.warn('Matchmaker group refused: %s', plan)
 		throw new Error(plan)
 	}
+	if (refuseMatchedGroup(nk, logger, plan))
+		throw new Error('A matched player may not queue')
 	for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
 		const code = generateCode(MATCHMADE_CODE_LENGTH)
 		if (!reserveCode(nk, code, plan.modId)) continue

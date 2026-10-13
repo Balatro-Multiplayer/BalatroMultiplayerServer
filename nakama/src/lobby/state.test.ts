@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { ServerOp } from './protocol'
 import {
 	CREATOR_JOIN_TIMEOUT_MS,
+	adminRemove,
+	adminView,
 	type Lobby,
 	type Outbound,
 	type Step,
@@ -280,6 +282,42 @@ describe('kick', () => {
 		expect(step.lobby.players.map((p) => p.id)).toEqual(['a', 'c'])
 		expect(step.lobby.kickedIds).toEqual(['b'])
 		expect(step.out).toContainEqual({ kind: 'kick', userId: 'b' })
+	})
+})
+
+describe('adminRemove', () => {
+	it('kicks a player for the server, who may not come back', () => {
+		const step = adminRemove(lobbyWith('a', 'b'), 'b', 'banned')
+		expect(events(step)).toEqual([
+			expect.objectContaining({ type: 'player_kicked', playerId: 'b', data: { kickedBy: 'server', reason: 'banned' } }),
+		])
+		expect(step.lobby.kickedIds).toEqual(['b'])
+		expect(step.out).toContainEqual({ kind: 'kick', userId: 'b' })
+		expect(joinRejection(step.lobby, 'b', 'MultiplayerPvP')).toBeTruthy()
+	})
+	it('can leave a player alone until a game runs', () => {
+		const lobby = lobbyWith('a', 'b')
+		expect(adminRemove(lobby, 'b', 'banned', true).lobby).toBe(lobby)
+		const started = { ...lobby, game: { ...lobby.game, started: { at: 1 } as any } }
+		expect(adminRemove(started, 'b', 'banned', true).lobby.kickedIds).toEqual(['b'])
+	})
+	it('ignores a player not in the lobby', () => {
+		const lobby = lobbyWith('a')
+		expect(adminRemove(lobby, 'z', 'x')).toEqual({ lobby, out: [] })
+	})
+})
+
+describe('adminView', () => {
+	it('lists the seated players for webadmin', () => {
+		expect(adminView(lobbyWith('a', 'b'))).toMatchObject({
+			code: 'ABC123',
+			hostId: 'a',
+			started: false,
+			players: [
+				{ id: 'a', displayName: 'a', connected: true },
+				{ id: 'b', displayName: 'b', connected: true },
+			],
+		})
 	})
 })
 

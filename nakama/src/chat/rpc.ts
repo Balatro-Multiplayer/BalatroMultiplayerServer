@@ -9,6 +9,8 @@ import {
 	runtimeError,
 } from '../errors'
 import { readConfig, type ServerConfig } from '../config'
+import { chatBanRefusal } from '../moderation/access'
+import { readBans } from '../moderation/bans'
 import { currentLobby } from '../lobby/rpc'
 import { playerView, profileFor, updateProfile, type Profile } from '../player/profile'
 import { parsePayload, requireUser } from '../rpc'
@@ -68,6 +70,8 @@ export function rpcChatSend(
 	if (profile.chatBlocked || !profile.chatEnabled)
 		throw runtimeError(PERMISSION_DENIED, 'Chat is not enabled for this account')
 	if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
+	const banned = chatBanRefusal(readBans(nk, userId), Date.now())
+	if (banned) throw runtimeError(PERMISSION_DENIED, banned)
 
 	const current = currentLobby(nk, userId)
 	if (!current) throw runtimeError(INVALID_ARGUMENT, 'Not in a lobby')

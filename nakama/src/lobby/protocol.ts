@@ -236,6 +236,10 @@ export type LobbySignal =
 	| { type: 'chat_post'; userId: string; text: string }
 	// A profile change (player/rpc.ts) reaching the player's lobby.
 	| { type: 'player_info'; userId: string; info: Partial<PlayerInfo> }
+	// Admin actions and bans (moderation/enforce.ts, admin.ts).
+	| { type: 'admin_remove'; userId: string; reason: string; onlyIfStarted?: boolean }
+	| { type: 'admin_close' }
+	| { type: 'admin_view' }
 
 // Storage object (per user) naming the lobby they are in, for reconnect after
 // a game restart. Written and removed by the match only.

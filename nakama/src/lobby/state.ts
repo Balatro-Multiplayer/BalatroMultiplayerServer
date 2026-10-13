@@ -466,19 +466,20 @@ export function kick(lobby: Lobby, byId: string, targetId: string): Step {
 		return { lobby, out: [rejectOp(byId, 'Only the host can kick players')] }
 	if (targetId === byId)
 		return { lobby, out: [rejectOp(byId, 'You cannot kick yourself')] }
-	const target = findPlayer(lobby, targetId)
-	if (!target)
+	if (!findPlayer(lobby, targetId))
 		return { lobby, out: [rejectOp(byId, 'Player is not in this lobby')] }
+	return removeKicked(lobby, targetId, { kickedBy: byId })
+}
 
-	// Announced to everyone, the target included, before they are removed.
+// Announced to everyone, the target included, before they are removed; they
+// may not come back.
+function removeKicked(lobby: Lobby, targetId: string, data: { [key: string]: unknown }): Step {
+	const target = findPlayer(lobby, targetId)
+	if (!target) return { lobby, out: [] }
 	const announced = event(
 		lobby,
 		'player_kicked',
-		{
-			playerId: targetId,
-			displayName: target.info.displayName,
-			data: { kickedBy: byId },
-		},
+		{ playerId: targetId, displayName: target.info.displayName, data },
 		allIds(lobby),
 	)
 	const marked = { ...lobby, kickedIds: lobby.kickedIds.concat([targetId]) }
@@ -488,6 +489,39 @@ export function kick(lobby: Lobby, byId: string, targetId: string): Step {
 		out: [announced as Outbound].concat(step.out, [
 			{ kind: 'kick', userId: targetId },
 		]),
+	}
+}
+
+// The server (an admin, or a ban) takes userId out. With onlyIfStarted, only
+// out of a running game: a queue ban forfeits the game but leaves an idle
+// lobby alone. Leaving a started game is its forfeit: the result clock and
+// the others' reports settle it (actions/results.ts).
+export function adminRemove(
+	lobby: Lobby,
+	userId: string,
+	reason: string,
+	onlyIfStarted = false,
+): Step {
+	if (onlyIfStarted && lobby.game.started === null) return { lobby, out: [] }
+	return removeKicked(lobby, userId, { kickedBy: 'server', reason })
+}
+
+// What webadmin shows of a lobby beyond its label.
+export function adminView(lobby: Lobby) {
+	return {
+		code: lobby.code,
+		modId: lobby.modId,
+		hostId: lobby.hostId,
+		maxPlayers: lobby.maxPlayers,
+		createdAt: lobby.createdAt,
+		metadata: lobby.metadata,
+		started: lobby.game.started !== null,
+		players: lobby.players.map((p) => ({
+			id: p.id,
+			displayName: p.info.displayName,
+			connected: p.awaySince === null,
+		})),
+		spectators: lobby.spectators || [],
 	}
 }
 

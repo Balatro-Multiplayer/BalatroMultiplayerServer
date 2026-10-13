@@ -9,6 +9,9 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from '../errors'
+import { readConfig } from '../config'
+import { lobbyCreateRefusal } from '../moderation/access'
+import { profileFor } from '../player/profile'
 import { parsePayload, requireUser } from '../rpc'
 import { bindCode, lookupCode, releaseCode, reserveCode } from './codes'
 import {
@@ -75,6 +78,8 @@ export function rpcLobbyCreate(
 ) {
 	const userId = requireUser(ctx)
 	const input = parsePayload(payload)
+	const refused = lobbyCreateRefusal(readConfig(nk), profileFor(nk, userId, ctx.username).privileges)
+	if (refused) throw runtimeError(PERMISSION_DENIED, refused)
 
 	const modId = input.modId
 	if (typeof modId !== 'string' || !MOD_ID_PATTERN.test(modId)) {

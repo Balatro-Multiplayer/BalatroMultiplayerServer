@@ -6,7 +6,10 @@
 // the sync is tried again next time.
 import { readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
-import { bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
+import { PERMISSION_DENIED, runtimeError } from '../errors'
+import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
+import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
+import { enforceAccountBan } from '../moderation/enforce'
 import { parsePayload, requireUser } from '../rpc'
 import {
 	cleanName,
@@ -132,6 +135,13 @@ export function rpcSessionInit(
 		}
 		writeBans(nk, userId, bans)
 		logger.info('Synced player %s from Postgres player %s', userId, sync.playerId)
+	}
+	// An account ban the sync brought over (or one Nakama's own ban somehow
+	// missed) ends the login here.
+	const accountBan = activeBan(readBans(nk, userId), 'account', Date.now())
+	if (accountBan) {
+		enforceAccountBan(nk, userId, accountBan)
+		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan))
 	}
 	syncDisplayName(nk, userId, profile)
 	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))

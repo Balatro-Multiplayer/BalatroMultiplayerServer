@@ -18,6 +18,7 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from './errors'
+import { checkLoginBan } from './moderation/enforce'
 import { claimLegacyRatingsAtLogin } from './rating/legacy'
 
 const STEAM_AUTH_URL =
@@ -95,6 +96,7 @@ export function beforeAuthenticateCustom(
 
 	const steamId = verifySteamTicket(ctx, logger, nk, ticket)
 	account.id = STEAM_CUSTOM_ID_PREFIX + steamId
+	checkLoginBan(nk, logger, 'custom:' + account.id, Date.now())
 	// vars end up inside the session token; the ticket has no business there.
 	// biome-ignore lint/performance/noDelete: the key must be gone, not undefined -- vars becomes a Go map[string]string
 	delete vars.steam_ticket
@@ -124,6 +126,7 @@ export function beforeAuthenticateDevice(
 	if (ctx.env.ALLOW_DEVICE_AUTH !== 'true') {
 		throw runtimeError(PERMISSION_DENIED, 'Device login is disabled')
 	}
+	if (data.account && data.account.id) checkLoginBan(nk, logger, 'device:' + data.account.id, Date.now())
 	return data
 }
 

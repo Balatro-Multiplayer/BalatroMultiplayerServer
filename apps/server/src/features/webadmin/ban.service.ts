@@ -1,6 +1,7 @@
 import { insertBan, type BanRecord, type BanType } from '../../infrastructure/gateways/ban.gateway.js'
 import { kickClient } from '../../infrastructure/emqx/emqx-admin.service.js'
 import { mqttService } from '../../infrastructure/mqtt/mqtt.service.js'
+import { banInNakama } from '../../infrastructure/nakama/moderation-sync.js'
 import { getSession } from '../../state/index.js'
 
 export interface IssueBanParams {
@@ -22,6 +23,9 @@ export interface IssueBanParams {
  * leave them connected but pull them out of matchmaking. Either way, if
  * they're currently inside an active match, that's an instant forfeit --
  * not the normal 2-minute disconnect grace period.
+ *
+ * A player with a Nakama account gets the ban there too, which enforces it
+ * the same way for Nakama sessions.
  */
 export async function issueBan(params: IssueBanParams): Promise<BanRecord> {
 	const ban = await insertBan({
@@ -31,6 +35,8 @@ export async function issueBan(params: IssueBanParams): Promise<BanRecord> {
 		issuedBy: params.issuedBy,
 		reason: params.reason,
 	})
+
+	await banInNakama(ban).catch((e) => console.error('[ban.service] Nakama ban failed:', e))
 
 	if (params.banType === 'account' || params.banType === 'queue') {
 		if (getSession(params.playerId)) {

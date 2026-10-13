@@ -1,7 +1,18 @@
 // Nakama JavaScript runtime entry point (bundled to modules/index.js by
 // build.mjs). Nakama resolves every function registered here by its name in
 // the script's global scope, so they are passed as plain identifiers.
-import { rpcAdminConfigSet, rpcAdminNotify, rpcAdminPing } from './admin'
+import {
+	rpcAdminBanApply,
+	rpcAdminBanLift,
+	rpcAdminConfigSet,
+	rpcAdminLobbyClose,
+	rpcAdminLobbyGet,
+	rpcAdminLobbyKick,
+	rpcAdminLobbyList,
+	rpcAdminNotify,
+	rpcAdminPing,
+	rpcAdminPlayerGet,
+} from './admin'
 import {
 	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
@@ -25,6 +36,7 @@ import {
 	rpcRunActive,
 } from './lobby/rpc'
 import { rpcChatEnable, rpcChatSend } from './chat/rpc'
+import { beforeMatchmakerAdd } from './matchmaking/gate'
 import { matchmakerMatched } from './matchmaking/matched'
 import {
 	afterMatchmakerAdd,
@@ -64,6 +76,7 @@ function InitModule(
 		matchTerminate: lobbyMatchTerminate,
 	})
 	initializer.registerMatchmakerMatched(matchmakerMatched)
+	initializer.registerRtBefore('MatchmakerAdd', beforeMatchmakerAdd)
 	initializer.registerRtAfter('MatchmakerAdd', afterMatchmakerAdd)
 	initializer.registerRtBefore('MatchmakerRemove', beforeMatchmakerRemove)
 	initializer.registerRpc('queue_counts', rpcQueueCounts)
@@ -90,6 +103,13 @@ function InitModule(
 	initializer.registerRpc('admin_ping', rpcAdminPing)
 	initializer.registerRpc('admin_notify', rpcAdminNotify)
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
+	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
+	initializer.registerRpc('admin_ban_lift', rpcAdminBanLift)
+	initializer.registerRpc('admin_lobby_list', rpcAdminLobbyList)
+	initializer.registerRpc('admin_lobby_get', rpcAdminLobbyGet)
+	initializer.registerRpc('admin_lobby_kick', rpcAdminLobbyKick)
+	initializer.registerRpc('admin_lobby_close', rpcAdminLobbyClose)
+	initializer.registerRpc('admin_player_get', rpcAdminPlayerGet)
 	logger.info('BMP lobby module loaded')
 }
 

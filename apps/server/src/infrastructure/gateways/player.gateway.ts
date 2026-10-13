@@ -18,6 +18,8 @@ export interface PlayerRecord {
 	chatBlocked: boolean
 	tosAcceptedVersion: number
 	deletedAt: Date | null
+	// Set once the player has signed in through Nakama.
+	nakamaUserId?: string | null
 }
 
 export async function findPlayerBySteamIdHash(

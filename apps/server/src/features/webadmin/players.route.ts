@@ -6,6 +6,7 @@ import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
 import { isBanType, liftBan, listBans } from '../../infrastructure/gateways/ban.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { parseExpiresAt } from '../../shared/utils/parse-expires-at.js'
+import { liftBanInNakama } from '../../infrastructure/nakama/moderation-sync.js'
 import { issueBan } from './ban.service.js'
 
 // Privilege names are free-form identifiers (a lowercase letter followed by
@@ -134,6 +135,9 @@ router.delete('/players/:id/bans/:banId', async (req, res, next) => {
 	try {
 		const lifted = await liftBan(req.params.id, req.params.banId, `admin:${req.player!.playerId}`)
 		if (!lifted) throw new AppError('No matching active ban found', 404)
+		await liftBanInNakama(req.params.id, req.params.banId).catch((e) =>
+			console.error('[webadmin] Nakama ban lift failed:', e),
+		)
 		console.log(`[webadmin] ${req.player!.playerId} lifted ban ${req.params.banId} on ${req.params.id}`)
 		res.json({ ban: lifted })
 	} catch (err) {

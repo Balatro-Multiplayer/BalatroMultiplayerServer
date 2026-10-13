@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { rpcAdminConfigSet, rpcAdminNotify, rpcAdminPing } from './admin'
+import {
+	parseExpiresAt,
+	rpcAdminBanApply,
+	rpcAdminBanLift,
+	rpcAdminConfigSet,
+	rpcAdminLobbyKick,
+	rpcAdminNotify,
+	rpcAdminPing,
+} from './admin'
 import { DEFAULT_CONFIG, mergeConfig, readConfig } from './config'
 import { NotifyCode } from './notify'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from './testing/fake_nk'
@@ -55,5 +63,61 @@ describe('admin RPCs', () => {
 		expect(nk.http[0].headers['X-BMP-Internal-Key']).toBe('k')
 		const down = fakeNk({ httpRequest: () => { throw new Error('refused') } })
 		expect(call(rpcAdminPing, down, {}, serverCtx(env))).toEqual({ ok: true, express: false })
+	})
+})
+
+const U = '11111111-1111-4111-8111-111111111111'
+const nkWithAccount = (extra = {}) =>
+	fakeNk({
+		accountGetId: (id: string) => {
+			if (id !== U) throw new Error('not found')
+			return { user: { id: U }, customId: '765' }
+		},
+		usersBanId: () => undefined,
+		usersUnbanId: () => undefined,
+		matchSignal: () => '',
+		...extra,
+	})
+
+describe('admin ban RPCs', () => {
+	it('are server only', () => {
+		expect(() => rpcAdminBanApply(playerCtx(U), fakeLogger, nkWithAccount() as any, '{}')).toThrow()
+		expect(() => rpcAdminBanLift(playerCtx(U), fakeLogger, nkWithAccount() as any, '{}')).toThrow()
+	})
+	it('apply and lift a ban', () => {
+		const nk = nkWithAccount()
+		const body = { userId: U, type: 'chat', banId: 'b1', expiresAt: '2030-01-01T00:00:00Z', reason: 'r' }
+		const out = JSON.parse(rpcAdminBanApply(serverCtx(), fakeLogger, nk as any, JSON.stringify(body)))
+		expect(out.bans.chat).toEqual({ banId: 'b1', expiresAt: Date.parse('2030-01-01T00:00:00Z'), reason: 'r' })
+		const lifted = JSON.parse(rpcAdminBanLift(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: U, banId: 'b1' })))
+		expect(lifted.bans).toEqual({})
+	})
+	it('refuse unknown accounts and bad input', () => {
+		const nk = nkWithAccount()
+		const call = (body: object) => () => rpcAdminBanApply(serverCtx(), fakeLogger, nk as any, JSON.stringify(body))
+		expect(call({ userId: '22222222-2222-4222-8222-222222222222', type: 'chat', banId: 'b' })).toThrow()
+		expect(call({ userId: U, type: 'mute', banId: 'b' })).toThrow(/type/)
+		expect(call({ userId: U, type: 'chat' })).toThrow(/banId/)
+		expect(call({ userId: U, type: 'chat', banId: 'b', expiresAt: 'soon' })).toThrow(/expiresAt/)
+	})
+})
+
+describe('parseExpiresAt', () => {
+	it('reads ms, ISO times and null', () => {
+		expect(parseExpiresAt(5)).toBe(5)
+		expect(parseExpiresAt(null)).toBeNull()
+		expect(parseExpiresAt(undefined)).toBeNull()
+		expect(parseExpiresAt('1970-01-01T00:00:01Z')).toBe(1000)
+		expect(parseExpiresAt('x')).toBeUndefined()
+	})
+})
+
+describe('admin_lobby_kick', () => {
+	it('reports a player who is not seated', () => {
+		const nk = nkWithAccount({ matchSignal: () => 'not_member', matchGet: () => ({ matchId: 'm1' }) })
+		nk.storageWrite([{ collection: 'lobby_codes', key: 'ABC123', userId: '00000000-0000-0000-0000-000000000000', value: { matchId: 'm1', modId: 'M' } }])
+		expect(() =>
+			rpcAdminLobbyKick(serverCtx(), fakeLogger, nk as any, JSON.stringify({ code: 'abc123', userId: U })),
+		).toThrow(/not in this lobby/)
 	})
 })

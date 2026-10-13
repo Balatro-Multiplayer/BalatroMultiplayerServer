@@ -21,6 +21,8 @@ import {
 	type Lobby,
 	type Outbound,
 	type Step,
+	adminRemove,
+	adminView,
 	close,
 	disconnect,
 	join,
@@ -579,6 +581,29 @@ export function lobbyMatchSignal(
 			setPlayerInfo(state.lobby, signal.userId, signal.info),
 		)
 		return { state: next || state, data: 'ok' }
+	}
+	if (signal.type === 'admin_remove') {
+		const member = state.lobby.players.some((p) => p.id === signal.userId)
+		const next = apply(
+			ctx,
+			logger,
+			nk,
+			dispatcher,
+			state,
+			adminRemove(state.lobby, signal.userId, signal.reason, signal.onlyIfStarted === true),
+		)
+		return {
+			state: next || { ...state, lobby: { ...state.lobby, closed: true } },
+			data: member ? 'ok' : 'not_member',
+		}
+	}
+	if (signal.type === 'admin_view') return { state, data: JSON.stringify(adminView(state.lobby)) }
+	if (signal.type === 'admin_close') {
+		const next = apply(ctx, logger, nk, dispatcher, state, close(state.lobby))
+		return {
+			state: next || { ...state, lobby: { ...state.lobby, closed: true } },
+			data: 'ok',
+		}
 	}
 	if (signal.type === 'leave') {
 		const next = apply(

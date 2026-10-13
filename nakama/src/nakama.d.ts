@@ -156,6 +156,7 @@ declare namespace nkruntime {
 			metadata?: { [key: string]: unknown }
 		}
 		customId: string
+		devices?: { id: string }[]
 	}
 
 	// A realtime message from a client socket (registerRtBefore/After).

@@ -78,6 +78,61 @@ var LOGS_COLLECTION = "match_logs";
 var MY_RUNS_COLLECTION = "my_runs";
 var RATINGS_COLLECTION = "ratings";
 
+// src/lobby/codes.ts
+function keyOf(code) {
+  return {
+    collection: LOBBY_CODE_COLLECTION,
+    key: code,
+    userId: SYSTEM_USER_ID
+  };
+}
+function write(nk, code, entry, version) {
+  nk.storageWrite([
+    __spreadProps(__spreadValues({}, keyOf(code)), {
+      value: __spreadValues({}, entry),
+      permissionRead: 0,
+      permissionWrite: 0,
+      version
+    })
+  ]);
+}
+function read(nk, code) {
+  const objects = nk.storageRead([keyOf(code)]);
+  if (objects.length === 0) return null;
+  const value = objects[0].value;
+  return {
+    matchId: String(value.matchId || ""),
+    modId: String(value.modId || "")
+  };
+}
+function reserveCode(nk, code, modId) {
+  const existing = read(nk, code);
+  if (existing) {
+    if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
+    nk.storageDelete([keyOf(code)]);
+  }
+  try {
+    write(nk, code, { matchId: "", modId }, "*");
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function bindCode(nk, code, matchId, modId) {
+  write(nk, code, { matchId, modId });
+}
+function lookupCode(nk, code) {
+  const entry = read(nk, code);
+  if (!entry || !entry.matchId || !nk.matchGet(entry.matchId)) return null;
+  return entry;
+}
+function releaseCode(nk, code, matchId) {
+  const entry = read(nk, code);
+  if (entry && entry.matchId === matchId) {
+    nk.storageDelete([keyOf(code)]);
+  }
+}
+
 // src/config.ts
 var CONFIG_COLLECTION = "server_config";
 var CONFIG_KEY = "global";
@@ -125,53 +180,280 @@ function writeConfig(nk, config) {
   ]);
 }
 
-// src/express.ts
-var TIMEOUT_MS = 3e3;
-function callExpress(nk, logger, env, path, body) {
-  const base = (env.EXPRESS_INTERNAL_URL || "").replace(/\/+$/, "");
-  if (!base) return null;
-  let response;
-  try {
-    response = nk.httpRequest(
-      `${base}/internal/nakama${path}`,
-      "post",
-      {
-        "Content-Type": "application/json",
-        "X-BMP-Internal-Key": env.EXPRESS_INTERNAL_KEY || ""
-      },
-      JSON.stringify(body),
-      TIMEOUT_MS
-    );
-  } catch (e) {
-    logger.warn("Express call %s failed: %v", path, e);
-    return null;
+// src/moderation/bans.ts
+var MODERATION_COLLECTION = "moderation";
+var BANS_KEY = "bans";
+var BAN_TYPES = ["chat", "queue", "account"];
+function isBanType(value) {
+  return typeof value === "string" && BAN_TYPES.indexOf(value) !== -1;
+}
+function isBan(value) {
+  const b = value;
+  return typeof b === "object" && b !== null && typeof b.banId === "string" && typeof b.reason === "string" && (b.expiresAt === null || typeof b.expiresAt === "number" && Number.isFinite(b.expiresAt));
+}
+function activeBan(bans, type, now) {
+  const ban = bans[type];
+  if (!ban) return null;
+  return ban.expiresAt === null || ban.expiresAt > now ? ban : null;
+}
+function longer(a, b) {
+  if (!a) return b;
+  if (a.expiresAt === null) return a;
+  if (b.expiresAt === null) return b;
+  return b.expiresAt > a.expiresAt ? b : a;
+}
+function withBan(bans, type, ban) {
+  return __spreadProps(__spreadValues({}, bans), { [type]: longer(bans[type], ban) });
+}
+function withoutBan(bans, banId) {
+  const next = {};
+  for (const type of BAN_TYPES) {
+    const ban = bans[type];
+    if (ban && ban.banId !== banId) next[type] = ban;
   }
-  let parsed = {};
-  try {
-    const data = JSON.parse(response.body || "{}");
-    if (typeof data === "object" && data !== null) parsed = data;
-  } catch (e) {
-    logger.warn("Express call %s returned non-JSON (HTTP %d)", path, response.code);
+  return next;
+}
+function withoutExpired(bans, now) {
+  let changed = false;
+  const next = {};
+  for (const type of BAN_TYPES) {
+    const ban = bans[type];
+    if (!ban) continue;
+    if (activeBan(bans, type, now)) next[type] = ban;
+    else changed = true;
   }
-  return { status: response.code, body: parsed };
+  return changed ? next : bans;
+}
+function bansFromList(list) {
+  let bans = {};
+  for (const entry of list) {
+    const ban = { banId: entry.banId, expiresAt: entry.expiresAt, reason: entry.reason };
+    if (isBanType(entry.type) && isBan(ban)) bans = withBan(bans, entry.type, ban);
+  }
+  return bans;
+}
+function readBans(nk, userId) {
+  const objects = nk.storageRead([{ collection: MODERATION_COLLECTION, key: BANS_KEY, userId }]);
+  if (objects.length === 0) return {};
+  const stored = objects[0].value;
+  const bans = {};
+  for (const type of BAN_TYPES) if (isBan(stored[type])) bans[type] = stored[type];
+  return bans;
+}
+function writeBans(nk, userId, bans) {
+  nk.storageWrite([
+    {
+      collection: MODERATION_COLLECTION,
+      key: BANS_KEY,
+      userId,
+      value: bans,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
 }
 
-// src/notify.ts
-var NotifyCode = {
-  CHALLENGE: 100,
-  ACCOUNT_UPDATED: 101,
-  BANNED: 102,
-  QUEUE_CANCELLED: 103,
-  CONFIG: 104,
-  INTEGRITY: 105,
-  KICKED: 106
-};
-var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
-function isNotifyCode(code) {
-  return typeof code === "number" && CODES.indexOf(code) !== -1;
+// src/moderation/access.ts
+function playRefusal(config, privileges) {
+  if (config.testingMode && privileges.indexOf("tester") === -1)
+    return "The server is in testing mode. Tester access is required to play.";
+  return null;
 }
-function notify(nk, userId, code, subject, content, persistent = false) {
-  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
+function lobbyCreateRefusal(config, privileges) {
+  if (!config.lobbyCreationEnabled) return "Lobby creation is currently disabled.";
+  return playRefusal(config, privileges);
+}
+function queueRefusal(config, privileges, bans, ranked, now) {
+  if (ranked && !config.rankedEnabled) return "Ranked matchmaking is currently disabled.";
+  if (!ranked && !config.casualQueueEnabled) return "Casual matchmaking is currently disabled.";
+  const ban = activeBan(bans, "queue", now);
+  if (ban) return banMessage("You are banned from matchmaking", ban);
+  return playRefusal(config, privileges);
+}
+function chatBanRefusal(bans, now) {
+  const ban = activeBan(bans, "chat", now);
+  return ban ? banMessage("You are banned from chat", ban) : null;
+}
+function banMessage(what, ban) {
+  let text = what;
+  if (ban.expiresAt !== null) text += " until " + new Date(ban.expiresAt).toISOString();
+  if (ban.reason) text += ": " + ban.reason;
+  return text;
+}
+var ACCOUNT_BANNED = "Account banned";
+
+// src/shared/jokers.ts
+var STANDARD_JOKERS = [
+  "j_joker",
+  "j_mime",
+  "j_chaos",
+  "j_space",
+  "j_scholar",
+  "j_egg",
+  "j_burglar",
+  "j_runner",
+  "j_sixth_sense",
+  "j_hiker",
+  "j_card_sharp",
+  "j_madness",
+  "j_vampire",
+  "j_baron",
+  "j_fortune_teller",
+  "j_luchador",
+  "j_lucky_cat",
+  "j_bull",
+  "j_swashbuckler",
+  "j_throwback",
+  "j_mr_bones",
+  "j_ring_master",
+  "j_idol",
+  "j_merry_andy",
+  "j_stuntman",
+  "j_matador",
+  "j_troubadour",
+  "j_ancient",
+  "j_even_steven",
+  "j_odd_todd"
+];
+var PRIVILEGE_JOKERS = {
+  virtualized: "j_perkeo",
+  bean: "j_turtle_bean",
+  vagabond: "j_vagabond",
+  sizaak: "j_dusk",
+  lava: "j_burnt",
+  twelve: "j_stone"
+};
+var DEFAULT_JOKER = "j_joker";
+function isValidJoker(id, privileges = []) {
+  if (STANDARD_JOKERS.indexOf(id) !== -1) return true;
+  return privileges.some((p) => PRIVILEGE_JOKERS[p] === id);
+}
+function privilegeTable(privileges) {
+  const jokers = privileges.map((p) => PRIVILEGE_JOKERS[p]).filter((j) => !!j);
+  return jokers.length > 0 ? { jokers } : {};
+}
+
+// src/player/profile.ts
+var PLAYER_COLLECTION = "player";
+var PROFILE_KEY = "profile";
+var MAX_NAME_LENGTH = 64;
+var WRITE_ATTEMPTS = 3;
+function cleanName(name) {
+  if (typeof name !== "string") return "";
+  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
+}
+function defaultProfile(steamName) {
+  return {
+    steamName,
+    useDiscordName: false,
+    preferredJoker: DEFAULT_JOKER,
+    mods: null,
+    discordIdHash: null,
+    discordUsername: null,
+    privileges: [],
+    tosAcceptedVersion: 0,
+    chatEnabled: false,
+    chatBlocked: false,
+    mutedUserIds: [],
+    unresolvedMutedPlayerIds: [],
+    legacyPlayerId: null,
+    synced: false,
+    nakamaLogin: false
+  };
+}
+function stringList(value) {
+  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+}
+function profileOf(value, fallbackName) {
+  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
+  return __spreadProps(__spreadValues({}, base), {
+    useDiscordName: value.useDiscordName === true,
+    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
+    mods: value.mods === void 0 ? null : value.mods,
+    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
+    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
+    privileges: stringList(value.privileges),
+    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
+    chatEnabled: value.chatEnabled === true,
+    chatBlocked: value.chatBlocked === true,
+    mutedUserIds: stringList(value.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
+    synced: value.synced === true,
+    nakamaLogin: value.nakamaLogin === true
+  });
+}
+function withSync(profile, sync) {
+  var _a, _b;
+  return __spreadProps(__spreadValues({}, profile), {
+    useDiscordName: sync.useDiscordName === true,
+    preferredJoker: typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker,
+    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
+    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
+    privileges: stringList(sync.privileges),
+    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
+    chatEnabled: sync.chatEnabled === true,
+    chatBlocked: sync.chatBlocked === true,
+    mutedUserIds: stringList(sync.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
+    synced: true
+  });
+}
+function displayNameOf(profile) {
+  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
+  return profile.steamName;
+}
+function playerView(userId, profile) {
+  return {
+    id: userId,
+    steamName: profile.steamName,
+    displayName: displayNameOf(profile),
+    useDiscordName: profile.useDiscordName,
+    preferredJoker: profile.preferredJoker,
+    discordLinked: profile.discordIdHash !== null,
+    discordUsername: profile.discordUsername,
+    privileges: privilegeTable(profile.privileges),
+    chatEnabled: profile.chatEnabled,
+    chatBlocked: profile.chatBlocked,
+    mutedPlayerIds: profile.mutedUserIds
+  };
+}
+function readProfile(nk, userId, fallbackName = "") {
+  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
+  if (objects.length === 0) return null;
+  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
+}
+function writeProfile(nk, userId, profile, version) {
+  nk.storageWrite([
+    {
+      collection: PLAYER_COLLECTION,
+      key: PROFILE_KEY,
+      userId,
+      value: profile,
+      version,
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+}
+function updateProfile(nk, userId, change, fallbackName = "") {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+    const stored = readProfile(nk, userId, fallbackName);
+    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
+    try {
+      writeProfile(nk, userId, next, stored ? stored.version : "*");
+      return next;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+function profileFor(nk, userId, fallbackName = "") {
+  const stored = readProfile(nk, userId, fallbackName);
+  return stored ? stored.profile : defaultProfile(fallbackName);
 }
 
 // src/rpc.ts
@@ -191,570 +473,6 @@ function parsePayload(payload) {
   } catch (e) {
   }
   throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
-}
-
-// src/admin.ts
-var USER_ID_PATTERN = /^[0-9a-f-]{36}$/;
-function rpcAdminPing(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const reply = callExpress(nk, logger, ctx.env, "/ping", {});
-  return JSON.stringify({ ok: true, express: reply !== null && reply.status === 200 });
-}
-function rpcAdminNotify(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const input = parsePayload(payload);
-  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
-    throw runtimeError(INVALID_ARGUMENT, "userId is required");
-  if (!isNotifyCode(input.code)) throw runtimeError(INVALID_ARGUMENT, "Unknown notification code");
-  const content = typeof input.content === "object" && input.content !== null && !Array.isArray(input.content) ? input.content : {};
-  notify(
-    nk,
-    input.userId,
-    input.code,
-    typeof input.subject === "string" ? input.subject : "",
-    content,
-    input.persistent === true
-  );
-  return JSON.stringify({});
-}
-function rpcAdminConfigSet(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const config = mergeConfig(readConfig(nk), parsePayload(payload));
-  writeConfig(nk, config);
-  logger.info("Server config updated: %v", JSON.stringify(config));
-  return JSON.stringify(config);
-}
-
-// src/rating/elo.ts
-var INITIAL_HIDDEN_RATING = 600;
-var PLACEMENT_GAMES = 5;
-var K_ESTABLISHED = 40;
-var RATING_FLOOR = 100;
-var SOFT_RESET_ANCHOR = 1200;
-var ELO_SCALE = 1e3;
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-function effectiveK(gamesPlayed, performance) {
-  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
-  const baseK = 200 - gamesPlayed * 40;
-  return baseK * (1 + clamp(performance, 0, 1));
-}
-function expectedScore(ratingA, ratingB) {
-  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
-}
-function compute1v1(a, b, outcome) {
-  const ea = expectedScore(a.rating, b.rating);
-  const eb = 1 - ea;
-  let sa;
-  let sb;
-  if (outcome === "a_wins") {
-    sa = 1;
-    sb = 0;
-  } else if (outcome === "b_wins") {
-    sa = 0;
-    sb = 1;
-  } else {
-    sa = 0.5;
-    sb = 0.5;
-  }
-  const ka = effectiveK(a.gamesPlayed, a.performance);
-  const kb = effectiveK(b.gamesPlayed, b.performance);
-  return {
-    deltaA: Math.round(ka * (sa - ea)),
-    deltaB: Math.round(kb * (sb - eb))
-  };
-}
-function computeFFA(players) {
-  const n = players.length;
-  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
-  const kDivisor = n - 1;
-  const deltas = /* @__PURE__ */ new Map();
-  for (const p of players) {
-    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
-    let sum = 0;
-    for (const q of players) {
-      if (q.playerId === p.playerId) continue;
-      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
-      const ep = expectedScore(p.rating, q.rating);
-      sum += kp * (score - ep);
-    }
-    deltas.set(p.playerId, Math.round(sum));
-  }
-  return deltas;
-}
-function computeTeam(teams, winnerTeamIndex) {
-  const deltas = /* @__PURE__ */ new Map();
-  if (teams.length !== 2) {
-    for (const team of teams) {
-      for (const p of team) deltas.set(p.playerId, 0);
-    }
-    return deltas;
-  }
-  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
-  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
-  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
-  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
-  const winner = teams[winnerTeamIndex];
-  const loser = teams[loserTeamIndex];
-  const winnerAvg = {
-    rating: avgRating(winner),
-    gamesPlayed: avgGamesPlayed(winner),
-    performance: avgPerformance(winner)
-  };
-  const loserAvg = {
-    rating: avgRating(loser),
-    gamesPlayed: avgGamesPlayed(loser),
-    performance: avgPerformance(loser)
-  };
-  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
-  for (const p of winner) deltas.set(p.playerId, deltaA);
-  for (const p of loser) deltas.set(p.playerId, deltaB);
-  return deltas;
-}
-function applySoftReset(rating) {
-  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
-  return Math.min(pulled, SOFT_RESET_ANCHOR);
-}
-function detectRatingMode(placements) {
-  if (placements.some((p) => p.teamId)) return "team";
-  if (placements.length === 2) return "solo";
-  return "ffa";
-}
-function computeRatingDeltas(mode, placements, ratings) {
-  var _a, _b;
-  if (mode === "solo") {
-    const [a, b] = placements;
-    const ra = ratings.get(a.playerId);
-    const rb = ratings.get(b.playerId);
-    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
-    const { deltaA, deltaB } = compute1v1(
-      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
-      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
-      outcome
-    );
-    return /* @__PURE__ */ new Map([
-      [a.playerId, deltaA],
-      [b.playerId, deltaB]
-    ]);
-  }
-  if (mode === "ffa") {
-    return computeFFA(
-      placements.map((p) => {
-        var _a2;
-        const r = ratings.get(p.playerId);
-        return {
-          playerId: p.playerId,
-          rating: r.rating,
-          gamesPlayed: r.gamesPlayed,
-          performance: (_a2 = p.performance) != null ? _a2 : 0,
-          place: p.place
-        };
-      })
-    );
-  }
-  const teamMap = /* @__PURE__ */ new Map();
-  for (const p of placements) {
-    const tid = p.teamId;
-    if (!teamMap.has(tid)) teamMap.set(tid, []);
-    teamMap.get(tid).push(p);
-  }
-  const teamEntries = Array.from(teamMap.entries());
-  const winnerTeamPlace = Math.min(
-    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
-  );
-  const winnerTeamIdx = teamEntries.findIndex(
-    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
-  );
-  const teams = teamEntries.map(
-    ([, members]) => members.map((m) => {
-      var _a2;
-      const r = ratings.get(m.playerId);
-      return {
-        playerId: m.playerId,
-        rating: r.rating,
-        gamesPlayed: r.gamesPlayed,
-        performance: (_a2 = m.performance) != null ? _a2 : 0
-      };
-    })
-  );
-  return computeTeam(teams, winnerTeamIdx);
-}
-
-// src/rating/metrics.ts
-var METRIC_CONFIG = {
-  MultiplayerPvP: { kind: "score", direction: "desc" },
-  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
-};
-var BOUNDS = {
-  score: { min: 0, max: 1e15 },
-  // A legitimate ranked run can't complete in under 10s nor take over 6h.
-  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
-};
-function nextSeasonBest(modId, reported, current) {
-  const config = METRIC_CONFIG[modId];
-  if (!config || reported === void 0) return current;
-  const bounds = BOUNDS[config.kind];
-  if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
-    return current;
-  if (current === null) return reported;
-  const better = config.direction === "asc" ? reported < current : reported > current;
-  return better ? reported : current;
-}
-
-// src/rating/season.ts
-var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
-var DECAY_RATE_PER_DAY = 5;
-var DAY_MS = 24 * 60 * 60 * 1e3;
-var season = 1;
-function currentSeason() {
-  return season;
-}
-function configureSeason(value) {
-  const parsed = value === void 0 ? NaN : Number(value);
-  if (Number.isInteger(parsed) && parsed > 0) season = parsed;
-}
-function decayedRating(record, now) {
-  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
-  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
-  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
-  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
-  return Math.max(RATING_FLOOR, record.rating - loss);
-}
-function carriedOver(previous, now) {
-  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
-  return applySoftReset(decayedRating(previous, now));
-}
-
-// src/rating/apply.ts
-function boardId(modId, mode, season2 = currentSeason()) {
-  return `${modId}:${mode}:${season2}`;
-}
-function newRating() {
-  return {
-    rating: INITIAL_HIDDEN_RATING,
-    wins: 0,
-    losses: 0,
-    gamesPlayed: 0,
-    seasonBest: null,
-    lastMatchAt: 0
-  };
-}
-function planRatings(run, checks, current) {
-  const plan = { updates: {}, results: {} };
-  if (run.status !== "agreed" && run.status !== "partial") return plan;
-  const placements = run.placements.filter((p) => checks[p.playerId] !== "mismatch");
-  if (placements.length < 2) return plan;
-  const ratings = /* @__PURE__ */ new Map();
-  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
-  const entries = placements.map((p) => ({
-    playerId: p.playerId,
-    place: p.place,
-    performance: p.performance
-  }));
-  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
-  const bestPlace = Math.min(...placements.map((p) => p.place));
-  for (const p of placements) {
-    const before = ratings.get(p.playerId);
-    const delta = deltas.get(p.playerId) || 0;
-    const won = p.place === bestPlace;
-    const after = {
-      rating: Math.max(RATING_FLOOR, before.rating + delta),
-      wins: before.wins + (won ? 1 : 0),
-      losses: before.losses + (won ? 0 : 1),
-      gamesPlayed: before.gamesPlayed + 1,
-      seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
-      lastMatchAt: run.endedAt
-    };
-    plan.updates[p.playerId] = after;
-    const placing = after.gamesPlayed < PLACEMENT_GAMES;
-    plan.results[p.playerId] = {
-      delta: placing ? null : after.rating - before.rating,
-      newRating: placing ? null : after.rating,
-      isPlacement: placing,
-      gamesPlayed: after.gamesPlayed
-    };
-  }
-  return plan;
-}
-var WRITE_ATTEMPTS = 5;
-function loadRatings(nk, modId, mode, playerIds, now) {
-  const key = boardId(modId, mode);
-  const current = {};
-  const versions = {};
-  for (const object of nk.storageRead(
-    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
-  )) {
-    const record = object.value;
-    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
-    versions[object.userId] = object.version;
-  }
-  const season2 = currentSeason();
-  const fresh = playerIds.filter((id) => !current[id]);
-  if (season2 > 1 && fresh.length > 0) {
-    const previous = nk.storageRead(
-      fresh.map((id) => ({
-        collection: RATINGS_COLLECTION,
-        key: boardId(modId, mode, season2 - 1),
-        userId: id
-      }))
-    );
-    for (const object of previous) {
-      const rating = carriedOver(object.value, now);
-      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
-    }
-  }
-  return { current, versions };
-}
-function applyRatings(nk, logger, run, mode, checks) {
-  const key = boardId(run.modId, mode);
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
-    const { current, versions } = loadRatings(
-      nk,
-      run.modId,
-      mode,
-      run.players.map((p) => p.id),
-      run.endedAt
-    );
-    const plan = planRatings(run, checks, current);
-    const ids = Object.keys(plan.updates);
-    if (ids.length === 0) return {};
-    try {
-      nk.storageWrite(
-        ids.map((id) => ({
-          collection: RATINGS_COLLECTION,
-          key,
-          userId: id,
-          value: plan.updates[id],
-          permissionRead: 2,
-          permissionWrite: 0,
-          // '*' = only if it doesn't exist yet.
-          version: versions[id] || "*"
-        }))
-      );
-    } catch (e) {
-      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
-      continue;
-    }
-    mirrorToLeaderboard(nk, logger, run, mode, plan, checks);
-    return plan.results;
-  }
-  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS);
-  return {};
-}
-function mirrorToLeaderboard(nk, logger, run, mode, plan, _checks) {
-  const id = boardId(run.modId, mode);
-  try {
-    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
-    for (const player of run.players) {
-      const after = plan.updates[player.id];
-      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
-      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
-        losses: after.losses,
-        gamesPlayed: after.gamesPlayed,
-        seasonBest: after.seasonBest
-      }, "set");
-    }
-  } catch (e) {
-    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
-  }
-}
-
-// src/rating/legacy.ts
-var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
-var STEAM_CUSTOM_ID_PREFIX = "steam:";
-var HASH_PATTERN = /^[0-9a-f]{64}$/;
-var IMPORT_BATCH_LIMIT = 100;
-function steamIdHash(nk, salt, steamId) {
-  return nk.sha256Hash(steamId + salt);
-}
-function isLegacyBoard(value) {
-  const b = value;
-  return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
-}
-function recordOf(board) {
-  return {
-    rating: board.rating,
-    wins: board.wins,
-    losses: board.losses,
-    gamesPlayed: board.gamesPlayed,
-    seasonBest: board.seasonBest,
-    lastMatchAt: board.lastMatchAt
-  };
-}
-function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  let players;
-  try {
-    players = JSON.parse(payload).players;
-  } catch (e) {
-    throw runtimeError(INVALID_ARGUMENT, "Payload must be {players: {<hash>: {boards: []}}}");
-  }
-  const hashes = Object.keys(players || {});
-  if (hashes.length === 0 || hashes.length > IMPORT_BATCH_LIMIT)
-    throw runtimeError(INVALID_ARGUMENT, `Send 1 to ${IMPORT_BATCH_LIMIT} players per call`);
-  const valid = [];
-  let skipped = 0;
-  for (const hash of hashes) {
-    const boards = players[hash].boards;
-    if (!HASH_PATTERN.test(hash) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
-      skipped++;
-      continue;
-    }
-    valid.push({ hash, boards });
-  }
-  const claimed = new Set(
-    nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID }))).filter((o) => o.value.claimedBy).map((o) => o.key)
-  );
-  const writes = valid.filter((p) => !claimed.has(p.hash)).map((p) => ({
-    collection: LEGACY_RATINGS_COLLECTION,
-    key: p.hash,
-    userId: SYSTEM_USER_ID,
-    value: { boards: p.boards },
-    permissionRead: 0,
-    permissionWrite: 0
-  }));
-  if (writes.length > 0) nk.storageWrite(writes);
-  logger.info("Legacy ratings import: %d written, %d already claimed, %d skipped", writes.length, claimed.size, skipped);
-  return JSON.stringify({ imported: writes.length, alreadyClaimed: claimed.size, skipped });
-}
-function claimLegacyRatings(nk, logger, userId, username, hash, now) {
-  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
-  const legacy = parked == null ? void 0 : parked.value;
-  if (!parked || !legacy || legacy.claimedBy) return 0;
-  const existing = new Set(
-    nk.storageRead(
-      legacy.boards.map((b) => ({
-        collection: RATINGS_COLLECTION,
-        key: boardId(b.modId, b.mode, b.season),
-        userId
-      }))
-    ).map((o) => o.key)
-  );
-  const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
-  const writes = fresh.map((b) => ({
-    collection: RATINGS_COLLECTION,
-    key: boardId(b.modId, b.mode, b.season),
-    userId,
-    value: recordOf(b),
-    permissionRead: 2,
-    permissionWrite: 0,
-    version: "*"
-  }));
-  writes.push({
-    collection: LEGACY_RATINGS_COLLECTION,
-    key: hash,
-    userId: SYSTEM_USER_ID,
-    value: __spreadProps(__spreadValues({}, legacy), { claimedBy: userId, claimedAt: now }),
-    permissionRead: 0,
-    permissionWrite: 0,
-    version: parked.version
-  });
-  nk.storageWrite(writes);
-  for (const b of fresh) {
-    if (b.gamesPlayed < PLACEMENT_GAMES) continue;
-    const id = boardId(b.modId, b.mode, b.season);
-    try {
-      nk.leaderboardCreate(id, true, "desc", "set", null, { modId: b.modId, mode: b.mode });
-      nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
-        losses: b.losses,
-        gamesPlayed: b.gamesPlayed,
-        seasonBest: b.seasonBest
-      }, "set");
-    } catch (e) {
-      logger.warn("Legacy rating leaderboard write for %s failed: %v", userId, e);
-    }
-  }
-  logger.info("Claimed %d legacy rating boards for %s", fresh.length, userId);
-  return fresh.length;
-}
-function claimLegacyRatingsAtLogin(ctx, logger, nk) {
-  try {
-    const salt = ctx.env.PLAYER_ID_SALT;
-    if (!salt || !ctx.userId) return;
-    const account = nk.accountGetId(ctx.userId);
-    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX)) return;
-    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX.length));
-    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
-  } catch (e) {
-    logger.error("Legacy rating claim failed: %v", e);
-  }
-}
-
-// src/auth.ts
-var STEAM_AUTH_URL = "https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/";
-var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
-var STEAM_TICKET_PATTERN = /^[0-9a-fA-F]{16,4096}$/;
-var STEAM_TIMEOUT_MS = 1e4;
-function verifySteamTicket(ctx, logger, nk, ticket) {
-  const key = ctx.env.STEAM_WEB_API_KEY;
-  const appId = ctx.env.STEAM_APP_ID || "2379780";
-  if (!key) {
-    logger.error("Steam login is not configured: STEAM_WEB_API_KEY is empty");
-    throw runtimeError(UNAVAILABLE, "Steam login is not configured");
-  }
-  const url = `${STEAM_AUTH_URL}?key=${encodeURIComponent(key)}&appid=${encodeURIComponent(appId)}&ticket=${ticket}`;
-  let response;
-  try {
-    response = nk.httpRequest(url, "get", {}, "", STEAM_TIMEOUT_MS);
-  } catch (e) {
-    logger.warn("Steam ticket check failed: request error");
-    throw runtimeError(UNAVAILABLE, "Steam request failed");
-  }
-  if (response.code !== 200) {
-    logger.warn("Steam ticket check failed: HTTP %d", response.code);
-    throw runtimeError(UNAVAILABLE, "Steam request failed");
-  }
-  let result;
-  try {
-    const data = JSON.parse(response.body);
-    result = data == null ? void 0 : data.response;
-  } catch (e) {
-    result = null;
-  }
-  const params = result == null ? void 0 : result.params;
-  if (!params || params.result !== "OK" || !params.steamid) {
-    const steamError = (result == null ? void 0 : result.error) || {};
-    logger.warn(
-      "Steam rejected the ticket: %v %v",
-      steamError.errorcode,
-      steamError.errordesc
-    );
-    throw runtimeError(UNAUTHENTICATED, "Invalid Steam ticket");
-  }
-  return String(params.steamid);
-}
-function beforeAuthenticateCustom(ctx, logger, nk, data) {
-  const account = data.account || {};
-  const vars = account.vars || {};
-  const ticket = vars.steam_ticket;
-  if (!ticket || !STEAM_TICKET_PATTERN.test(ticket)) {
-    throw runtimeError(
-      INVALID_ARGUMENT,
-      "Custom login needs a Steam ticket in vars.steam_ticket"
-    );
-  }
-  const steamId = verifySteamTicket(ctx, logger, nk, ticket);
-  account.id = STEAM_CUSTOM_ID_PREFIX2 + steamId;
-  delete vars.steam_ticket;
-  account.vars = vars;
-  data.account = account;
-  return data;
-}
-function refuseCustomIdChange(ctx, logger, nk, data) {
-  throw runtimeError(
-    PERMISSION_DENIED,
-    "Custom ids are only set by Steam login"
-  );
-}
-function beforeAuthenticateDevice(ctx, logger, nk, data) {
-  if (ctx.env.ALLOW_DEVICE_AUTH !== "true") {
-    throw runtimeError(PERMISSION_DENIED, "Device login is disabled");
-  }
-  return data;
-}
-function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
-  claimLegacyRatingsAtLogin(ctx, logger, nk);
 }
 
 // src/lobby/state.ts
@@ -1052,17 +770,17 @@ function kick(lobby, byId, targetId) {
     return { lobby, out: [rejectOp(byId, "Only the host can kick players")] };
   if (targetId === byId)
     return { lobby, out: [rejectOp(byId, "You cannot kick yourself")] };
-  const target = findPlayer(lobby, targetId);
-  if (!target)
+  if (!findPlayer(lobby, targetId))
     return { lobby, out: [rejectOp(byId, "Player is not in this lobby")] };
+  return removeKicked(lobby, targetId, { kickedBy: byId });
+}
+function removeKicked(lobby, targetId, data) {
+  const target = findPlayer(lobby, targetId);
+  if (!target) return { lobby, out: [] };
   const announced = event(
     lobby,
     "player_kicked",
-    {
-      playerId: targetId,
-      displayName: target.info.displayName,
-      data: { kickedBy: byId }
-    },
+    { playerId: targetId, displayName: target.info.displayName, data },
     allIds(lobby)
   );
   const marked = __spreadProps(__spreadValues({}, lobby), { kickedIds: lobby.kickedIds.concat([targetId]) });
@@ -1072,6 +790,27 @@ function kick(lobby, byId, targetId) {
     out: [announced].concat(step.out, [
       { kind: "kick", userId: targetId }
     ])
+  };
+}
+function adminRemove(lobby, userId, reason, onlyIfStarted = false) {
+  if (onlyIfStarted && lobby.game.started === null) return { lobby, out: [] };
+  return removeKicked(lobby, userId, { kickedBy: "server", reason });
+}
+function adminView(lobby) {
+  return {
+    code: lobby.code,
+    modId: lobby.modId,
+    hostId: lobby.hostId,
+    maxPlayers: lobby.maxPlayers,
+    createdAt: lobby.createdAt,
+    metadata: lobby.metadata,
+    started: lobby.game.started !== null,
+    players: lobby.players.map((p) => ({
+      id: p.id,
+      displayName: p.info.displayName,
+      connected: p.awaySince === null
+    })),
+    spectators: lobby.spectators || []
   };
 }
 function isPlainObject(value) {
@@ -1129,6 +868,935 @@ function tick(lobby, now) {
     }
   }
   return step;
+}
+
+// src/lobby/rpc.ts
+var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ123456789";
+var CODE_LENGTH = 6;
+var MATCHMADE_CODE_LENGTH = 5;
+var CODE_PATTERN = /^[A-HJ-NP-Z1-9]{5,6}$/;
+var CODE_ATTEMPTS = 10;
+var MOD_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+var DEFAULT_MAX_PLAYERS = 16;
+var RANKED_MODE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+function generateCode(length = CODE_LENGTH) {
+  let code = "";
+  for (let i = 0; i < length; i++) {
+    code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length));
+  }
+  return code;
+}
+function currentLobby(nk, userId) {
+  const key = {
+    collection: CURRENT_LOBBY_COLLECTION,
+    key: CURRENT_LOBBY_KEY,
+    userId
+  };
+  const objects = nk.storageRead([key]);
+  if (objects.length === 0) return null;
+  const matchId = objects[0].value.matchId;
+  const code = objects[0].value.code;
+  const modId = String(objects[0].value.modId || "");
+  if (typeof matchId === "string" && typeof code === "string" && nk.matchGet(matchId)) {
+    const signal = { type: "has_player", userId };
+    if (nk.matchSignal(matchId, JSON.stringify(signal)) === "yes")
+      return { matchId, code, modId };
+  }
+  nk.storageDelete([key]);
+  return null;
+}
+function rpcLobbyCreate(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  const refused = lobbyCreateRefusal(readConfig(nk), profileFor(nk, userId, ctx.username).privileges);
+  if (refused) throw runtimeError(PERMISSION_DENIED, refused);
+  const modId = input.modId;
+  if (typeof modId !== "string" || !MOD_ID_PATTERN.test(modId)) {
+    throw runtimeError(INVALID_ARGUMENT, "modId is required");
+  }
+  const maxPlayers = input.maxPlayers === void 0 || input.maxPlayers === null ? DEFAULT_MAX_PLAYERS : input.maxPlayers;
+  if (typeof maxPlayers !== "number" || maxPlayers % 1 !== 0 || maxPlayers < MIN_PLAYERS || maxPlayers > MAX_PLAYERS) {
+    throw runtimeError(
+      INVALID_ARGUMENT,
+      `maxPlayers must be a whole number from ${MIN_PLAYERS} to ${MAX_PLAYERS}`
+    );
+  }
+  const rankedMode = input.rankedMode;
+  if (rankedMode !== void 0 && rankedMode !== null) {
+    if (typeof rankedMode !== "string" || !RANKED_MODE_PATTERN.test(rankedMode))
+      throw runtimeError(INVALID_ARGUMENT, "rankedMode is not a valid mode");
+    if (ctx.env.ALLOW_RANKED_LOBBIES !== "true")
+      throw runtimeError(PERMISSION_DENIED, "Ranked lobbies are not enabled");
+  }
+  const current = currentLobby(nk, userId);
+  if (current)
+    throw runtimeError(ALREADY_EXISTS, `Already in lobby ${current.code}`);
+  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
+    const code = generateCode();
+    if (!reserveCode(nk, code, modId)) continue;
+    let matchId;
+    try {
+      matchId = nk.matchCreate(LOBBY_MATCH, {
+        code,
+        modId,
+        maxPlayers,
+        creatorId: userId,
+        rankedMode: typeof rankedMode === "string" ? rankedMode : ""
+      });
+    } catch (e) {
+      releaseCode(nk, code, "");
+      throw e;
+    }
+    bindCode(nk, code, matchId, modId);
+    return JSON.stringify({ matchId, code });
+  }
+  logger.error(
+    "Could not find a free lobby code after %d attempts",
+    CODE_ATTEMPTS
+  );
+  throw runtimeError(UNAVAILABLE, "Could not allocate a lobby code");
+}
+function rpcLobbyFind(ctx, logger, nk, payload) {
+  requireUser(ctx);
+  const input = parsePayload(payload);
+  const code = typeof input.code === "string" ? input.code.toUpperCase() : "";
+  if (!CODE_PATTERN.test(code))
+    throw runtimeError(INVALID_ARGUMENT, "Invalid lobby code");
+  const entry = lookupCode(nk, code);
+  if (!entry) throw runtimeError(NOT_FOUND, "Lobby not found");
+  return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
+}
+function rpcLobbyCurrent(ctx, logger, nk, payload) {
+  const current = currentLobby(nk, requireUser(ctx));
+  return JSON.stringify(current || {});
+}
+function rpcRunActive(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const current = currentLobby(nk, userId);
+  if (!current) return JSON.stringify({});
+  const signal = { type: "get_active", userId };
+  const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)));
+  return JSON.stringify(active ? { active } : {});
+}
+function rpcLobbyLeave(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const current = currentLobby(nk, userId);
+  if (current) {
+    const signal = { type: "leave", userId };
+    nk.matchSignal(current.matchId, JSON.stringify(signal));
+  }
+  return JSON.stringify({});
+}
+
+// src/notify.ts
+var NotifyCode = {
+  CHALLENGE: 100,
+  ACCOUNT_UPDATED: 101,
+  BANNED: 102,
+  QUEUE_CANCELLED: 103,
+  CONFIG: 104,
+  INTEGRITY: 105,
+  KICKED: 106
+};
+var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
+function isNotifyCode(code) {
+  return typeof code === "number" && CODES.indexOf(code) !== -1;
+}
+function notify(nk, userId, code, subject, content, persistent = false) {
+  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
+}
+
+// src/moderation/enforce.ts
+var BAN_INDEX_COLLECTION = "ban_index";
+function loginKeys(nk, userId) {
+  const account = nk.accountGetId(userId);
+  const keys = [];
+  if (account.customId) keys.push("custom:" + account.customId);
+  for (const device of account.devices || []) keys.push("device:" + device.id);
+  return keys;
+}
+function writeIndex(nk, userId, ban) {
+  const value = { userId, ban };
+  nk.storageWrite(
+    loginKeys(nk, userId).map((key) => ({
+      collection: BAN_INDEX_COLLECTION,
+      key,
+      userId: SYSTEM_USER_ID,
+      value,
+      permissionRead: 0,
+      permissionWrite: 0
+    }))
+  );
+}
+function deleteIndex(nk, userId) {
+  nk.storageDelete(
+    loginKeys(nk, userId).map((key) => ({ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }))
+  );
+}
+function removeFromLobby(nk, userId, reason, onlyIfStarted) {
+  const lobby = currentLobby(nk, userId);
+  if (!lobby) return;
+  const signal = { type: "admin_remove", userId, reason, onlyIfStarted };
+  nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+}
+function pushBan(nk, userId, type, ban) {
+  notify(
+    nk,
+    userId,
+    NotifyCode.BANNED,
+    "banned",
+    { banType: type, banId: ban.banId, reason: ban.reason, expiresAt: ban.expiresAt },
+    type === "account"
+  );
+}
+function enforceAccountBan(nk, userId, ban) {
+  writeIndex(nk, userId, ban);
+  removeFromLobby(nk, userId, "banned", false);
+  nk.usersBanId([userId]);
+}
+function applyBan(nk, logger, userId, type, ban) {
+  const bans = withBan(readBans(nk, userId), type, ban);
+  writeBans(nk, userId, bans);
+  pushBan(nk, userId, type, ban);
+  if (type === "queue") removeFromLobby(nk, userId, "banned", true);
+  if (type === "account" && bans.account) enforceAccountBan(nk, userId, bans.account);
+  logger.info("Applied %s ban %s to %s", type, ban.banId, userId);
+  return bans;
+}
+function releaseAccount(nk, userId, before, after) {
+  if (before.account && !after.account) {
+    deleteIndex(nk, userId);
+    nk.usersUnbanId([userId]);
+  }
+}
+function liftBan(nk, logger, userId, banId) {
+  const before = readBans(nk, userId);
+  const after = withoutBan(before, banId);
+  writeBans(nk, userId, after);
+  releaseAccount(nk, userId, before, after);
+  logger.info("Lifted ban %s of %s", banId, userId);
+  return after;
+}
+function checkLoginBan(nk, logger, key, now) {
+  const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
+  if (objects.length === 0) return;
+  const entry = objects[0].value;
+  if (activeBan({ account: entry.ban }, "account", now))
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban));
+  const before = readBans(nk, entry.userId);
+  const after = withoutExpired(before, now);
+  if (after !== before) writeBans(nk, entry.userId, after);
+  if (activeBan(after, "account", now)) {
+    writeIndex(nk, entry.userId, after.account);
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, after.account));
+  }
+  deleteIndex(nk, entry.userId);
+  nk.usersUnbanId([entry.userId]);
+  logger.info("Account ban of %s expired; unbanned", entry.userId);
+}
+
+// src/express.ts
+var TIMEOUT_MS = 3e3;
+function callExpress(nk, logger, env, path, body) {
+  const base = (env.EXPRESS_INTERNAL_URL || "").replace(/\/+$/, "");
+  if (!base) return null;
+  let response;
+  try {
+    response = nk.httpRequest(
+      `${base}/internal/nakama${path}`,
+      "post",
+      {
+        "Content-Type": "application/json",
+        "X-BMP-Internal-Key": env.EXPRESS_INTERNAL_KEY || ""
+      },
+      JSON.stringify(body),
+      TIMEOUT_MS
+    );
+  } catch (e) {
+    logger.warn("Express call %s failed: %v", path, e);
+    return null;
+  }
+  let parsed = {};
+  try {
+    const data = JSON.parse(response.body || "{}");
+    if (typeof data === "object" && data !== null) parsed = data;
+  } catch (e) {
+    logger.warn("Express call %s returned non-JSON (HTTP %d)", path, response.code);
+  }
+  return { status: response.code, body: parsed };
+}
+
+// src/admin.ts
+var USER_ID_PATTERN = /^[0-9a-f-]{36}$/;
+function rpcAdminPing(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const reply = callExpress(nk, logger, ctx.env, "/ping", {});
+  return JSON.stringify({ ok: true, express: reply !== null && reply.status === 200 });
+}
+function rpcAdminNotify(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
+    throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  if (!isNotifyCode(input.code)) throw runtimeError(INVALID_ARGUMENT, "Unknown notification code");
+  const content = typeof input.content === "object" && input.content !== null && !Array.isArray(input.content) ? input.content : {};
+  notify(
+    nk,
+    input.userId,
+    input.code,
+    typeof input.subject === "string" ? input.subject : "",
+    content,
+    input.persistent === true
+  );
+  return JSON.stringify({});
+}
+function rpcAdminConfigSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const config = mergeConfig(readConfig(nk), parsePayload(payload));
+  writeConfig(nk, config);
+  logger.info("Server config updated: %v", JSON.stringify(config));
+  return JSON.stringify(config);
+}
+function requireUserId(nk, input) {
+  if (typeof input.userId !== "string" || !USER_ID_PATTERN.test(input.userId))
+    throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  try {
+    nk.accountGetId(input.userId);
+  } catch (e) {
+    throw runtimeError(NOT_FOUND, "No such user");
+  }
+  return input.userId;
+}
+function parseExpiresAt(value) {
+  if (value === null || value === void 0) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const ms = Date.parse(value);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return void 0;
+}
+function rpcAdminBanApply(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId(nk, input);
+  if (!isBanType(input.type)) throw runtimeError(INVALID_ARGUMENT, "type must be 'chat', 'queue' or 'account'");
+  if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
+  const expiresAt = parseExpiresAt(input.expiresAt);
+  if (expiresAt === void 0) throw runtimeError(INVALID_ARGUMENT, "expiresAt must be a time or null");
+  const reason = typeof input.reason === "string" ? input.reason : "";
+  const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason });
+  return JSON.stringify({ bans });
+}
+function rpcAdminBanLift(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId(nk, input);
+  if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
+  return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) });
+}
+var MOD_ID_PATTERN2 = /^[A-Za-z0-9_.-]{1,64}$/;
+var LOBBY_LIST_LIMIT = 100;
+function rpcAdminLobbyList(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const modId = parsePayload(payload).modId;
+  let query = null;
+  if (modId !== void 0) {
+    if (typeof modId !== "string" || !MOD_ID_PATTERN2.test(modId))
+      throw runtimeError(INVALID_ARGUMENT, "modId is not valid");
+    query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&");
+  }
+  const lobbies = nk.matchList(LOBBY_LIST_LIMIT, true, null, null, null, query || "*").map((m) => {
+    let label = {};
+    try {
+      label = JSON.parse(m.label || "{}");
+    } catch (e) {
+    }
+    return __spreadProps(__spreadValues({}, label), { matchId: m.matchId, connected: m.size });
+  });
+  return JSON.stringify({ lobbies });
+}
+function lobbyByCode(nk, code) {
+  if (typeof code !== "string" || !code) throw runtimeError(INVALID_ARGUMENT, "code is required");
+  const entry = lookupCode(nk, code.toUpperCase());
+  if (!entry) throw runtimeError(NOT_FOUND, "No such lobby");
+  return entry;
+}
+function rpcAdminLobbyGet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const lobby = lobbyByCode(nk, parsePayload(payload).code);
+  const signal = { type: "admin_view" };
+  const view = nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+  if (!view) throw runtimeError(NOT_FOUND, "No such lobby");
+  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view)), { matchId: lobby.matchId }) });
+}
+function rpcAdminLobbyKick(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const lobby = lobbyByCode(nk, input.code);
+  if (typeof input.userId !== "string" || !input.userId) throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  const signal = {
+    type: "admin_remove",
+    userId: input.userId,
+    reason: typeof input.reason === "string" ? input.reason : "admin"
+  };
+  if (nk.matchSignal(lobby.matchId, JSON.stringify(signal)) === "not_member")
+    throw runtimeError(NOT_FOUND, "Player is not in this lobby");
+  return JSON.stringify({ ok: true });
+}
+function rpcAdminLobbyClose(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const lobby = lobbyByCode(nk, parsePayload(payload).code);
+  const signal = { type: "admin_close" };
+  nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+  return JSON.stringify({ ok: true });
+}
+function rpcAdminPlayerGet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const userId = requireUserId(nk, input);
+  const profile = profileFor(nk, userId);
+  const online = nk.streamUserList({ mode: 0, subject: userId }, true, true).length;
+  return JSON.stringify({
+    player: playerView(userId, profile),
+    bans: readBans(nk, userId),
+    lobby: currentLobby(nk, userId),
+    online
+  });
+}
+
+// src/rating/elo.ts
+var INITIAL_HIDDEN_RATING = 600;
+var PLACEMENT_GAMES = 5;
+var K_ESTABLISHED = 40;
+var RATING_FLOOR = 100;
+var SOFT_RESET_ANCHOR = 1200;
+var ELO_SCALE = 1e3;
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+function effectiveK(gamesPlayed, performance) {
+  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
+  const baseK = 200 - gamesPlayed * 40;
+  return baseK * (1 + clamp(performance, 0, 1));
+}
+function expectedScore(ratingA, ratingB) {
+  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
+}
+function compute1v1(a, b, outcome) {
+  const ea = expectedScore(a.rating, b.rating);
+  const eb = 1 - ea;
+  let sa;
+  let sb;
+  if (outcome === "a_wins") {
+    sa = 1;
+    sb = 0;
+  } else if (outcome === "b_wins") {
+    sa = 0;
+    sb = 1;
+  } else {
+    sa = 0.5;
+    sb = 0.5;
+  }
+  const ka = effectiveK(a.gamesPlayed, a.performance);
+  const kb = effectiveK(b.gamesPlayed, b.performance);
+  return {
+    deltaA: Math.round(ka * (sa - ea)),
+    deltaB: Math.round(kb * (sb - eb))
+  };
+}
+function computeFFA(players) {
+  const n = players.length;
+  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
+  const kDivisor = n - 1;
+  const deltas = /* @__PURE__ */ new Map();
+  for (const p of players) {
+    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
+    let sum = 0;
+    for (const q of players) {
+      if (q.playerId === p.playerId) continue;
+      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
+      const ep = expectedScore(p.rating, q.rating);
+      sum += kp * (score - ep);
+    }
+    deltas.set(p.playerId, Math.round(sum));
+  }
+  return deltas;
+}
+function computeTeam(teams, winnerTeamIndex) {
+  const deltas = /* @__PURE__ */ new Map();
+  if (teams.length !== 2) {
+    for (const team of teams) {
+      for (const p of team) deltas.set(p.playerId, 0);
+    }
+    return deltas;
+  }
+  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
+  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
+  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
+  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
+  const winner = teams[winnerTeamIndex];
+  const loser = teams[loserTeamIndex];
+  const winnerAvg = {
+    rating: avgRating(winner),
+    gamesPlayed: avgGamesPlayed(winner),
+    performance: avgPerformance(winner)
+  };
+  const loserAvg = {
+    rating: avgRating(loser),
+    gamesPlayed: avgGamesPlayed(loser),
+    performance: avgPerformance(loser)
+  };
+  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
+  for (const p of winner) deltas.set(p.playerId, deltaA);
+  for (const p of loser) deltas.set(p.playerId, deltaB);
+  return deltas;
+}
+function applySoftReset(rating) {
+  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
+  return Math.min(pulled, SOFT_RESET_ANCHOR);
+}
+function detectRatingMode(placements) {
+  if (placements.some((p) => p.teamId)) return "team";
+  if (placements.length === 2) return "solo";
+  return "ffa";
+}
+function computeRatingDeltas(mode, placements, ratings) {
+  var _a, _b;
+  if (mode === "solo") {
+    const [a, b] = placements;
+    const ra = ratings.get(a.playerId);
+    const rb = ratings.get(b.playerId);
+    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
+    const { deltaA, deltaB } = compute1v1(
+      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
+      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
+      outcome
+    );
+    return /* @__PURE__ */ new Map([
+      [a.playerId, deltaA],
+      [b.playerId, deltaB]
+    ]);
+  }
+  if (mode === "ffa") {
+    return computeFFA(
+      placements.map((p) => {
+        var _a2;
+        const r = ratings.get(p.playerId);
+        return {
+          playerId: p.playerId,
+          rating: r.rating,
+          gamesPlayed: r.gamesPlayed,
+          performance: (_a2 = p.performance) != null ? _a2 : 0,
+          place: p.place
+        };
+      })
+    );
+  }
+  const teamMap = /* @__PURE__ */ new Map();
+  for (const p of placements) {
+    const tid = p.teamId;
+    if (!teamMap.has(tid)) teamMap.set(tid, []);
+    teamMap.get(tid).push(p);
+  }
+  const teamEntries = Array.from(teamMap.entries());
+  const winnerTeamPlace = Math.min(
+    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
+  );
+  const winnerTeamIdx = teamEntries.findIndex(
+    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
+  );
+  const teams = teamEntries.map(
+    ([, members]) => members.map((m) => {
+      var _a2;
+      const r = ratings.get(m.playerId);
+      return {
+        playerId: m.playerId,
+        rating: r.rating,
+        gamesPlayed: r.gamesPlayed,
+        performance: (_a2 = m.performance) != null ? _a2 : 0
+      };
+    })
+  );
+  return computeTeam(teams, winnerTeamIdx);
+}
+
+// src/rating/metrics.ts
+var METRIC_CONFIG = {
+  MultiplayerPvP: { kind: "score", direction: "desc" },
+  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
+};
+var BOUNDS = {
+  score: { min: 0, max: 1e15 },
+  // A legitimate ranked run can't complete in under 10s nor take over 6h.
+  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
+};
+function nextSeasonBest(modId, reported, current) {
+  const config = METRIC_CONFIG[modId];
+  if (!config || reported === void 0) return current;
+  const bounds = BOUNDS[config.kind];
+  if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
+    return current;
+  if (current === null) return reported;
+  const better = config.direction === "asc" ? reported < current : reported > current;
+  return better ? reported : current;
+}
+
+// src/rating/season.ts
+var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
+var DECAY_RATE_PER_DAY = 5;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var season = 1;
+function currentSeason() {
+  return season;
+}
+function configureSeason(value) {
+  const parsed = value === void 0 ? NaN : Number(value);
+  if (Number.isInteger(parsed) && parsed > 0) season = parsed;
+}
+function decayedRating(record, now) {
+  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
+  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
+  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
+  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
+  return Math.max(RATING_FLOOR, record.rating - loss);
+}
+function carriedOver(previous, now) {
+  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
+  return applySoftReset(decayedRating(previous, now));
+}
+
+// src/rating/apply.ts
+function boardId(modId, mode, season2 = currentSeason()) {
+  return `${modId}:${mode}:${season2}`;
+}
+function newRating() {
+  return {
+    rating: INITIAL_HIDDEN_RATING,
+    wins: 0,
+    losses: 0,
+    gamesPlayed: 0,
+    seasonBest: null,
+    lastMatchAt: 0
+  };
+}
+function planRatings(run, checks, current) {
+  const plan = { updates: {}, results: {} };
+  if (run.status !== "agreed" && run.status !== "partial") return plan;
+  const placements = run.placements.filter((p) => checks[p.playerId] !== "mismatch");
+  if (placements.length < 2) return plan;
+  const ratings = /* @__PURE__ */ new Map();
+  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
+  const entries = placements.map((p) => ({
+    playerId: p.playerId,
+    place: p.place,
+    performance: p.performance
+  }));
+  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
+  const bestPlace = Math.min(...placements.map((p) => p.place));
+  for (const p of placements) {
+    const before = ratings.get(p.playerId);
+    const delta = deltas.get(p.playerId) || 0;
+    const won = p.place === bestPlace;
+    const after = {
+      rating: Math.max(RATING_FLOOR, before.rating + delta),
+      wins: before.wins + (won ? 1 : 0),
+      losses: before.losses + (won ? 0 : 1),
+      gamesPlayed: before.gamesPlayed + 1,
+      seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
+      lastMatchAt: run.endedAt
+    };
+    plan.updates[p.playerId] = after;
+    const placing = after.gamesPlayed < PLACEMENT_GAMES;
+    plan.results[p.playerId] = {
+      delta: placing ? null : after.rating - before.rating,
+      newRating: placing ? null : after.rating,
+      isPlacement: placing,
+      gamesPlayed: after.gamesPlayed
+    };
+  }
+  return plan;
+}
+var WRITE_ATTEMPTS2 = 5;
+function loadRatings(nk, modId, mode, playerIds, now) {
+  const key = boardId(modId, mode);
+  const current = {};
+  const versions = {};
+  for (const object of nk.storageRead(
+    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
+  )) {
+    const record = object.value;
+    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
+    versions[object.userId] = object.version;
+  }
+  const season2 = currentSeason();
+  const fresh = playerIds.filter((id) => !current[id]);
+  if (season2 > 1 && fresh.length > 0) {
+    const previous = nk.storageRead(
+      fresh.map((id) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(modId, mode, season2 - 1),
+        userId: id
+      }))
+    );
+    for (const object of previous) {
+      const rating = carriedOver(object.value, now);
+      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
+    }
+  }
+  return { current, versions };
+}
+function applyRatings(nk, logger, run, mode, checks) {
+  const key = boardId(run.modId, mode);
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
+    const { current, versions } = loadRatings(
+      nk,
+      run.modId,
+      mode,
+      run.players.map((p) => p.id),
+      run.endedAt
+    );
+    const plan = planRatings(run, checks, current);
+    const ids = Object.keys(plan.updates);
+    if (ids.length === 0) return {};
+    try {
+      nk.storageWrite(
+        ids.map((id) => ({
+          collection: RATINGS_COLLECTION,
+          key,
+          userId: id,
+          value: plan.updates[id],
+          permissionRead: 2,
+          permissionWrite: 0,
+          // '*' = only if it doesn't exist yet.
+          version: versions[id] || "*"
+        }))
+      );
+    } catch (e) {
+      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
+      continue;
+    }
+    mirrorToLeaderboard(nk, logger, run, mode, plan, checks);
+    return plan.results;
+  }
+  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS2);
+  return {};
+}
+function mirrorToLeaderboard(nk, logger, run, mode, plan, _checks) {
+  const id = boardId(run.modId, mode);
+  try {
+    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
+    for (const player of run.players) {
+      const after = plan.updates[player.id];
+      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
+      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
+        losses: after.losses,
+        gamesPlayed: after.gamesPlayed,
+        seasonBest: after.seasonBest
+      }, "set");
+    }
+  } catch (e) {
+    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
+  }
+}
+
+// src/rating/legacy.ts
+var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
+var STEAM_CUSTOM_ID_PREFIX = "steam:";
+var HASH_PATTERN = /^[0-9a-f]{64}$/;
+var IMPORT_BATCH_LIMIT = 100;
+function steamIdHash(nk, salt, steamId) {
+  return nk.sha256Hash(steamId + salt);
+}
+function isLegacyBoard(value) {
+  const b = value;
+  return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
+}
+function recordOf(board) {
+  return {
+    rating: board.rating,
+    wins: board.wins,
+    losses: board.losses,
+    gamesPlayed: board.gamesPlayed,
+    seasonBest: board.seasonBest,
+    lastMatchAt: board.lastMatchAt
+  };
+}
+function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  let players;
+  try {
+    players = JSON.parse(payload).players;
+  } catch (e) {
+    throw runtimeError(INVALID_ARGUMENT, "Payload must be {players: {<hash>: {boards: []}}}");
+  }
+  const hashes = Object.keys(players || {});
+  if (hashes.length === 0 || hashes.length > IMPORT_BATCH_LIMIT)
+    throw runtimeError(INVALID_ARGUMENT, `Send 1 to ${IMPORT_BATCH_LIMIT} players per call`);
+  const valid = [];
+  let skipped = 0;
+  for (const hash of hashes) {
+    const boards = players[hash].boards;
+    if (!HASH_PATTERN.test(hash) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
+      skipped++;
+      continue;
+    }
+    valid.push({ hash, boards });
+  }
+  const claimed = new Set(
+    nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID }))).filter((o) => o.value.claimedBy).map((o) => o.key)
+  );
+  const writes = valid.filter((p) => !claimed.has(p.hash)).map((p) => ({
+    collection: LEGACY_RATINGS_COLLECTION,
+    key: p.hash,
+    userId: SYSTEM_USER_ID,
+    value: { boards: p.boards },
+    permissionRead: 0,
+    permissionWrite: 0
+  }));
+  if (writes.length > 0) nk.storageWrite(writes);
+  logger.info("Legacy ratings import: %d written, %d already claimed, %d skipped", writes.length, claimed.size, skipped);
+  return JSON.stringify({ imported: writes.length, alreadyClaimed: claimed.size, skipped });
+}
+function claimLegacyRatings(nk, logger, userId, username, hash, now) {
+  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
+  const legacy = parked == null ? void 0 : parked.value;
+  if (!parked || !legacy || legacy.claimedBy) return 0;
+  const existing = new Set(
+    nk.storageRead(
+      legacy.boards.map((b) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(b.modId, b.mode, b.season),
+        userId
+      }))
+    ).map((o) => o.key)
+  );
+  const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
+  const writes = fresh.map((b) => ({
+    collection: RATINGS_COLLECTION,
+    key: boardId(b.modId, b.mode, b.season),
+    userId,
+    value: recordOf(b),
+    permissionRead: 2,
+    permissionWrite: 0,
+    version: "*"
+  }));
+  writes.push({
+    collection: LEGACY_RATINGS_COLLECTION,
+    key: hash,
+    userId: SYSTEM_USER_ID,
+    value: __spreadProps(__spreadValues({}, legacy), { claimedBy: userId, claimedAt: now }),
+    permissionRead: 0,
+    permissionWrite: 0,
+    version: parked.version
+  });
+  nk.storageWrite(writes);
+  for (const b of fresh) {
+    if (b.gamesPlayed < PLACEMENT_GAMES) continue;
+    const id = boardId(b.modId, b.mode, b.season);
+    try {
+      nk.leaderboardCreate(id, true, "desc", "set", null, { modId: b.modId, mode: b.mode });
+      nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
+        losses: b.losses,
+        gamesPlayed: b.gamesPlayed,
+        seasonBest: b.seasonBest
+      }, "set");
+    } catch (e) {
+      logger.warn("Legacy rating leaderboard write for %s failed: %v", userId, e);
+    }
+  }
+  logger.info("Claimed %d legacy rating boards for %s", fresh.length, userId);
+  return fresh.length;
+}
+function claimLegacyRatingsAtLogin(ctx, logger, nk) {
+  try {
+    const salt = ctx.env.PLAYER_ID_SALT;
+    if (!salt || !ctx.userId) return;
+    const account = nk.accountGetId(ctx.userId);
+    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX)) return;
+    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX.length));
+    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
+  } catch (e) {
+    logger.error("Legacy rating claim failed: %v", e);
+  }
+}
+
+// src/auth.ts
+var STEAM_AUTH_URL = "https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/";
+var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
+var STEAM_TICKET_PATTERN = /^[0-9a-fA-F]{16,4096}$/;
+var STEAM_TIMEOUT_MS = 1e4;
+function verifySteamTicket(ctx, logger, nk, ticket) {
+  const key = ctx.env.STEAM_WEB_API_KEY;
+  const appId = ctx.env.STEAM_APP_ID || "2379780";
+  if (!key) {
+    logger.error("Steam login is not configured: STEAM_WEB_API_KEY is empty");
+    throw runtimeError(UNAVAILABLE, "Steam login is not configured");
+  }
+  const url = `${STEAM_AUTH_URL}?key=${encodeURIComponent(key)}&appid=${encodeURIComponent(appId)}&ticket=${ticket}`;
+  let response;
+  try {
+    response = nk.httpRequest(url, "get", {}, "", STEAM_TIMEOUT_MS);
+  } catch (e) {
+    logger.warn("Steam ticket check failed: request error");
+    throw runtimeError(UNAVAILABLE, "Steam request failed");
+  }
+  if (response.code !== 200) {
+    logger.warn("Steam ticket check failed: HTTP %d", response.code);
+    throw runtimeError(UNAVAILABLE, "Steam request failed");
+  }
+  let result;
+  try {
+    const data = JSON.parse(response.body);
+    result = data == null ? void 0 : data.response;
+  } catch (e) {
+    result = null;
+  }
+  const params = result == null ? void 0 : result.params;
+  if (!params || params.result !== "OK" || !params.steamid) {
+    const steamError = (result == null ? void 0 : result.error) || {};
+    logger.warn(
+      "Steam rejected the ticket: %v %v",
+      steamError.errorcode,
+      steamError.errordesc
+    );
+    throw runtimeError(UNAUTHENTICATED, "Invalid Steam ticket");
+  }
+  return String(params.steamid);
+}
+function beforeAuthenticateCustom(ctx, logger, nk, data) {
+  const account = data.account || {};
+  const vars = account.vars || {};
+  const ticket = vars.steam_ticket;
+  if (!ticket || !STEAM_TICKET_PATTERN.test(ticket)) {
+    throw runtimeError(
+      INVALID_ARGUMENT,
+      "Custom login needs a Steam ticket in vars.steam_ticket"
+    );
+  }
+  const steamId = verifySteamTicket(ctx, logger, nk, ticket);
+  account.id = STEAM_CUSTOM_ID_PREFIX2 + steamId;
+  checkLoginBan(nk, logger, "custom:" + account.id, Date.now());
+  delete vars.steam_ticket;
+  account.vars = vars;
+  data.account = account;
+  return data;
+}
+function refuseCustomIdChange(ctx, logger, nk, data) {
+  throw runtimeError(
+    PERMISSION_DENIED,
+    "Custom ids are only set by Steam login"
+  );
+}
+function beforeAuthenticateDevice(ctx, logger, nk, data) {
+  if (ctx.env.ALLOW_DEVICE_AUTH !== "true") {
+    throw runtimeError(PERMISSION_DENIED, "Device login is disabled");
+  }
+  if (data.account && data.account.id) checkLoginBan(nk, logger, "device:" + data.account.id, Date.now());
+  return data;
+}
+function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
+  claimLegacyRatingsAtLogin(ctx, logger, nk);
 }
 
 // src/actions/results.ts
@@ -1485,61 +2153,6 @@ function activeRunOf(lobby, userId) {
   };
 }
 
-// src/lobby/codes.ts
-function keyOf(code) {
-  return {
-    collection: LOBBY_CODE_COLLECTION,
-    key: code,
-    userId: SYSTEM_USER_ID
-  };
-}
-function write(nk, code, entry, version) {
-  nk.storageWrite([
-    __spreadProps(__spreadValues({}, keyOf(code)), {
-      value: __spreadValues({}, entry),
-      permissionRead: 0,
-      permissionWrite: 0,
-      version
-    })
-  ]);
-}
-function read(nk, code) {
-  const objects = nk.storageRead([keyOf(code)]);
-  if (objects.length === 0) return null;
-  const value = objects[0].value;
-  return {
-    matchId: String(value.matchId || ""),
-    modId: String(value.modId || "")
-  };
-}
-function reserveCode(nk, code, modId) {
-  const existing = read(nk, code);
-  if (existing) {
-    if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
-    nk.storageDelete([keyOf(code)]);
-  }
-  try {
-    write(nk, code, { matchId: "", modId }, "*");
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-function bindCode(nk, code, matchId, modId) {
-  write(nk, code, { matchId, modId });
-}
-function lookupCode(nk, code) {
-  const entry = read(nk, code);
-  if (!entry || !entry.matchId || !nk.matchGet(entry.matchId)) return null;
-  return entry;
-}
-function releaseCode(nk, code, matchId) {
-  const entry = read(nk, code);
-  if (entry && entry.matchId === matchId) {
-    nk.storageDelete([keyOf(code)]);
-  }
-}
-
 // src/lobby/relay.ts
 var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 var MAX_PARAMS_BYTES = 16 * 1024;
@@ -1646,180 +2259,6 @@ function action(lobby, senderId, data, ctx) {
     lobby: budgeted,
     out: [{ kind: "send", op: ServerOp.ACTION, payload: envelope, to: targets }]
   };
-}
-
-// src/shared/jokers.ts
-var STANDARD_JOKERS = [
-  "j_joker",
-  "j_mime",
-  "j_chaos",
-  "j_space",
-  "j_scholar",
-  "j_egg",
-  "j_burglar",
-  "j_runner",
-  "j_sixth_sense",
-  "j_hiker",
-  "j_card_sharp",
-  "j_madness",
-  "j_vampire",
-  "j_baron",
-  "j_fortune_teller",
-  "j_luchador",
-  "j_lucky_cat",
-  "j_bull",
-  "j_swashbuckler",
-  "j_throwback",
-  "j_mr_bones",
-  "j_ring_master",
-  "j_idol",
-  "j_merry_andy",
-  "j_stuntman",
-  "j_matador",
-  "j_troubadour",
-  "j_ancient",
-  "j_even_steven",
-  "j_odd_todd"
-];
-var PRIVILEGE_JOKERS = {
-  virtualized: "j_perkeo",
-  bean: "j_turtle_bean",
-  vagabond: "j_vagabond",
-  sizaak: "j_dusk",
-  lava: "j_burnt",
-  twelve: "j_stone"
-};
-var DEFAULT_JOKER = "j_joker";
-function isValidJoker(id, privileges = []) {
-  if (STANDARD_JOKERS.indexOf(id) !== -1) return true;
-  return privileges.some((p) => PRIVILEGE_JOKERS[p] === id);
-}
-function privilegeTable(privileges) {
-  const jokers = privileges.map((p) => PRIVILEGE_JOKERS[p]).filter((j) => !!j);
-  return jokers.length > 0 ? { jokers } : {};
-}
-
-// src/player/profile.ts
-var PLAYER_COLLECTION = "player";
-var PROFILE_KEY = "profile";
-var MAX_NAME_LENGTH = 64;
-var WRITE_ATTEMPTS2 = 3;
-function cleanName(name) {
-  if (typeof name !== "string") return "";
-  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
-}
-function defaultProfile(steamName) {
-  return {
-    steamName,
-    useDiscordName: false,
-    preferredJoker: DEFAULT_JOKER,
-    mods: null,
-    discordIdHash: null,
-    discordUsername: null,
-    privileges: [],
-    tosAcceptedVersion: 0,
-    chatEnabled: false,
-    chatBlocked: false,
-    mutedUserIds: [],
-    unresolvedMutedPlayerIds: [],
-    legacyPlayerId: null,
-    synced: false,
-    nakamaLogin: false
-  };
-}
-function stringList(value) {
-  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
-}
-function profileOf(value, fallbackName) {
-  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
-  return __spreadProps(__spreadValues({}, base), {
-    useDiscordName: value.useDiscordName === true,
-    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
-    mods: value.mods === void 0 ? null : value.mods,
-    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
-    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
-    privileges: stringList(value.privileges),
-    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
-    chatEnabled: value.chatEnabled === true,
-    chatBlocked: value.chatBlocked === true,
-    mutedUserIds: stringList(value.mutedUserIds),
-    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
-    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
-    synced: value.synced === true,
-    nakamaLogin: value.nakamaLogin === true
-  });
-}
-function withSync(profile, sync) {
-  var _a, _b;
-  return __spreadProps(__spreadValues({}, profile), {
-    useDiscordName: sync.useDiscordName === true,
-    preferredJoker: typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker,
-    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
-    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
-    privileges: stringList(sync.privileges),
-    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
-    chatEnabled: sync.chatEnabled === true,
-    chatBlocked: sync.chatBlocked === true,
-    mutedUserIds: stringList(sync.mutedUserIds),
-    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
-    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
-    synced: true
-  });
-}
-function displayNameOf(profile) {
-  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
-  return profile.steamName;
-}
-function playerView(userId, profile) {
-  return {
-    id: userId,
-    steamName: profile.steamName,
-    displayName: displayNameOf(profile),
-    useDiscordName: profile.useDiscordName,
-    preferredJoker: profile.preferredJoker,
-    discordLinked: profile.discordIdHash !== null,
-    discordUsername: profile.discordUsername,
-    privileges: privilegeTable(profile.privileges),
-    chatEnabled: profile.chatEnabled,
-    chatBlocked: profile.chatBlocked,
-    mutedPlayerIds: profile.mutedUserIds
-  };
-}
-function readProfile(nk, userId, fallbackName = "") {
-  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
-  if (objects.length === 0) return null;
-  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
-}
-function writeProfile(nk, userId, profile, version) {
-  nk.storageWrite([
-    {
-      collection: PLAYER_COLLECTION,
-      key: PROFILE_KEY,
-      userId,
-      value: profile,
-      version,
-      permissionRead: 1,
-      permissionWrite: 0
-    }
-  ]);
-}
-function updateProfile(nk, userId, change, fallbackName = "") {
-  let lastError = null;
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
-    const stored = readProfile(nk, userId, fallbackName);
-    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
-    try {
-      writeProfile(nk, userId, next, stored ? stored.version : "*");
-      return next;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError;
-}
-function profileFor(nk, userId, fallbackName = "") {
-  const stored = readProfile(nk, userId, fallbackName);
-  return stored ? stored.profile : defaultProfile(fallbackName);
 }
 
 // src/lobby/chat.ts
@@ -2396,6 +2835,29 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     );
     return { state: next || state, data: "ok" };
   }
+  if (signal.type === "admin_remove") {
+    const member = state.lobby.players.some((p) => p.id === signal.userId);
+    const next = apply(
+      ctx,
+      logger,
+      nk,
+      dispatcher,
+      state,
+      adminRemove(state.lobby, signal.userId, signal.reason, signal.onlyIfStarted === true)
+    );
+    return {
+      state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
+      data: member ? "ok" : "not_member"
+    };
+  }
+  if (signal.type === "admin_view") return { state, data: JSON.stringify(adminView(state.lobby)) };
+  if (signal.type === "admin_close") {
+    const next = apply(ctx, logger, nk, dispatcher, state, close(state.lobby));
+    return {
+      state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
+      data: "ok"
+    };
+  }
   if (signal.type === "leave") {
     const next = apply(
       ctx,
@@ -2415,122 +2877,6 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
 function lobbyMatchTerminate(ctx, logger, nk, dispatcher, tickNumber, state, graceSeconds) {
   apply(ctx, logger, nk, dispatcher, state, close(state.lobby));
   return { state };
-}
-
-// src/lobby/rpc.ts
-var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ123456789";
-var CODE_LENGTH = 6;
-var MATCHMADE_CODE_LENGTH = 5;
-var CODE_PATTERN = /^[A-HJ-NP-Z1-9]{5,6}$/;
-var CODE_ATTEMPTS = 10;
-var MOD_ID_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
-var DEFAULT_MAX_PLAYERS = 16;
-var RANKED_MODE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
-function generateCode(length = CODE_LENGTH) {
-  let code = "";
-  for (let i = 0; i < length; i++) {
-    code += CODE_CHARS.charAt(Math.floor(Math.random() * CODE_CHARS.length));
-  }
-  return code;
-}
-function currentLobby(nk, userId) {
-  const key = {
-    collection: CURRENT_LOBBY_COLLECTION,
-    key: CURRENT_LOBBY_KEY,
-    userId
-  };
-  const objects = nk.storageRead([key]);
-  if (objects.length === 0) return null;
-  const matchId = objects[0].value.matchId;
-  const code = objects[0].value.code;
-  const modId = String(objects[0].value.modId || "");
-  if (typeof matchId === "string" && typeof code === "string" && nk.matchGet(matchId)) {
-    const signal = { type: "has_player", userId };
-    if (nk.matchSignal(matchId, JSON.stringify(signal)) === "yes")
-      return { matchId, code, modId };
-  }
-  nk.storageDelete([key]);
-  return null;
-}
-function rpcLobbyCreate(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const input = parsePayload(payload);
-  const modId = input.modId;
-  if (typeof modId !== "string" || !MOD_ID_PATTERN.test(modId)) {
-    throw runtimeError(INVALID_ARGUMENT, "modId is required");
-  }
-  const maxPlayers = input.maxPlayers === void 0 || input.maxPlayers === null ? DEFAULT_MAX_PLAYERS : input.maxPlayers;
-  if (typeof maxPlayers !== "number" || maxPlayers % 1 !== 0 || maxPlayers < MIN_PLAYERS || maxPlayers > MAX_PLAYERS) {
-    throw runtimeError(
-      INVALID_ARGUMENT,
-      `maxPlayers must be a whole number from ${MIN_PLAYERS} to ${MAX_PLAYERS}`
-    );
-  }
-  const rankedMode = input.rankedMode;
-  if (rankedMode !== void 0 && rankedMode !== null) {
-    if (typeof rankedMode !== "string" || !RANKED_MODE_PATTERN.test(rankedMode))
-      throw runtimeError(INVALID_ARGUMENT, "rankedMode is not a valid mode");
-    if (ctx.env.ALLOW_RANKED_LOBBIES !== "true")
-      throw runtimeError(PERMISSION_DENIED, "Ranked lobbies are not enabled");
-  }
-  const current = currentLobby(nk, userId);
-  if (current)
-    throw runtimeError(ALREADY_EXISTS, `Already in lobby ${current.code}`);
-  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
-    const code = generateCode();
-    if (!reserveCode(nk, code, modId)) continue;
-    let matchId;
-    try {
-      matchId = nk.matchCreate(LOBBY_MATCH, {
-        code,
-        modId,
-        maxPlayers,
-        creatorId: userId,
-        rankedMode: typeof rankedMode === "string" ? rankedMode : ""
-      });
-    } catch (e) {
-      releaseCode(nk, code, "");
-      throw e;
-    }
-    bindCode(nk, code, matchId, modId);
-    return JSON.stringify({ matchId, code });
-  }
-  logger.error(
-    "Could not find a free lobby code after %d attempts",
-    CODE_ATTEMPTS
-  );
-  throw runtimeError(UNAVAILABLE, "Could not allocate a lobby code");
-}
-function rpcLobbyFind(ctx, logger, nk, payload) {
-  requireUser(ctx);
-  const input = parsePayload(payload);
-  const code = typeof input.code === "string" ? input.code.toUpperCase() : "";
-  if (!CODE_PATTERN.test(code))
-    throw runtimeError(INVALID_ARGUMENT, "Invalid lobby code");
-  const entry = lookupCode(nk, code);
-  if (!entry) throw runtimeError(NOT_FOUND, "Lobby not found");
-  return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
-}
-function rpcLobbyCurrent(ctx, logger, nk, payload) {
-  const current = currentLobby(nk, requireUser(ctx));
-  return JSON.stringify(current || {});
-}
-function rpcRunActive(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const current = currentLobby(nk, userId);
-  if (!current) return JSON.stringify({});
-  const signal = { type: "get_active", userId };
-  const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)));
-  return JSON.stringify(active ? { active } : {});
-}
-function rpcLobbyLeave(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const current = currentLobby(nk, userId);
-  if (current) {
-    const signal = { type: "leave", userId };
-    nk.matchSignal(current.matchId, JSON.stringify(signal));
-  }
-  return JSON.stringify({});
 }
 
 // src/chat/moderation.ts
@@ -2616,6 +2962,8 @@ function rpcChatSend(ctx, logger, nk, payload) {
   if (profile.chatBlocked || !profile.chatEnabled)
     throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
   if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
+  const banned = chatBanRefusal(readBans(nk, userId), Date.now());
+  if (banned) throw runtimeError(PERMISSION_DENIED, banned);
   const current = currentLobby(nk, userId);
   if (!current) throw runtimeError(INVALID_ARGUMENT, "Not in a lobby");
   const check = JSON.parse(
@@ -2643,6 +2991,40 @@ function rpcChatSend(ctx, logger, nk, payload) {
   return JSON.stringify({ text });
 }
 
+// src/matchmaking/gate.ts
+function queueRefusalFor(nk, userId, ranked, now) {
+  return queueRefusal(readConfig(nk), profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
+}
+function stringProperties(envelope) {
+  const add = envelope.matchmakerAdd || envelope.matchmaker_add;
+  return add && (add.stringProperties || add.string_properties) || {};
+}
+function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
+  if (!ctx.userId) return envelope;
+  const ranked = stringProperties(envelope).kind === "ranked";
+  const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
+  if (refused) throw runtimeError(PERMISSION_DENIED, refused);
+  return envelope;
+}
+function refuseMatchedGroup(nk, logger, plan) {
+  const now = Date.now();
+  const ranked = plan.rankedMode !== "";
+  const refused = plan.playerIds.filter((id) => queueRefusalFor(nk, id, ranked, now) !== null);
+  if (refused.length === 0) return false;
+  const mode = ranked ? plan.rankedMode : plan.gameMode;
+  for (const id of plan.playerIds) {
+    if (refused.indexOf(id) !== -1) continue;
+    notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+      modId: plan.modId,
+      mode,
+      reason: "A matched player can no longer play",
+      requeue: true
+    });
+  }
+  logger.warn("Matched group refused: %d player(s) may not queue", refused.length);
+  return true;
+}
+
 // src/matchmaking/queue.ts
 var QUEUE_COLLECTION = "queue_presence";
 var QUEUE_STALE_MS = 30 * 6e4;
@@ -2650,7 +3032,7 @@ var LIST_PAGE = 100;
 var MATCH_LIST_LIMIT = 100;
 var NOTIFICATIONS_STREAM = 0;
 var TOMBSTONE_MS = 6e4;
-var MOD_ID_PATTERN2 = /^[A-Za-z0-9_.-]{1,64}$/;
+var MOD_ID_PATTERN3 = /^[A-Za-z0-9_.-]{1,64}$/;
 function recordKey(modId, gameMode) {
   return modId + ":" + gameMode;
 }
@@ -2666,7 +3048,7 @@ function recordOf2(input, output, sessionId, now) {
   const modId = props.modId;
   const mode = props.mode;
   if (typeof ticket !== "string" || typeof modId !== "string" || typeof mode !== "string") return null;
-  if (!MOD_ID_PATTERN2.test(modId) || !MOD_ID_PATTERN2.test(mode)) return null;
+  if (!MOD_ID_PATTERN3.test(modId) || !MOD_ID_PATTERN3.test(mode)) return null;
   const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
   return { modId, gameMode, ticket, sessionId, at: now };
 }
@@ -2781,7 +3163,7 @@ function liveRecords(nk, modId, now) {
 }
 function rpcQueueCounts(ctx, logger, nk, payload) {
   const modId = parsePayload(payload).modId;
-  if (typeof modId !== "string" || !MOD_ID_PATTERN2.test(modId))
+  if (typeof modId !== "string" || !MOD_ID_PATTERN3.test(modId))
     throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
   const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
   const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
@@ -2823,6 +3205,8 @@ function matchmakerMatched(ctx, logger, nk, matches) {
     logger.warn("Matchmaker group refused: %s", plan);
     throw new Error(plan);
   }
+  if (refuseMatchedGroup(nk, logger, plan))
+    throw new Error("A matched player may not queue");
   for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
     const code = generateCode(MATCHMADE_CODE_LENGTH);
     if (!reserveCode(nk, code, plan.modId)) continue;
@@ -2906,55 +3290,6 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   });
 }
 
-// src/moderation/bans.ts
-var MODERATION_COLLECTION = "moderation";
-var BANS_KEY = "bans";
-var BAN_TYPES = ["chat", "queue", "account"];
-function isBanType(value) {
-  return typeof value === "string" && BAN_TYPES.indexOf(value) !== -1;
-}
-function isBan(value) {
-  const b = value;
-  return typeof b === "object" && b !== null && typeof b.banId === "string" && typeof b.reason === "string" && (b.expiresAt === null || typeof b.expiresAt === "number" && Number.isFinite(b.expiresAt));
-}
-function longer(a, b) {
-  if (!a) return b;
-  if (a.expiresAt === null) return a;
-  if (b.expiresAt === null) return b;
-  return b.expiresAt > a.expiresAt ? b : a;
-}
-function withBan(bans, type, ban) {
-  return __spreadProps(__spreadValues({}, bans), { [type]: longer(bans[type], ban) });
-}
-function bansFromList(list) {
-  let bans = {};
-  for (const entry of list) {
-    const ban = { banId: entry.banId, expiresAt: entry.expiresAt, reason: entry.reason };
-    if (isBanType(entry.type) && isBan(ban)) bans = withBan(bans, entry.type, ban);
-  }
-  return bans;
-}
-function readBans(nk, userId) {
-  const objects = nk.storageRead([{ collection: MODERATION_COLLECTION, key: BANS_KEY, userId }]);
-  if (objects.length === 0) return {};
-  const stored = objects[0].value;
-  const bans = {};
-  for (const type of BAN_TYPES) if (isBan(stored[type])) bans[type] = stored[type];
-  return bans;
-}
-function writeBans(nk, userId, bans) {
-  nk.storageWrite([
-    {
-      collection: MODERATION_COLLECTION,
-      key: BANS_KEY,
-      userId,
-      value: bans,
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-
 // src/player/session.ts
 var STEAM_CUSTOM_ID = /^steam:(\d+)$/;
 function steamIdOf(nk, userId) {
@@ -3034,6 +3369,11 @@ function rpcSessionInit(ctx, logger, nk, payload) {
     }
     writeBans(nk, userId, bans);
     logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
+  }
+  const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
+  if (accountBan) {
+    enforceAccountBan(nk, userId, accountBan);
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
   }
   syncDisplayName(nk, userId, profile);
   return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
@@ -3157,6 +3497,7 @@ function InitModule(ctx, logger, nk, initializer) {
     matchTerminate: lobbyMatchTerminate
   });
   initializer.registerMatchmakerMatched(matchmakerMatched);
+  initializer.registerRtBefore("MatchmakerAdd", beforeMatchmakerAdd);
   initializer.registerRtAfter("MatchmakerAdd", afterMatchmakerAdd);
   initializer.registerRtBefore("MatchmakerRemove", beforeMatchmakerRemove);
   initializer.registerRpc("queue_counts", rpcQueueCounts);
@@ -3182,6 +3523,13 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_ping", rpcAdminPing);
   initializer.registerRpc("admin_notify", rpcAdminNotify);
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
+  initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);
+  initializer.registerRpc("admin_ban_lift", rpcAdminBanLift);
+  initializer.registerRpc("admin_lobby_list", rpcAdminLobbyList);
+  initializer.registerRpc("admin_lobby_get", rpcAdminLobbyGet);
+  initializer.registerRpc("admin_lobby_kick", rpcAdminLobbyKick);
+  initializer.registerRpc("admin_lobby_close", rpcAdminLobbyClose);
+  initializer.registerRpc("admin_player_get", rpcAdminPlayerGet);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);
