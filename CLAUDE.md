@@ -87,7 +87,7 @@ middleware/, state/ (web sessions only), shared/, contracts/, tests/
 - The client recorder sends replay events through the lobby match; Nakama stores each player's log and, at the run's end, recomputes the SHA-256 the client sent in its `chk` event (`lobby/log_check.ts`). A mismatch, or an implausible elapsed-time/hand-count ratio (`lobby/anticheat.ts`), flags the run and keeps it out of rating; the flag reaches the webadmin service queue through the mirror.
 - Logs are `[t, opcode, args]` **positional tuples** — the client's timeline reader (`MPAPI.playback.build_timeline`) reads `ev[1]/ev[2]/ev[3]`. Postgres stores the mirrored copy as JSON → gzip → base64 in `matchRunLogs.compressedEvents`.
 - **Schema-v2 card refs**: card-referencing opcodes encode card identity via `RLOG.card_ref` — a JSON array whose first element's sign disambiguates: positive `id` = already seen this run (`[id, tag...]`), negative `-id` = first seen (`[-id, kind, ident..., tag...]`). Up to 3 trailing tags (`e:`/`ed:`/`s:`) capture mid-run mutations.
-- Retention: 180 days unless flagged, in both Nakama (purged daily by Express's retention job) and Postgres (purged hourly).
+- Retention: 180 days unless flagged, in both Nakama and Postgres, each purged hourly by Express.
 - **`GET /api/runs/mine`** (website "My Matches") and **`GET /api/runs/:runId/replay`** (participant- or moderator-gated) read the mirrored copy.
 
 ## REST API surface (mounted in `routes/index.ts`)

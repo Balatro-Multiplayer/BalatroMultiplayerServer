@@ -4,11 +4,13 @@ import type { Result } from '../../shared/utils/result.js'
 import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
 // Nakama keeps a finished run's record and replay logs for as long as
-// match_run_logs keeps them here (RUN_LOG_TTL_MS): once a day, ask it to
-// delete the older ones. It keeps flagged and disputed runs itself.
+// match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, ask it to
+// delete the older ones. It keeps flagged and disputed runs itself. Hourly
+// rather than daily so a sweep missed while Nakama is still booting (or
+// restarting) is retried soon; a sweep with nothing to delete is one call.
 
 export const RUN_RETENTION_DAYS = RUN_LOG_TTL_MS / (24 * 60 * 60 * 1000)
-export const RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000
+export const RETENTION_INTERVAL_MS = 60 * 60 * 1000
 // Calls per sweep at most, each deleting up to Nakama's own cap.
 const MAX_CALLS = 50
 
