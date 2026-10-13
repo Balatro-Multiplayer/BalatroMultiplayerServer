@@ -35,6 +35,10 @@ export const ServerOp = {
 	ACTION_REJECTED: 106,
 	// {senderId, displayName, message}: a chat line, to everyone seated.
 	CHAT: 107,
+	// SpectateSnapshot, to a spectator once it has joined.
+	SPECTATE_SNAPSHOT: 108,
+	// SpectateEvent: one participant's replay event, to every spectator.
+	SPECTATE_EVENT: 109,
 } as const
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included,
@@ -173,6 +177,42 @@ export interface ActiveRun {
 	code: string
 	modId: string
 	events: { t: unknown; opcode: unknown; args: unknown }[]
+}
+
+// What a spectator joining mid-game has to start from: each participant's
+// latest ante and hand, and the run to bootstrap (the API's
+// getSpectatorSnapshot entries).
+export interface SpectatorManifest {
+	seed: string
+	deck: string
+	stake: number | null
+	ruleset: string
+	gamemode: string
+	sleeve: string | null
+	challenge: string | null
+}
+
+export interface SpectatorSnapshotEntry {
+	playerId: string
+	ante: string | null
+	score: string | null
+	handsRemaining: number | null
+	manifest: SpectatorManifest | null
+}
+
+export interface SpectateSnapshot {
+	code: string
+	modId: string
+	runId: string | null
+	players: { playerId: string; displayName: string }[]
+	snapshot: SpectatorSnapshotEntry[]
+}
+
+export interface SpectateEvent {
+	playerId: string
+	t: unknown
+	opcode: unknown
+	args: unknown
 }
 
 // GAME_ENDED event data.

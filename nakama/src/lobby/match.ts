@@ -39,6 +39,13 @@ import {
 import { displayNameOf, readProfile } from '../player/profile'
 import { applyRatings } from '../rating/apply'
 import { chatCheck, chatPost, reportEvidence } from './chat'
+import {
+	SPECTATOR_ROLE,
+	addSpectator,
+	isSpectator,
+	removeSpectator,
+	spectateRejection,
+} from './spectate'
 import { logChecksOf, saveRun } from './storage'
 
 const TICK_RATE = 5
@@ -51,6 +58,8 @@ export interface LobbyMatchState extends nkruntime.MatchState {
 	// Player info from matchJoinAttempt's metadata, consumed by matchJoin
 	// (which gets no metadata of its own).
 	pendingInfo: { [userId: string]: PlayerInfo }
+	// Users let in as spectators by matchJoinAttempt, until matchJoin.
+	pendingSpectators?: string[]
 	label: string
 }
 
@@ -130,7 +139,7 @@ function apply(
 		logger.info('Lobby %s closed', step.lobby.code)
 		return null
 	}
-	return { lobby: step.lobby, presences, pendingInfo: state.pendingInfo, label }
+	return { ...state, lobby: step.lobby, presences, label }
 }
 
 // A ranked game is rated before it's stored, so the run and each player's
@@ -333,6 +342,15 @@ export function lobbyMatchJoinAttempt(
 	metadata: { [key: string]: string },
 ) {
 	const meta = metadata || {}
+	if (meta.role === SPECTATOR_ROLE) {
+		const refused = spectateRejection(state.lobby, presence.userId)
+		if (refused) return { state, accept: false, rejectMessage: refused }
+		const pending = (state.pendingSpectators || []).filter((id) => id !== presence.userId)
+		return {
+			state: { ...state, pendingSpectators: pending.concat([presence.userId]) },
+			accept: true,
+		}
+	}
 	const rejection = joinRejection(
 		state.lobby,
 		presence.userId,
@@ -372,6 +390,16 @@ export function lobbyMatchJoin(
 	let current: LobbyMatchState | null = state
 	for (const presence of presences) {
 		if (!current) break
+		const pendingSpectators = current.pendingSpectators || []
+		if (pendingSpectators.indexOf(presence.userId) !== -1) {
+			const watching = {
+				...current,
+				pendingSpectators: pendingSpectators.filter((id) => id !== presence.userId),
+				presences: { ...current.presences, [presence.userId]: presence },
+			}
+			current = apply(ctx, logger, nk, dispatcher, watching, addSpectator(watching.lobby, presence.userId))
+			continue
+		}
 		const pendingInfo = { ...current.pendingInfo }
 		const info = pendingInfo[presence.userId] || {
 			displayName: presence.username,
@@ -411,9 +439,14 @@ export function lobbyMatchLeave(
 		if (!current) break
 		const attached = current.presences[presence.userId]
 		if (attached && attached.sessionId === presence.sessionId) {
-			const remaining = { ...current.presences }
+			const remaining: { [userId: string]: nkruntime.Presence } = { ...current.presences }
 			delete remaining[presence.userId]
 			current = { ...current, presences: remaining }
+		}
+		if (isSpectator(current.lobby, presence.userId)) {
+			if (attached && attached.sessionId === presence.sessionId)
+				current = apply(ctx, logger, nk, dispatcher, current, removeSpectator(current.lobby, presence.userId))
+			continue
 		}
 		current = apply(
 			ctx,
@@ -458,6 +491,10 @@ function stepForMessage(
 				newId: () => nk.uuidv4(),
 			})
 		case ClientOp.LEAVE:
+			if (isSpectator(lobby, senderId)) {
+				const stopped = removeSpectator(lobby, senderId)
+				return { lobby: stopped.lobby, out: [{ kind: 'kick', userId: senderId }] }
+			}
 			return leave(lobby, senderId)
 		case ClientOp.KICK:
 			return kick(

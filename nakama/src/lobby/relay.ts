@@ -16,7 +16,9 @@ import {
 	BROADCAST_TARGET,
 	SERVER_TARGET,
 	ServerOp,
+	type SpectateEvent,
 } from './protocol'
+import { spectateEvent } from './spectate'
 import {
 	type Lobby,
 	type Outbound,
@@ -132,6 +134,8 @@ export function action(
 			})
 		}
 		if (result.out) out.push(...result.out)
+		if (key === LOG_EVENT_KEY && audience !== 'none' && result.params)
+			out.push(...spectateEvent(next, result.params as SpectateEvent))
 		// A report may have been the last one the game was waiting for.
 		const settled = settle(next, ctx.now)
 		return { lobby: settled.lobby, out: out.concat(settled.out) }

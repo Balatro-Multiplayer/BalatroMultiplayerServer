@@ -218,6 +218,8 @@ export function joinRejection(
 ): string | null {
 	if (lobby.closed) return 'Lobby is closed'
 	if (findPlayer(lobby, userId)) return null
+	if ((lobby.spectators || []).indexOf(userId) !== -1)
+		return 'You are spectating this lobby'
 	if (lobby.kickedIds.indexOf(userId) !== -1)
 		return 'You were kicked from this lobby'
 	if (modId !== lobby.modId) return 'Lobby is for a different mod'
@@ -363,7 +365,10 @@ function transferHostFrom(lobby: Lobby, userId: string): Step {
 export function close(lobby: Lobby): Step {
 	if (lobby.closed) return { lobby, out: [] }
 	const next = { ...lobby, closed: true }
-	const out: Outbound[] = [event(next, 'lobby_closed', {}, allIds(next))]
+	// Spectators hear it too: the match ends with it.
+	const out: Outbound[] = [
+		event(next, 'lobby_closed', {}, allIds(next).concat(next.spectators || [])),
+	]
 	for (const id of allIds(next)) out.push({ kind: 'clearCurrent', userId: id })
 	return { lobby: next, out }
 }

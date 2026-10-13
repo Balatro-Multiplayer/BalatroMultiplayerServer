@@ -21,6 +21,7 @@ import {
 	type LobbySignal,
 } from './protocol'
 import { MAX_PLAYERS, MIN_PLAYERS } from './state'
+import { spectatableLobbies } from './spectate'
 
 // Same alphabet as the API's generateLobbyCode (no I or O), and the same
 // lengths: 6 for manual lobbies, 5 for matchmade ones.
@@ -157,6 +158,31 @@ export function rpcLobbyFind(
 	const entry = lookupCode(nk, code)
 	if (!entry) throw runtimeError(NOT_FOUND, 'Lobby not found')
 	return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId })
+}
+
+const SPECTATE_LIST_LIMIT = 100
+
+// {modId?} -> {lobbies: [{code, modId, playerCount, started, spectators}]}:
+// the lobbies a player may watch (match_join with metadata role=spectator on
+// the id lobby_find returns).
+export function rpcSpectateList(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	requireUser(ctx)
+	const modId = parsePayload(payload).modId
+	let query = '+label.spectatable:T'
+	if (modId !== undefined && modId !== null && modId !== '') {
+		if (typeof modId !== 'string' || !MOD_ID_PATTERN.test(modId))
+			throw runtimeError(INVALID_ARGUMENT, 'Invalid modId')
+		query += ' +label.modId:' + modId.replace(/[^A-Za-z0-9_]/g, '\\$&')
+	}
+	const labels = nk
+		.matchList(SPECTATE_LIST_LIMIT, true, null, null, null, query)
+		.map((m) => m.label || '')
+	return JSON.stringify({ lobbies: spectatableLobbies(labels) })
 }
 
 export function rpcLobbyCurrent(

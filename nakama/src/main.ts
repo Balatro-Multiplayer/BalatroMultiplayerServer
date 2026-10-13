@@ -32,6 +32,7 @@ import {
 	rpcLobbyCreate,
 	rpcLobbyCurrent,
 	rpcLobbyFind,
+	rpcSpectateList,
 	rpcLobbyLeave,
 	rpcRunActive,
 } from './lobby/rpc'
@@ -95,6 +96,7 @@ function InitModule(
 	initializer.registerRpc('report_submit', rpcReportSubmit)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)
 	initializer.registerRpc('lobby_find', rpcLobbyFind)
+	initializer.registerRpc('spectate_list', rpcSpectateList)
 	initializer.registerRpc('lobby_current', rpcLobbyCurrent)
 	initializer.registerRpc('lobby_leave', rpcLobbyLeave)
 	initializer.registerRpc('run_active', rpcRunActive)

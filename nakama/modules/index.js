@@ -66,7 +66,11 @@ var ServerOp = {
   // {cid, action, reason}, to the sender of a refused ACTION.
   ACTION_REJECTED: 106,
   // {senderId, displayName, message}: a chat line, to everyone seated.
-  CHAT: 107
+  CHAT: 107,
+  // SpectateSnapshot, to a spectator once it has joined.
+  SPECTATE_SNAPSHOT: 108,
+  // SpectateEvent: one participant's replay event, to every spectator.
+  SPECTATE_EVENT: 109
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -561,6 +565,8 @@ function rejectOp(userId, message) {
 function joinRejection(lobby, userId, modId) {
   if (lobby.closed) return "Lobby is closed";
   if (findPlayer(lobby, userId)) return null;
+  if ((lobby.spectators || []).indexOf(userId) !== -1)
+    return "You are spectating this lobby";
   if (lobby.kickedIds.indexOf(userId) !== -1)
     return "You were kicked from this lobby";
   if (modId !== lobby.modId) return "Lobby is for a different mod";
@@ -685,7 +691,9 @@ function transferHostFrom(lobby, userId) {
 function close(lobby) {
   if (lobby.closed) return { lobby, out: [] };
   const next = __spreadProps(__spreadValues({}, lobby), { closed: true });
-  const out = [event(next, "lobby_closed", {}, allIds(next))];
+  const out = [
+    event(next, "lobby_closed", {}, allIds(next).concat(next.spectators || []))
+  ];
   for (const id of allIds(next)) out.push({ kind: "clearCurrent", userId: id });
   return { lobby: next, out };
 }
@@ -871,6 +879,125 @@ function tick(lobby, now) {
   return step;
 }
 
+// src/lobby/spectate.ts
+var MAX_SPECTATORS = 16;
+var SPECTATOR_ROLE = "spectator";
+function spectatorsOf(lobby) {
+  return lobby.spectators || [];
+}
+function isSpectator(lobby, userId) {
+  return spectatorsOf(lobby).indexOf(userId) !== -1;
+}
+function spectateRejection(lobby, userId) {
+  if (lobby.closed) return "Lobby is closed";
+  if (isSpectator(lobby, userId)) return null;
+  if (lobby.kickedIds.indexOf(userId) !== -1) return "You have been kicked from this lobby";
+  if (!isSpectatable(lobby)) return "This lobby is not spectatable";
+  if (findPlayer(lobby, userId)) return "You are playing in this lobby";
+  if (spectatorsOf(lobby).length >= MAX_SPECTATORS) return "This lobby has too many spectators";
+  return null;
+}
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function snapshotEntry(playerId, lines) {
+  let ante = null;
+  let score = null;
+  let handsRemaining = null;
+  let lobbyInfo = null;
+  let runInfo = null;
+  for (const line of lines) {
+    let opcode, args;
+    try {
+      ;
+      [, opcode, args] = JSON.parse(line);
+    } catch (e) {
+      continue;
+    }
+    if (opcode === "set_ante_key" && Array.isArray(args) && typeof args[0] === "string") {
+      ante = args[0];
+    } else if (opcode === "hand_result" && Array.isArray(args)) {
+      if (typeof args[0] === "string") score = args[0];
+      if (typeof args[1] === "number") handsRemaining = args[1];
+    } else if (opcode === "lobby_info" && !lobbyInfo && isObject(args) && typeof args.gamemode === "string" && typeof args.ruleset === "string") {
+      const options = isObject(args.options) ? args.options : {};
+      lobbyInfo = {
+        gamemode: args.gamemode,
+        ruleset: args.ruleset,
+        sleeve: typeof options.sleeve === "string" ? options.sleeve : null,
+        challenge: typeof options.challenge === "string" ? options.challenge : null
+      };
+    } else if (opcode === "run_info" && isObject(args) && typeof args.seed === "string" && typeof args.deck === "string") {
+      runInfo = {
+        seed: args.seed,
+        deck: args.deck,
+        stake: typeof args.stake === "number" ? args.stake : null
+      };
+    }
+  }
+  const manifest = lobbyInfo && runInfo ? {
+    seed: runInfo.seed,
+    deck: runInfo.deck,
+    stake: runInfo.stake,
+    ruleset: lobbyInfo.ruleset,
+    gamemode: lobbyInfo.gamemode,
+    sleeve: lobbyInfo.sleeve,
+    challenge: lobbyInfo.challenge
+  } : null;
+  return { playerId, ante, score, handsRemaining, manifest };
+}
+function spectateSnapshot(lobby) {
+  const started = lobby.game.started;
+  const participants = started ? started.players : [];
+  return {
+    code: lobby.code,
+    modId: lobby.modId,
+    runId: started ? started.runId : null,
+    players: participants.map((p) => ({ playerId: p.id, displayName: p.displayName })),
+    snapshot: participants.filter((p) => lobby.game.logs[p.id]).map((p) => snapshotEntry(p.id, lobby.game.logs[p.id].lines))
+  };
+}
+function addSpectator(lobby, userId) {
+  const next = isSpectator(lobby, userId) ? lobby : __spreadProps(__spreadValues({}, lobby), { spectators: spectatorsOf(lobby).concat([userId]) });
+  return {
+    lobby: next,
+    out: [{ kind: "send", op: ServerOp.SPECTATE_SNAPSHOT, payload: spectateSnapshot(next), to: [userId] }]
+  };
+}
+function removeSpectator(lobby, userId) {
+  if (!isSpectator(lobby, userId)) return { lobby, out: [] };
+  return {
+    lobby: __spreadProps(__spreadValues({}, lobby), { spectators: spectatorsOf(lobby).filter((id) => id !== userId) }),
+    out: []
+  };
+}
+function spectateEvent(lobby, event2) {
+  const to = spectatorsOf(lobby);
+  if (to.length === 0) return [];
+  return [{ kind: "send", op: ServerOp.SPECTATE_EVENT, payload: event2, to }];
+}
+function spectatableLobbies(labels) {
+  const lobbies = [];
+  for (const raw of labels) {
+    let label;
+    try {
+      label = JSON.parse(raw);
+    } catch (e) {
+      continue;
+    }
+    if (!isObject(label) || label.spectatable !== true || typeof label.code !== "string") continue;
+    if (typeof label.spectators === "number" && label.spectators >= MAX_SPECTATORS) continue;
+    lobbies.push({
+      code: label.code,
+      modId: typeof label.modId === "string" ? label.modId : "",
+      playerCount: typeof label.size === "number" ? label.size : 0,
+      started: label.started === true,
+      spectators: typeof label.spectators === "number" ? label.spectators : 0
+    });
+  }
+  return lobbies;
+}
+
 // src/lobby/rpc.ts
 var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ123456789";
 var CODE_LENGTH = 6;
@@ -966,6 +1093,19 @@ function rpcLobbyFind(ctx, logger, nk, payload) {
   const entry = lookupCode(nk, code);
   if (!entry) throw runtimeError(NOT_FOUND, "Lobby not found");
   return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
+}
+var SPECTATE_LIST_LIMIT = 100;
+function rpcSpectateList(ctx, logger, nk, payload) {
+  requireUser(ctx);
+  const modId = parsePayload(payload).modId;
+  let query = "+label.spectatable:T";
+  if (modId !== void 0 && modId !== null && modId !== "") {
+    if (typeof modId !== "string" || !MOD_ID_PATTERN.test(modId))
+      throw runtimeError(INVALID_ARGUMENT, "Invalid modId");
+    query += " +label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&");
+  }
+  const labels = nk.matchList(SPECTATE_LIST_LIMIT, true, null, null, null, query).map((m) => m.label || "");
+  return JSON.stringify({ lobbies: spectatableLobbies(labels) });
 }
 function rpcLobbyCurrent(ctx, logger, nk, payload) {
   const current = currentLobby(nk, requireUser(ctx));
@@ -2235,6 +2375,8 @@ function action(lobby, senderId, data, ctx) {
       });
     }
     if (result.out) out.push(...result.out);
+    if (key === LOG_EVENT_KEY && audience !== "none" && result.params)
+      out.push(...spectateEvent(next, result.params));
     const settled = settle(next, ctx.now);
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
@@ -2522,7 +2664,7 @@ function apply(ctx, logger, nk, dispatcher, state, raw) {
     logger.info("Lobby %s closed", step.lobby.code);
     return null;
   }
-  return { lobby: step.lobby, presences, pendingInfo: state.pendingInfo, label };
+  return __spreadProps(__spreadValues({}, state), { lobby: step.lobby, presences, label });
 }
 function withRatings(nk, logger, run, logs) {
   if (!run.rankedMode) return run;
@@ -2662,6 +2804,15 @@ function otherLobbyOf(nk, ctx, userId) {
 }
 function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, presence, metadata) {
   const meta = metadata || {};
+  if (meta.role === SPECTATOR_ROLE) {
+    const refused = spectateRejection(state.lobby, presence.userId);
+    if (refused) return { state, accept: false, rejectMessage: refused };
+    const pending = (state.pendingSpectators || []).filter((id) => id !== presence.userId);
+    return {
+      state: __spreadProps(__spreadValues({}, state), { pendingSpectators: pending.concat([presence.userId]) }),
+      accept: true
+    };
+  }
   const rejection = joinRejection(
     state.lobby,
     presence.userId,
@@ -2690,6 +2841,15 @@ function lobbyMatchJoin(ctx, logger, nk, dispatcher, tickNumber, state, presence
   let current = state;
   for (const presence of presences) {
     if (!current) break;
+    const pendingSpectators = current.pendingSpectators || [];
+    if (pendingSpectators.indexOf(presence.userId) !== -1) {
+      const watching = __spreadProps(__spreadValues({}, current), {
+        pendingSpectators: pendingSpectators.filter((id) => id !== presence.userId),
+        presences: __spreadProps(__spreadValues({}, current.presences), { [presence.userId]: presence })
+      });
+      current = apply(ctx, logger, nk, dispatcher, watching, addSpectator(watching.lobby, presence.userId));
+      continue;
+    }
     const pendingInfo = __spreadValues({}, current.pendingInfo);
     const info = pendingInfo[presence.userId] || {
       displayName: presence.username,
@@ -2723,6 +2883,11 @@ function lobbyMatchLeave(ctx, logger, nk, dispatcher, tickNumber, state, presenc
       delete remaining[presence.userId];
       current = __spreadProps(__spreadValues({}, current), { presences: remaining });
     }
+    if (isSpectator(current.lobby, presence.userId)) {
+      if (attached && attached.sessionId === presence.sessionId)
+        current = apply(ctx, logger, nk, dispatcher, current, removeSpectator(current.lobby, presence.userId));
+      continue;
+    }
     current = apply(
       ctx,
       logger,
@@ -2753,6 +2918,10 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
         newId: () => nk.uuidv4()
       });
     case ClientOp.LEAVE:
+      if (isSpectator(lobby, senderId)) {
+        const stopped = removeSpectator(lobby, senderId);
+        return { lobby: stopped.lobby, out: [{ kind: "kick", userId: senderId }] };
+      }
       return leave(lobby, senderId);
     case ClientOp.KICK:
       return kick(
@@ -3693,6 +3862,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("report_submit", rpcReportSubmit);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);
   initializer.registerRpc("lobby_find", rpcLobbyFind);
+  initializer.registerRpc("spectate_list", rpcSpectateList);
   initializer.registerRpc("lobby_current", rpcLobbyCurrent);
   initializer.registerRpc("lobby_leave", rpcLobbyLeave);
   initializer.registerRpc("run_active", rpcRunActive);
