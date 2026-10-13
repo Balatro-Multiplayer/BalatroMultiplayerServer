@@ -2,7 +2,8 @@ import { env } from '../../env.js'
 import { err, ok } from '../../shared/utils/result.js'
 import type { Result } from '../../shared/utils/result.js'
 
-export type NakamaRpcError = 'disabled' | 'unreachable' | 'rejected'
+// conflict: the RPC answered ALREADY_EXISTS (HTTP 409).
+export type NakamaRpcError = 'disabled' | 'unreachable' | 'rejected' | 'conflict'
 
 const TIMEOUT_MS = 5000
 
@@ -30,6 +31,7 @@ export async function callNakamaRpc<T = unknown>(
 	} catch {
 		return err('unreachable')
 	}
+	if (response.status === 409) return err('conflict')
 	if (!response.ok) {
 		console.warn(`[nakama] RPC ${id} failed: HTTP ${response.status} ${await response.text().catch(() => '')}`)
 		return err('rejected')

@@ -6,15 +6,18 @@ const LINK_STATE_TTL = 5 * 60 * 1000
 
 export const linkStateNonces = new Map<
 	string,
-	{ playerId: string; expiresAt: number; source?: string }
+	{ playerId: string; expiresAt: number; source?: string; nakamaUserId?: string }
 >()
 
-export function generateLinkState(playerId: string, source?: string): string {
+// nakamaUserId: a link started in game over Nakama (features/nakama), which
+// the callback completes on the Nakama account; playerId is then ''.
+export function generateLinkState(playerId: string, source?: string, nakamaUserId?: string): string {
 	const nonce = randomBytes(32).toString('hex')
 	linkStateNonces.set(nonce, {
 		playerId,
 		expiresAt: Date.now() + LINK_STATE_TTL,
 		source,
+		nakamaUserId,
 	})
 	return jwt.sign({ nonce, purpose: 'discord-link' }, env.JWT_SECRET, {
 		expiresIn: '5m',
@@ -36,7 +39,7 @@ function decodeLinkStateJwt(
 
 function consumeLinkStateNonce(
 	nonce: string,
-): { playerId: string; expiresAt: number; source?: string } | null {
+): { playerId: string; expiresAt: number; source?: string; nakamaUserId?: string } | null {
 	const entry = linkStateNonces.get(nonce)
 	if (!entry) return null
 	linkStateNonces.delete(nonce)
@@ -49,7 +52,7 @@ function isLinkStateNonceFresh(entry: { expiresAt: number }): boolean {
 
 export function verifyLinkState(
 	state: string,
-): { playerId: string; source?: string } | null {
+): { playerId: string; source?: string; nakamaUserId?: string } | null {
 	const decoded = decodeLinkStateJwt(state)
 	if (!decoded || decoded.purpose !== 'discord-link') return null
 
@@ -57,5 +60,5 @@ export function verifyLinkState(
 	if (!entry) return null
 	if (!isLinkStateNonceFresh(entry)) return null
 
-	return { playerId: entry.playerId, source: entry.source }
+	return { playerId: entry.playerId, source: entry.source, nakamaUserId: entry.nakamaUserId }
 }

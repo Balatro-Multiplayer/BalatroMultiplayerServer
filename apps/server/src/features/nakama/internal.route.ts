@@ -6,6 +6,10 @@ import * as muteGateway from '../../infrastructure/gateways/mute.gateway.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import * as reportGateway from '../../infrastructure/gateways/report.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
+import { getDiscordAuthUrl } from '../auth/discord.js'
+import { generateLinkState } from '../auth/link-state.js'
+import { discordLinkService } from './discord-link.js'
+import type { DiscordLinkService } from './discord-link.service.js'
 import { createPlayerSyncService, type PlayerSyncService } from './player-sync.service.js'
 import { createReportRelayService, parseNakamaReport, type ReportRelayService } from './report-relay.service.js'
 
@@ -41,6 +45,7 @@ function defaultReportService(): ReportRelayService {
 export function createInternalNakamaRouter(
 	sync: PlayerSyncService = defaultSyncService(),
 	reportRelay: ReportRelayService = defaultReportService(),
+	discordLink: DiscordLinkService = discordLinkService,
 ) {
 	const router = Router()
 	router.use(requireInternalKey)
@@ -72,6 +77,30 @@ export function createInternalNakamaRouter(
 				throw new AppError('Bad playerIds', 400)
 			const found = await playerGateway.findNakamaUserIds(ids)
 			res.json({ resolved: Object.fromEntries(found) })
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// {nakamaUserId} -> {url}: the Discord authorize URL for an in-game link.
+	// Its state names the Nakama user; /api/auth/discord/callback finishes it.
+	router.post('/discord/link-url', (req, res, next) => {
+		try {
+			const nakamaUserId = req.body?.nakamaUserId
+			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
+			res.json({ url: getDiscordAuthUrl(generateLinkState('', 'game', nakamaUserId)) })
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// {nakamaUserId} -> {ok}: the player unlinked Discord on Nakama.
+	router.post('/discord/unlinked', async (req, res, next) => {
+		try {
+			const nakamaUserId = req.body?.nakamaUserId
+			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
+			await discordLink.unlinkNakamaDiscord(nakamaUserId)
+			res.json({ ok: true })
 		} catch (err) {
 			next(err)
 		}

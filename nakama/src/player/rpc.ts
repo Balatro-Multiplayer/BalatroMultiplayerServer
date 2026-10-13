@@ -18,14 +18,14 @@ const MAX_MUTES = 1000
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // Tells the player's lobby (if any) about their new info.
-function pushToLobby(nk: nkruntime.Nakama, userId: string, info: Partial<PlayerInfo>) {
+export function pushToLobby(nk: nkruntime.Nakama, userId: string, info: Partial<PlayerInfo>) {
 	const current = currentLobby(nk, userId)
 	if (!current) return
 	const signal: LobbySignal = { type: 'player_info', userId, info }
 	nk.matchSignal(current.matchId, JSON.stringify(signal))
 }
 
-function accountUpdated(nk: nkruntime.Nakama, userId: string, profile: Profile) {
+export function accountUpdated(nk: nkruntime.Nakama, userId: string, profile: Profile) {
 	notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, 'account_updated', { player: playerView(userId, profile) })
 }
 

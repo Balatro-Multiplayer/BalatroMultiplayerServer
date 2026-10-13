@@ -9,6 +9,7 @@ import { getDiscordAuthUrl, validateDiscordCode } from './discord.js'
 import { fetchNakamaAccount, isNakamaAuthEnabled } from './nakama.js'
 import type { NakamaAccountError } from './nakama.js'
 import { generateLinkState, verifyLinkState } from './link-state.js'
+import { discordLinkService } from '../nakama/discord-link.js'
 import { cancelGracePeriod } from '../../infrastructure/mqtt/grace-period.service.js'
 import { getConfig } from '../../state/config.js'
 import { issueRefreshToken, redeemRefreshToken } from '../../infrastructure/gateways/refresh-token.gateway.js'
@@ -94,6 +95,26 @@ const NAKAMA_ACCOUNT_ERRORS: Record<NakamaAccountError, [message: string, status
 	invalid_session: ['Invalid Nakama session', 401],
 	no_steam_identity: ['Nakama account has no Steam identity', 401],
 	api_error: ['Nakama request failed', 502],
+}
+
+function linkPage(title: string, text: string, colour: string): string {
+	return `<!DOCTYPE html>
+<html><head><title>${title}</title>
+<style>body{font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0}
+.card{text-align:center;padding:2rem;border-radius:12px;background:#16213e;box-shadow:0 4px 20px rgba(0,0,0,0.3)}
+h1{color:${colour};margin-bottom:0.5rem}p{color:#a0a0b0}</style>
+</head><body><div class="card"><h1>${title}</h1><p>${text}</p></div></body></html>`
+}
+
+// The callback's answer to a link started in game over Nakama.
+const NAKAMA_LINK_PAGES = {
+	linked: linkPage('Discord Linked!', 'You can close this tab and return to the game.', '#5865f2'),
+	linked_elsewhere: linkPage(
+		'Already Linked',
+		'This Discord account is already linked to another player. Unlink it there first.',
+		'#ed4245',
+	),
+	unavailable: linkPage('Link Failed', 'The game server could not be reached. Please try again later.', '#ed4245'),
 }
 
 export function createAuthRouter(service: AuthService): Router {
@@ -379,6 +400,13 @@ export function createAuthRouter(service: AuthService): Router {
 
 			if (state) {
 				const linked = verifyLinkState(state)
+				if (linked?.nakamaUserId) {
+					const outcome = await discordLinkService.linkNakamaDiscord(linked.nakamaUserId, discordId, discordName)
+					res.status(outcome === 'linked' ? 200 : outcome === 'linked_elsewhere' ? 409 : 502)
+					res.setHeader('Content-Type', 'text/html')
+					res.send(NAKAMA_LINK_PAGES[outcome])
+					return
+				}
 				if (linked) {
 					const { token } = await service.linkDiscordToPlayer(linked.playerId, discordId, discordName)
 

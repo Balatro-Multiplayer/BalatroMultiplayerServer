@@ -215,15 +215,15 @@ function withoutBan(bans, banId) {
   return next;
 }
 function withoutExpired(bans, now) {
-  let changed = false;
+  let changed2 = false;
   const next = {};
   for (const type of BAN_TYPES) {
     const ban = bans[type];
     if (!ban) continue;
     if (activeBan(bans, type, now)) next[type] = ban;
-    else changed = true;
+    else changed2 = true;
   }
-  return changed ? next : bans;
+  return changed2 ? next : bans;
 }
 function bansFromList(list) {
   let bans = {};
@@ -3577,6 +3577,86 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   return JSON.stringify({ ok: true, reportId: reply.body.reportId });
 }
 
+// src/player/discord.ts
+var DISCORD_INDEX_COLLECTION = "discord_index";
+var USER_ID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var HASH = /^[A-Za-z0-9_-]{8,128}$/;
+var MAX_NAME = 64;
+function indexKey(hash) {
+  return { collection: DISCORD_INDEX_COLLECTION, key: hash, userId: SYSTEM_USER_ID };
+}
+function discordOwner(nk, hash) {
+  const objects = nk.storageRead([indexKey(hash)]);
+  return objects.length > 0 ? String(objects[0].value.userId) : null;
+}
+function claimDiscord(nk, userId, hash) {
+  const owner = discordOwner(nk, hash);
+  if (owner === userId) return;
+  if (owner !== null) throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
+  try {
+    nk.storageWrite([__spreadProps(__spreadValues({}, indexKey(hash)), { value: { userId }, version: "*", permissionRead: 0, permissionWrite: 0 })]);
+  } catch (e) {
+    throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
+  }
+}
+function releaseDiscord(nk, userId, hash) {
+  if (hash && discordOwner(nk, hash) === userId) nk.storageDelete([indexKey(hash)]);
+}
+function withDiscord(profile, hash, username) {
+  return __spreadProps(__spreadValues({}, profile), { discordIdHash: hash, discordUsername: username });
+}
+function withoutDiscord(profile) {
+  return __spreadProps(__spreadValues({}, profile), { discordIdHash: null, discordUsername: null, useDiscordName: false });
+}
+function changed(nk, userId, profile) {
+  syncDisplayName(nk, userId, profile);
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
+}
+function rpcDiscordLinkStart(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const reply = callExpress(nk, logger, ctx.env, "/discord/link-url", { nakamaUserId: userId });
+  const url = reply && reply.status === 200 ? reply.body.url : null;
+  if (typeof url !== "string") throw runtimeError(UNAVAILABLE, "Discord linking is unavailable right now");
+  return JSON.stringify({ url });
+}
+function rpcDiscordUnlink(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  let previous = null;
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      previous = current.discordIdHash;
+      return withoutDiscord(current);
+    },
+    ctx.username
+  );
+  releaseDiscord(nk, userId, previous);
+  changed(nk, userId, profile);
+  callExpress(nk, logger, ctx.env, "/discord/unlinked", { nakamaUserId: userId });
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcAdminDiscordSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const { userId, discordIdHash, discordUsername } = parsePayload(payload);
+  if (typeof userId !== "string" || !USER_ID2.test(userId)) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid userId");
+  if (typeof discordIdHash !== "string" || !HASH.test(discordIdHash))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid discordIdHash");
+  const name = typeof discordUsername === "string" && discordUsername ? discordUsername.slice(0, MAX_NAME) : null;
+  nk.accountGetId(userId);
+  claimDiscord(nk, userId, discordIdHash);
+  let previous = null;
+  const profile = updateProfile(nk, userId, (current) => {
+    previous = current.discordIdHash;
+    return withDiscord(current, discordIdHash, name);
+  });
+  if (previous !== discordIdHash) releaseDiscord(nk, userId, previous);
+  changed(nk, userId, profile);
+  logger.info("Linked Discord to %s", userId);
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
@@ -3606,6 +3686,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("profile_set_joker", rpcProfileSetJoker);
   initializer.registerRpc("profile_set_mods", rpcProfileSetMods);
   initializer.registerRpc("mute_set", rpcMuteSet);
+  initializer.registerRpc("discord_link_start", rpcDiscordLinkStart);
+  initializer.registerRpc("discord_unlink", rpcDiscordUnlink);
   initializer.registerRpc("chat_enable", rpcChatEnable);
   initializer.registerRpc("chat_send", rpcChatSend);
   initializer.registerRpc("report_submit", rpcReportSubmit);
@@ -3630,6 +3712,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_lobby_kick", rpcAdminLobbyKick);
   initializer.registerRpc("admin_lobby_close", rpcAdminLobbyClose);
   initializer.registerRpc("admin_player_get", rpcAdminPlayerGet);
+  initializer.registerRpc("admin_discord_set", rpcAdminDiscordSet);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

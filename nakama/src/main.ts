@@ -50,6 +50,7 @@ import { configureSeason } from './rating/season'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 import { rpcReportSubmit } from './moderation/report'
+import { rpcAdminDiscordSet, rpcDiscordLinkStart, rpcDiscordUnlink } from './player/discord'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -87,6 +88,8 @@ function InitModule(
 	initializer.registerRpc('profile_set_joker', rpcProfileSetJoker)
 	initializer.registerRpc('profile_set_mods', rpcProfileSetMods)
 	initializer.registerRpc('mute_set', rpcMuteSet)
+	initializer.registerRpc('discord_link_start', rpcDiscordLinkStart)
+	initializer.registerRpc('discord_unlink', rpcDiscordUnlink)
 	initializer.registerRpc('chat_enable', rpcChatEnable)
 	initializer.registerRpc('chat_send', rpcChatSend)
 	initializer.registerRpc('report_submit', rpcReportSubmit)
@@ -112,6 +115,7 @@ function InitModule(
 	initializer.registerRpc('admin_lobby_kick', rpcAdminLobbyKick)
 	initializer.registerRpc('admin_lobby_close', rpcAdminLobbyClose)
 	initializer.registerRpc('admin_player_get', rpcAdminPlayerGet)
+	initializer.registerRpc('admin_discord_set', rpcAdminDiscordSet)
 	logger.info('BMP lobby module loaded')
 }
 
