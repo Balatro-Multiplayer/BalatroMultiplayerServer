@@ -1,6 +1,6 @@
 import { Router } from 'express'
-import { authenticate } from '../../middleware/authenticate.js'
 import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
+import { authenticate } from '../../middleware/authenticate.js'
 import type { ReplayLogService } from './replay-log.service.js'
 
 export function createReplayLogRouter(service: ReplayLogService): Router {
@@ -8,29 +8,26 @@ export function createReplayLogRouter(service: ReplayLogService): Router {
 
 	router.use(authenticate)
 
-	// §22.2: discovery step for a client-side "My Matches" replay list --
-	// previously there was no way for a player to find their own past run ids
-	// at all (getMostRecentRunForLobbyCode serves report-filing only).
+	// The website's "My Matches" list.
 	router.get('/mine', async (req, res, next) => {
 		try {
-			const page = Math.max(1, Math.min(1000, Number.parseInt(String(req.query.page ?? '1'), 10) || 1))
-			const pageSize = Math.max(1, Math.min(50, Number.parseInt(String(req.query.pageSize ?? '20'), 10) || 20))
-			const result = await service.listMyRuns(req.player!.playerId, page, pageSize)
+			const page = Math.max(
+				1,
+				Math.min(1000, Number.parseInt(String(req.query.page ?? '1'), 10) || 1),
+			)
+			const pageSize = Math.max(
+				1,
+				Math.min(
+					50,
+					Number.parseInt(String(req.query.pageSize ?? '20'), 10) || 20,
+				),
+			)
+			const result = await service.listMyRuns(
+				req.player!.playerId,
+				page,
+				pageSize,
+			)
 			res.json(result)
-		} catch (err) {
-			next(err)
-		}
-	})
-
-	// Crash-relaunch rejoin detection: does the requesting player have a match
-	// still in progress right now (see service.findActiveRunForPlayer's own
-	// doc comment for scope -- server-process-alive, in-memory only). The
-	// client polls this once after boot/connect to decide whether to show a
-	// Rejoin/Abandon prompt.
-	router.get('/mine/active', async (req, res, next) => {
-		try {
-			const active = service.findActiveRunForPlayer(req.player!.playerId)
-			res.json({ active })
 		} catch (err) {
 			next(err)
 		}
@@ -43,7 +40,9 @@ export function createReplayLogRouter(service: ReplayLogService): Router {
 			// website -- no live game session required -- still gets access.
 			const player = await findPlayerById(req.player!.playerId)
 			const isModerator =
-				player?.privileges.includes('admin') || player?.privileges.includes('moderator') || false
+				player?.privileges.includes('admin') ||
+				player?.privileges.includes('moderator') ||
+				false
 
 			const result = await service.getReplay(
 				req.params.runId,

@@ -6,7 +6,7 @@ import { setConfig } from '../state/config.js'
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test'
 process.env.JWT_SECRET = 'test-jwt-secret'
 process.env.STEAM_WEB_API_KEY = 'test-steam-key'
-process.env.EMQX_SYSTEM_PASSWORD = 'test-emqx-password'
+process.env.NAKAMA_URL = 'http://nakama.test:7350'
 process.env.PLAYER_ID_SALT = 'test-player-id-salt'
 process.env.ADMIN_SECRET = 'test-admin-secret'
 // features/webadmin/archives.service.ts resolves ARCHIVE_DIR into an
@@ -14,31 +14,6 @@ process.env.ADMIN_SECRET = 'test-admin-secret'
 // run before any test file's own imports) rather than in an individual test
 // file, where it would be too late.
 process.env.ARCHIVE_DIR = path.join(import.meta.dirname, 'fixtures', 'archives')
-
-// Mock the MQTT service globally — no real broker in tests
-vi.mock('../infrastructure/mqtt/mqtt.service.js', () => ({
-	mqttService: {
-		connect: vi.fn().mockResolvedValue(undefined),
-		publishEvent: vi.fn().mockResolvedValue(undefined),
-		publishMetadata: vi.fn().mockResolvedValue(undefined),
-		publishPlayerInfo: vi.fn().mockResolvedValue(undefined),
-		publishChatMessage: vi.fn().mockResolvedValue(undefined),
-		publishToPlayer: vi.fn().mockResolvedValue(undefined),
-		publishAdminQueueEvent: vi.fn().mockResolvedValue(undefined),
-		clearPlayerInfo: vi.fn().mockResolvedValue(undefined),
-		cleanupLobbyTopics: vi.fn().mockResolvedValue(undefined),
-		cleanupPlayerState: vi.fn().mockResolvedValue(undefined),
-		disconnect: vi.fn().mockResolvedValue(undefined),
-	},
-}))
-
-// Mock the refresh-token gateway — no real DB in tests
-vi.mock('../infrastructure/gateways/refresh-token.gateway.js', () => ({
-	issueRefreshToken: vi.fn().mockResolvedValue('mock-refresh-token'),
-	redeemRefreshToken: vi.fn().mockResolvedValue(null),
-	revokeAllTokens: vi.fn().mockResolvedValue(undefined),
-	cleanupExpiredTokens: vi.fn().mockResolvedValue(0),
-}))
 
 // A minimal fluent-builder stand-in for db.select()... chains (from/where/
 // orderBy/limit/offset, any order, any subset) -- thenable so `await
@@ -119,11 +94,6 @@ vi.mock('../infrastructure/gateways/mute.gateway.js', () => ({
 	listMutes: vi.fn().mockResolvedValue([]),
 }))
 
-// Mock the EMQX admin client — no real broker in tests
-vi.mock('../infrastructure/emqx/emqx-admin.service.js', () => ({
-	kickClient: vi.fn().mockResolvedValue(true),
-}))
-
 const mockPlayerRecord = {
 	id: 'mock-id',
 	steamIdHash: null,
@@ -167,27 +137,14 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 // Reset in-memory state between tests
 beforeEach(async () => {
 	const state = await import('../state/index.js')
-	state.lobbies.clear()
 	state.sessions.clear()
 	state.steamIndex.clear()
 	state.discordIndex.clear()
 	state.stopSessionCleanup()
 
-	const mm = await import('../state/matchmaking.js')
-	mm.queues.clear()
-	mm.playerQueues.clear()
-	mm.matches.clear()
-	mm.matchByLobby.clear()
-
 	// Clear CSRF link state nonces
 	const linkState = await import('../features/auth/link-state.js')
 	linkState.linkStateNonces.clear()
-
-	// Clear grace periods
-	const gracePeriod = await import(
-		'../infrastructure/mqtt/grace-period.service.js'
-	)
-	gracePeriod.clearAllGracePeriods()
 
 	// Reset server config — tosVersion 0 disables TOS gating in tests
 	setConfig({ tosVersion: 0, mods: [], chatAllowlist: new Set() })

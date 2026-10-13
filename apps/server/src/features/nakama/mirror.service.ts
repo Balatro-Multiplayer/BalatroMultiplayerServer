@@ -21,7 +21,12 @@ export interface NakamaRun {
 	startedAt: number
 	endedAt: number
 	status: 'agreed' | 'partial' | 'disputed' | 'abandoned' | 'restarted'
-	placements: { playerId: string; place: number; performance?: number; metric?: number }[]
+	placements: {
+		playerId: string
+		place: number
+		performance?: number
+		metric?: number
+	}[]
 	reports: { [userId: string]: { playerId: string; place: number }[] }
 	reportOrder?: string[]
 	players: { id: string; displayName: string }[]
@@ -63,7 +68,13 @@ export interface PulledChat {
 	key: string
 	kind: 'chat'
 	at: number
-	line: { lobbyCode: string; userId: string; message: string; flagged: boolean; verdict: unknown }
+	line: {
+		lobbyCode: string
+		userId: string
+		message: string
+		flagged: boolean
+		verdict: unknown
+	}
 }
 
 // A player back right after timing out of a matchmade game.
@@ -94,11 +105,11 @@ export interface MirrorPull {
 // The rows an entry becomes (pure)
 // ---------------------------------------------------------------------------
 
-// How long a run's logs are kept unless one is flagged (replay-log.service.ts).
+// How long a run's logs are kept unless one is flagged.
 export const RUN_LOG_TTL_MS = 180 * 24 * 60 * 60 * 1000
-// How long a chat line is kept unless it is flagged (history.gateway.ts).
+// How long a chat line is kept unless it is flagged.
 export const CHAT_LOG_TTL_MS = 90 * 24 * 60 * 60 * 1000
-// How long a flagged message is kept (chat.gateway.ts).
+// How long a flagged message is kept.
 export const FLAGGED_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
 export interface RunRows {
@@ -164,6 +175,10 @@ export interface RunRows {
 	}[]
 }
 
+export function rankedGameModeOf(mode: string): string {
+	return mode.startsWith('ranked:') ? mode : 'ranked:' + mode
+}
+
 function placesKey(placements: { playerId: string; place: number }[]): string {
 	return JSON.stringify(
 		placements
@@ -172,14 +187,21 @@ function placesKey(placements: { playerId: string; place: number }[]): string {
 	)
 }
 
-function conflictsOf(run: NakamaRun, ids: Map<string, string>): RunRows['conflicts'] {
+function conflictsOf(
+	run: NakamaRun,
+	ids: Map<string, string>,
+): RunRows['conflicts'] {
 	if (run.status !== 'disputed' || !run.gameMode) return []
-	const order = (run.reportOrder ?? Object.keys(run.reports)).filter((id) => run.reports[id] && ids.has(id))
+	const order = (run.reportOrder ?? Object.keys(run.reports)).filter(
+		(id) => run.reports[id] && ids.has(id),
+	)
 	const result = placesKey(run.placements)
 	const first = order.find((id) => placesKey(run.reports[id]) === result)
 	if (!first) return []
 	const inPg = (placements: { playerId: string; place: number }[]) =>
-		placements.filter((p) => ids.has(p.playerId)).map((p) => ({ playerId: ids.get(p.playerId) as string, place: p.place }))
+		placements
+			.filter((p) => ids.has(p.playerId))
+			.map((p) => ({ playerId: ids.get(p.playerId) as string, place: p.place }))
 	return order
 		.filter((id) => placesKey(run.reports[id]) !== result)
 		.map((id) => ({
@@ -200,7 +222,10 @@ export interface ForfeitRow {
 	reconnectedAt: Date
 }
 
-export function forfeitRowOf(entry: PulledForfeit, playerId: string): ForfeitRow {
+export function forfeitRowOf(
+	entry: PulledForfeit,
+	playerId: string,
+): ForfeitRow {
 	return {
 		matchId: entry.runId,
 		lobbyCode: entry.code,
@@ -210,7 +235,9 @@ export function forfeitRowOf(entry: PulledForfeit, playerId: string): ForfeitRow
 	}
 }
 
-function runStatusOf(status: NakamaRun['status']): RunRows['lobbyRun']['status'] {
+function runStatusOf(
+	status: NakamaRun['status'],
+): RunRows['lobbyRun']['status'] {
 	if (status === 'abandoned') return 'abandoned'
 	if (status === 'restarted') return 'terminated'
 	return 'completed'
@@ -227,14 +254,17 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	const flagged: RunRows['flagged'] = []
 	for (const player of seated) {
 		const log = entry.logs[player.id]
-		const check = (run.logChecks && run.logChecks[player.id]) || (log ? log.check : 'unavailable')
+		const check =
+			(run.logChecks && run.logChecks[player.id]) ||
+			(log ? log.check : 'unavailable')
 		// Runs stored before flags existed have only their log checks.
 		const flagReason: FlagReason | null = run.flags
 			? run.flags[player.id] || null
 			: check === 'mismatch'
 				? 'hash_mismatch'
 				: null
-		if (flagReason) flagged.push({ playerId: pg(player.id), reason: flagReason })
+		if (flagReason)
+			flagged.push({ playerId: pg(player.id), reason: flagReason })
 		logs.push({
 			runId: run.runId,
 			playerId: pg(player.id),
@@ -256,7 +286,9 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 				gameMode: run.gameMode,
 				players: seated.map((p) => pg(p.id)),
 				lobbyState: {
-					playerInfos: Object.fromEntries(seated.map((p) => [pg(p.id), { displayName: p.displayName }])),
+					playerInfos: Object.fromEntries(
+						seated.map((p) => [pg(p.id), { displayName: p.displayName }]),
+					),
 				},
 				status: 'resolved',
 				gameStartedAt: new Date(run.startedAt),
@@ -277,7 +309,9 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			ratings.push({
 				playerId: pg(userId),
 				modId: entry.rating.modId,
-				gameMode: entry.rating.mode,
+				// Nakama keys boards by the bare mode; Postgres and the website by
+				// the queue's game mode.
+				gameMode: rankedGameModeOf(entry.rating.mode),
 				season: entry.rating.season,
 				rating: Math.round(r.rating),
 				wins: r.wins,
@@ -295,7 +329,9 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			id: run.runId,
 			lobbyCode: run.code,
 			modId: run.modId,
-			lobbyType: run.lobbyType ?? (run.gameMode || run.rankedMode ? 'public' : 'private'),
+			lobbyType:
+				run.lobbyType ??
+				(run.gameMode || run.rankedMode ? 'public' : 'private'),
 			matchmakingMatchId: match ? match.matchId : null,
 			status: runStatusOf(run.status),
 			startedAt: new Date(run.startedAt),
@@ -335,12 +371,23 @@ export interface ChatRows {
 // flagged_messages.matches as the API's own filters wrote it: the local word
 // filter's matches, or the remote service's band.
 function flagMatchesOf(verdict: unknown): unknown {
-	const record = typeof verdict === 'object' && verdict !== null ? (verdict as { [key: string]: unknown }) : {}
-	if (record.source === 'local' && Array.isArray(record.matches)) return record.matches
-	return { source: 'remote', band: typeof record.band === 'string' ? record.band : 'unknown' }
+	const record =
+		typeof verdict === 'object' && verdict !== null
+			? (verdict as { [key: string]: unknown })
+			: {}
+	if (record.source === 'local' && Array.isArray(record.matches))
+		return record.matches
+	return {
+		source: 'remote',
+		band: typeof record.band === 'string' ? record.band : 'unknown',
+	}
 }
 
-export function chatRowsOf(entry: PulledChat, playerId: string, steamIdHash: string | null): ChatRows {
+export function chatRowsOf(
+	entry: PulledChat,
+	playerId: string,
+	steamIdHash: string | null,
+): ChatRows {
 	const { line } = entry
 	const sentAt = new Date(entry.at)
 	return {
@@ -373,11 +420,18 @@ export function chatRowsOf(entry: PulledChat, playerId: string, steamIdHash: str
 
 export interface MirrorDeps {
 	players: {
-		findPlayerIdsByNakamaUserIds(nakamaUserIds: string[]): Promise<Map<string, string>>
+		findPlayerIdsByNakamaUserIds(
+			nakamaUserIds: string[],
+		): Promise<Map<string, string>>
 		findPlayerById(id: string): Promise<{ id: string } | null>
 		findPlayerBySteamIdHash(hash: string): Promise<{ id: string } | null>
 		linkNakamaUser(playerId: string, nakamaUserId: string): Promise<void>
-		createPlayer(data: { id: string; steamName: string; steamIdHash?: string; nakamaUserId?: string }): Promise<{ id: string }>
+		createPlayer(data: {
+			id: string
+			steamName: string
+			steamIdHash?: string
+			nakamaUserId?: string
+		}): Promise<{ id: string }>
 	}
 	store: {
 		storeRun(rows: RunRows): Promise<void>
@@ -396,15 +450,21 @@ export function createMirrorService(deps: MirrorDeps) {
 	// without a linked row (their first-login sync failed, or a dev device
 	// login) gets one: the row their profile names, else found by Steam id,
 	// else created.
-	async function resolvePlayers(pulled: MirrorPull): Promise<Map<string, string>> {
+	async function resolvePlayers(
+		pulled: MirrorPull,
+	): Promise<Map<string, string>> {
 		const userIds = Object.keys(pulled.players)
 		const ids = await players.findPlayerIdsByNakamaUserIds(userIds)
 		for (const userId of userIds) {
 			if (ids.has(userId)) continue
 			const info = pulled.players[userId]
 			const existing =
-				(info.legacyPlayerId ? await players.findPlayerById(info.legacyPlayerId) : null) ??
-				(info.steamId ? await players.findPlayerBySteamIdHash(hashSteamId(info.steamId)) : null)
+				(info.legacyPlayerId
+					? await players.findPlayerById(info.legacyPlayerId)
+					: null) ??
+				(info.steamId
+					? await players.findPlayerBySteamIdHash(hashSteamId(info.steamId))
+					: null)
 			if (existing) {
 				await players.linkNakamaUser(existing.id, userId)
 				ids.set(userId, existing.id)
@@ -423,7 +483,9 @@ export function createMirrorService(deps: MirrorDeps) {
 
 	// Stores every entry it can; returns the keys stored (to ack). An entry
 	// that fails stays in the outbox for the next pull.
-	async function storePull(pulled: MirrorPull): Promise<{ stored: string[]; failed: string[] }> {
+	async function storePull(
+		pulled: MirrorPull,
+	): Promise<{ stored: string[]; failed: string[] }> {
 		const stored: string[] = []
 		const failed: string[] = []
 		if (pulled.entries.length === 0) return { stored, failed }
@@ -439,12 +501,21 @@ export function createMirrorService(deps: MirrorDeps) {
 					const playerId = ids.get(entry.line.userId)
 					if (playerId) {
 						const steamId = pulled.players[entry.line.userId]?.steamId
-						await store.storeChat(chatRowsOf(entry, playerId, steamId ? hashSteamId(steamId) : null))
+						await store.storeChat(
+							chatRowsOf(
+								entry,
+								playerId,
+								steamId ? hashSteamId(steamId) : null,
+							),
+						)
 					}
 				}
 				stored.push(entry.key)
 			} catch (err) {
-				console.error(`[mirror] Could not store ${entry.kind} ${entry.key}:`, err)
+				console.error(
+					`[mirror] Could not store ${entry.kind} ${entry.key}:`,
+					err,
+				)
 				failed.push(entry.key)
 			}
 		}

@@ -1,31 +1,4 @@
 services:
-  emqx:
-    image: emqx/emqx:5.8
-    container_name: bmp-emqx
-    ports:
-      - "8883:8883"
-      # Plain MQTT for local dev clients (custom_server_secure=false -> port 1883).
-      - "1883:1883"
-    environment:
-      EMQX_NAME: bmp-emqx
-    volumes:
-      - ./apps/server/emqx/cluster.hocon:/opt/emqx/etc/cluster.hocon:ro
-      # Let's Encrypt cert for mqtt.balatromp.com, copied out of /etc/letsencrypt
-      # (root-only permissions there aren't readable by the non-root emqx
-      # container user) by /etc/letsencrypt/renewal-hooks/deploy/reload-emqx.sh,
-      # which also restarts this container on renewal.
-      - /root/emqx-certs/mqtt.balatromp.com:/opt/emqx/etc/certs:ro
-      - emqx-data:/opt/emqx/data
-      - emqx-log:/opt/emqx/log
-    healthcheck:
-      test: ["CMD", "emqx", "ctl", "status"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - bmp
-
   postgres:
     image: postgres:16-alpine
     container_name: bmp-postgres
@@ -44,15 +17,89 @@ services:
     networks:
       - bmp
 
+  # The game backend. Game clients reach it at nakama.balatromp.com through
+  # nginx (HTTP and the websocket on 7350); the API drives it over the
+  # compose network. Its data lives in a separate "nakama" database on the
+  # shared Postgres server; `migrate up` creates it on first start. Secrets
+  # come from the root .env -- the entrypoint refuses to start without them.
+  # docker-compose.local.yml swaps in local.yml and dev placeholders.
+  nakama:
+    image: heroiclabs/nakama:3.41.0
+    container_name: bmp-nakama
+    # Longer than prod.yml's shutdown_grace_sec, so lobbies get to checkpoint.
+    stop_grace_period: 30s
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        db="postgres:postgres@postgres:5432/nakama"
+        /nakama/nakama migrate up --database.address "$$db"
+        exec /nakama/nakama --config /nakama/data/prod.yml \
+          --database.address "$$db" \
+          --socket.server_key "$${NAKAMA_SERVER_KEY:?}" \
+          --session.encryption_key "$${NAKAMA_SESSION_KEY:?}" \
+          --session.refresh_encryption_key "$${NAKAMA_REFRESH_KEY:?}" \
+          --runtime.http_key "$${NAKAMA_HTTP_KEY:?}" \
+          --console.username admin \
+          --console.password "$${NAKAMA_CONSOLE_PASSWORD:?}" \
+          --console.signing_key "$${NAKAMA_CONSOLE_SIGNING_KEY:?}" \
+          --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
+          --runtime.env "STEAM_WEB_API_KEY=$${STEAM_WEB_API_KEY:?}" \
+          --runtime.env "PLAYER_ID_SALT=$${PLAYER_ID_SALT:?}" \
+          --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
+          --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
+          --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
+          --runtime.env "EXPRESS_INTERNAL_KEY=$${INTERNAL_API_KEY:?}"
+    environment:
+      STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
+      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+      # Same salt as the API's, so a login's Steam id hashes to the key the
+      # legacy ratings import parked its ratings under.
+      PLAYER_ID_SALT: ${PLAYER_ID_SALT:-}
+      # The client ships this (MPAPI api/connection/lifecycle.lua
+      # SERVER_DEFAULTS.server_key), so the two must match.
+      NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}
+      NAKAMA_SESSION_KEY: ${NAKAMA_SESSION_KEY:-}
+      NAKAMA_REFRESH_KEY: ${NAKAMA_REFRESH_KEY:-}
+      NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-}
+      NAKAMA_CONSOLE_PASSWORD: ${NAKAMA_CONSOLE_PASSWORD:-}
+      NAKAMA_CONSOLE_SIGNING_KEY: ${NAKAMA_CONSOLE_SIGNING_KEY:-}
+      # What Nakama sends on the API's /internal/nakama/* routes (through
+      # nginx, so a blue/green swap is invisible here).
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
+      # Chat is judged by moderation-lb (hardcoded in nakama/src/chat). It
+      # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
+      # missing model from blocking. "off" judges chat with the local word
+      # filter (nakama/src/chat/filter.ts) instead.
+      MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
+      MODERATION_REMOTE: ${MODERATION_REMOTE:-on}
+    volumes:
+      - ./nakama/prod.yml:/nakama/data/prod.yml:ro
+      - ./nakama/modules:/nakama/data/modules:ro
+    ports:
+      # The console, for an SSH tunnel only.
+      - "127.0.0.1:7351:7351"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      moderation-lb:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - bmp
+
   # api-blue/api-green: the blue-green pair (scripts/deploy-color-swap.sh).
   # Neither publishes a host port or is reachable as plain "api" on the bmp
   # network -- the `nginx` service below is the only stable address, for
-  # both external traffic (published 80/443 in prod, 127.0.0.1:8788 for
-  # local dev -- see docker-compose.local.yml) and EMQX's own webhook/authn
-  # calls (which are hardcoded to "http://api:8788" in
-  # cluster.hocon/emqx-provision.service.ts and were never changed -- nginx
-  # just took over that identity via a network alias, so EMQX never needs to
-  # know a swap happened at all).
+  # external traffic (published 80/443 in prod, 127.0.0.1:8788 for local dev
+  # -- see docker-compose.local.yml), web's server-side calls and Nakama's
+  # /internal/nakama/* calls, all through the "api" network alias.
   api-blue: &api-color
     build:
       context: .
@@ -61,16 +108,13 @@ services:
     env_file: ./apps/server/.env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/bmp
-      EMQX_BROKER_URL: mqtt://emqx:1883
-      EMQX_API_URL: http://emqx:18083/api/v5
       WEB_BASE_URL: ${WEB_BASE_URL:-https://new.balatromp.com}
-      # Chat is moderated by default here so the stack works out of the box.
-      # This needs a model in the moderation volume: without one the service
-      # reports not-ready and chat fails closed rather than going through
-      # unmoderated. To turn the bridge off instead, run with
-      #   MODERATION_SERVICE_URL= docker compose up
-      # and chat falls back to the local obscenity filter.
-      MODERATION_SERVICE_URL: ${MODERATION_SERVICE_URL-http://moderation-lb:8001}
+      # The API mirrors Nakama's games into Postgres and drives it through
+      # its server-only admin RPCs (NAKAMA_HTTP_KEY = Nakama's
+      # runtime.http_key); INTERNAL_API_KEY guards /internal/nakama/*.
+      NAKAMA_URL: http://nakama:7350
+      NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       ARCHIVE_DIR: /app/archives
     volumes:
       # Read-only bind mount of manually-populated Discord channel archive
@@ -79,12 +123,8 @@ services:
       # deploy host uses a different path. This app never writes here.
       - ${ARCHIVE_DIR:-/opt/bmp/archives}:/app/archives:ro
     depends_on:
-      emqx:
-        condition: service_healthy
       postgres:
         condition: service_healthy
-      moderation-lb:
-        condition: service_started
     healthcheck:
       # node's global fetch (no curl/wget in node:22-alpine) against the
       # existing /health endpoint (main.ts) -- previously unused by anything,
@@ -151,8 +191,7 @@ services:
 
   # Round-robins across the 5 replicas above (nginx/moderation-upstream.conf),
   # with passive failover (max_fails/fail_timeout) if one goes unhealthy.
-  # Internal-only, no TLS, no host port -- api-blue/api-green are the only
-  # callers, via MODERATION_SERVICE_URL above.
+  # Internal-only, no TLS, no host port -- Nakama's chat is the only caller.
   moderation-lb:
     image: nginx:1.27-alpine
     container_name: bmp-moderation-lb
@@ -204,24 +243,20 @@ services:
       # "Full (strict)" (which would reject an untrusted origin cert
       # outright) - if that mode is ever tightened, this needs a real
       # Origin CA cert first. Long-lived either way, no certbot/renewal
-      # hook needed (unlike EMQX's mqtt.balatromp.com cert below, which is
-      # real Let's Encrypt and does renew - see the certbot mount below).
+      # hook needed. nakama.balatromp.com is served with the same cert,
+      # which "Full" mode accepts just as well.
       - /etc/nginx/ssl/bmp.crt:/etc/nginx/ssl/bmp.crt:ro
       - /etc/nginx/ssl/bmp.key:/etc/nginx/ssl/bmp.key:ro
-      # certbot's webroot HTTP-01 authenticator for mqtt.balatromp.com
-      # drops its challenge file here; nginx/prod/server.conf's
-      # mqtt.balatromp.com server block serves it back. Read-only - only
-      # certbot itself (running on the host, outside this container) ever
-      # writes here.
-      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       api-green:
+        condition: service_started
+      nakama:
         condition: service_started
     healthcheck:
       # Generous start_period -- this proxies straight through to whichever
       # api color is currently starting, so it can't become healthy any
       # faster than that color's own app boot. Hits the internal :8788
-      # listener (server.conf's first server block - the same one EMQX/web
+      # listener (server.conf's first server block - the same one Nakama/web
       # use via the "api" network alias), not the public :443 vhost - the
       # public vhost's bare "/health" (no /api/ prefix) falls through to
       # location / (the web app, which has no such route -> 404), and only
@@ -260,7 +295,5 @@ networks:
     name: bmp
 
 volumes:
-  emqx-data:
-  emqx-log:
   pg-data:
   moderation-model-cache:

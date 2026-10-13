@@ -111,6 +111,7 @@ declare namespace nkruntime {
 			metadata: { [key: string]: unknown },
 			overrideOperator?: 'best' | 'set' | 'incr' | 'decr',
 		): LeaderboardRecord
+		leaderboardRecordDelete(id: string, ownerId: string): void
 		leaderboardRecordsList(
 			id: string,
 			ownerIds: string[] | null,

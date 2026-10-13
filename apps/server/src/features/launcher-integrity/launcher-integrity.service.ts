@@ -1,10 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ILauncherIntegrityRepository } from '../../contracts/ILauncherIntegrityRepository.js'
-import type { IMessageBus } from '../../contracts/IMessageBus.js'
 import { env } from '../../env.js'
-import * as launcherIntegrityGateway from '../../infrastructure/gateways/launcher-integrity.gateway.js'
-import { mirrorIntegrityToNakama } from '../../infrastructure/nakama/integrity-sync.js'
-import { mqttService } from '../../infrastructure/mqtt/mqtt.service.js'
 import type {
 	ChallengeKind,
 	ChallengeStrategy,
@@ -32,15 +28,22 @@ export interface IntegrityVerdict {
 	message?: string
 }
 
+// Sends a player one 'challenge' message: issued, verified or failed.
+export type ChallengeSender = (
+	playerId: string,
+	payload: Record<string, unknown>,
+) => Promise<void>
+
 interface LauncherIntegrityServiceDeps {
-	messageBus: IMessageBus
+	sendChallenge: ChallengeSender
 	repository: ILauncherIntegrityRepository
 	// Told every verdict (best effort, errors are logged): Nakama keeps its
 	// own copy to gate its ranked queue on - see features/nakama/integrity.ts.
 	onVerdict?: (playerId: string, verdict: IntegrityVerdict) => Promise<void>
 }
 
-const FAILED_MESSAGE = "Anti-cheat check failed. You'll need to pass it to queue for Ranked."
+const FAILED_MESSAGE =
+	"Anti-cheat check failed. You'll need to pass it to queue for Ranked."
 
 export type LauncherIntegrityService = ReturnType<
 	typeof createLauncherIntegrityService
@@ -84,8 +87,7 @@ function extractReadinessVerdict(
 // ui/anticheat_failed_overlay.lua), but does NOT disconnect them (see
 // failIntegrity below). A cctl-launched or otherwise non-BET client can
 // never answer this challenge, and by design that only costs it Ranked
-// eligibility (isLauncherVerified() gates the Ranked queue guard in
-// matchmaking.service.ts) -- Casual play, private lobbies, and everything
+// eligibility (the verdict gates Nakama's Ranked queue hook) -- Casual play, private lobbies, and everything
 // else stay fully usable while unverified.
 //
 // The real verify()/issue() cryptography never lives in this repo -- see
@@ -98,7 +100,7 @@ function extractReadinessVerdict(
 export function createLauncherIntegrityService(
 	deps: LauncherIntegrityServiceDeps,
 ) {
-	const { messageBus, repository, onVerdict } = deps
+	const { sendChallenge, repository, onVerdict } = deps
 	let strategy: ChallengeStrategy | null = null
 	let rankedReadinessFailureHandler: RankedReadinessFailureHandler | null = null
 
@@ -106,7 +108,10 @@ export function createLauncherIntegrityService(
 		strategy = s
 	}
 
-	async function reportVerdict(playerId: string, verdict: IntegrityVerdict): Promise<void> {
+	async function reportVerdict(
+		playerId: string,
+		verdict: IntegrityVerdict,
+	): Promise<void> {
 		if (!onVerdict) return
 		await onVerdict(playerId, verdict).catch((err) => {
 			console.error('[launcher-integrity] Failed to report verdict:', err)
@@ -117,23 +122,24 @@ export function createLauncherIntegrityService(
 		return strategy !== null
 	}
 
-	// matchmaking.service.ts registers exactly one handler here (once, at
-	// its own module-singleton construction - see that file) so this
-	// feature never has to import matchmaking directly (matchmaking
-	// already imports this one, for isLauncherVerified() - a reverse
-	// import would be circular). Fired only on a ranked_readiness
+	// nakama/integrity.ts registers exactly one handler here, which cancels
+	// the player's Nakama queue ticket. Fired only on a ranked_readiness
 	// failure/refusal/timeout/stale-verdict; a successful current+current
 	// verdict needs no action at all (the player just stays queued).
-	function onRankedReadinessFailed(handler: RankedReadinessFailureHandler): void {
+	function onRankedReadinessFailed(
+		handler: RankedReadinessFailureHandler,
+	): void {
 		rankedReadinessFailureHandler = handler
 	}
 
-	// matchmaking.service.ts::joinQueue calls this right after a
-	// successful Ranked queue join - fire-and-forget from that call site,
+	// Called right after a Ranked queue join (Nakama's queue hook, through
+	// /internal/nakama/integrity/ranked-readiness) - fire-and-forget from that call site,
 	// the eventual outcome arrives asynchronously through
 	// handleChallengeResponse/handleChallengeTimeout below, same as every
 	// other challenge kind.
-	async function issueRankedReadinessChallenge(playerId: string): Promise<void> {
+	async function issueRankedReadinessChallenge(
+		playerId: string,
+	): Promise<void> {
 		await issueChallenge(playerId, 'ranked_readiness')
 	}
 
@@ -192,7 +198,7 @@ export function createLauncherIntegrityService(
 
 		session.activeChallenge = { challengeId, kind, issuance, timeoutTimer }
 
-		await messageBus.publishToPlayer(playerId, 'challenge', {
+		await sendChallenge(playerId, {
 			type: 'issued',
 			challengeId,
 			kind,
@@ -202,8 +208,8 @@ export function createLauncherIntegrityService(
 		})
 	}
 
-	// EMQX client.connected webhook (see emqx.route.ts) -- issues the login
-	// challenge. A fresh MQTT connection always starts a fresh integrity
+	// Nakama session start (/internal/nakama/integrity/session-start) -- issues the login
+	// challenge. A fresh session always starts a fresh integrity
 	// session: any leftover state from a prior connection (e.g. a stale timer
 	// from a session that never cleanly disconnected) is invalid now.
 	async function handleClientConnected(playerId: string): Promise<void> {
@@ -244,13 +250,12 @@ export function createLauncherIntegrityService(
 	// though it doesn't change what happens here.
 	//
 	// Deliberately does NOT disconnect the player -- only clears
-	// launcherVerified, which is all matchmaking.service.ts's Ranked queue
-	// guard actually checks. Casual play, private lobbies, chat, etc. are
+	// launcherVerified, which is all Nakama's Ranked queue guard actually
+	// checks. Casual play, private lobbies, chat, etc. are
 	// untouched by a failed/refused/timed-out challenge. This is what makes
 	// the check non-punitive for anyone who simply isn't running through the
 	// real launcher (Casual players, a manual game launch, ClaudeControl-driven
-	// testing) instead of relying on the disconnect-then-grace-period dance a
-	// kick would otherwise require.
+	// testing) instead of the forced rejoin a kick would otherwise require.
 	async function failIntegrity(
 		playerId: string,
 		kind: ChallengeKind,
@@ -270,14 +275,17 @@ export function createLauncherIntegrityService(
 		session.launcherVerified = false
 		session.launcherRefused = true
 
-		await messageBus
-			.publishToPlayer(playerId, 'challenge', {
-				type: 'failed',
-				reason,
-				message: FAILED_MESSAGE,
-			})
-			.catch(() => {})
-		await reportVerdict(playerId, { verified: false, permanent: false, reason, message: FAILED_MESSAGE })
+		await sendChallenge(playerId, {
+			type: 'failed',
+			reason,
+			message: FAILED_MESSAGE,
+		}).catch(() => {})
+		await reportVerdict(playerId, {
+			verified: false,
+			permanent: false,
+			reason,
+			message: FAILED_MESSAGE,
+		})
 	}
 
 	// Fired by the setTimeout armed in issueChallenge -- looks the challenge up
@@ -316,8 +324,7 @@ export function createLauncherIntegrityService(
 		await failIntegrity(playerId, kind, wasVerifiedBefore, 'timeout')
 	}
 
-	// MQTT player/{playerId}/challenge-response handler (see mqtt.service.ts's
-	// subscribeToPlayerChallengeResponses, wired in main.ts).
+	// The player's answer, relayed by /internal/nakama/integrity/answer.
 	async function handleChallengeResponse(
 		playerId: string,
 		payload: { challengeId?: unknown; response?: unknown; refused?: unknown },
@@ -375,13 +382,11 @@ export function createLauncherIntegrityService(
 		// closed until the next periodic challenge succeeds, not a security
 		// hole (the server-side joinQueue() guard is the actual enforcement
 		// point either way).
-		await messageBus
-			.publishToPlayer(playerId, 'challenge', {
-				type: 'verified',
-				challengeId: active.challengeId,
-				kind: active.kind,
-			})
-			.catch(() => {})
+		await sendChallenge(playerId, {
+			type: 'verified',
+			challengeId: active.challengeId,
+			kind: active.kind,
+		}).catch(() => {})
 		await reportVerdict(playerId, { verified: true, permanent: false })
 
 		scheduleNextPeriodicChallenge(playerId)
@@ -453,14 +458,3 @@ export function createLauncherIntegrityService(
 		clearAll,
 	}
 }
-
-// Module-level singleton, matching mqttService/replayLogService/
-// gracePeriodService -- the EMQX webhook, the MQTT challenge-response
-// subscriber, main.ts's registerPrivate call, and matchmaking.service.ts's
-// joinQueue guard all need to reach the same in-memory session map without
-// being threaded through DI at every call site.
-export const launcherIntegrityService = createLauncherIntegrityService({
-	messageBus: mqttService,
-	repository: launcherIntegrityGateway,
-	onVerdict: mirrorIntegrityToNakama,
-})

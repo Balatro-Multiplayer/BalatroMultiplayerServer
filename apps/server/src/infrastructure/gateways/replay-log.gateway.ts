@@ -1,68 +1,12 @@
 import { desc, eq, inArray, lt } from 'drizzle-orm'
 import type {
-	InsertRunParams,
 	LobbyRunStatus,
 	PaginatedRuns,
 	RunRow,
 	RunWithLogs,
-	UpsertPlayerLogParams,
 } from '../../contracts/IReplayLogRepository.js'
 import { db } from '../db/index.js'
 import { lobbyRuns, matchRunLogs } from '../db/schema.js'
-
-export async function insertRun(params: InsertRunParams): Promise<string> {
-	const [row] = await db
-		.insert(lobbyRuns)
-		.values({
-			lobbyCode: params.lobbyCode,
-			modId: params.modId,
-			lobbyType: params.lobbyType,
-			matchmakingMatchId: params.matchmakingMatchId ?? undefined,
-		})
-		.returning({ id: lobbyRuns.id })
-	return row.id
-}
-
-export async function upsertPlayerLog(
-	params: UpsertPlayerLogParams,
-): Promise<void> {
-	const finalizedAt = new Date()
-	await db
-		.insert(matchRunLogs)
-		.values({
-			runId: params.runId,
-			playerId: params.playerId,
-			compressedEvents: params.compressedEvents,
-			carbonHash: params.carbonHash ?? undefined,
-			eventCount: params.eventCount,
-			status: params.status,
-			flagReason: params.flagReason ?? undefined,
-			finalizedAt,
-			expiresAt: params.expiresAt ?? undefined,
-		})
-		.onConflictDoUpdate({
-			target: [matchRunLogs.runId, matchRunLogs.playerId],
-			set: {
-				compressedEvents: params.compressedEvents,
-				carbonHash: params.carbonHash ?? undefined,
-				eventCount: params.eventCount,
-				status: params.status,
-				flagReason: params.flagReason ?? undefined,
-				finalizedAt,
-				expiresAt: params.expiresAt ?? undefined,
-			},
-		})
-}
-
-export async function updateRunStatus(
-	runId: string,
-	status: LobbyRunStatus,
-): Promise<void> {
-	await db
-		.update(lobbyRuns)
-		.set({ status, finalizedAt: new Date() })
-		.where(eq(lobbyRuns.id, runId))
-}
 
 export async function purgeExpiredRunLogs(): Promise<number> {
 	const result = await db
@@ -84,28 +28,7 @@ export async function pseudonymizeRunLogsForPlayer(
 		.where(eq(matchRunLogs.playerId, playerId))
 }
 
-// The "current match" for a report filed from this lobby code (§15.6):
-// codes get reused across different lobby instances over time, so this
-// resolves to whichever run is most recent for that code -- correct at
-// report-filing time, since that's necessarily the one just played. Returns
-// null if no run has ever started under this code (e.g. reported mid-lobby
-// before the match began).
-export async function getMostRecentRunForLobbyCode(
-	lobbyCode: string,
-): Promise<string | null> {
-	const [row] = await db
-		.select({ id: lobbyRuns.id })
-		.from(lobbyRuns)
-		.where(eq(lobbyRuns.lobbyCode, lobbyCode))
-		.orderBy(desc(lobbyRuns.startedAt))
-		.limit(1)
-	return row?.id ?? null
-}
-
-// §22.2: the discovery step a player-facing "My Matches" replay list needs --
-// previously nothing let a player find their own past run ids at all; the
-// only existing lookup (getMostRecentRunForLobbyCode) serves report-filing,
-// not browsing. Two queries (run ids this player has a log row for, then
+// A player's own runs, for "My Matches". Two queries (run ids this player has a log row for, then
 // those runs' own rows) rather than a join, since matchRunLogs has no FK
 // back to a single canonical "which runs is this player in" projection and
 // drizzle's own relational query builder isn't wired up elsewhere in this
@@ -156,7 +79,10 @@ export async function getRunIdsForMatchIds(
 ): Promise<Map<string, string>> {
 	if (matchIds.length === 0) return new Map()
 	const rows = await db
-		.select({ id: lobbyRuns.id, matchmakingMatchId: lobbyRuns.matchmakingMatchId })
+		.select({
+			id: lobbyRuns.id,
+			matchmakingMatchId: lobbyRuns.matchmakingMatchId,
+		})
 		.from(lobbyRuns)
 		.where(inArray(lobbyRuns.matchmakingMatchId, matchIds))
 	const map = new Map<string, string>()

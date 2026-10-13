@@ -1,28 +1,18 @@
+// The Express copy of the Elo rules, used only to rebuild a scope's ratings
+// when webadmin voids a match (infrastructure/db/void-match.ts). Live games
+// are rated by Nakama (nakama/src/rating).
 import type { PlacementEntry } from '../../shared/types/index.js'
 
-export const MATCHING_INTERVAL_MS = 2_000
-// §16.x: how long a queue that has reached minPlayers but not maxPlayers holds
-// off committing, to give a fuller lobby a chance to form before falling back
-// to the smaller group. Measured from the oldest queuedAt among the entries
-// that would be collected into that group.
-export const QUEUE_FILL_GRACE_MS = 15_000
 export const INITIAL_HIDDEN_RATING = 600
 export const PLACEMENT_GAMES = 5
 export const K_ESTABLISHED = 40
 export const RATING_FLOOR = 100
-// §11.10: the hard cap applySoftReset clamps down to after the symmetric pull
-// toward INITIAL_HIDDEN_RATING -- not itself the pull target.
-export const SOFT_RESET_ANCHOR = 1200
-export const RANKED_SPREAD_INITIAL = 150
-export const RANKED_SPREAD_EXPAND_RATE = 50
-export const RANKED_SPREAD_CAP = 600
-// §11.x: widened from the textbook 400 so wide-spread ranked matches (up to
-// RANKED_SPREAD_CAP) stay worth playing for the favourite -- a 600-point
-// favourite's win now nets ~8 rating instead of ~1.
+// §11.x: widened from the textbook 400 so wide-spread ranked matches stay
+// worth playing for the favourite -- a 600-point favourite's win nets ~8
+// rating instead of ~1.
 export const ELO_SCALE = 1000
 export const DECAY_INACTIVE_THRESHOLD_DAYS = 7
 export const DECAY_RATE_PER_DAY = 5
-export const LEADERBOARD_TOP_N = 100
 
 function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value))
@@ -104,7 +94,12 @@ export function computeFFA(
 // Team mode: compute team averages, treat as 1v1, distribute equally per member.
 export function computeTeam(
 	teams: Array<
-		Array<{ playerId: string; rating: number; gamesPlayed: number; performance: number }>
+		Array<{
+			playerId: string
+			rating: number
+			gamesPlayed: number
+			performance: number
+		}>
 	>,
 	winnerTeamIndex: number,
 ): Map<string, number> {
@@ -149,15 +144,6 @@ export function computeTeam(
 	return deltas
 }
 
-// Seasonal soft reset (§11.9/§11.10): every rating is pulled halfway back
-// toward the same starting value new players get (600), whether currently
-// above or below it -- not just compressed down from above. Anything still
-// above 1200 after that pull is then hard-clamped down to exactly 1200.
-export function applySoftReset(rating: number): number {
-	const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2)
-	return Math.min(pulled, SOFT_RESET_ANCHOR)
-}
-
 export type RatingMode = 'solo' | 'ffa' | 'team'
 
 export function detectRatingMode(placements: PlacementEntry[]): RatingMode {
@@ -175,10 +161,19 @@ export function computeRatingDeltas(
 		const [a, b] = placements
 		const ra = ratings.get(a.playerId)!
 		const rb = ratings.get(b.playerId)!
-		const outcome = a.place < b.place ? 'a_wins' : b.place < a.place ? 'b_wins' : 'draw'
+		const outcome =
+			a.place < b.place ? 'a_wins' : b.place < a.place ? 'b_wins' : 'draw'
 		const { deltaA, deltaB } = compute1v1(
-			{ rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: a.performance ?? 0 },
-			{ rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: b.performance ?? 0 },
+			{
+				rating: ra.rating,
+				gamesPlayed: ra.gamesPlayed,
+				performance: a.performance ?? 0,
+			},
+			{
+				rating: rb.rating,
+				gamesPlayed: rb.gamesPlayed,
+				performance: b.performance ?? 0,
+			},
 			outcome,
 		)
 		return new Map([
@@ -210,10 +205,13 @@ export function computeRatingDeltas(
 	}
 	const teamEntries = Array.from(teamMap.entries())
 	const winnerTeamPlace = Math.min(
-		...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place))),
+		...teamEntries.map(([, members]) =>
+			Math.min(...members.map((m) => m.place)),
+		),
 	)
 	const winnerTeamIdx = teamEntries.findIndex(
-		([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace,
+		([, members]) =>
+			Math.min(...members.map((m) => m.place)) === winnerTeamPlace,
 	)
 	const teams = teamEntries.map(([, members]) =>
 		members.map((m) => {

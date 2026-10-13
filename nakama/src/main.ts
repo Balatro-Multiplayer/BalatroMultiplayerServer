@@ -48,6 +48,7 @@ import {
 } from './matchmaking/queue'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcAdminRunsPurge } from './lobby/retention'
+import { rpcAdminRatingsSet } from './rating/admin'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
@@ -137,6 +138,7 @@ function InitModule(
 	initializer.registerRpc('admin_profile_set', rpcAdminProfileSet)
 	initializer.registerRpc('admin_account_delete', rpcAdminAccountDelete)
 	initializer.registerRpc('admin_runs_purge', rpcAdminRunsPurge)
+	initializer.registerRpc('admin_ratings_set', rpcAdminRatingsSet)
 	logger.info('BMP lobby module loaded')
 }
 

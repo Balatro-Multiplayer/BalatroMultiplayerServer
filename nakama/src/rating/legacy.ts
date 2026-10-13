@@ -56,6 +56,12 @@ function isLegacyBoard(value: unknown): value is LegacyBoard {
 	)
 }
 
+// The legacy server keyed ranked boards by the queue's game mode
+// ('ranked:<mode>'); Nakama keys them by the bare mode.
+function bareBoard(board: LegacyBoard): LegacyBoard {
+	return { ...board, mode: board.mode.replace(/^ranked:/, '') }
+}
+
 function recordOf(board: LegacyBoard): RatingRecord {
 	return {
 		rating: board.rating,
@@ -95,7 +101,7 @@ export function rpcLegacyRatingsImport(
 			skipped++
 			continue
 		}
-		valid.push({ hash, boards })
+		valid.push({ hash, boards: boards.map(bareBoard) })
 	}
 	const claimed = new Set(
 		nk
@@ -132,11 +138,13 @@ export function claimLegacyRatings(
 	const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }])
 	const legacy = parked?.value as unknown as LegacyPlayer | undefined
 	if (!parked || !legacy || legacy.claimedBy) return 0
+	// Parked before the import dropped the prefix.
+	const boards = legacy.boards.map(bareBoard)
 
 	const existing = new Set(
 		nk
 			.storageRead(
-				legacy.boards.map((b) => ({
+				boards.map((b) => ({
 					collection: RATINGS_COLLECTION,
 					key: boardId(b.modId, b.mode, b.season),
 					userId,
@@ -144,7 +152,7 @@ export function claimLegacyRatings(
 			)
 			.map((o) => o.key),
 	)
-	const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)))
+	const fresh = boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)))
 	const writes: nkruntime.StorageWriteRequest[] = fresh.map((b) => ({
 		collection: RATINGS_COLLECTION,
 		key: boardId(b.modId, b.mode, b.season),

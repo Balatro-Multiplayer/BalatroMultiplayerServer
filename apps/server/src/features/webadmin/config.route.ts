@@ -1,11 +1,15 @@
-import { Router } from 'express'
 import { eq } from 'drizzle-orm'
+import { Router } from 'express'
 import { db } from '../../infrastructure/db/index.js'
-import { chatAllowlist, modVersions, serverConfig } from '../../infrastructure/db/schema.js'
-import { getConfig } from '../../state/config.js'
+import {
+	chatAllowlist,
+	modVersions,
+	serverConfig,
+} from '../../infrastructure/db/schema.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { requireAdmin } from '../../shared/utils/require-admin.js'
+import { getConfig } from '../../state/config.js'
 
 // §6.4: AppConfig was only ever editable via a direct DB write plus
 // /admin/refresh-config (the ops-secret-gated reload, admin.route.ts) picking
@@ -41,7 +45,12 @@ router.get('/config', async (_req, res, next) => {
 router.patch('/config/feature-flags', async (req, res, next) => {
 	try {
 		await requireAdmin(req)
-		const { chatEnabled, rankedEnabled, casualQueueEnabled, lobbyCreationEnabled } = req.body as {
+		const {
+			chatEnabled,
+			rankedEnabled,
+			casualQueueEnabled,
+			lobbyCreationEnabled,
+		} = req.body as {
 			chatEnabled?: unknown
 			rankedEnabled?: unknown
 			casualQueueEnabled?: unknown
@@ -91,14 +100,21 @@ router.patch('/config/tos-version', async (req, res, next) => {
 	try {
 		await requireAdmin(req)
 		const { tosVersion } = req.body as { tosVersion?: unknown }
-		if (typeof tosVersion !== 'number' || !Number.isInteger(tosVersion) || tosVersion < 1) {
+		if (
+			typeof tosVersion !== 'number' ||
+			!Number.isInteger(tosVersion) ||
+			tosVersion < 1
+		) {
 			throw new AppError('tosVersion must be a positive integer', 400)
 		}
 
 		await db
 			.insert(serverConfig)
 			.values({ id: 1, tosVersion })
-			.onConflictDoUpdate({ target: serverConfig.id, set: { tosVersion, updatedAt: new Date() } })
+			.onConflictDoUpdate({
+				target: serverConfig.id,
+				set: { tosVersion, updatedAt: new Date() },
+			})
 
 		const config = await loadConfigFromDb()
 		res.json({ tosVersion: config.tosVersion })
@@ -116,9 +132,12 @@ router.put('/config/mods/:modId', async (req, res, next) => {
 			version?: unknown
 			downloadUrl?: unknown
 		}
-		if (typeof displayName !== 'string' || !displayName) throw new AppError('displayName is required', 400)
-		if (typeof version !== 'string' || !version) throw new AppError('version is required', 400)
-		if (typeof downloadUrl !== 'string' || !downloadUrl) throw new AppError('downloadUrl is required', 400)
+		if (typeof displayName !== 'string' || !displayName)
+			throw new AppError('displayName is required', 400)
+		if (typeof version !== 'string' || !version)
+			throw new AppError('version is required', 400)
+		if (typeof downloadUrl !== 'string' || !downloadUrl)
+			throw new AppError('downloadUrl is required', 400)
 
 		await db
 			.insert(modVersions)
@@ -129,7 +148,7 @@ router.put('/config/mods/:modId', async (req, res, next) => {
 			})
 
 		// Reuses the same reload path /admin/refresh-config uses (diffs mod
-		// versions and broadcasts an MQTT update for anything changed).
+		// pushes the new config to Nakama).
 		const config = await loadConfigFromDb()
 		res.json({ mods: config.mods })
 	} catch (err) {
@@ -155,7 +174,10 @@ router.post('/config/chat-allowlist', async (req, res, next) => {
 		if (typeof message !== 'string' || !message.trim()) {
 			throw new AppError('message is required', 400)
 		}
-		await db.insert(chatAllowlist).values({ message: message.trim() }).onConflictDoNothing()
+		await db
+			.insert(chatAllowlist)
+			.values({ message: message.trim() })
+			.onConflictDoNothing()
 		const config = await loadConfigFromDb()
 		res.json({ chatAllowlist: [...config.chatAllowlist] })
 	} catch (err) {
@@ -166,7 +188,9 @@ router.post('/config/chat-allowlist', async (req, res, next) => {
 router.delete('/config/chat-allowlist/:message', async (req, res, next) => {
 	try {
 		await requireAdmin(req)
-		await db.delete(chatAllowlist).where(eq(chatAllowlist.message, req.params.message))
+		await db
+			.delete(chatAllowlist)
+			.where(eq(chatAllowlist.message, req.params.message))
 		const config = await loadConfigFromDb()
 		res.json({ chatAllowlist: [...config.chatAllowlist] })
 	} catch (err) {

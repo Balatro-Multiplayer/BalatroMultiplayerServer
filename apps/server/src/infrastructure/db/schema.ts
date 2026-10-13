@@ -45,8 +45,8 @@ export const players = pgTable(
 		// Null = active account.
 		deletedAt: timestamp('deleted_at', { withTimezone: true }),
 		ipHash: text('ip_hash'),
-		// Nakama account id, set when the player signs in through POST
-		// /api/auth/nakama. Null for players who have only used /steam.
+		// Nakama account id, set when the mirror or profile sync first sees
+		// the player's Nakama account. Null for players who never played on it.
 		nakamaUserId: uuid('nakama_user_id'),
 	},
 	(table) => [
@@ -62,6 +62,7 @@ export const players = pgTable(
 	],
 )
 
+// Unused since game sign-in moved to Nakama sessions; kept for its history.
 export const refreshTokens = pgTable(
 	'refresh_tokens',
 	{
@@ -256,15 +257,12 @@ export const matchResultConflicts = pgTable('match_result_conflicts', {
 		.defaultNow(),
 })
 
-// A candidate "wrongful auto-forfeit" -- a player reconnected (MQTT or a
-// fresh HTTP re-auth) shortly after a match involving them resolved via the
-// grace-period auto-forfeit path (matchmaking_matches.result_reported_by =
-// 'system'), which is exactly the race that let a legitimately-reconnected
-// player still get forfeited (see grace-period.service.ts's GRACE_PERIOD_MS).
-// Purely a flag for a moderator to review and, if it really was wrongful,
-// void via void-match.ts's voidMatch() -- never an automatic rating change,
-// since the reconnect timing alone isn't proof the forfeit was wrong (see
-// RECONCILIATION_WINDOW_MS in matchmaking.service.ts).
+// A candidate "wrongful auto-forfeit" -- a player came back shortly after
+// Nakama forfeited them out of a ranked match for being disconnected (mirrored
+// in as a `forfeit` outbox entry). Purely a flag for a moderator to review
+// and, if it really was wrongful, void via void-match.ts's voidMatch() --
+// never an automatic rating change, since the reconnect timing alone isn't
+// proof the forfeit was wrong.
 export const forfeitReconciliationFlags = pgTable(
 	'forfeit_reconciliation_flags',
 	{
@@ -288,8 +286,7 @@ export const forfeitReconciliationFlags = pgTable(
 // review, across all 5 source types (see service-queue.gateway.ts). Every
 // item-creation site inserts here via the shared enqueueServiceQueueItem
 // helper -- this table is the ONLY thing the admin Service Queue list page
-// reads (no join across the 5 source tables), and the single call site that
-// fires the future-Discord-bot MQTT seam (mqttService.publishAdminQueueEvent).
+// reads (no join across the 5 source tables).
 //
 // status is a deliberately simplified 'open'|'resolved' vocabulary --
 // collapsed from whichever richer vocabulary the source table (if any) uses
@@ -372,9 +369,9 @@ export const serviceQueueItems = pgTable(
 	],
 )
 
-// Persisted mirror of grace-period.service.ts's in-memory `gracePeriods` Map
-// -- a disconnected player's 2-minute countdown before auto-forfeit,
-// durable across a bmp-api restart. No FK on playerId, same precedent as
+// Unused since the move to Nakama (which holds disconnect grace itself); kept
+// so the MQTT-era rows survive. Was a disconnected player's 2-minute countdown
+// before auto-forfeit, durable across a bmp-api restart. No FK on playerId, same precedent as
 // forfeitReconciliationFlags above: a grace period can involve a temp/dev
 // account never written to `players` (see authenticateAsTemp).
 export const gracePeriods = pgTable('grace_periods', {
@@ -422,6 +419,8 @@ export const matchmakingRatings = pgTable(
 	],
 )
 
+// No longer written (the website ranks straight off matchmaking_ratings);
+// kept for its history.
 export const leaderboardCache = pgTable(
 	'leaderboard_cache',
 	{
@@ -584,7 +583,7 @@ export const blogPosts = pgTable('blog_post', {
 // liftedAt IS NULL AND (expiresAt IS NULL OR expiresAt > now()).
 //   chat    — cannot send chat messages; can still play and queue
 //   queue   — cannot join matchmaking; private lobbies unaffected
-//   account — denied at MQTT CONNECT (game client); website login still works
+//   account — denied Nakama sign-in (game client); website login still works
 export const playerBans = pgTable(
 	'player_bans',
 	{

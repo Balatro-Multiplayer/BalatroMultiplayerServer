@@ -1,0 +1,30 @@
+# Nakama config for a deployed server (docker-compose.yml's `nakama`
+# service). Nothing secret lives here: the database address, the session and
+# console keys, runtime.http_key and every runtime.env value are passed as
+# flags by docker-compose.yml from the root .env. local.yml is the local-dev
+# counterpart.
+name: bmp
+data_dir: /nakama/data
+# On shutdown, lobby matches get this long to checkpoint themselves (their
+# matchTerminate) so they come back after the restart (lobby/checkpoint.ts).
+# docker-compose.yml's stop_grace_period must outlast it.
+shutdown_grace_sec: 20
+
+logger:
+  level: INFO
+  stdout: true
+
+session:
+  # One websocket per session: a second socket closes the first.
+  single_socket: true
+  token_expiry_sec: 7200
+  refresh_token_expiry_sec: 604800
+
+runtime:
+  # modules/index.js, built from ./src by build.mjs.
+  path: /nakama/data/modules
+  js_entrypoint: index.js
+
+matchmaker:
+  interval_sec: 5
+  max_tickets: 3

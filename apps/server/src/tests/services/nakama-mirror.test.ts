@@ -8,6 +8,7 @@ import {
 	type PulledRun,
 	chatRowsOf,
 	createMirrorService,
+	rankedGameModeOf,
 	runRowsOf,
 } from '../../features/nakama/mirror.service.js'
 import { decompressFromBase64 } from '../../shared/utils/compression.js'
@@ -84,7 +85,7 @@ describe('runRowsOf', () => {
 			status: 'resolved',
 		})
 		expect(rows.ratings).toEqual([
-			expect.objectContaining({ playerId: 'pg-a', gameMode: 'duel', season: 2, rating: 616, gamesPlayed: 1 }),
+			expect.objectContaining({ playerId: 'pg-a', gameMode: 'ranked:duel', season: 2, rating: 616, gamesPlayed: 1 }),
 		])
 	})
 
@@ -271,5 +272,12 @@ describe('drainMirror', () => {
 		expect(await drainMirror(rpc as never, service)).toBe(MIRROR_PAGE - 1)
 		expect(rpc.mock.calls.filter(([id]) => id === 'admin_mirror_pull')).toHaveLength(1)
 		error.mockRestore()
+	})
+})
+
+describe('rankedGameModeOf', () => {
+	it('keys a Nakama board the way the website reads it', () => {
+		expect(rankedGameModeOf('duel')).toBe('ranked:duel')
+		expect(rankedGameModeOf('ranked:duel')).toBe('ranked:duel')
 	})
 })

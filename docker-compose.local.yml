@@ -1,26 +1,12 @@
 # Opt-in overlay for local/test environments that don't have real TLS certs
-# (docker-compose.yml's default expects them at /root/emqx-certs/<domain> and
-# /etc/nginx/ssl/, matching production). Not auto-applied -- docker-compose.yml
-# is the base file; layer this on top explicitly:
+# or production secrets. Not auto-applied -- docker-compose.yml is the base
+# file; layer this on top explicitly:
 #
 #   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 #
 # or export COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml once per
 # shell/CI job to make plain `docker compose ...` pick it up automatically.
-#
-# Without real certs, EMQX's stock wss:default listener (port 8084) hard-fails
-# with no_cert on cold boot and crashes the whole node -- unlike
-# listeners.ssl.default (8883, configured in apps/server/emqx/cluster.hocon),
-# which tolerates missing certs at boot. wss:default isn't published in
-# docker-compose.yml's ports: and isn't used by this project at all -- MQTT
-# clients connect over plain tcp:1883 for local/insecure dev (see that file's
-# own comment on the 1883 port) or ssl:8883 when real certs are present.
-# Disabling it here is a no-op for anything that actually uses this stack.
 services:
-  emqx:
-    environment:
-      EMQX_LISTENERS__WSS__DEFAULT__ENABLE: "false"
-
   # No real domain/TLS cert locally -- swap in the plain-HTTP local server
   # block (nginx/local/server.conf) in place of the prod one, and publish
   # the same 127.0.0.1:8788 game clients have always talked to, in addition
@@ -54,9 +40,6 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
 
-  # Game login through Nakama (POST /api/auth/nakama): the API asks Nakama
-  # who a session token belongs to. Local dev only -- the base file (and so
-  # prod) has no NAKAMA_URL, which leaves that route disabled.
   # NAKAMA_HTTP_KEY (= nakama/local.yml runtime.http_key) lets the API call
   # Nakama's server-only admin RPCs; INTERNAL_API_KEY is what Nakama sends
   # back on /internal/nakama/* (its EXPRESS_INTERNAL_KEY). Both are public
@@ -66,7 +49,6 @@ services:
   # (ClaudeControl e2e/nakama_integrity).
   api-blue: &api-local
     environment:
-      NAKAMA_URL: http://nakama:7350
       NAKAMA_HTTP_KEY: local-dev-http-key
       INTERNAL_API_KEY: local-dev-internal-key
       DEV_FAKE_LAUNCHER_STRATEGY: ${DEV_FAKE_LAUNCHER_STRATEGY:-false}
@@ -82,21 +64,11 @@ services:
     volumes: !override
       - ./nginx/local/moderation-upstream.conf:/etc/nginx/conf.d/moderation-upstream.conf:ro
 
-  # Basic Nakama next to EMQX, local dev only. It verifies Steam tickets for
-  # in-game login (MPAPI's use_nakama_auth) in a runtime hook
-  # (nakama/modules/index.js, built from nakama/src -- stock authenticate_steam needs Balatro's
-  # publisher key) with the same STEAM_WEB_API_KEY the API uses, read from
-  # the root .env. Its data lives in
-  # a separate "nakama" database on the shared Postgres server; `migrate up`
-  # creates it on first start. No nginx route: the Nakama client SDK builds
-  # scheme://host:port/... URLs and can't take a path prefix, so clients talk
-  # to 127.0.0.1:7350 directly. Console on 127.0.0.1:7351 (nakama/local.yml).
+  # Nakama with local.yml's placeholder keys, published on 127.0.0.1 so
+  # game clients reach it directly at 127.0.0.1:7350 (no TLS). The Steam key
+  # and salt come from the root .env.
   nakama:
-    image: heroiclabs/nakama:3.41.0
-    container_name: bmp-nakama
-    # Longer than local.yml's shutdown_grace_sec, so lobbies get to checkpoint.
-    stop_grace_period: 30s
-    entrypoint:
+    entrypoint: !override
       - /bin/sh
       - -ec
       - |
@@ -112,51 +84,22 @@ services:
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
           --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
-          --runtime.env "EXPRESS_INTERNAL_URL=$$EXPRESS_INTERNAL_URL" \
-          --runtime.env "EXPRESS_INTERNAL_KEY=$$EXPRESS_INTERNAL_KEY"
+          --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
+          --runtime.env "EXPRESS_INTERNAL_KEY=local-dev-internal-key"
     environment:
-      STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
-      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
-      # Same salt as the API's, so a login's Steam id hashes to the key the
-      # legacy ratings import parked its ratings under.
-      PLAYER_ID_SALT: ${PLAYER_ID_SALT:-}
       # Device login lets impersonated ClaudeControl instances (no Steam
       # ticket) into Nakama. Local dev only -- never set it on a real server.
       ALLOW_DEVICE_AUTH: "true"
       # Lets a client create a ranked lobby directly (rankedMode). Local dev
-      # only, until matchmaking creates ranked lobbies server-side.
+      # only; on a real server ranked lobbies come from the matchmaker.
       ALLOW_RANKED_LOBBIES: "true"
       # Lobby grace period after a disconnect; empty = the 120s default.
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
       # How long a game waits for the rest of its results; empty = 60s.
       RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
-      # Chat is judged by moderation-lb (hardcoded in nakama/src/chat). It
-      # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
-      # missing model from blocking.
-      MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
-      # "off" judges chat with the local word filter (nakama/src/chat/filter.ts)
-      # instead, with no moderation service needed.
-      MODERATION_REMOTE: ${MODERATION_REMOTE:-on}
-      # The API's internal routes (nakama/src/express.ts), through nginx so a
-      # blue/green swap is invisible here. Same placeholder key as the API's
-      # INTERNAL_API_KEY above.
-      EXPRESS_INTERNAL_URL: http://nginx:8788
-      EXPRESS_INTERNAL_KEY: local-dev-internal-key
-    volumes:
+    volumes: !override
       - ./nakama/local.yml:/nakama/data/local.yml:ro
       - ./nakama/modules:/nakama/data/modules:ro
-    ports:
+    ports: !override
       - "127.0.0.1:7350:7350"
       - "127.0.0.1:7351:7351"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "/nakama/nakama", "healthcheck"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 15s
-    restart: unless-stopped
-    networks:
-      - bmp

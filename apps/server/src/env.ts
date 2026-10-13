@@ -55,12 +55,6 @@ export const env = {
 		'https://new.balatromp.com/api/auth/discord/callback',
 	),
 
-	EMQX_BROKER_URL: optional('EMQX_BROKER_URL', 'mqtt://emqx:1883'),
-	EMQX_API_URL: optional('EMQX_API_URL', 'http://emqx:18083/api/v5'),
-	EMQX_SYSTEM_CLIENT_ID: optional('EMQX_SYSTEM_CLIENT_ID', 'bmp-api-server'),
-	EMQX_SYSTEM_USERNAME: optional('EMQX_SYSTEM_USERNAME', 'bmp-system'),
-	EMQX_SYSTEM_PASSWORD: required('EMQX_SYSTEM_PASSWORD'),
-
 	PLAYER_ID_SALT: required('PLAYER_ID_SALT'),
 
 	ADMIN_SECRET: required('ADMIN_SECRET'),
@@ -106,30 +100,15 @@ export const env = {
 	// features must keep working even before this token exists.
 	GITHUB_TOKEN: optional('GITHUB_TOKEN', ''),
 
-	// Chat moderation bridge. Unset (default) means dormant — chat keeps using the
-	// local obscenity filter, unchanged. Set MODERATION_SERVICE_URL to route chat
-	// through an external moderation service instead.
-	MODERATION_SERVICE_URL: optional('MODERATION_SERVICE_URL', '').replace(
-		/\/+$/,
-		'',
-	),
-	// Nakama login bridge (POST /api/auth/nakama). Unset (default) disables the
-	// route; set to the Nakama HTTP API base, e.g. http://nakama:7350 on the local
-	// compose network (docker-compose.local.yml).
-	NAKAMA_URL: optional('NAKAMA_URL', '').replace(/\/+$/, ''),
-	// Nakama's runtime.http_key. With NAKAMA_URL set, the API drives Nakama
-	// through its server-only admin RPCs (features/nakama). Unset = dormant.
+	// Nakama's HTTP API base, e.g. http://nakama:7350 on the compose network.
+	// The API mirrors its games into Postgres and drives it through its
+	// server-only admin RPCs (features/nakama).
+	NAKAMA_URL: required('NAKAMA_URL').replace(/\/+$/, ''),
+	// Nakama's runtime.http_key, for those admin RPCs. Unset = dormant.
 	NAKAMA_HTTP_KEY: optional('NAKAMA_HTTP_KEY', ''),
 	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
 	// Unset = those routes refuse everything.
 	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),
-
-	MODERATION_BEARER_TOKEN: optional('MODERATION_BEARER_TOKEN', ''),
-	// Must exceed the moderation service's own judgement deadline plus margin.
-	// Set below it and a slow-but-successful verdict is abandoned here while it
-	// still occupies the service's single model lane, so the player sees an
-	// outage and their retry deepens the backlog that caused it.
-	MODERATION_TIMEOUT_MS: optionalPositiveInt('MODERATION_TIMEOUT_MS', 6000),
 
 	// Directory containing archived Discord channel bundles (features/webadmin/
 	// archives.route.ts), each produced externally by the discord-channel-archiver

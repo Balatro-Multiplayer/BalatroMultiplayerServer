@@ -3725,6 +3725,9 @@ function isLegacyBoard(value) {
   const b = value;
   return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
 }
+function bareBoard(board) {
+  return __spreadProps(__spreadValues({}, board), { mode: board.mode.replace(/^ranked:/, "") });
+}
 function recordOf(board) {
   return {
     rating: board.rating,
@@ -3754,7 +3757,7 @@ function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
       skipped++;
       continue;
     }
-    valid.push({ hash, boards });
+    valid.push({ hash, boards: boards.map(bareBoard) });
   }
   const claimed = new Set(
     nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID }))).filter((o) => o.value.claimedBy).map((o) => o.key)
@@ -3775,16 +3778,17 @@ function claimLegacyRatings(nk, logger, userId, username, hash, now) {
   const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
   const legacy = parked == null ? void 0 : parked.value;
   if (!parked || !legacy || legacy.claimedBy) return 0;
+  const boards = legacy.boards.map(bareBoard);
   const existing = new Set(
     nk.storageRead(
-      legacy.boards.map((b) => ({
+      boards.map((b) => ({
         collection: RATINGS_COLLECTION,
         key: boardId(b.modId, b.mode, b.season),
         userId
       }))
     ).map((o) => o.key)
   );
-  const fresh = legacy.boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
+  const fresh = boards.filter((b) => !existing.has(boardId(b.modId, b.mode, b.season)));
   const writes = fresh.map((b) => ({
     collection: RATINGS_COLLECTION,
     key: boardId(b.modId, b.mode, b.season),
@@ -5631,6 +5635,88 @@ function rpcAdminRunsPurge(ctx, logger, nk, payload) {
   return JSON.stringify(result);
 }
 
+// src/rating/admin.ts
+var USER_ID_PATTERN4 = /^[0-9a-f-]{36}$/;
+var MODE_PATTERN2 = /^[A-Za-z0-9_:.-]{1,64}$/;
+var MAX_ENTRIES = 1e3;
+function isCount(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+function recordOf3(value) {
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) return void 0;
+  const r = value;
+  if (typeof r.rating !== "number" || !Number.isFinite(r.rating)) return void 0;
+  if (!isCount(r.wins) || !isCount(r.losses) || !isCount(r.gamesPlayed) || !isCount(r.lastMatchAt)) return void 0;
+  if (r.seasonBest !== null && (typeof r.seasonBest !== "number" || !Number.isFinite(r.seasonBest))) return void 0;
+  return {
+    rating: r.rating,
+    wins: r.wins,
+    losses: r.losses,
+    gamesPlayed: r.gamesPlayed,
+    seasonBest: r.seasonBest,
+    lastMatchAt: r.lastMatchAt
+  };
+}
+function parseRatingsSet(input) {
+  const { modId, mode, season, entries } = input;
+  if (typeof modId !== "string" || modId === "" || typeof mode !== "string" || !MODE_PATTERN2.test(mode))
+    return "modId and mode are required";
+  if (typeof season !== "number" || !Number.isInteger(season) || season < 1) return "season must be a positive integer";
+  if (!Array.isArray(entries) || entries.length > MAX_ENTRIES) return `entries must be a list of at most ${MAX_ENTRIES}`;
+  const parsed = [];
+  for (const entry of entries) {
+    if (typeof entry !== "object" || entry === null) return "Each entry must be an object";
+    const { userId, name, record } = entry;
+    if (typeof userId !== "string" || !USER_ID_PATTERN4.test(userId)) return "Each entry needs a userId";
+    const parsedRecord = recordOf3(record);
+    if (parsedRecord === void 0) return `Invalid record for ${userId}`;
+    parsed.push({ userId, name: typeof name === "string" ? name : "", record: parsedRecord });
+  }
+  return { modId, mode, season, entries: parsed };
+}
+function rpcAdminRatingsSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const request = parseRatingsSet(parsePayload(payload));
+  if (typeof request === "string") throw runtimeError(INVALID_ARGUMENT, request);
+  const key = boardId(request.modId, request.mode, request.season);
+  const written = request.entries.filter((e) => e.record !== null);
+  const cleared = request.entries.filter((e) => e.record === null);
+  if (written.length > 0) {
+    nk.storageWrite(
+      written.map((e) => ({
+        collection: RATINGS_COLLECTION,
+        key,
+        userId: e.userId,
+        value: e.record,
+        permissionRead: 2,
+        permissionWrite: 0
+      }))
+    );
+  }
+  if (cleared.length > 0) {
+    nk.storageDelete(cleared.map((e) => ({ collection: RATINGS_COLLECTION, key, userId: e.userId })));
+  }
+  nk.leaderboardCreate(key, true, "desc", "set", null, { modId: request.modId, mode: request.mode });
+  for (const e of request.entries) {
+    const record = e.record;
+    if (record && record.gamesPlayed >= PLACEMENT_GAMES) {
+      nk.leaderboardRecordWrite(key, e.userId, e.name, record.rating, record.wins, {
+        losses: record.losses,
+        gamesPlayed: record.gamesPlayed,
+        seasonBest: record.seasonBest
+      }, "set");
+    } else {
+      try {
+        nk.leaderboardRecordDelete(key, e.userId);
+      } catch (err) {
+      }
+    }
+  }
+  logger.info("Ratings on %s set by the API: %d written, %d cleared", key, written.length, cleared.length);
+  return JSON.stringify({ written: written.length, cleared: cleared.length });
+}
+
 // src/player/rpc.ts
 var MAX_MODS = 300;
 var MAX_MOD_LENGTH = 128;
@@ -6009,6 +6095,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_profile_set", rpcAdminProfileSet);
   initializer.registerRpc("admin_account_delete", rpcAdminAccountDelete);
   initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
+  initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

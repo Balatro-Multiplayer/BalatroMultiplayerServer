@@ -4,33 +4,23 @@ import express from 'express'
 import type { Express, Request, Response } from 'express'
 import { env } from './env.js'
 import { createDevChallengeStrategy } from './features/launcher-integrity/dev-strategy.js'
-import { launcherIntegrityService } from './features/launcher-integrity/launcher-integrity.service.js'
-import {
-	startDailyJob,
-	stopDailyJob,
-} from './features/matchmaking/matchmaking.service.js'
 import { syncModRegistry } from './features/mods/mods-sync.service.js'
-import { replayLogService } from './features/replay-log/replay-log.service.js'
-import { db, pool } from './infrastructure/db/index.js'
-import { chatLogs, flaggedMessages } from './infrastructure/db/schema.js'
-import { provisionEmqxWebhook } from './infrastructure/emqx/emqx-provision.service.js'
-import { forceReconnectStalePlayers } from './infrastructure/emqx/reconnect-recovery.service.js'
-import { loadConfigFromDb } from './infrastructure/gateways/config.gateway.js'
-import { pushConfigToNakama, setIntegrityEnforced } from './infrastructure/nakama/config-sync.js'
-import { purgeExpiredDeletedPlayerHashes } from './infrastructure/gateways/player.gateway.js'
-import { purgeExpiredRunLogs } from './infrastructure/gateways/replay-log.gateway.js'
-import {
-	clearAllGracePeriods,
-	restoreGracePeriodsFromDb,
-} from './infrastructure/mqtt/grace-period.service.js'
-import { mqttService } from './infrastructure/mqtt/mqtt.service.js'
-import { clearAllSpectatorGrants } from './infrastructure/mqtt/spectator-registry.js'
-import { errorHandler } from './middleware/errorHandler.js'
-import router, { matchmakingService } from './routes/index.js'
-import type { RegisterPrivateDeps } from './shared/types/index.js'
 import { nakamaIntegrityService } from './features/nakama/integrity.js'
 import { startMirrorJob } from './features/nakama/mirror.job.js'
 import { startRetentionJob } from './features/nakama/retention.job.js'
+import { startSeasonJob } from './features/ratings/season.job.js'
+import { db, pool } from './infrastructure/db/index.js'
+import { chatLogs, flaggedMessages } from './infrastructure/db/schema.js'
+import { loadConfigFromDb } from './infrastructure/gateways/config.gateway.js'
+import { purgeExpiredDeletedPlayerHashes } from './infrastructure/gateways/player.gateway.js'
+import { purgeExpiredRunLogs } from './infrastructure/gateways/replay-log.gateway.js'
+import {
+	pushConfigToNakama,
+	setIntegrityEnforced,
+} from './infrastructure/nakama/config-sync.js'
+import { errorHandler } from './middleware/errorHandler.js'
+import router from './routes/index.js'
+import type { RegisterPrivateDeps } from './shared/types/index.js'
 import type { ChallengeStrategy } from './shared/types/index.js'
 import { getConfig } from './state/config.js'
 import { startSessionCleanup, stopSessionCleanup } from './state/index.js'
@@ -51,16 +41,8 @@ let server: Server
 const SHUTDOWN_DEADLINE_MS = 8_000
 
 async function shutdownSteps() {
-	matchmakingService.stopMatchmaking()
-	stopDailyJob()
 	stopSessionCleanup()
-	// Grace-period timers are cleared here, not resolved -- that's fine now
-	// that they're also persisted (grace-period.gateway.ts): the next boot's
-	// restoreGracePeriodsFromDb() picks up wherever this left off, instead of
-	// the countdown silently vanishing the way it used to.
-	clearAllGracePeriods()
-	clearAllSpectatorGrants()
-	launcherIntegrityService.clearAll()
+	nakamaIntegrityService.clearAll()
 
 	if (server) {
 		await new Promise<void>((resolve) => {
@@ -68,9 +50,6 @@ async function shutdownSteps() {
 		})
 		console.log('[server] HTTP server closed')
 	}
-
-	await mqttService.disconnect()
-	console.log('[server] MQTT disconnected')
 
 	await pool.end()
 	console.log('[server] DB pool closed')
@@ -88,7 +67,10 @@ async function shutdown() {
 		setTimeout(() => resolve('timeout'), SHUTDOWN_DEADLINE_MS),
 	)
 
-	const result = await Promise.race([shutdownSteps().then(() => 'done' as const), timeout])
+	const result = await Promise.race([
+		shutdownSteps().then(() => 'done' as const),
+		timeout,
+	])
 	if (result === 'timeout') {
 		console.error(
 			`[server] Shutdown did not complete within ${SHUTDOWN_DEADLINE_MS}ms, exiting anyway`,
@@ -155,9 +137,7 @@ async function start() {
 		// The real ChallengeStrategy (launcher-integrity.service.ts) lives here
 		// too -- see that module's doc comment for why running without it is
 		// expected and simply disables the feature, not an error.
-		// One strategy serves both the MQTT and the Nakama players.
 		const setChallengeStrategy = (strategy: ChallengeStrategy) => {
-			launcherIntegrityService.setChallengeStrategy(strategy)
 			nakamaIntegrityService.setChallengeStrategy(strategy)
 		}
 		const privatePath: string = '@v-rtualized/bmp-internal'
@@ -167,62 +147,18 @@ async function start() {
 		} catch {
 			// running without private features
 		}
-		if (!launcherIntegrityService.isEnabled() && env.DEV_FAKE_LAUNCHER_STRATEGY) {
-			console.warn('[launcher-integrity] Using the dev challenge strategy (DEV_FAKE_LAUNCHER_STRATEGY)')
+		if (!nakamaIntegrityService.isEnabled() && env.DEV_FAKE_LAUNCHER_STRATEGY) {
+			console.warn(
+				'[launcher-integrity] Using the dev challenge strategy (DEV_FAKE_LAUNCHER_STRATEGY)',
+			)
 			setChallengeStrategy(createDevChallengeStrategy())
 		}
 		// Nakama gates ranked on integrity only when there is a strategy to
-		// check it with, as the MQTT queue does.
-		setIntegrityEnforced(launcherIntegrityService.isEnabled())
+		// check it with.
+		setIntegrityEnforced(nakamaIntegrityService.isEnabled())
 		void pushConfigToNakama(getConfig())
 
 		app.use(errorHandler)
-
-		await mqttService.connect()
-		await provisionEmqxWebhook()
-		// One subscription per consuming mod's own RLOG action key -- each mod
-		// (BalatroMultiplayerPvP, BalatroMultiplayerSpeed) wires its own
-		// ActionType to MPAPI.replay's live transport client-side (see
-		// MPAPI.replay.register_broadcaster in BalatroMultiplayerAPI's
-		// recorder.lua), but they all feed the same replayLogService buffer
-		// server-side -- handleActionLogEvent itself is mod-agnostic.
-		for (const actionKey of ['pvp_log_event', 'spdrn_log_event']) {
-			await mqttService.subscribeToLobbyActions(
-				actionKey,
-				(lobbyCode, playerId, params) => {
-					void replayLogService
-						.handleActionLogEvent(lobbyCode, playerId, params)
-						.catch((err) =>
-							console.error('[replay-log] Failed to buffer event:', err),
-						)
-				},
-			)
-		}
-		await mqttService.subscribeToPlayerChallengeResponses(
-			(playerId, payload) => {
-				void launcherIntegrityService
-					.handleChallengeResponse(playerId, payload)
-					.catch((err) =>
-						console.error(
-							'[launcher-integrity] Failed to handle challenge response:',
-							err,
-						),
-					)
-			},
-		)
-
-		await matchmakingService.restoreMatchesFromDb()
-		await restoreGracePeriodsFromDb()
-		// Unconditional on every boot (planned deploy or a bare crash-restart
-		// alike) -- see reconnect-recovery.service.ts's doc comment for why the
-		// client can't detect an app-only restart on its own, and
-		// auth.service.ts's reattachRestoredSession for what actually restores
-		// state once the forced reconnect lands.
-		void forceReconnectStalePlayers(matchmakingService.getActiveMatchPlayerIds()).catch(
-			(err) => console.error('[reconnect-recovery] Failed to force stale reconnects:', err),
-		)
-		matchmakingService.startMatchmaking()
-		startDailyJob()
 
 		startSessionCleanup()
 
@@ -235,10 +171,11 @@ async function start() {
 		void purgeExpiredChatLogsJob()
 		setInterval(() => void purgeExpiredChatLogsJob(), 60 * 60 * 1000).unref()
 
-		// Nakama games reach the website and webadmin through the mirror.
+		// Games reach the website and webadmin through the mirror...
 		startMirrorJob()
 		// ...and Nakama drops what they no longer keep.
 		startRetentionJob()
+		startSeasonJob()
 
 		void purgeExpiredDeletedPlayerHashesJob()
 		setInterval(
@@ -248,14 +185,6 @@ async function start() {
 
 		server = app.listen(env.PORT, () => {
 			console.log(`[server] API server listening on port ${env.PORT}`)
-			// Whether chat is being moderated is the first thing you want to
-			// know from a log, and a typo'd URL otherwise presents as chat
-			// silently failing closed with no clue why.
-			console.log(
-				env.MODERATION_SERVICE_URL
-					? `[server] chat moderation ON (${env.MODERATION_SERVICE_URL})`
-					: '[server] chat moderation OFF — using the local obscenity filter',
-			)
 		})
 
 		process.on('SIGTERM', shutdown)

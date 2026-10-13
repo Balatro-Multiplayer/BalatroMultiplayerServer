@@ -1,8 +1,6 @@
 import { env } from '../env.js'
-import { Lobby } from './lobby.js'
 import { PlayerSession } from './player.js'
 
-export const lobbies = new Map<string, Lobby>()
 export const sessions = new Map<string, PlayerSession>()
 
 // Hashed provider ID → playerId lookup indexes
@@ -11,12 +9,24 @@ export const discordIndex = new Map<string, string>()
 
 export function createSession(
 	steamName: string,
-	opts?: { id?: string; steamIdHash?: string; discordIdHash?: string; discordUsername?: string; useDiscordName?: boolean; preferredJoker?: string; privileges?: string[]; tosAcceptedVersion?: number; chatEnabled?: boolean; chatBlocked?: boolean; mutedPlayerIds?: string[] },
+	opts?: {
+		id?: string
+		steamIdHash?: string
+		discordIdHash?: string
+		discordUsername?: string
+		useDiscordName?: boolean
+		preferredJoker?: string
+		privileges?: string[]
+		tosAcceptedVersion?: number
+		chatEnabled?: boolean
+		chatBlocked?: boolean
+	},
 ): PlayerSession {
 	const session = new PlayerSession(steamName, opts)
 	sessions.set(session.playerId, session)
 	if (opts?.steamIdHash) steamIndex.set(opts.steamIdHash, session.playerId)
-	if (opts?.discordIdHash) discordIndex.set(opts.discordIdHash, session.playerId)
+	if (opts?.discordIdHash)
+		discordIndex.set(opts.discordIdHash, session.playerId)
 	return session
 }
 
@@ -62,10 +72,6 @@ export function getSession(playerId: string): PlayerSession | undefined {
 	return sessions.get(playerId)
 }
 
-export function getLobby(code: string): Lobby | undefined {
-	return lobbies.get(code.toUpperCase())
-}
-
 export function removeSession(playerId: string): void {
 	const session = sessions.get(playerId)
 	if (session) {
@@ -101,7 +107,6 @@ export function cleanupExpiredSessions(): number {
 	let removed = 0
 
 	for (const [playerId, session] of sessions) {
-		if (session.lobbyCode) continue
 		if (now - session.connectedAt.getTime() > ttl) {
 			removeSession(playerId)
 			removed++
@@ -131,4 +136,4 @@ export function stopSessionCleanup(): void {
 	}
 }
 
-export { Lobby, PlayerSession }
+export { PlayerSession }

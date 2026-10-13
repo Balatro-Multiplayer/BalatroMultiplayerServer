@@ -1,7 +1,6 @@
 import { and, count, desc, eq } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { serviceQueueItems } from '../db/schema.js'
-import { mqttService } from '../mqtt/mqtt.service.js'
 
 export type ServiceQueueItemType =
 	| 'report'
@@ -18,8 +17,13 @@ export const SERVICE_QUEUE_ITEM_TYPES: readonly ServiceQueueItemType[] = [
 	'anti_cheat',
 ]
 
-export function isServiceQueueItemType(value: unknown): value is ServiceQueueItemType {
-	return typeof value === 'string' && SERVICE_QUEUE_ITEM_TYPES.includes(value as ServiceQueueItemType)
+export function isServiceQueueItemType(
+	value: unknown,
+): value is ServiceQueueItemType {
+	return (
+		typeof value === 'string' &&
+		SERVICE_QUEUE_ITEM_TYPES.includes(value as ServiceQueueItemType)
+	)
 }
 
 export type ServiceQueueItemRecord = typeof serviceQueueItems.$inferSelect
@@ -32,15 +36,12 @@ export interface EnqueueServiceQueueItemInput {
 }
 
 /**
- * The single insert point for every one of the 5 item types (see each
- * source gateway's insert function -- report.gateway.ts's submitReport,
- * chat.gateway.ts's insertFlaggedMessage, match-conflict.gateway.ts's
- * insertMatchConflict, forfeit-reconciliation.gateway.ts's
- * insertForfeitReconciliationFlag, replay-log.service.ts's finalizeRun) and
- * the single call site that fires the future-Discord-bot MQTT seam
- * (mqttService.publishAdminQueueEvent). onConflictDoNothing on
- * (itemType, sourceId) is a defensive dedupe -- the same source row should
- * never enqueue twice -- so a retry never double-publishes either.
+ * The single insert point for every item type (report.gateway.ts's
+ * submitNakamaReport, match-conflict.gateway.ts's insertMatchConflict,
+ * forfeit-reconciliation.gateway.ts's insertForfeitReconciliationFlag, and
+ * the Nakama mirror's flagged chat and anti-cheat items).
+ * onConflictDoNothing on (itemType, sourceId) is a defensive dedupe -- the
+ * same source row should never enqueue twice.
  */
 export async function enqueueServiceQueueItem(
 	input: EnqueueServiceQueueItemInput,
@@ -59,17 +60,6 @@ export async function enqueueServiceQueueItem(
 		.returning()
 
 	if (!row) return null
-
-	await mqttService
-		.publishAdminQueueEvent('queue_item_created', {
-			id: row.id,
-			itemType: row.itemType,
-			sourceId: row.sourceId,
-			subjectPlayerId: row.subjectPlayerId,
-			summary: row.summary,
-			createdAt: row.createdAt,
-		})
-		.catch((e) => console.error('[service-queue] publishAdminQueueEvent failed:', e))
 
 	return row
 }
@@ -103,8 +93,14 @@ export async function listServiceQueueItems(opts: {
 	return { items, total }
 }
 
-export async function getServiceQueueItemById(id: number): Promise<ServiceQueueItemRecord | null> {
-	const [row] = await db.select().from(serviceQueueItems).where(eq(serviceQueueItems.id, id)).limit(1)
+export async function getServiceQueueItemById(
+	id: number,
+): Promise<ServiceQueueItemRecord | null> {
+	const [row] = await db
+		.select()
+		.from(serviceQueueItems)
+		.where(eq(serviceQueueItems.id, id))
+		.limit(1)
 	return row ?? null
 }
 
@@ -117,9 +113,13 @@ export async function markServiceQueueItemResolved(
 ): Promise<ServiceQueueItemRecord | null> {
 	const [row] = await db
 		.update(serviceQueueItems)
-		.set({ status: 'resolved', resolvedAt: new Date(), resolvedBy, resolutionAction })
+		.set({
+			status: 'resolved',
+			resolvedAt: new Date(),
+			resolvedBy,
+			resolutionAction,
+		})
 		.where(eq(serviceQueueItems.id, id))
 		.returning()
 	return row ?? null
 }
-

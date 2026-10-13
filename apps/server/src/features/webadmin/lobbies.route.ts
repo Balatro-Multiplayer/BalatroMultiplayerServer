@@ -6,24 +6,8 @@ import {
 	listNakamaLobbies,
 } from '../../infrastructure/nakama/moderation-sync.js'
 import { AppError } from '../../shared/utils/errors.js'
-import { getLobby, lobbies } from '../../state/index.js'
-import type { PlayerSession } from '../../state/player.js'
 
 const router = Router()
-
-function matchesSearch(
-	term: string,
-	code: string,
-	players: PlayerSession[],
-): boolean {
-	if (code.toLowerCase().includes(term)) return true
-	return players.some(
-		(p) =>
-			p.steamName.toLowerCase().includes(term) ||
-			p.discordUsername?.toLowerCase().includes(term) ||
-			p.getDisplayName().toLowerCase().includes(term),
-	)
-}
 
 router.get('/lobbies', async (req, res, next) => {
 	try {
@@ -34,17 +18,7 @@ router.get('/lobbies', async (req, res, next) => {
 				? req.query.search.trim().toLowerCase()
 				: ''
 
-		const all = Array.from(lobbies.values())
-			.filter(
-				(lobby) =>
-					!search ||
-					matchesSearch(search, lobby.code, Array.from(lobby.players.values())),
-			)
-			.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-
-		// Nakama's lobbies first: a code both servers use is the Nakama one
-		// (kick and close act on it).
-		const nakama = (await listNakamaLobbies())
+		const all = (await listNakamaLobbies())
 			.filter((lobby) => !search || lobby.code.toLowerCase().includes(search))
 			.map((lobby) => ({
 				source: 'nakama' as const,
@@ -58,23 +32,9 @@ router.get('/lobbies', async (req, res, next) => {
 				createdAt: null,
 				isReported: false,
 			}))
-		const legacy = all.map((lobby) => ({
-			source: 'legacy' as const,
-			code: lobby.code,
-			modId: lobby.modId,
-			type: lobby.type,
-			hostId: lobby.hostId,
-			hostName: lobby.players.get(lobby.hostId)?.getDisplayName() ?? null,
-			playerCount: lobby.playerCount,
-			maxPlayers: lobby.maxPlayers,
-			createdAt: lobby.createdAt.toISOString(),
-			isReported: lobby.isReported,
-		}))
-		const merged = [...nakama, ...legacy]
-
-		const total = merged.length
+		const total = all.length
 		const offset = (page - 1) * limit
-		const pageItems = merged.slice(offset, offset + limit)
+		const pageItems = all.slice(offset, offset + limit)
 
 		res.json({ lobbies: pageItems, total, page, limit })
 	} catch (err) {
@@ -104,27 +64,7 @@ router.get('/lobbies/:code', async (req, res, next) => {
 			})
 			return
 		}
-
-		const lobby = getLobby(req.params.code)
-		if (!lobby) throw new AppError('Lobby not found', 404)
-
-		const { lobbyService } = await import('../../routes/index.js')
-		const players = lobbyService.getLobbyPlayers(lobby.code)
-
-		res.json({
-			lobby: {
-				code: lobby.code,
-				modId: lobby.modId,
-				type: lobby.type,
-				hostId: lobby.hostId,
-				maxPlayers: lobby.maxPlayers,
-				playerCount: lobby.playerCount,
-				metadata: lobby.metadata,
-				createdAt: lobby.createdAt.toISOString(),
-				isReported: lobby.isReported,
-			},
-			players,
-		})
+		throw new AppError('Lobby not found', 404)
 	} catch (err) {
 		next(err)
 	}
@@ -133,13 +73,10 @@ router.get('/lobbies/:code', async (req, res, next) => {
 router.post('/lobbies/:code/kick/:playerId', async (req, res, next) => {
 	try {
 		const reason = `admin:${req.player!.playerId}`
-		if (!(await kickFromNakamaLobby(req.params.code, req.params.playerId, reason))) {
-			const { lobbyService } = await import('../../routes/index.js')
-			await lobbyService.adminKickPlayer(
-			req.params.code,
-				req.params.playerId,
-				req.player!.playerId,
-			)
+		if (
+			!(await kickFromNakamaLobby(req.params.code, req.params.playerId, reason))
+		) {
+			throw new AppError('Lobby or player not found', 404)
 		}
 
 		console.log(
@@ -153,10 +90,8 @@ router.post('/lobbies/:code/kick/:playerId', async (req, res, next) => {
 
 router.post('/lobbies/:code/close', async (req, res, next) => {
 	try {
-		if (!(await closeNakamaLobby(req.params.code))) {
-			const { lobbyService } = await import('../../routes/index.js')
-			await lobbyService.adminCloseLobby(req.params.code, req.player!.playerId)
-		}
+		if (!(await closeNakamaLobby(req.params.code)))
+			throw new AppError('Lobby not found', 404)
 
 		console.log(
 			`[webadmin] ${req.player!.playerId} closed lobby ${req.params.code}`,

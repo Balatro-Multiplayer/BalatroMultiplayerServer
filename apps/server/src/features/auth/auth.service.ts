@@ -1,23 +1,22 @@
+import type {
+	IPlayerRepository,
+	PlayerRecord,
+} from '../../contracts/IPlayerRepository.js'
+import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/history.gateway.js'
+import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
+import { isValidJoker } from '../../shared/constants/jokers.js'
+import { AppError } from '../../shared/utils/errors.js'
+import { hashProviderId } from '../../shared/utils/hash.js'
+import { getConfig } from '../../state/config.js'
 import {
+	type PlayerSession,
 	createSession,
 	findByProvider,
 	getSession,
 	linkProvider,
 	unlinkProvider,
-	PlayerSession,
 } from '../../state/index.js'
-import { isValidJoker } from '../../shared/constants/jokers.js'
-import { AppError } from '../../shared/utils/errors.js'
-import { hashProviderId } from '../../shared/utils/hash.js'
-import { getConfig } from '../../state/config.js'
-import type { IPlayerRepository, PlayerRecord } from '../../contracts/IPlayerRepository.js'
-import type { IGracePeriodService } from '../../contracts/IGracePeriodService.js'
-import type { IMatchSessionRestorer } from '../../contracts/IMatchSessionRestorer.js'
-import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/history.gateway.js'
-import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
-import { listMutes } from '../../infrastructure/gateways/mute.gateway.js'
 import { signJwt } from './jwt.js'
-import type { NakamaAccount } from './nakama.js'
 
 type Provider = 'steam' | 'discord'
 type SessionInit = NonNullable<Parameters<typeof createSession>[1]>
@@ -25,21 +24,9 @@ type SessionAndToken = { session: PlayerSession; token: string }
 
 interface AuthServiceDeps {
 	playerRepository: IPlayerRepository
-	gracePeriodService: Pick<IGracePeriodService, 'cancelGracePeriod'>
-	matchSessionRestorer: IMatchSessionRestorer
 }
 
 export type AuthService = ReturnType<typeof createAuthService>
-
-export function authenticateAsTemp(steamName: string) {
-	const session = createSession(steamName)
-	const token = signJwt({
-		playerId: session.playerId,
-		steamName: session.steamName,
-		isTemp: true,
-	})
-	return { session, token }
-}
 
 function signSessionJwt(session: PlayerSession): string {
 	return signJwt({
@@ -50,7 +37,6 @@ function signSessionJwt(session: PlayerSession): string {
 		preferredJoker: session.preferredJoker,
 		discordIdHash: session.discordIdHash,
 		discordUsername: session.discordUsername,
-		lobbyCode: session.lobbyCode,
 	})
 }
 
@@ -90,34 +76,20 @@ function ensureProviderNotLinkedElsewhere(
 }
 
 export function createAuthService(deps: AuthServiceDeps) {
-	const { playerRepository, gracePeriodService, matchSessionRestorer } = deps
-
-	// A session rebuilt here means none existed in memory a moment ago -- the
-	// exact "server forgot me" shape left behind by an app-only restart (see
-	// matchmaking.service.ts's restorePlayerMatchSession doc comment). Cancel
-	// any grace period left dangling from before the restart, and re-attach
-	// the player to their active match/lobby if the DB says they're still in
-	// one, so a mid-match player reconnecting via a fresh HTTP auth doesn't
-	// silently lose match/lobby membership the way it did prior to this fix.
-	async function reattachRestoredSession(session: PlayerSession): Promise<void> {
-		await gracePeriodService.cancelGracePeriod(session.playerId)
-		await matchSessionRestorer.restorePlayerMatchSession(session)
-	}
+	const { playerRepository } = deps
 
 	async function ensureSession(playerId: string): Promise<PlayerSession> {
 		const existing = getSession(playerId)
 		if (existing) return existing
 		const dbPlayer = await playerRepository.findPlayerById(playerId)
 		if (!dbPlayer) throw new AppError('Player not found', 404)
-		const mutedPlayerIds = await listMutes(dbPlayer.id)
-		return createSession(dbPlayer.steamName, dbPlayerToSessionInit(dbPlayer, { mutedPlayerIds }))
+		return createSession(dbPlayer.steamName, dbPlayerToSessionInit(dbPlayer))
 	}
 
 	async function refreshSteamSessionOnReauth(
 		session: PlayerSession,
 		steamName: string,
 	): Promise<SessionAndToken> {
-		await gracePeriodService.cancelGracePeriod(session.playerId)
 		session.steamName = steamName
 		await playerRepository.updateSteamName(session.playerId, steamName)
 		return sessionAndToken(session)
@@ -127,14 +99,13 @@ export function createAuthService(deps: AuthServiceDeps) {
 		dbPlayer: PlayerRecord,
 		steamName: string,
 	): Promise<SessionAndToken> {
-		const mutedPlayerIds = await listMutes(dbPlayer.id)
-		const session = createSession(steamName, dbPlayerToSessionInit(dbPlayer, { mutedPlayerIds }))
+		const session = createSession(steamName, dbPlayerToSessionInit(dbPlayer))
 		await playerRepository.updateSteamName(dbPlayer.id, steamName)
 		// A previously-deleted account is reactivated by simply signing back in
 		// with the same Steam identity (steamIdHash survives deletion for exactly
 		// this reason) -- a no-op if the account was never deleted.
-		if (dbPlayer.deletedAt) await playerRepository.reactivateIfDeleted(dbPlayer.id)
-		await reattachRestoredSession(session)
+		if (dbPlayer.deletedAt)
+			await playerRepository.reactivateIfDeleted(dbPlayer.id)
 		return sessionAndToken(session)
 	}
 
@@ -161,23 +132,10 @@ export function createAuthService(deps: AuthServiceDeps) {
 		return createBrandNewSteamSession(steamName, steamIdHash)
 	}
 
-	// Nakama has already verified the Steam ticket; from here on the player is
-	// found exactly as /steam finds them, and the Nakama account id is recorded.
-	async function authenticateWithNakama(
-		account: NakamaAccount,
-		steamName: string,
-	): Promise<SessionAndToken> {
-		const result = await authenticateWithSteam(account.steamId, steamName)
-		result.session.nakamaUserId = account.userId
-		await playerRepository.linkNakamaUser(result.session.playerId, account.userId)
-		return result
-	}
-
 	async function refreshDiscordSessionOnReauth(
 		session: PlayerSession,
 		discordName: string,
 	): Promise<SessionAndToken> {
-		await gracePeriodService.cancelGracePeriod(session.playerId)
 		session.steamName = discordName
 		session.discordUsername = discordName
 		await playerRepository.updateSteamName(session.playerId, discordName)
@@ -189,14 +147,12 @@ export function createAuthService(deps: AuthServiceDeps) {
 		dbPlayer: PlayerRecord,
 		discordName: string,
 	): Promise<SessionAndToken> {
-		const mutedPlayerIds = await listMutes(dbPlayer.id)
 		const session = createSession(
 			discordName,
-			dbPlayerToSessionInit(dbPlayer, { discordUsername: discordName, mutedPlayerIds }),
+			dbPlayerToSessionInit(dbPlayer, { discordUsername: discordName }),
 		)
 		await playerRepository.updateSteamName(dbPlayer.id, discordName)
 		await playerRepository.updateDiscordUsername(dbPlayer.id, discordName)
-		await reattachRestoredSession(session)
 		return sessionAndToken(session)
 	}
 
@@ -225,75 +181,11 @@ export function createAuthService(deps: AuthServiceDeps) {
 		const existing = findByProvider('discord', discordIdHash)
 		if (existing) return refreshDiscordSessionOnReauth(existing, discordName)
 
-		const dbPlayer = await playerRepository.findPlayerByDiscordIdHash(discordIdHash)
+		const dbPlayer =
+			await playerRepository.findPlayerByDiscordIdHash(discordIdHash)
 		if (dbPlayer) return restoreDiscordSessionFromDb(dbPlayer, discordName)
 
 		return createBrandNewDiscordSession(discordName, discordIdHash)
-	}
-
-	async function refreshExistingSessionByPlayerId(
-		session: PlayerSession,
-		steamName: string,
-	): Promise<SessionAndToken> {
-		await gracePeriodService.cancelGracePeriod(session.playerId)
-		session.steamName = steamName
-		await playerRepository.updateSteamName(session.playerId, steamName)
-		return sessionAndToken(session)
-	}
-
-	async function authenticateWithPlayerId(
-		playerId: string,
-		steamName: string,
-	): Promise<SessionAndToken> {
-		const existing = getSession(playerId)
-		if (existing) return refreshExistingSessionByPlayerId(existing, steamName)
-
-		const dbPlayer = await playerRepository.findPlayerById(playerId)
-		if (!dbPlayer) throw new AppError('Player not found', 401)
-
-		return restoreSessionFromDbPlayer(dbPlayer, steamName)
-	}
-
-	async function findImpersonationTarget(opts: {
-		playerId?: string
-		steamId?: string
-		discordId?: string
-		steamName?: string
-	}): Promise<PlayerRecord | null> {
-		if (opts.playerId) return playerRepository.findPlayerById(opts.playerId)
-		if (opts.steamId)
-			return playerRepository.findPlayerBySteamIdHash(hashProviderId(opts.steamId))
-		if (opts.discordId)
-			return playerRepository.findPlayerByDiscordIdHash(hashProviderId(opts.discordId))
-		if (opts.steamName) return playerRepository.findPlayerBySteamName(opts.steamName)
-		return null
-	}
-
-	async function impersonatePlayer(opts: {
-		playerId?: string
-		steamId?: string
-		discordId?: string
-		steamName?: string
-	}): Promise<SessionAndToken> {
-		const dbPlayer = await findImpersonationTarget(opts)
-		if (!dbPlayer) throw new AppError('Player not found', 404)
-
-		const mutedPlayerIds = await listMutes(dbPlayer.id)
-		const session = createSession(
-			dbPlayer.steamName,
-			dbPlayerToSessionInit(dbPlayer, { mutedPlayerIds }),
-		)
-		return sessionAndToken(session)
-	}
-
-	async function linkSteamToPlayer(playerId: string, steamId: string) {
-		const session = await ensureSession(playerId)
-		const steamIdHash = hashProviderId(steamId)
-		ensureProviderNotLinkedElsewhere('steam', steamIdHash, playerId)
-
-		linkProvider(session, 'steam', steamIdHash)
-		await playerRepository.linkSteam(playerId, steamIdHash)
-		return sessionAndToken(session)
 	}
 
 	async function linkDiscordToPlayer(
@@ -344,15 +236,6 @@ export function createAuthService(deps: AuthServiceDeps) {
 		return sessionAndToken(session)
 	}
 
-	// Session-only, not DB-persisted -- a player's installed mods are
-	// inherently per-launch (unlike preferredJoker) and don't need durability
-	// beyond the current connection.
-	async function setInstalledMods(playerId: string, mods: string[]) {
-		const session = await ensureSession(playerId)
-		session.installedMods = mods
-		return sessionAndToken(session)
-	}
-
 	async function ensurePlayerExistsInDb(session: PlayerSession): Promise<void> {
 		const dbPlayer = await playerRepository.findPlayerById(session.playerId)
 		if (dbPlayer) return
@@ -360,7 +243,6 @@ export function createAuthService(deps: AuthServiceDeps) {
 			id: session.playerId,
 			steamName: session.steamName,
 			steamIdHash: session.steamIdHash,
-			nakamaUserId: session.nakamaUserId,
 		})
 	}
 
@@ -375,7 +257,11 @@ export function createAuthService(deps: AuthServiceDeps) {
 		session.tosAcceptedVersion = tosVersion
 
 		if (chatEligible !== undefined) {
-			await playerRepository.updateChatStatus(playerId, chatEligible, !chatEligible)
+			await playerRepository.updateChatStatus(
+				playerId,
+				chatEligible,
+				!chatEligible,
+			)
 			session.chatEnabled = chatEligible
 			session.chatBlocked = !chatEligible
 		}
@@ -397,16 +283,11 @@ export function createAuthService(deps: AuthServiceDeps) {
 
 	return {
 		authenticateWithSteam,
-		authenticateWithNakama,
 		authenticateWithDiscord,
-		authenticateWithPlayerId,
-		impersonatePlayer,
-		linkSteamToPlayer,
 		linkDiscordToPlayer,
 		unlinkDiscordFromPlayer,
 		setUseDiscordName,
 		setPreferredJoker,
-		setInstalledMods,
 		acceptTos,
 		deleteAccount,
 	}

@@ -28,7 +28,11 @@ export const METRIC_CONFIG: Record<string, MetricConfig> = {
 	// silently never matched a real match.modId and left season_best NULL for
 	// every ranked SPDRN game (confirmed live: 10 rating rows, up to 18 games
 	// played each, season_best always NULL).
-	MultiplayerSPDRN: { kind: 'time_ms', direction: 'asc', serverMeasured: false },
+	MultiplayerSPDRN: {
+		kind: 'time_ms',
+		direction: 'asc',
+		serverMeasured: false,
+	},
 }
 
 export function getMetricConfig(modId: string): MetricConfig | undefined {

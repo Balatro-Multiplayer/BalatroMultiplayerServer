@@ -1,9 +1,7 @@
 import { eq, max } from 'drizzle-orm'
-import { db } from '../db/index.js'
-import { reports, reportedLobbyMessages } from '../db/schema.js'
-import type { Lobby } from '../../state/lobby.js'
 import type { ReportType } from '../../shared/types/index.js'
-import { getMostRecentRunForLobbyCode } from './replay-log.gateway.js'
+import { db } from '../db/index.js'
+import { reportedLobbyMessages, reports } from '../db/schema.js'
 import { enqueueServiceQueueItem } from './service-queue.gateway.js'
 
 export type { ReportType } from '../../shared/types/index.js'
@@ -18,36 +16,6 @@ export const REPORT_TYPES: readonly ReportType[] = [
 
 export function isReportType(value: unknown): value is ReportType {
 	return typeof value === 'string' && REPORT_TYPES.includes(value as ReportType)
-}
-
-export async function submitReport(
-	lobby: Lobby,
-	reporterId: string,
-	reportedId: string,
-	type: ReportType,
-	message: string | undefined,
-): Promise<number> {
-	// The actual "match" identifier (§15.6) -- reports.lobbyId is only the
-	// ephemeral in-memory lobby instance, not the same id as lobbyRuns.id that
-	// replay/logs are keyed by. Resolved as the most recent run for this lobby's
-	// code; null if no match has started on this lobby yet.
-	const runId = await getMostRecentRunForLobbyCode(lobby.code)
-
-	// The first report flushes the in-memory message buffer to DB so the
-	// history leading up to the report is preserved alongside future messages.
-	const chat = lobby.isReported ? [] : lobby.messageBuffer
-	const id = await recordReport({
-		lobbyId: lobby.id,
-		lobbyCode: lobby.code,
-		reporterId,
-		reportedId,
-		type,
-		runId,
-		message,
-		chat,
-	})
-	lobby.isReported = true
-	return id
 }
 
 export interface ReportedChatLine {
@@ -79,7 +47,9 @@ export async function submitNakamaReport(report: NewReport): Promise<number> {
 		.from(reportedLobbyMessages)
 		.where(eq(reportedLobbyMessages.lobbyId, report.lobbyId))
 	const latest = kept?.latest ?? null
-	const chat = latest ? report.chat.filter((line) => line.sentAt > latest) : report.chat
+	const chat = latest
+		? report.chat.filter((line) => line.sentAt > latest)
+		: report.chat
 	return recordReport({ ...report, chat })
 }
 
@@ -126,7 +96,11 @@ export type ReportRecord = typeof reports.$inferSelect
 
 /** Looks up a single report by id, or null if it doesn't exist. */
 export async function getReportById(id: number): Promise<ReportRecord | null> {
-	const [row] = await db.select().from(reports).where(eq(reports.id, id)).limit(1)
+	const [row] = await db
+		.select()
+		.from(reports)
+		.where(eq(reports.id, id))
+		.limit(1)
 	return row ?? null
 }
 

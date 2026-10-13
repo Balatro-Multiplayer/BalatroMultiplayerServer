@@ -1,3 +1,4 @@
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { Router } from 'express'
 import { db } from '../../infrastructure/db/index.js'
 import {
@@ -6,21 +7,37 @@ import {
 	players,
 	seasons,
 } from '../../infrastructure/db/schema.js'
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
-import { getCurrentSeason } from '../../infrastructure/gateways/matchmaking.gateway.js'
-import { PLACEMENT_GAMES } from '../matchmaking/elo.service.js'
-import { totalPlayerCount } from '../matchmaking/queue.js'
-import { matches, queues } from '../../state/matchmaking.js'
+import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
+import {
+	DECAY_INACTIVE_THRESHOLD_DAYS,
+	DECAY_RATE_PER_DAY,
+	PLACEMENT_GAMES,
+	RATING_FLOOR,
+} from '../ratings/elo.js'
 
 const router = Router()
+
+// Nakama decays an inactive rating when it next reads it and only stores the
+// result after the player's next game, so the mirrored rating is the
+// undecayed one. Apply the same decay here (rating/season.ts decayedRating).
+// Every query below reads matchmaking_ratings as `r`.
+const effectiveRating = sql.raw(`CASE
+	WHEN r.games_played >= ${PLACEMENT_GAMES}
+	 AND r.last_match_at < now() - interval '${DECAY_INACTIVE_THRESHOLD_DAYS} days'
+	THEN GREATEST(${RATING_FLOOR}, r.rating - floor(extract(epoch FROM now() - r.last_match_at) / 86400 - ${DECAY_INACTIVE_THRESHOLD_DAYS})::int * ${DECAY_RATE_PER_DAY})
+	ELSE r.rating END`)
 
 // Legacy match total from the old www system (Seasons 1–6).
 // Unique players is not carried forward — account systems don't overlap.
 const LEGACY_MATCHES = 453_792
 const LEGACY_UNIQUE_PLAYERS = 0
 
-let cache: { activePlayers: number; totalMatches: number; uniquePlayers: number } | null = null
+let cache: {
+	activePlayers: number
+	totalMatches: number
+	uniquePlayers: number
+} | null = null
 let cacheAt = 0
 const CACHE_TTL_MS = 5 * 60 * 1000
 
@@ -53,8 +70,10 @@ router.get('/', async (_req, res, next) => {
 router.get('/leaderboard', async (req, res, next) => {
 	try {
 		const { modId, gameMode, season } = req.query
-		if (!modId || typeof modId !== 'string') throw new AppError('Missing modId', 400)
-		if (!gameMode || typeof gameMode !== 'string') throw new AppError('Missing gameMode', 400)
+		if (!modId || typeof modId !== 'string')
+			throw new AppError('Missing modId', 400)
+		if (!gameMode || typeof gameMode !== 'string')
+			throw new AppError('Missing gameMode', 400)
 
 		let seasonId: number
 		if (season !== undefined) {
@@ -67,15 +86,19 @@ router.get('/leaderboard', async (req, res, next) => {
 			seasonId = active.id
 		}
 
-		// Paginate over the full ranked list (matchmaking_ratings is the source of
-		// truth; leaderboard_cache only holds the top 100). Rank is a window
+		// Paginate over the full ranked list (matchmaking_ratings is the
+		// source of truth). Rank is a window
 		// function over the whole board (rating desc, wins desc), so an optional
 		// name search returns matching players with their true global rank,
 		// spanning every page rather than just the current one.
 		const page = Math.max(1, Number(req.query.page ?? 1))
-		const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize ?? 100)))
+		const pageSize = Math.min(
+			200,
+			Math.max(1, Number(req.query.pageSize ?? 100)),
+		)
 		const offset = (page - 1) * pageSize
-		const search = typeof req.query.search === 'string' ? req.query.search.trim() : ''
+		const search =
+			typeof req.query.search === 'string' ? req.query.search.trim() : ''
 		const term = search ? `%${search}%` : null
 
 		const totalRes = await db.execute(sql`
@@ -86,7 +109,9 @@ router.get('/leaderboard', async (req, res, next) => {
 			  AND r.games_played >= ${PLACEMENT_GAMES}
 			  ${term ? sql`AND (p.steam_name ILIKE ${term} OR p.discord_username ILIKE ${term})` : sql``}
 		`)
-		const total = Number((totalRes.rows[0] as { total: number } | undefined)?.total ?? 0)
+		const total = Number(
+			(totalRes.rows[0] as { total: number } | undefined)?.total ?? 0,
+		)
 
 		const rowsRes = await db.execute(sql`
 			SELECT rank, player_id, display_name, rating, wins, losses, games_played, season_best
@@ -96,8 +121,8 @@ router.get('/leaderboard', async (req, res, next) => {
 					CASE WHEN p.use_discord_name AND p.discord_username IS NOT NULL
 					     THEN p.discord_username ELSE p.steam_name END AS display_name,
 					p.steam_name, p.discord_username,
-					r.rating, r.wins, r.losses, r.games_played, r.season_best,
-					ROW_NUMBER() OVER (ORDER BY r.rating DESC, r.wins DESC, r.player_id ASC) AS rank
+					${effectiveRating} AS rating, r.wins, r.losses, r.games_played, r.season_best,
+					ROW_NUMBER() OVER (ORDER BY ${effectiveRating} DESC, r.wins DESC, r.player_id ASC) AS rank
 				FROM matchmaking_ratings r
 				JOIN players p ON p.id = r.player_id
 				WHERE r.mod_id = ${modId} AND r.game_mode = ${gameMode} AND r.season = ${seasonId}
@@ -137,48 +162,6 @@ router.get('/leaderboard', async (req, res, next) => {
 	}
 })
 
-// Live "N queued / M in game" counts, per gameMode, for a mod -- e.g. to
-// show on each button of a Find Game menu. Reads straight off the same
-// in-memory Maps the matchmaking loop itself uses (state/matchmaking.ts) --
-// no DB, no cache, since the whole point is being live and a scan over
-// these Maps is already far cheaper than any query would be. Single-process
-// in-memory state, same assumption the matchmaking loop already makes
-// (no distributed lock) -- if this server ever runs multiple replicas, this
-// only reflects whichever one served the request.
-//
-// One call returns every gameMode currently active for modId, not just one
-// -- a menu with several buttons only needs one round-trip. A gameMode with
-// zero queued and zero in-match players is omitted entirely rather than
-// listed with explicit zeros; callers should treat an absent key as 0/0.
-router.get('/queue-counts', (req, res, next) => {
-	try {
-		const { modId } = req.query
-		if (!modId || typeof modId !== 'string') throw new AppError('Missing modId', 400)
-
-		const counts: Record<string, { queued: number; inMatch: number }> = {}
-
-		const prefix = `${modId}:`
-		for (const [key, entries] of queues.entries()) {
-			if (!key.startsWith(prefix)) continue
-			const queued = totalPlayerCount(entries)
-			if (queued === 0) continue
-			const gameMode = key.slice(prefix.length)
-			counts[gameMode] = counts[gameMode] || { queued: 0, inMatch: 0 }
-			counts[gameMode].queued = queued
-		}
-
-		for (const match of matches.values()) {
-			if (match.modId !== modId || match.playerIds.length === 0) continue
-			counts[match.gameMode] = counts[match.gameMode] || { queued: 0, inMatch: 0 }
-			counts[match.gameMode].inMatch += match.playerIds.length
-		}
-
-		res.json({ modId, gameModes: counts })
-	} catch (err) {
-		next(err)
-	}
-})
-
 router.get('/seasons', async (_req, res, next) => {
 	try {
 		const rows = await db
@@ -203,8 +186,10 @@ router.get('/players/:id', async (req, res, next) => {
 	try {
 		const { id } = req.params
 		const { modId, gameMode, season } = req.query
-		if (!modId || typeof modId !== 'string') throw new AppError('Missing modId', 400)
-		if (!gameMode || typeof gameMode !== 'string') throw new AppError('Missing gameMode', 400)
+		if (!modId || typeof modId !== 'string')
+			throw new AppError('Missing modId', 400)
+		if (!gameMode || typeof gameMode !== 'string')
+			throw new AppError('Missing gameMode', 400)
 
 		let seasonId: number
 		if (season !== undefined) {
@@ -240,7 +225,6 @@ router.get('/players/:id', async (req, res, next) => {
 
 		const [r] = await db
 			.select({
-				rating: matchmakingRatings.rating,
 				wins: matchmakingRatings.wins,
 				losses: matchmakingRatings.losses,
 				gamesPlayed: matchmakingRatings.gamesPlayed,
@@ -254,18 +238,20 @@ router.get('/players/:id', async (req, res, next) => {
 		// same ROW_NUMBER ordering as the leaderboard so the two always agree.
 		// Established players only (placement players don't appear -> rank null).
 		const rankRes = await db.execute(sql`
-			SELECT rank FROM (
-				SELECT player_id,
-					ROW_NUMBER() OVER (ORDER BY rating DESC, wins DESC, player_id ASC) AS rank
-				FROM matchmaking_ratings
-				WHERE mod_id = ${modId} AND game_mode = ${gameMode} AND season = ${seasonId}
-				  AND games_played >= ${PLACEMENT_GAMES}
+			SELECT rank, rating FROM (
+				SELECT r.player_id, ${effectiveRating} AS rating,
+					ROW_NUMBER() OVER (ORDER BY ${effectiveRating} DESC, r.wins DESC, r.player_id ASC) AS rank
+				FROM matchmaking_ratings r
+				WHERE r.mod_id = ${modId} AND r.game_mode = ${gameMode} AND r.season = ${seasonId}
+				  AND r.games_played >= ${PLACEMENT_GAMES}
 			) t
 			WHERE player_id = ${id}
 		`)
-		const rankRow = rankRes.rows[0] as { rank: string | number } | undefined
+		const rankRow = rankRes.rows[0] as
+			| { rank: string | number; rating: string | number }
+			| undefined
 		const rank = rankRow ? Number(rankRow.rank) : null
-		const rating = rank !== null && r ? r.rating : null
+		const rating = rankRow && r ? Number(rankRow.rating) : null
 
 		res.json({
 			playerId: player.id,
@@ -400,10 +386,16 @@ router.get('/stake-popularity', async (_req, res, next) => {
 			.from(matchmakingMatches)
 			.groupBy(matchmakingMatches.gameMode)
 
-		const buckets: Record<string, number> = { 'White Stake': 0, 'Gold Stake': 0, Other: 0 }
+		const buckets: Record<string, number> = {
+			'White Stake': 0,
+			'Gold Stake': 0,
+			Other: 0,
+		}
 		for (const row of rows) {
-			if (row.gameMode.includes('white_stake_triple')) buckets['White Stake'] += row.count
-			else if (row.gameMode.includes('gold_stake_single')) buckets['Gold Stake'] += row.count
+			if (row.gameMode.includes('white_stake_triple'))
+				buckets['White Stake'] += row.count
+			else if (row.gameMode.includes('gold_stake_single'))
+				buckets['Gold Stake'] += row.count
 			else buckets.Other += row.count
 		}
 

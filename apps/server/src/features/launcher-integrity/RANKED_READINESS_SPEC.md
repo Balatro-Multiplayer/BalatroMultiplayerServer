@@ -31,8 +31,9 @@ is a real future hardening option, deliberately out of scope here.
 ## Wire contract
 
 New challenge kind, issued by `launcher-integrity.service.ts` right after a
-successful Ranked `matchmaking.service.ts::joinQueue` (not at MQTT-connect
-time like `login`/`periodic`):
+successful Ranked queue join (Nakama's queue hook, through
+`/internal/nakama/integrity/ranked-readiness`; not at session start like
+`login`/`periodic`):
 
 ```jsonc
 // issued

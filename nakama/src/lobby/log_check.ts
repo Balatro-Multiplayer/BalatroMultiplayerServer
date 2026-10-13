@@ -1,7 +1,6 @@
 // Checks a player's stored replay log against the hash the client itself
 // sent in its closing 'chk' event (api/replay/recorder.lua's RLOG.end_run).
-// Mirrors apps/server's replay-log.service.ts verifyPlayerHash: SHA-256 over
-// the JSON array of [t, opcode, args] tuples, framing events excluded -- here
+// SHA-256 over the JSON array of [t, opcode, args] tuples, framing events excluded -- here
 // over each event's JSON text as it arrived (see PlayerLog). Pure; the hash
 // function is passed in.
 import type { LogCheck, PlayerLog } from './protocol'
