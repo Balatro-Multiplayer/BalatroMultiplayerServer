@@ -7,9 +7,8 @@ export const NotifyCode = {
 	ACCOUNT_UPDATED: 101,
 	BANNED: 102,
 	QUEUE_CANCELLED: 103,
-	CONFIG: 104,
+	// 104 and 106 are retired (never sent); don't reuse them.
 	INTEGRITY: 105,
-	KICKED: 106,
 }
 
 const CODES: number[] = Object.keys(NotifyCode).map((k) => (NotifyCode as { [k: string]: number })[k])
