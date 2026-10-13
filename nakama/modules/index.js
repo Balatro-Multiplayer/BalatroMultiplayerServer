@@ -2528,6 +2528,288 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   });
 }
 
+// src/moderation/bans.ts
+var MODERATION_COLLECTION = "moderation";
+var BANS_KEY = "bans";
+var BAN_TYPES = ["chat", "queue", "account"];
+function isBanType(value) {
+  return typeof value === "string" && BAN_TYPES.indexOf(value) !== -1;
+}
+function isBan(value) {
+  const b = value;
+  return typeof b === "object" && b !== null && typeof b.banId === "string" && typeof b.reason === "string" && (b.expiresAt === null || typeof b.expiresAt === "number" && Number.isFinite(b.expiresAt));
+}
+function longer(a, b) {
+  if (!a) return b;
+  if (a.expiresAt === null) return a;
+  if (b.expiresAt === null) return b;
+  return b.expiresAt > a.expiresAt ? b : a;
+}
+function withBan(bans, type, ban) {
+  return __spreadProps(__spreadValues({}, bans), { [type]: longer(bans[type], ban) });
+}
+function bansFromList(list) {
+  let bans = {};
+  for (const entry of list) {
+    const ban = { banId: entry.banId, expiresAt: entry.expiresAt, reason: entry.reason };
+    if (isBanType(entry.type) && isBan(ban)) bans = withBan(bans, entry.type, ban);
+  }
+  return bans;
+}
+function readBans(nk, userId) {
+  const objects = nk.storageRead([{ collection: MODERATION_COLLECTION, key: BANS_KEY, userId }]);
+  if (objects.length === 0) return {};
+  const stored = objects[0].value;
+  const bans = {};
+  for (const type of BAN_TYPES) if (isBan(stored[type])) bans[type] = stored[type];
+  return bans;
+}
+function writeBans(nk, userId, bans) {
+  nk.storageWrite([
+    {
+      collection: MODERATION_COLLECTION,
+      key: BANS_KEY,
+      userId,
+      value: bans,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+
+// src/shared/jokers.ts
+var PRIVILEGE_JOKERS = {
+  virtualized: "j_perkeo",
+  bean: "j_turtle_bean",
+  vagabond: "j_vagabond",
+  sizaak: "j_dusk",
+  lava: "j_burnt",
+  twelve: "j_stone"
+};
+var DEFAULT_JOKER = "j_joker";
+function privilegeTable(privileges) {
+  const jokers = privileges.map((p) => PRIVILEGE_JOKERS[p]).filter((j) => !!j);
+  return jokers.length > 0 ? { jokers } : {};
+}
+
+// src/player/profile.ts
+var PLAYER_COLLECTION = "player";
+var PROFILE_KEY = "profile";
+var MAX_NAME_LENGTH = 64;
+var WRITE_ATTEMPTS2 = 3;
+function cleanName(name) {
+  if (typeof name !== "string") return "";
+  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
+}
+function defaultProfile(steamName) {
+  return {
+    steamName,
+    useDiscordName: false,
+    preferredJoker: DEFAULT_JOKER,
+    mods: null,
+    discordIdHash: null,
+    discordUsername: null,
+    privileges: [],
+    tosAcceptedVersion: 0,
+    chatEnabled: false,
+    chatBlocked: false,
+    mutedUserIds: [],
+    unresolvedMutedPlayerIds: [],
+    legacyPlayerId: null,
+    synced: false
+  };
+}
+function stringList(value) {
+  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+}
+function profileOf(value, fallbackName) {
+  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
+  return __spreadProps(__spreadValues({}, base), {
+    useDiscordName: value.useDiscordName === true,
+    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
+    mods: value.mods === void 0 ? null : value.mods,
+    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
+    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
+    privileges: stringList(value.privileges),
+    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
+    chatEnabled: value.chatEnabled === true,
+    chatBlocked: value.chatBlocked === true,
+    mutedUserIds: stringList(value.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
+    synced: value.synced === true
+  });
+}
+function withSync(profile, sync) {
+  var _a, _b;
+  return __spreadProps(__spreadValues({}, profile), {
+    useDiscordName: sync.useDiscordName === true,
+    preferredJoker: typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker,
+    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
+    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
+    privileges: stringList(sync.privileges),
+    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
+    chatEnabled: sync.chatEnabled === true,
+    chatBlocked: sync.chatBlocked === true,
+    mutedUserIds: stringList(sync.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
+    synced: true
+  });
+}
+function displayNameOf(profile) {
+  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
+  return profile.steamName;
+}
+function playerView(userId, profile) {
+  return {
+    id: userId,
+    steamName: profile.steamName,
+    displayName: displayNameOf(profile),
+    useDiscordName: profile.useDiscordName,
+    preferredJoker: profile.preferredJoker,
+    discordLinked: profile.discordIdHash !== null,
+    discordUsername: profile.discordUsername,
+    privileges: privilegeTable(profile.privileges),
+    chatEnabled: profile.chatEnabled,
+    chatBlocked: profile.chatBlocked,
+    mutedPlayerIds: profile.mutedUserIds
+  };
+}
+function readProfile(nk, userId, fallbackName = "") {
+  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
+  if (objects.length === 0) return null;
+  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
+}
+function writeProfile(nk, userId, profile, version) {
+  nk.storageWrite([
+    {
+      collection: PLAYER_COLLECTION,
+      key: PROFILE_KEY,
+      userId,
+      value: profile,
+      version,
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+}
+function updateProfile(nk, userId, change, fallbackName = "") {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
+    const stored = readProfile(nk, userId, fallbackName);
+    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
+    try {
+      writeProfile(nk, userId, next, stored ? stored.version : "*");
+      return next;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
+// src/player/session.ts
+var STEAM_CUSTOM_ID = /^steam:(\d+)$/;
+function steamIdOf(nk, userId) {
+  const match = STEAM_CUSTOM_ID.exec(nk.accountGetId(userId).customId || "");
+  return match ? match[1] : null;
+}
+function isPlayerSync(value) {
+  return typeof value.playerId === "string" && Array.isArray(value.bans);
+}
+function fetchSync(ctx, logger, nk, userId, steamId, steamName) {
+  const reply = callExpress(nk, logger, ctx.env, "/player-sync", { steamId, nakamaUserId: userId, steamName });
+  if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
+    logger.warn("Player sync for %s failed (HTTP %v); retrying next login", userId, reply && reply.status);
+    return null;
+  }
+  return reply.body;
+}
+function resolveMutes(ctx, logger, nk, profile) {
+  const reply = callExpress(nk, logger, ctx.env, "/resolve-players", { playerIds: profile.unresolvedMutedPlayerIds });
+  const resolved = reply && reply.status === 200 ? reply.body.resolved : null;
+  return resolved && typeof resolved === "object" ? resolved : {};
+}
+function withResolvedMutes(profile, resolved) {
+  const found = profile.unresolvedMutedPlayerIds.filter((id) => typeof resolved[id] === "string");
+  if (found.length === 0) return profile;
+  const muted = profile.mutedUserIds.slice();
+  for (const id of found) if (muted.indexOf(resolved[id]) === -1) muted.push(resolved[id]);
+  return __spreadProps(__spreadValues({}, profile), {
+    mutedUserIds: muted,
+    unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
+  });
+}
+function loginResponse(userId, profile, config) {
+  return {
+    tosRequired: profile.tosAcceptedVersion < config.tosVersion,
+    tosUpdate: profile.tosAcceptedVersion > 0,
+    player: playerView(userId, profile),
+    serverConfig: config
+  };
+}
+function syncDisplayName(nk, userId, profile) {
+  const name = displayNameOf(profile);
+  if (nk.accountGetId(userId).user.displayName !== name)
+    nk.accountUpdateId(userId, null, name, null, null, null, null, null);
+}
+function rpcSessionInit(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const steamName = cleanName(parsePayload(payload).steamName) || ctx.username;
+  const stored = readProfile(nk, userId, steamName);
+  const steamId = steamIdOf(nk, userId);
+  let sync = null;
+  let resolved = {};
+  if (!stored || !stored.profile.synced) {
+    if (steamId) sync = fetchSync(ctx, logger, nk, userId, steamId, steamName);
+  } else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
+    resolved = resolveMutes(ctx, logger, nk, stored.profile);
+  }
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      let next = __spreadProps(__spreadValues({}, current), { steamName });
+      if (sync) next = withSync(next, sync);
+      else if (!steamId) next.synced = true;
+      return withResolvedMutes(next, resolved);
+    },
+    steamName
+  );
+  if (sync) {
+    let bans = readBans(nk, userId);
+    const synced = bansFromList(sync.bans);
+    for (const type of BAN_TYPES) {
+      const ban = synced[type];
+      if (ban) bans = withBan(bans, type, ban);
+    }
+    writeBans(nk, userId, bans);
+    logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
+  }
+  syncDisplayName(nk, userId, profile);
+  return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
+}
+function rpcTosAccept(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const eligible = parsePayload(payload).chatEligible;
+  const config = readConfig(nk);
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: config.tosVersion });
+      if (typeof eligible === "boolean") {
+        next.chatEnabled = eligible;
+        next.chatBlocked = !eligible;
+      }
+      return next;
+    },
+    ctx.username
+  );
+  return JSON.stringify(loginResponse(userId, profile, config));
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
@@ -2547,6 +2829,8 @@ function InitModule(ctx, logger, nk, initializer) {
     matchTerminate: lobbyMatchTerminate
   });
   initializer.registerMatchmakerMatched(matchmakerMatched);
+  initializer.registerRpc("session_init", rpcSessionInit);
+  initializer.registerRpc("tos_accept", rpcTosAccept);
   initializer.registerRpc("chat_enable", rpcChatEnable);
   initializer.registerRpc("chat_send", rpcChatSend);
   initializer.registerRpc("lobby_create", rpcLobbyCreate);

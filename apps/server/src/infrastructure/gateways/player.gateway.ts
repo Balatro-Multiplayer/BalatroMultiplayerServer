@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, lt } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, lt } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { players } from '../db/schema.js'
 import { getActiveBans } from './ban.gateway.js'
@@ -94,6 +94,25 @@ export async function linkNakamaUser(
 		.update(players)
 		.set({ nakamaUserId, updatedAt: new Date() })
 		.where(eq(players.id, playerId))
+}
+
+// playerId -> Nakama user id, for those of the given players that have one.
+export async function findNakamaUserIds(playerIds: string[]): Promise<Map<string, string>> {
+	if (playerIds.length === 0) return new Map()
+	const rows = await db
+		.select({ id: players.id, nakamaUserId: players.nakamaUserId })
+		.from(players)
+		.where(inArray(players.id, playerIds))
+	const found = new Map<string, string>()
+	for (const row of rows) if (row.nakamaUserId) found.set(row.id, row.nakamaUserId)
+	return found
+}
+
+export async function findPlayerByNakamaUserId(nakamaUserId: string): Promise<PlayerRecord | null> {
+	const row = await db.query.players.findFirst({
+		where: eq(players.nakamaUserId, nakamaUserId),
+	})
+	return row ?? null
 }
 
 export async function linkDiscord(

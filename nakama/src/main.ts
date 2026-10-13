@@ -30,6 +30,7 @@ import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
+import { rpcSessionInit, rpcTosAccept } from './player/session'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -57,6 +58,8 @@ function InitModule(
 		matchTerminate: lobbyMatchTerminate,
 	})
 	initializer.registerMatchmakerMatched(matchmakerMatched)
+	initializer.registerRpc('session_init', rpcSessionInit)
+	initializer.registerRpc('tos_accept', rpcTosAccept)
 	initializer.registerRpc('chat_enable', rpcChatEnable)
 	initializer.registerRpc('chat_send', rpcChatSend)
 	initializer.registerRpc('lobby_create', rpcLobbyCreate)

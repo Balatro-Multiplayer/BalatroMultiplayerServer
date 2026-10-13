@@ -148,6 +148,8 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	createPlayer: vi.fn().mockResolvedValue(mockPlayerRecord),
 	linkSteam: vi.fn().mockResolvedValue(undefined),
 	linkNakamaUser: vi.fn().mockResolvedValue(undefined),
+	findNakamaUserIds: vi.fn().mockResolvedValue(new Map()),
+	findPlayerByNakamaUserId: vi.fn().mockResolvedValue(null),
 	linkDiscord: vi.fn().mockResolvedValue(undefined),
 	unlinkDiscord: vi.fn().mockResolvedValue(undefined),
 	updateSteamName: vi.fn().mockResolvedValue(undefined),
