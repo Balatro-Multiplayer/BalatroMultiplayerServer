@@ -1,0 +1,37 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import { MAX_PARAMS_BYTES } from './lobby/relay'
+
+// The largest ACTION a client may send (params at relay.ts's cap) as the
+// websocket message Nakama reads: the action JSON, base64'd into a
+// match_data_send envelope.
+function largestActionMessage() {
+	const action = JSON.stringify({
+		cid: 'c'.repeat(64),
+		action: 'a'.repeat(64),
+		to: 'server',
+		params: 'x'.repeat(MAX_PARAMS_BYTES - 2),
+	})
+	return JSON.stringify({
+		cid: '9999999999',
+		match_data_send: {
+			match_id: '00000000-0000-0000-0000-000000000000.bmp-nakama-node',
+			op_code: '5',
+			data: Buffer.from(action).toString('base64'),
+		},
+	}).length
+}
+
+function maxMessageSize(config: string) {
+	const text = readFileSync(new URL(`../${config}`, import.meta.url), 'utf8')
+	const match = /^socket:\n(?:[ \t]+.*\n|\n)*?[ \t]+max_message_size_bytes:\s*(\d+)/m.exec(text)
+	return match ? Number(match[1]) : 4096 // Nakama's default
+}
+
+describe('socket.max_message_size_bytes', () => {
+	for (const config of ['local.yml', 'prod.yml']) {
+		it(`${config} reads an ACTION at relay.ts's params cap`, () => {
+			expect(maxMessageSize(config)).toBeGreaterThanOrEqual(largestActionMessage())
+		})
+	}
+})

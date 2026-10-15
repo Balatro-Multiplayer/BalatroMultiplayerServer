@@ -29,6 +29,12 @@ session:
 socket:
   # MPAPI's config.lua uses the same value (nakama_server_key).
   server_key: defaultkey
+  # Nakama's default (4096) closes a client's socket (1009) on any bigger
+  # message, which a match_data_send carrying more than ~2.9KB of action
+  # params already is (base64 + envelope). Room for lobby/relay.ts's own
+  # MAX_PARAMS_BYTES (16KB) so its too_large refusal is what applies;
+  # src/socket_limit.test.ts checks this against both configs.
+  max_message_size_bytes: 32768
 
 runtime:
   http_key: local-dev-http-key
