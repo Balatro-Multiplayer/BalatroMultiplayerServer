@@ -279,7 +279,8 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			status: check === 'unavailable' ? 'partial' : 'complete',
 			flagReason,
 			finalizedAt,
-			expiresAt: flagReason ? null : new Date(run.endedAt + RUN_LOG_TTL_MS),
+			// Kept as long as Nakama keeps the run (retention isKept): flagged or disputed.
+			expiresAt: flagReason || run.status === 'disputed' ? null : new Date(run.endedAt + RUN_LOG_TTL_MS),
 		})
 	}
 

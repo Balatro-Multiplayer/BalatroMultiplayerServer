@@ -101,6 +101,11 @@ describe('runRowsOf', () => {
 })
 
 describe('runRowsOf: flags and disputes', () => {
+	it("keeps a disputed run's logs, as Nakama's retention keeps the run", () => {
+		const rows = runRowsOf(run({ status: 'disputed' }), ids)
+		expect(rows.logs.map((l) => l.expiresAt)).toEqual([null, null])
+	})
+
 	it('marks which players Nakama rated, so a void replays the same games', () => {
 		const rated = runRowsOf(run({ ratings: { na: {}, nb: {} } }), ids)
 		expect(rated.match?.resultPlacements).toEqual([
