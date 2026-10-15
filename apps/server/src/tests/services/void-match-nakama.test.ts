@@ -84,15 +84,36 @@ describe('replayPlacements', () => {
 	const b = { playerId: 'b', place: 2 }
 	it('replays every placement of a game Nakama rated (or an unmarked one)', () => {
 		expect(replayPlacements([a, b])).toEqual([a, b])
-		expect(replayPlacements([{ ...a, rated: true }, { ...b, rated: true }])).toEqual([a, b])
+		expect(
+			replayPlacements([
+				{ ...a, rated: true },
+				{ ...b, rated: true },
+			]),
+		).toEqual([a, b])
 	})
 	it('skips a game Nakama did not rate: disputed, or one player flagged', () => {
-		expect(replayPlacements([{ ...a, rated: false }, { ...b, rated: false }])).toBeNull()
-		expect(replayPlacements([{ ...a, rated: false }, { ...b, rated: true }])).toBeNull()
+		expect(
+			replayPlacements([
+				{ ...a, rated: false },
+				{ ...b, rated: false },
+			]),
+		).toBeNull()
+		expect(
+			replayPlacements([
+				{ ...a, rated: false },
+				{ ...b, rated: true },
+			]),
+		).toBeNull()
 	})
 	it('drops only the unrated player of a bigger game', () => {
 		const c = { playerId: 'c', place: 3 }
-		expect(replayPlacements([{ ...a, rated: false }, { ...b, rated: true }, { ...c, rated: true }])).toEqual([b, c])
+		expect(
+			replayPlacements([
+				{ ...a, rated: false },
+				{ ...b, rated: true },
+				{ ...c, rated: true },
+			]),
+		).toEqual([b, c])
 	})
 	it('treats missing placements as nothing to replay', () => {
 		expect(replayPlacements(null)).toBeNull()
@@ -103,12 +124,31 @@ describe('resolvedInSeason', () => {
 	const start = new Date(Date.UTC(2026, 0, 1))
 	const end = new Date(Date.UTC(2026, 3, 1))
 	it('takes a match resolved within the season', () => {
-		expect(resolvedInSeason(new Date(Date.UTC(2026, 1, 1)), { startedAt: start, endedAt: end })).toBe(true)
-		expect(resolvedInSeason(new Date(Date.UTC(2027, 1, 1)), { startedAt: start, endedAt: null })).toBe(true)
+		expect(
+			resolvedInSeason(new Date(Date.UTC(2026, 1, 1)), {
+				startedAt: start,
+				endedAt: end,
+			}),
+		).toBe(true)
+		expect(
+			resolvedInSeason(new Date(Date.UTC(2027, 1, 1)), {
+				startedAt: start,
+				endedAt: null,
+			}),
+		).toBe(true)
 	})
 	it("leaves out a later season's matches when voiding an ended season", () => {
-		expect(resolvedInSeason(new Date(Date.UTC(2026, 4, 1)), { startedAt: start, endedAt: end })).toBe(false)
-		expect(resolvedInSeason(end, { startedAt: start, endedAt: end })).toBe(false)
-		expect(resolvedInSeason(null, { startedAt: start, endedAt: end })).toBe(false)
+		expect(
+			resolvedInSeason(new Date(Date.UTC(2026, 4, 1)), {
+				startedAt: start,
+				endedAt: end,
+			}),
+		).toBe(false)
+		expect(resolvedInSeason(end, { startedAt: start, endedAt: end })).toBe(
+			false,
+		)
+		expect(resolvedInSeason(null, { startedAt: start, endedAt: end })).toBe(
+			false,
+		)
 	})
 })

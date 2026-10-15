@@ -11,6 +11,9 @@ import {
 	detectRatingMode,
 	effectiveK,
 	expectedScore,
+	applySoftReset,
+	decayedRating,
+	seasonStartRating,
 } from '../../features/ratings/elo.js'
 
 describe('ratings/elo', () => {
@@ -581,4 +584,64 @@ describe('ratings/elo', () => {
 	// §11.9/§11.10: every rating is pulled halfway back toward
 	// INITIAL_HIDDEN_RATING (600) regardless of direction, then hard-clamped to
 	// SOFT_RESET_ANCHOR (1200) if still above it.
+})
+
+// The void replay must start and decay ratings as Nakama does
+// (nakama/src/rating/season.ts), or a void rewrites the board away from it.
+describe('season carry-over and decay (Nakama parity)', () => {
+	const DAY = 24 * 60 * 60 * 1000
+	const at = new Date(Date.UTC(2026, 9, 15))
+	const ago = (days: number) => new Date(at.getTime() - days * DAY)
+
+	it('soft-resets halfway to the initial rating, capped', () => {
+		expect(applySoftReset(757)).toBe(679)
+		expect(applySoftReset(443)).toBe(522)
+		expect(applySoftReset(100)).toBe(350)
+		expect(applySoftReset(3000)).toBe(1200)
+	})
+
+	it('decays past 7 idle days by 5 per further whole day, to the floor', () => {
+		expect(
+			decayedRating(
+				{ rating: 845, gamesPlayed: 6, lastMatchAt: ago(20.5) },
+				at,
+			),
+		).toBe(780)
+		expect(
+			decayedRating({ rating: 355, gamesPlayed: 6, lastMatchAt: ago(200) }, at),
+		).toBe(RATING_FLOOR)
+		expect(
+			decayedRating({ rating: 845, gamesPlayed: 6, lastMatchAt: ago(7) }, at),
+		).toBe(845)
+		// Placement players and never-played rows don't decay.
+		expect(
+			decayedRating({ rating: 845, gamesPlayed: 4, lastMatchAt: ago(100) }, at),
+		).toBe(845)
+		expect(
+			decayedRating({ rating: 845, gamesPlayed: 6, lastMatchAt: null }, at),
+		).toBe(845)
+	})
+
+	it("starts a season from the previous one's decayed, soft-reset rating", () => {
+		expect(
+			seasonStartRating(
+				{ rating: 757, gamesPlayed: 7, lastMatchAt: ago(1) },
+				at,
+			),
+		).toBe(679)
+		expect(
+			seasonStartRating(
+				{ rating: 845, gamesPlayed: 6, lastMatchAt: ago(20.5) },
+				at,
+			),
+		).toBe(applySoftReset(780))
+		// Never finished placement, or never played: the initial rating.
+		expect(
+			seasonStartRating(
+				{ rating: 900, gamesPlayed: 4, lastMatchAt: ago(1) },
+				at,
+			),
+		).toBe(INITIAL_HIDDEN_RATING)
+		expect(seasonStartRating(undefined, at)).toBe(INITIAL_HIDDEN_RATING)
+	})
 })

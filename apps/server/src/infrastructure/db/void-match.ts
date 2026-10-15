@@ -90,7 +90,9 @@ export function nakamaRatingEntries(
 // The placements a replay rates: the players Nakama itself rated for that
 // game (the mirror marks the rest rated:false -- a disputed result, a flagged
 // player), or nothing when fewer than two are left, as Nakama's planRatings.
-export function replayPlacements(resultPlacements: unknown): PlacementEntry[] | null {
+export function replayPlacements(
+	resultPlacements: unknown,
+): PlacementEntry[] | null {
 	if (!Array.isArray(resultPlacements)) return null
 	const rated = (resultPlacements as (PlacementEntry & { rated?: boolean })[])
 		.filter((p) => p.rated !== false)
@@ -105,7 +107,9 @@ export function resolvedInSeason(
 	season: { startedAt: Date; endedAt: Date | null },
 ): boolean {
 	if (!at) return false
-	return at >= season.startedAt && (season.endedAt === null || at < season.endedAt)
+	return (
+		at >= season.startedAt && (season.endedAt === null || at < season.endedAt)
+	)
 }
 
 export async function voidMatch(matchId: string): Promise<void> {
@@ -163,7 +167,9 @@ export async function voidMatch(matchId: string): Promise<void> {
 			.update(matchmakingMatches)
 			.set({ status: 'voided' })
 			.where(eq(matchmakingMatches.matchId, matchId))
-		console.log(`[void-match] ${matchId} is a casual match (${gameMode}) -- voided, no ratings to rebuild`)
+		console.log(
+			`[void-match] ${matchId} is a casual match (${gameMode}) -- voided, no ratings to rebuild`,
+		)
 		return
 	}
 	console.log(

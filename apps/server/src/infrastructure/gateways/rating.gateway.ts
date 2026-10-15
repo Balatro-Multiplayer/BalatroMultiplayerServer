@@ -1,10 +1,11 @@
 import { and, asc, desc, eq, isNull, lt, sql } from 'drizzle-orm'
 import {
-	INITIAL_HIDDEN_RATING,
 	PLACEMENT_GAMES,
 	RATING_FLOOR,
 	computeRatingDeltas,
+	decayedRating,
 	detectRatingMode,
+	seasonStartRating,
 } from '../../features/ratings/elo.js'
 import {
 	getMetricConfig,
@@ -70,14 +71,14 @@ export async function resolveSeasonId(
 	return latest?.id
 }
 
-async function getOrCreateRating(
+async function findRating(
 	tx: Tx,
 	playerId: string,
 	modId: string,
 	gameMode: string,
 	seasonId: number,
-): Promise<RatingRow> {
-	const existing = await tx
+): Promise<RatingRow | undefined> {
+	const [row] = await tx
 		.select()
 		.from(matchmakingRatings)
 		.where(
@@ -89,15 +90,34 @@ async function getOrCreateRating(
 			),
 		)
 		.limit(1)
+	return row
+}
 
-	if (existing[0]) return existing[0]
+// The player's rating as Nakama would read it for a game at `at`: their row
+// decayed, or for their first game of the season the previous season's
+// rating carried over (decayed and soft-reset) -- a new row starts from that.
+async function getOrCreateRating(
+	tx: Tx,
+	playerId: string,
+	modId: string,
+	gameMode: string,
+	seasonId: number,
+	at: Date,
+): Promise<RatingRow> {
+	const existing = await findRating(tx, playerId, modId, gameMode, seasonId)
+	if (existing) return { ...existing, rating: decayedRating(existing, at) }
 
+	const previous =
+		seasonId > 1
+			? await findRating(tx, playerId, modId, gameMode, seasonId - 1)
+			: undefined
+	const rating = seasonStartRating(previous, at)
 	await tx.insert(matchmakingRatings).values({
 		playerId,
 		modId,
 		gameMode,
 		season: seasonId,
-		rating: INITIAL_HIDDEN_RATING,
+		rating,
 		wins: 0,
 		losses: 0,
 		gamesPlayed: 0,
@@ -106,7 +126,7 @@ async function getOrCreateRating(
 	})
 
 	return {
-		rating: INITIAL_HIDDEN_RATING,
+		rating,
 		wins: 0,
 		losses: 0,
 		gamesPlayed: 0,
@@ -134,6 +154,7 @@ export async function applyRatingTransaction(
 				match.modId,
 				match.gameMode,
 				seasonId,
+				at,
 			)
 			ratingMap.set(p.playerId, { ...r, playerId: p.playerId })
 		}

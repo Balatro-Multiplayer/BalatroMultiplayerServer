@@ -280,7 +280,10 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			flagReason,
 			finalizedAt,
 			// Kept as long as Nakama keeps the run (retention isKept): flagged or disputed.
-			expiresAt: flagReason || run.status === 'disputed' ? null : new Date(run.endedAt + RUN_LOG_TTL_MS),
+			expiresAt:
+				flagReason || run.status === 'disputed'
+					? null
+					: new Date(run.endedAt + RUN_LOG_TTL_MS),
 		})
 	}
 
@@ -302,7 +305,11 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 					.filter((p) => ids.has(p.playerId))
 					.map((p) =>
 						run.rankedMode && run.ratings
-							? { playerId: pg(p.playerId), place: p.place, rated: p.playerId in run.ratings }
+							? {
+									playerId: pg(p.playerId),
+									place: p.place,
+									rated: p.playerId in run.ratings,
+								}
 							: { playerId: pg(p.playerId), place: p.place },
 					),
 				resultReportedBy: 'nakama',
