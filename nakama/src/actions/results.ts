@@ -57,7 +57,11 @@ function sortedById(placements: Placement[]): Placement[] {
 }
 
 // Two reports agree when they give everyone the same place; performance and
-// metric come along from whichever report is recorded.
+// metric come along from whichever report is recorded: the host's when it is
+// in the group, else the first. The host's copy is the one to keep: in a
+// host-refereed game (PvP) only the host holds every player's scores, so a
+// guest's agreeing report carries metric 0 for everyone, and recording it just
+// because it arrived first wiped the season-best column.
 function placesKey(placements: Placement[]): string {
 	return JSON.stringify(sortedById(placements).map((p) => [p.playerId, p.place]))
 }
@@ -87,7 +91,7 @@ export function reconcile(
 		const everyone = participants.every((p) => reports[p.id] !== undefined)
 		return {
 			status: everyone ? 'agreed' : 'partial',
-			placements: reports[reporters[0]],
+			placements: reports[preferHost(groups[keys[0]], hostId)],
 		}
 	}
 
@@ -102,7 +106,11 @@ export function reconcile(
 		if (size > bestSize || (size === bestSize && hasHost && !bestHasHost))
 			best = key
 	}
-	return { status: 'disputed', placements: reports[groups[best][0]] }
+	return { status: 'disputed', placements: reports[preferHost(groups[best], hostId)] }
+}
+
+function preferHost(group: string[], hostId: string): string {
+	return group.indexOf(hostId) !== -1 ? hostId : group[0]
 }
 
 // Participants of the started game still seated in the lobby (an away player

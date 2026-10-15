@@ -211,6 +211,49 @@ describe('reporting results', () => {
 		expect(reconcile(reports, ['a', 'b'], participants, 'a').status).toBe('agreed')
 	})
 
+	it("keeps the host's metrics when a guest's agreeing report came first", () => {
+		const participants = ['h', 'g'].map((id) => ({ id, displayName: id }))
+		const reports = {
+			h: [
+				{ playerId: 'h', place: 1, metric: 17056 },
+				{ playerId: 'g', place: 2, metric: 27 },
+			],
+			g: [
+				{ playerId: 'h', place: 1, metric: 0 },
+				{ playerId: 'g', place: 2, metric: 0 },
+			],
+		}
+		const agreed = reconcile(reports, ['g', 'h'], participants, 'h')
+		expect(agreed.status).toBe('agreed')
+		expect(agreed.placements).toEqual(reports.h)
+		// Without the host in the group: the first report, as before.
+		expect(reconcile({ g: reports.g }, ['g'], participants, 'h').placements).toEqual(reports.g)
+	})
+
+	it("takes the host's copy within the winning disputed group", () => {
+		const participants = ['h', 'a', 'b'].map((id) => ({ id, displayName: id }))
+		const reports = {
+			a: [
+				{ playerId: 'h', place: 1, metric: 0 },
+				{ playerId: 'a', place: 2, metric: 0 },
+				{ playerId: 'b', place: 3, metric: 0 },
+			],
+			h: [
+				{ playerId: 'h', place: 1, metric: 900 },
+				{ playerId: 'a', place: 2, metric: 50 },
+				{ playerId: 'b', place: 3, metric: 5 },
+			],
+			b: [
+				{ playerId: 'b', place: 1 },
+				{ playerId: 'h', place: 2 },
+				{ playerId: 'a', place: 3 },
+			],
+		}
+		const r = reconcile(reports, ['a', 'h', 'b'], participants, 'h')
+		expect(r.status).toBe('disputed')
+		expect(r.placements).toEqual(reports.h)
+	})
+
 	it('stores a partial result when the rest never report', () => {
 		let lobby = started('a', 'b', 'c')
 		lobby = report(lobby, 'a', places('a', 'b', 'c'), 2000).lobby
