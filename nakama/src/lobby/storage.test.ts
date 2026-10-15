@@ -16,23 +16,44 @@ function storedRun() {
 		],
 		flags: { b: ['hash_mismatch'] },
 	} as unknown as RunRecord
-	nk.storageWrite([{ collection: RUNS_COLLECTION, key: 'r1', userId: SYSTEM_USER_ID, value: run }])
+	nk.storageWrite([
+		{
+			collection: RUNS_COLLECTION,
+			key: 'r1',
+			userId: SYSTEM_USER_ID,
+			value: run,
+		},
+	])
 	return nk as unknown as nkruntime.Nakama
 }
 
 describe('rpcRunGet', () => {
 	it('returns the run to a participant', () => {
-		const out = JSON.parse(rpcRunGet(ctx('a'), logger, storedRun(), JSON.stringify({ runId: 'r1' })))
+		const out = JSON.parse(
+			rpcRunGet(ctx('a'), logger, storedRun(), JSON.stringify({ runId: 'r1' })),
+		)
 		expect(out.runId).toBe('r1')
 	})
 
 	it('hides the run from a non-participant as not found', () => {
-		expect(() => rpcRunGet(ctx('stranger'), logger, storedRun(), JSON.stringify({ runId: 'r1' }))).toThrow(
-			'Run not found',
-		)
+		expect(() =>
+			rpcRunGet(
+				ctx('stranger'),
+				logger,
+				storedRun(),
+				JSON.stringify({ runId: 'r1' }),
+			),
+		).toThrow('Run not found')
 	})
 
 	it('reports a missing run as not found', () => {
-		expect(() => rpcRunGet(ctx('a'), logger, storedRun(), JSON.stringify({ runId: 'nope' }))).toThrow('Run not found')
+		expect(() =>
+			rpcRunGet(
+				ctx('a'),
+				logger,
+				storedRun(),
+				JSON.stringify({ runId: 'nope' }),
+			),
+		).toThrow('Run not found')
 	})
 })

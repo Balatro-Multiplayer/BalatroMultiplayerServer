@@ -24,14 +24,19 @@ function largestActionMessage() {
 
 function maxMessageSize(config: string) {
 	const text = readFileSync(new URL(`../${config}`, import.meta.url), 'utf8')
-	const match = /^socket:\n(?:[ \t]+.*\n|\n)*?[ \t]+max_message_size_bytes:\s*(\d+)/m.exec(text)
+	const match =
+		/^socket:\n(?:[ \t]+.*\n|\n)*?[ \t]+max_message_size_bytes:\s*(\d+)/m.exec(
+			text,
+		)
 	return match ? Number(match[1]) : 4096 // Nakama's default
 }
 
 describe('socket.max_message_size_bytes', () => {
 	for (const config of ['local.yml', 'prod.yml']) {
 		it(`${config} reads an ACTION at relay.ts's params cap`, () => {
-			expect(maxMessageSize(config)).toBeGreaterThanOrEqual(largestActionMessage())
+			expect(maxMessageSize(config)).toBeGreaterThanOrEqual(
+				largestActionMessage(),
+			)
 		})
 	}
 })
