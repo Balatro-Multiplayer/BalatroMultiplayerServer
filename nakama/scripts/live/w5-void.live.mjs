@@ -8,10 +8,12 @@
 //      report settles the game as partial and rates it.
 //   3. PATCH /api/webadmin/forfeit-reconciliation/:id/void as a w5test admin:
 //      Express replays the scope with its own Elo and calls admin_ratings_set.
-// Run: BMP_TEST_PREFIX=w5test_ node nakama/scripts/live/w5-void.live.mjs
+// Run: BMP_TEST_PREFIX=w5test_ [W5_SEASON=2] node nakama/scripts/live/w5-void.live.mjs
 import { PREFIX, check, express, poll, psql, q, rpc, sleep, startGame, summary, webJwt } from './lib.mjs'
 import { hostFirst, matchmake } from './mirror.live.mjs'
 import { MOD, MODE, nakamaBoard, pgBoard, player } from './w5-seed.live.mjs'
+
+const SEASON = Number(process.env.W5_SEASON || 1)
 
 const ended = (s, since, timeoutMs) =>
 	s.waitFor((x) => x.kind === 'data' && x.op === 101 && x.data.type === 'game_ended', timeoutMs, since)
@@ -27,7 +29,7 @@ const asMap = (rows) => Object.fromEntries(rows.map((r) => [r[0], { rating: Numb
 
 async function main() {
 	const [a, b] = [await player('a'), await player('b')]
-	const before = asMap(nakamaBoard())
+	const before = asMap(nakamaBoard(SEASON))
 	console.log('BEFORE (nakama)', JSON.stringify(before))
 
 	const { code } = await matchmake([a, b], MODE, 'ranked')
@@ -67,9 +69,9 @@ async function main() {
 		const m = psql('bmp', `select status from matchmaking_matches where match_id=${q(runId)}`)
 		return m.length ? m : null
 	}, 20000)
-	const forfeited = asMap(nakamaBoard())
+	const forfeited = asMap(nakamaBoard(SEASON))
 	console.log('AFTER FORFEIT (nakama)', JSON.stringify(forfeited))
-	console.log('AFTER FORFEIT (pg)    ', JSON.stringify(asMap(pgBoard())))
+	console.log('AFTER FORFEIT (pg)    ', JSON.stringify(asMap(pgBoard(SEASON))))
 	check('the forfeit game was rated (a up, b down)', forfeited[a.username].rating > before[a.username].rating && forfeited[b.username].rating < before[b.username].rating)
 
 	const jwt = webJwt(adminPlayer(), PREFIX + 'admin')
@@ -79,8 +81,8 @@ async function main() {
 	check('matchmaking_matches row voided', m[0][0] === 'voided', JSON.stringify(m))
 
 	await sleep(500)
-	const nk = asMap(nakamaBoard())
-	const pg = asMap(pgBoard())
+	const nk = asMap(nakamaBoard(SEASON))
+	const pg = asMap(pgBoard(SEASON))
 	console.log('AFTER VOID (nakama)', JSON.stringify(nk))
 	console.log('AFTER VOID (pg)    ', JSON.stringify(pg))
 	for (const name of Object.keys(pg)) {
