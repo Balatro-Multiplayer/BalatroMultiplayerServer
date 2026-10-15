@@ -205,7 +205,12 @@ function runEffect(
 			return
 		}
 		case 'setCurrent':
-			writeCurrent(nk, ctx, lobby, effect.userId)
+			// A throw here would stop the whole match (as would any effect's).
+			try {
+				writeCurrent(nk, ctx, lobby, effect.userId)
+			} catch (e) {
+				logger.warn('Lobby %s: could not record %s as in it: %v', lobby.code, effect.userId, e)
+			}
 			return
 		case 'saveRun':
 			try {
@@ -328,6 +333,15 @@ export function joinInfoOf(
 	}
 }
 
+function accountExists(nk: nkruntime.Nakama, userId: string): boolean {
+	try {
+		nk.accountGetId(userId)
+		return true
+	} catch (e) {
+		return false
+	}
+}
+
 // One lobby at a time: a player whose current-lobby record names another
 // live match they are still in must leave that one first.
 function otherLobbyOf(
@@ -363,6 +377,12 @@ export function lobbyMatchJoinAttempt(
 	metadata: { [key: string]: string },
 ) {
 	const meta = metadata || {}
+	// A deleted account's session token stays valid until it expires, and
+	// its socket can still reach here; seating it would fail the per-user
+	// storage writes (no users row) and stop the match for everyone.
+	if (!accountExists(nk, presence.userId)) {
+		return { state, accept: false, rejectMessage: 'No such account' }
+	}
 	if (meta.role === SPECTATOR_ROLE) {
 		const refused = spectateRejection(state.lobby, presence.userId)
 		if (refused) return { state, accept: false, rejectMessage: refused }
