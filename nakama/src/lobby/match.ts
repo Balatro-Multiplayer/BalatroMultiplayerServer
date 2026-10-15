@@ -565,7 +565,12 @@ export function lobbyMatchLoop(
 	state: LobbyMatchState,
 	messages: nkruntime.MatchMessage[],
 ) {
-	if (state.stopping) return null
+	// A signal that closed the lobby (the last player leaving, an admin close)
+	// already stored its game and released its code, but a signal can't end the
+	// match, so it hands back the pre-close lobby marked closed. Ending here
+	// keeps that stale lobby -- whose game still looks started -- from being
+	// finished and stored a second time.
+	if (state.stopping || state.lobby.closed) return null
 	let current: LobbyMatchState | null = state
 	for (const message of messages) {
 		if (!current) break
