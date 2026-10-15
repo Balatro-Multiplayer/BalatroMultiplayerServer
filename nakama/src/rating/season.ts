@@ -25,7 +25,7 @@ export function configureSeason(value: string | undefined): void {
 	if (Number.isInteger(parsed) && parsed > 0) bootSeason = parsed
 }
 
-interface Rated {
+export interface Rated {
 	rating: number
 	gamesPlayed: number
 	lastMatchAt: number

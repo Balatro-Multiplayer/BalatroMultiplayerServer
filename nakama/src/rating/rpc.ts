@@ -1,7 +1,9 @@
 // Rating read RPCs: a player's own rating on a board, and a board's top.
 import { INVALID_ARGUMENT, UNAUTHENTICATED, runtimeError } from '../errors'
 import { boardId, loadRatings, newRating } from './apply'
-import { currentSeason } from './season'
+import { RATINGS_COLLECTION } from '../lobby/protocol'
+import type { Rated } from './season'
+import { currentSeason, decayedRating } from './season'
 import { PLACEMENT_GAMES } from './elo'
 
 const BOARD_PAGE = 50
@@ -60,17 +62,59 @@ export function rpcLeaderboardGet(
 		// The board is created by the first rated game.
 		return JSON.stringify({ entries: [], cursor: '' })
 	}
+	const records = page.records || []
+	const stored = storedRatings(nk, records.map((r) => r.ownerId), boardId(modId, mode, currentSeason(nk)))
 	return JSON.stringify({
-		entries: (page.records || []).map((r) => ({
-			rank: r.rank,
-			playerId: r.ownerId,
-			name: r.username,
-			rating: r.score,
-			wins: r.subscore,
-			losses: r.metadata.losses,
-			gamesPlayed: r.metadata.gamesPlayed,
-			seasonBest: r.metadata.seasonBest,
-		})),
+		entries: boardEntries(records, stored, Date.now()),
 		cursor: page.nextCursor || '',
 	})
+}
+
+// Reads the stored (undecayed) rating objects behind a page of board records.
+function storedRatings(nk: nkruntime.Nakama, userIds: string[], key: string): { [userId: string]: Rated } {
+	const out: { [userId: string]: Rated } = {}
+	if (userIds.length === 0) return out
+	for (const object of nk.storageRead(userIds.map((userId) => ({ collection: RATINGS_COLLECTION, key, userId }))))
+		out[object.userId] = object.value as unknown as Rated
+	return out
+}
+
+export interface BoardEntry {
+	rank: number
+	playerId: string
+	name: string | undefined
+	rating: number
+	wins: number
+	losses: unknown
+	gamesPlayed: unknown
+	seasonBest: unknown
+}
+
+// A board page as players see it: each score is the stored rating, so the
+// entries are decayed the way rating_get and the website decay them, and the
+// page re-ranked by the decayed rating (then wins, as the website ranks).
+// Re-ranking is within the page: a decayed player can still sit a page too
+// high until their next game rewrites their score. Pure.
+export function boardEntries(
+	records: nkruntime.LeaderboardRecord[],
+	stored: { [userId: string]: Rated },
+	now: number,
+): BoardEntry[] {
+	if (records.length === 0) return []
+	const firstRank = Math.min(...records.map((r) => r.rank))
+	return records
+		.map((r) => {
+			const record = stored[r.ownerId]
+			return {
+				playerId: r.ownerId,
+				name: r.username,
+				rating: record ? decayedRating({ ...record, rating: r.score }, now) : r.score,
+				wins: r.subscore,
+				losses: r.metadata.losses,
+				gamesPlayed: r.metadata.gamesPlayed,
+				seasonBest: r.metadata.seasonBest,
+			}
+		})
+		.sort((a, b) => b.rating - a.rating || b.wins - a.wins)
+		.map((e, i) => ({ rank: firstRank + i, ...e }))
 }
