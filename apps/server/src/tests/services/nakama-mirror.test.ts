@@ -101,6 +101,20 @@ describe('runRowsOf', () => {
 })
 
 describe('runRowsOf: flags and disputes', () => {
+	it('marks which players Nakama rated, so a void replays the same games', () => {
+		const rated = runRowsOf(run({ ratings: { na: {}, nb: {} } }), ids)
+		expect(rated.match?.resultPlacements).toEqual([
+			{ playerId: 'pg-a', place: 1, rated: true },
+			{ playerId: 'pg-b', place: 2, rated: true },
+		])
+		// Disputed (nobody rated) and a flagged player (left out).
+		expect(runRowsOf(run({ status: 'disputed', ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([false, false])
+		expect(runRowsOf(run({ flags: { na: 'hash_mismatch' }, ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([false, false])
+		// A casual run, or a record from before ratings were stored: no marker.
+		expect(runRowsOf(run({ rankedMode: undefined, gameMode: 'duel', ratings: {} }), ids).match?.resultPlacements[0]).not.toHaveProperty('rated')
+		expect(runRowsOf(run(), ids).match?.resultPlacements[0]).not.toHaveProperty('rated')
+	})
+
 	it('takes the run\'s own flags over its log checks', () => {
 		const rows = runRowsOf(run({ flags: { na: 'elapsed_time_gate' } }), ids)
 		expect(rows.logs.map((l) => l.flagReason)).toEqual(['elapsed_time_gate', null])

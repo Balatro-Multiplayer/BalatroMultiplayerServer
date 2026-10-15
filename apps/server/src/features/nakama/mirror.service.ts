@@ -35,6 +35,9 @@ export interface NakamaRun {
 	lobbyType?: 'public' | 'private'
 	logChecks?: { [userId: string]: LogCheck }
 	flags?: { [userId: string]: FlagReason }
+	// A ranked run's rating result per player Nakama rated ({} when it rated
+	// nobody: a disputed result, or flags leaving fewer than two players).
+	ratings?: { [userId: string]: unknown }
 }
 
 export interface NakamaLog {
@@ -144,7 +147,9 @@ export interface RunRows {
 		lobbyState: { playerInfos: { [playerId: string]: { displayName: string } } }
 		status: 'resolved'
 		gameStartedAt: Date
-		resultPlacements: { playerId: string; place: number }[]
+		// rated: whether Nakama rated that player for this game (ranked runs
+		// only), so a void's Elo replay rates exactly the same games.
+		resultPlacements: { playerId: string; place: number; rated?: boolean }[]
 		resultReportedBy: string
 		resultReportedAt: Date
 		createdAt: Date
@@ -294,7 +299,11 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 				gameStartedAt: new Date(run.startedAt),
 				resultPlacements: run.placements
 					.filter((p) => ids.has(p.playerId))
-					.map((p) => ({ playerId: pg(p.playerId), place: p.place })),
+					.map((p) =>
+						run.rankedMode && run.ratings
+							? { playerId: pg(p.playerId), place: p.place, rated: p.playerId in run.ratings }
+							: { playerId: pg(p.playerId), place: p.place },
+					),
 				resultReportedBy: 'nakama',
 				resultReportedAt: finalizedAt,
 				createdAt: new Date(run.startedAt),

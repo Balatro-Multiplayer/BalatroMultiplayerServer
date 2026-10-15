@@ -87,6 +87,27 @@ export function nakamaRatingEntries(
 	return entries
 }
 
+// The placements a replay rates: the players Nakama itself rated for that
+// game (the mirror marks the rest rated:false -- a disputed result, a flagged
+// player), or nothing when fewer than two are left, as Nakama's planRatings.
+export function replayPlacements(resultPlacements: unknown): PlacementEntry[] | null {
+	if (!Array.isArray(resultPlacements)) return null
+	const rated = (resultPlacements as (PlacementEntry & { rated?: boolean })[])
+		.filter((p) => p.rated !== false)
+		.map(({ rated: _rated, ...p }) => p as PlacementEntry)
+	return rated.length >= 2 ? rated : null
+}
+
+// Whether a match resolved within the season: from its start to its end
+// (an ended season's later matches belong to the next one).
+export function resolvedInSeason(
+	at: Date | null,
+	season: { startedAt: Date; endedAt: Date | null },
+): boolean {
+	if (!at) return false
+	return at >= season.startedAt && (season.endedAt === null || at < season.endedAt)
+}
+
 export async function voidMatch(matchId: string): Promise<void> {
 	const [match] = await db
 		.select()
@@ -134,6 +155,17 @@ export async function voidMatch(matchId: string): Promise<void> {
 		)
 
 	const { modId, gameMode } = match
+
+	// Only ranked games move ratings. A casual match is just marked voided:
+	// replaying its scope would invent a rating board for a casual mode.
+	if (!gameMode.startsWith('ranked:')) {
+		await db
+			.update(matchmakingMatches)
+			.set({ status: 'voided' })
+			.where(eq(matchmakingMatches.matchId, matchId))
+		console.log(`[void-match] ${matchId} is a casual match (${gameMode}) -- voided, no ratings to rebuild`)
+		return
+	}
 	console.log(
 		`[void-match] voiding ${matchId} (${modId}:${gameMode}, season ${season.id} "${season.name}")`,
 	)
@@ -167,18 +199,20 @@ export async function voidMatch(matchId: string): Promise<void> {
 		`[void-match] cleared scope (${modId}:${gameMode}, season ${season.id}): ratings=${delRatings.rowCount} leaderboard=${delBoard.rowCount}`,
 	)
 
-	const scopedMatches = await db
-		.select()
-		.from(matchmakingMatches)
-		.where(
-			and(
-				eq(matchmakingMatches.status, 'resolved'),
-				eq(matchmakingMatches.modId, modId),
-				eq(matchmakingMatches.gameMode, gameMode),
-				gte(matchmakingMatches.createdAt, season.startedAt),
-			),
-		)
-		.orderBy(asc(matchmakingMatches.resultReportedAt))
+	const scopedMatches = (
+		await db
+			.select()
+			.from(matchmakingMatches)
+			.where(
+				and(
+					eq(matchmakingMatches.status, 'resolved'),
+					eq(matchmakingMatches.modId, modId),
+					eq(matchmakingMatches.gameMode, gameMode),
+					gte(matchmakingMatches.resultReportedAt, season.startedAt),
+				),
+			)
+			.orderBy(asc(matchmakingMatches.resultReportedAt))
+	).filter((row) => resolvedInSeason(row.resultReportedAt, season))
 
 	console.log(
 		`[void-match] replaying ${scopedMatches.length} remaining resolved matches in scope`,
@@ -186,8 +220,8 @@ export async function voidMatch(matchId: string): Promise<void> {
 
 	let n = 0
 	for (const row of scopedMatches) {
-		if (!row.resultPlacements) continue
-		const placements = row.resultPlacements as PlacementEntry[]
+		const placements = replayPlacements(row.resultPlacements)
+		if (!placements) continue
 		const at = row.resultReportedAt ?? row.updatedAt
 		const results = await applyRatingTransaction(row, season.id, placements, at)
 		console.log(
