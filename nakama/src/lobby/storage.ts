@@ -120,15 +120,19 @@ function readRun(nk: nkruntime.Nakama, runId: unknown): RunRecord {
 	return objects[0].value as unknown as RunRecord
 }
 
-// {runId} -> the run record.
+// {runId} -> the run record. Only the run's participants may read it: the
+// record carries every player's reports, anti-cheat flags and log checks.
 export function rpcRunGet(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
 	nk: nkruntime.Nakama,
 	payload: string,
 ) {
-	requireUser(ctx)
-	return JSON.stringify(readRun(nk, parsePayload(payload).runId))
+	const userId = requireUser(ctx)
+	const run = readRun(nk, parsePayload(payload).runId)
+	if (!run.players.some((p) => p.id === userId))
+		throw runtimeError(NOT_FOUND, 'Run not found')
+	return JSON.stringify(run)
 }
 
 // {runId, playerId?} -> {logs: {playerId: {events, eventCount, truncated}}}.
