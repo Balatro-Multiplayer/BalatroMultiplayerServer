@@ -71,8 +71,14 @@ export function matchmakerMatched(
 		logger.warn('Matchmaker group refused: %s', plan)
 		throw new Error(plan)
 	}
-	if (refuseMatchedGroup(nk, logger, plan))
+	if (refuseMatchedGroup(nk, logger, plan)) {
+		// The matchmaker spent every ticket of the group all the same, so their
+		// queue records go too; left, Find Game counted these players as queued
+		// until they reconnected. One still allowed to queue queues again,
+		// which writes a fresh record.
+		clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds)
 		throw new Error('A matched player may not queue')
+	}
 	for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
 		const code = generateCode(MATCHMADE_CODE_LENGTH)
 		if (!reserveCode(nk, code, plan.modId)) continue

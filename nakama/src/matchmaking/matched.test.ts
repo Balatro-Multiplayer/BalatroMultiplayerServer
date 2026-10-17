@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { planMatch, type MatchedEntry } from './matched'
+import { DEFAULT_CONFIG, writeConfig } from '../config'
+import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
+import { matchmakerMatched, planMatch, type MatchedEntry } from './matched'
+import { afterMatchmakerAdd, QUEUE_COLLECTION, recordKey } from './queue'
 
 function entry(userId: string, props: { [k: string]: string }): MatchedEntry {
 	return { presence: { userId }, properties: props }
@@ -30,5 +33,23 @@ describe('planMatch', () => {
 		expect(typeof planMatch([entry('a', RANKED), entry('a', RANKED)])).toBe('string')
 		const bad = { ...RANKED, mode: 'no spaces allowed' }
 		expect(typeof planMatch([entry('a', bad), entry('b', bad)])).toBe('string')
+	})
+})
+
+describe('matchmakerMatched', () => {
+	it('drops the queue records of a group it refuses', () => {
+		const nk = fakeNk()
+		const add = { matchmakerAdd: { stringProperties: RANKED } }
+		afterMatchmakerAdd(playerCtx('a'), fakeLogger, nk as any, { matchmakerTicket: { ticket: 'ta' } } as any, add as any)
+		afterMatchmakerAdd(playerCtx('b'), fakeLogger, nk as any, { matchmakerTicket: { ticket: 'tb' } } as any, add as any)
+		const key = recordKey(RANKED.modId, 'ranked:' + RANKED.mode)
+		const records = () =>
+			nk.storageRead(['a', 'b'].map((userId) => ({ collection: QUEUE_COLLECTION, key, userId })))
+		expect(records()).toHaveLength(2)
+		writeConfig(nk as any, { ...DEFAULT_CONFIG, rankedEnabled: false })
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, nk as any, [entry('a', RANKED), entry('b', RANKED)]),
+		).toThrow(/may not queue/)
+		expect(records()).toHaveLength(0)
 	})
 })
