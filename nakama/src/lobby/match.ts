@@ -127,6 +127,11 @@ function apply(
 	state: LobbyMatchState,
 	raw: Step,
 ): LobbyMatchState | null {
+	// Already closed: a signal that closed the lobby stored its game but has to
+	// hand back the stale pre-close lobby. Any later call on it (the leaver's
+	// kicked presence reaching matchLeave, a join, the loop) must not run the
+	// stale game's effects again: that stored every abandoned game twice.
+	if (state.lobby.closed) return null
 	// A lobby that closes mid-game still stores the game.
 	let step = raw
 	if (step.lobby.closed && step.lobby.game.started) {
