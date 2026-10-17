@@ -2048,6 +2048,39 @@ function resumeLobby(nk, logger, code, now) {
   return { kind: "resumed", matchId, modId: lobby.modId };
 }
 
+// src/lobby/create_limit.ts
+var CREATE_LIMIT = 30;
+var CREATE_WINDOW_MS = 6e4;
+var LIMIT_COLLECTION = "limits";
+var LIMIT_KEY = "lobby_create_times";
+function createTimesAfter(times, now) {
+  const recent = times.filter((t) => now - t < CREATE_WINDOW_MS);
+  if (recent.length >= CREATE_LIMIT) return null;
+  return recent.concat([now]);
+}
+function readTimes(nk, userId) {
+  const objects = nk.storageRead([
+    { collection: LIMIT_COLLECTION, key: LIMIT_KEY, userId }
+  ]);
+  const times = objects.length > 0 ? objects[0].value.times : null;
+  return Array.isArray(times) ? times.filter((t) => typeof t === "number") : [];
+}
+function spendLobbyCreate(nk, userId, now) {
+  const times = createTimesAfter(readTimes(nk, userId), now);
+  if (!times) return false;
+  nk.storageWrite([
+    {
+      collection: LIMIT_COLLECTION,
+      key: LIMIT_KEY,
+      userId,
+      value: { times },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+  return true;
+}
+
 // src/express.ts
 var TIMEOUT_MS = 3e3;
 function callExpress(nk, logger, env, path, body) {
@@ -3131,6 +3164,8 @@ function rpcLobbyCreate(ctx, logger, nk, payload) {
   const current = currentLobby(nk, userId);
   if (current)
     throw runtimeError(ALREADY_EXISTS, `Already in lobby ${current.code}`);
+  if (!spendLobbyCreate(nk, userId, Date.now()))
+    throw runtimeError(RESOURCE_EXHAUSTED, "Too many lobbies created; try again in a minute");
   for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
     const code = generateCode();
     if (!reserveCode(nk, code, modId)) continue;
@@ -4633,6 +4668,7 @@ function clearCurrent(nk, ctx, userId) {
   }
 }
 function apply(ctx, logger, nk, dispatcher, state, raw) {
+  if (state.lobby.closed) return null;
   let step = raw;
   if (step.lobby.closed && step.lobby.game.started) {
     const finished = finishGame(step.lobby, Date.now());
@@ -5997,8 +6033,8 @@ var REPORT_TYPES = ["cheating", "chat_abuse", "griefing", "inappropriate_usernam
 var MAX_REPORT_MESSAGE = 500;
 var REPORT_LIMIT = 5;
 var REPORT_WINDOW_MS = 10 * 6e4;
-var LIMIT_COLLECTION = "moderation";
-var LIMIT_KEY = "report_times";
+var LIMIT_COLLECTION2 = "moderation";
+var LIMIT_KEY2 = "report_times";
 function parseReport(data) {
   const { reportedUserId, type, message } = data;
   if (typeof reportedUserId !== "string" || !reportedUserId) return "Missing or invalid reportedUserId";
@@ -6012,16 +6048,16 @@ function reportTimesAfter(times, now) {
   if (recent.length >= REPORT_LIMIT) return null;
   return recent.concat([now]);
 }
-function readTimes(nk, userId) {
-  const objects = nk.storageRead([{ collection: LIMIT_COLLECTION, key: LIMIT_KEY, userId }]);
+function readTimes2(nk, userId) {
+  const objects = nk.storageRead([{ collection: LIMIT_COLLECTION2, key: LIMIT_KEY2, userId }]);
   const times = objects.length > 0 ? objects[0].value.times : null;
   return Array.isArray(times) ? times.filter((t) => typeof t === "number") : [];
 }
 function writeTimes(nk, userId, times) {
   nk.storageWrite([
     {
-      collection: LIMIT_COLLECTION,
-      key: LIMIT_KEY,
+      collection: LIMIT_COLLECTION2,
+      key: LIMIT_KEY2,
       userId,
       value: { times },
       permissionRead: 0,
@@ -6039,7 +6075,7 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   const report = parseReport(parsePayload(payload));
   if (typeof report === "string") throw runtimeError(INVALID_ARGUMENT, report);
   const now = Date.now();
-  const times = reportTimesAfter(readTimes(nk, userId), now);
+  const times = reportTimesAfter(readTimes2(nk, userId), now);
   if (!times) throw runtimeError(RESOURCE_EXHAUSTED, "Too many reports; try again later");
   const lobby = currentLobby(nk, userId);
   if (!lobby) throw runtimeError(NOT_FOUND, "Not in a lobby");
