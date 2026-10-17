@@ -34,4 +34,16 @@ describe('errorHandler middleware', () => {
 		expect(res.json).toHaveBeenCalledWith({ error: 'Internal server error' })
 		consoleSpy.mockRestore()
 	})
+
+	it('answers 400 for a request value Postgres cannot parse (a malformed uuid or number in the path or query)', () => {
+		const res = mockRes()
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		const err = Object.assign(new Error('invalid input syntax for type uuid: "not-a-uuid"'), { code: '22P02' })
+
+		errorHandler(err, req, res, next)
+
+		expect(res.status).toHaveBeenCalledWith(400)
+		expect(res.json).toHaveBeenCalledWith({ error: 'Invalid request value' })
+		warn.mockRestore()
+	})
 })
