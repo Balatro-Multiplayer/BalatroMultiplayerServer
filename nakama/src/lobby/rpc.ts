@@ -5,6 +5,7 @@ import {
 	INVALID_ARGUMENT,
 	NOT_FOUND,
 	PERMISSION_DENIED,
+	RESOURCE_EXHAUSTED,
 	UNAUTHENTICATED,
 	UNAVAILABLE,
 	runtimeError,
@@ -21,6 +22,7 @@ import {
 	type LobbySignal,
 } from './protocol'
 import { resumeLobby } from './checkpoint'
+import { spendLobbyCreate } from './create_limit'
 import { noteReturn } from './forfeits'
 import { MAX_PLAYERS, MIN_PLAYERS } from './state'
 import { spectatableLobbies } from './spectate'
@@ -141,6 +143,8 @@ export function rpcLobbyCreate(
 	const current = currentLobby(nk, userId)
 	if (current)
 		throw runtimeError(ALREADY_EXISTS, `Already in lobby ${current.code}`)
+	if (!spendLobbyCreate(nk, userId, Date.now()))
+		throw runtimeError(RESOURCE_EXHAUSTED, 'Too many lobbies created; try again in a minute')
 
 	for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
 		const code = generateCode()
