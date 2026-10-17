@@ -196,7 +196,8 @@ async function main() {
 	const del = await admin('admin_account_delete', { userId: d.userId })
 	check('throwaway account deleted', del.ok, del.text.slice(0, 120))
 	const ds = await connect(d).catch((e) => null)
-	check('deleted token: socket still opens (known 2h token limit)', !!ds, ds ? 'opened' : 'refused')
+	// Opening is the known token-revocation limit; refused is stricter. Either is fine.
+	console.log(`  info: deleted account's token on a socket -> ${ds ? 'opened (token revocation limit)' : 'refused'}`)
 	const e = await player('e')
 	const { matchId: ghostMatch, code: ghostCode, sockets: es } = await lobbyWith([e])
 	const delToken = await rpc(d.token, 'rating_get', {})
@@ -238,6 +239,39 @@ async function main() {
 		await s2.ask('mpapi_ready', { ready: true })
 		return s.ask('mpapi_start_game', { stake: 1, options: { pad: 'x'.repeat(4200) } }, 3000)
 	})
+
+	// --- match input burst: messages sent at once, past the budget ---
+	// Bad-key actions are refused before the budget (bad_action), so each one
+	// sent should come back refused. Nakama's match input queue
+	// (match.input_queue_size, 128 by default) drops what overflows before
+	// relay.ts sees it ("Match handler data processing too slow, dropping data
+	// message"): count how many a burst loses, and that nothing else breaks.
+	{
+		const p = await player('burst_a')
+		const q2 = await player('burst_b')
+		const { sockets: bs } = await lobbyWith([p, q2])
+		for (const n of [100, 300]) {
+			const mark = bs[0].mark()
+			for (let i = 0; i < n; i++) bs[0].sendOp(5, { cid: `ib${n}_${i}`, action: 'bad key!', to: 'server', params: null })
+			await sleep(4000)
+			const answered = bs[0].inbox.slice(mark).filter((i) => i.kind === 'data' && i.op === ServerOp.ACTION_REJECTED && String(i.data.cid).startsWith(`ib${n}_`)).length
+			console.log(`  info: input burst of ${n} at once: ${answered} answered, ${n - answered} dropped by Nakama's match input queue`)
+			if (n === 100) check('a burst of 100 messages is fully answered', answered === n, `${answered}/${n}`)
+		}
+		const after = await bs[0].ask('mpapi_ready', { ready: false })
+		check('after a 300-message burst the socket is open and the lobby answers', !bs[0].closed && !after.timeout, JSON.stringify(after))
+		for (const s of bs) s.close()
+	}
+
+	// --- lobby_create spam (limit 30 per player per minute, 514a65e) ---
+	{
+		const p = await player('spam')
+		const statuses = []
+		for (let i = 0; i < 35; i++) statuses.push((await rpc(p.token, 'lobby_create', { modId: PREFIX + 'mod' })).status)
+		const made = statuses.filter((s) => s === 200).length
+		// Nobody joins them: each closes itself after the 30s creator timeout.
+		check('lobby_create past 30 a minute refused (514a65e needs deploy)', made === 30 && statuses.slice(30).every((s) => s === 429 || s === 400), `${made} made, then ${statuses.slice(30).join(',')}`)
+	}
 
 	// --- exceptions in the Nakama log ---
 	await sleep(1000)

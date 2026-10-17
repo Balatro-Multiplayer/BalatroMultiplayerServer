@@ -78,7 +78,7 @@ async function main() {
 	const one = await express('GET', `${W}/players/${out.honestPlayer}`, { token: adm.token })
 	check('players/:id', one.ok && one.body.player.id === out.honestPlayer && Array.isArray(one.body.bans))
 	const badUuid = await express('GET', `${W}/players/not-a-uuid`, { token: adm.token })
-	check('players/:id malformed id answers 4xx (not 500)', badUuid.status >= 400 && badUuid.status < 500, `${badUuid.status}`)
+	check('players/:id malformed id answers 4xx (not 500; f12644c needs deploy)', badUuid.status >= 400 && badUuid.status < 500, `${badUuid.status}`)
 	check('players/:id unknown: 404', (await express('GET', `${W}/players/00000000-0000-0000-0000-000000000000`, { token: adm.token })).status === 404)
 	check(
 		'moderator cannot change privileges (403)',
@@ -223,10 +223,57 @@ async function main() {
 		check(`GET /api/stats${path}: 200`, r.ok, r.ok ? '' : `${r.status} ${r.text.slice(0, 160)}`)
 	}
 	check('leaderboard without modId: 400', (await express('GET', '/api/stats/leaderboard')).status === 400)
+	// Players still in placement (under 5 games) are kept off the board, as on
+	// Nakama's leaderboard_get; mirror.live adds one ranked game per run.
 	const lb = await express('GET', `/api/stats/leaderboard?${board}`)
-	check('leaderboard for the h1test ranked mode lists the mirrored players', lb.ok && lb.text.includes(out.honestPlayer), lb.text.slice(0, 200))
+	const established = psql(
+		'bmp',
+		`select player_id from matchmaking_ratings where mod_id=${q(PREFIX + 'mod')} and game_mode=${q('ranked:' + PREFIX + 'rk')}
+		   and season=${Number(lb.body && lb.body.season)} and games_played >= 5 order by 1`,
+	).map((r) => r[0])
+	const listed = lb.ok ? lb.body.entries.map((e) => e.playerId).sort() : null
+	check(
+		'leaderboard lists exactly the mirrored players past placement',
+		!!listed && JSON.stringify(listed) === JSON.stringify(established),
+		`listed ${JSON.stringify(listed)} established ${JSON.stringify(established)}`,
+	)
 	const ps = await express('GET', `/api/stats/players/${out.honestPlayer}?${board}`)
 	check('stats/players/:id', ps.ok, ps.text.slice(0, 200))
+	// Malformed ids/numbers: 400, never a 500 (fixed in f12644c, needs deploy).
+	for (const [method, path, body] of [
+		['GET', `${W}/players/not-a-uuid`],
+		['POST', `${W}/players/not-a-uuid/bans`, { type: 'queue', reason: 'h2test' }],
+		['DELETE', `${W}/players/not-a-uuid/bans/1`],
+		['DELETE', `${W}/players/${out.honestPlayer}/bans/not-a-uuid`],
+		['GET', `/api/stats/players/not-a-uuid?${board}`],
+		['GET', `/api/stats/leaderboard?${board}&page=abc`],
+		['GET', `/api/stats/leaderboard?${board}&season=1.5`],
+		['GET', '/api/runs/not-a-uuid/replay'],
+	]) {
+		const token = path.startsWith('/api/runs') ? webJwt(out.honestPlayer, PREFIX + 'mir_1') : adm.token
+		const r = await express(method, path, { token, body })
+		check(`${method} ${path.split('?')[0]}${path.includes('?') ? '?' + path.split('&').pop() : ''}: 4xx, not 500 (f12644c needs deploy)`, r.status >= 400 && r.status < 500, `${r.status} ${r.text.slice(0, 80)}`)
+	}
+
+	// Report resolve on one of this run's throwaway reports.
+	if (mine[0]) {
+		const resolved = await express('PATCH', `${W}/reports/${mine[0].id}/resolve`, { token: mod.token, body: {} })
+		check('reports/:id/resolve', resolved.ok && resolved.body.report && resolved.body.report.id === mine[0].id, resolved.text.slice(0, 160))
+		check('reports/:id/resolve unknown: 404', (await express('PATCH', `${W}/reports/999999999/resolve`, { token: mod.token, body: {} })).status === 404)
+	}
+
+	// More read-only webadmin routes (no writes).
+	for (const path of ['blog/posts', 'launcher-releases', 'archives', 'match-conflicts', 'service-queue']) {
+		const r = await express('GET', `${W}/${path}`, { token: mod.token })
+		check(`GET ${W}/${path}: 200`, r.ok, r.ok ? '' : `${r.status} ${r.text.slice(0, 120)}`)
+	}
+	check('archives path traversal: 404', (await express('GET', `${W}/archives/..%2F..%2Fetc%2Fpasswd`, { token: mod.token })).status === 404)
+	check('blog/posts/:id bad id: 400', (await express('GET', `${W}/blog/posts/abc`, { token: mod.token })).status === 400)
+	// The mod catalog needs the mod_registry migrations (0041/0044/0045); on a
+	// DB migrated from another branch's journal they're skipped and this 500s.
+	const mods = await express('GET', `${W}/mods`, { token: mod.token })
+	console.log(`  info: GET ${W}/mods -> ${mods.status} ${mods.text.slice(0, 80)}`)
+
 	const h = await express('GET', '/health')
 	check('/health 200', h.ok, h.text.slice(0, 120))
 

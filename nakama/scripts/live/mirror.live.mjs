@@ -163,7 +163,7 @@ async function main() {
 	await p1.socket.ask('mpapi_report_result', { placements: majority })
 	await p2.socket.ask('mpapi_report_result', { placements: majority })
 	const endedB = await waitEnded(p1, since)
-	check('B: 3-player 2-vs-1 is disputed, majority recorded', endedB && endedB.data.data.status === 'disputed' && JSON.stringify(endedB.data.data.placements.find((x) => x.playerId === p1.userId)) === JSON.stringify({ playerId: p1.userId, place: 1 }), endedB && JSON.stringify(endedB.data.data))
+	check('B: 3-player 2-vs-1 is disputed, majority recorded', endedB && endedB.data.data.status === 'disputed' && (endedB.data.data.placements.find((x) => x.playerId === p1.userId) || {}).place === 1, endedB && JSON.stringify(endedB.data.data))
 	check('B: mirrored into lobby_runs', await mirrored(runB))
 	const lrB = lobbyRun(runB)[0]
 	check('B: lobby_runs public with matchmaking_match_id', lrB[1] === 'public' && lrB[2] === runB, JSON.stringify(lrB))
@@ -180,6 +180,17 @@ async function main() {
 	await sleep(800)
 
 	// --- C: matchmade ranked, 2 players, agreed, ratings ------------------------
+	// Compared with the rows before C, so a rerun (which adds games) still checks.
+	const ratingRows = () =>
+		Object.fromEntries(
+			psql('bmp', `select player_id, game_mode, games_played, wins, losses from matchmaking_ratings where player_id in (${q(pg1)},${q(pg2)}) and mod_id=${q(MOD)}`).map((r) => [
+				r[0],
+				{ mode: r[1], games: Number(r[2]), wins: Number(r[3]), losses: Number(r[4]) },
+			]),
+		)
+	const zero = { games: 0, wins: 0, losses: 0 }
+	const beforeC = ratingRows()
+	const was = (id) => beforeC[id] || zero
 	const mmC = await matchmake([p1, p2], PREFIX + 'rk', 'ranked')
 	const startedC = await startGame(await hostFirst(mmC.code, [p1, p2]), {})
 	const runC = startedC.runId
@@ -192,14 +203,47 @@ async function main() {
 	check('C: run carries ratings for both', runCRec.ratings && runCRec.ratings[p1.userId] && runCRec.ratings[p2.userId], JSON.stringify(runCRec.ratings))
 	check('C: mirrored', await mirrored(runC))
 	const rt = await poll(() => {
-		const r = psql('bmp', `select player_id, game_mode, games_played, wins, losses from matchmaking_ratings where player_id in (${q(pg1)},${q(pg2)}) and mod_id=${q(MOD)}`)
-		return r.length === 2 ? r : null
+		const r = ratingRows()
+		return r[pg1] && r[pg2] && r[pg1].games === was(pg1).games + 1 && r[pg2].games === was(pg2).games + 1 ? r : null
 	}, 10000)
 	check(
 		'C: matchmaking_ratings rows keyed ranked:<mode>, p2 won',
-		rt && rt.every((r) => r[1] === 'ranked:' + PREFIX + 'rk') && rt.some((r) => r[0] === pg2 && r[3] !== '0' && r[4] === '0') && rt.some((r) => r[0] === pg1 && r[4] !== '0' && r[3] === '0'),
-		JSON.stringify(rt),
+		!!rt &&
+			[pg1, pg2].every((id) => rt[id].mode === 'ranked:' + PREFIX + 'rk') &&
+			rt[pg2].wins === was(pg2).wins + 1 && rt[pg2].losses === was(pg2).losses &&
+			rt[pg1].losses === was(pg1).losses + 1 && rt[pg1].wins === was(pg1).wins,
+		JSON.stringify({ before: beforeC, after: rt }),
 	)
+	for (const p of [p1, p2]) p.socket.sendOp(1, {})
+	await sleep(800)
+
+	// --- D: agreed placements keep the HOST's copy (48905ae) --------------------
+	// The guest reports first with metric 0 for everyone (a PvP guest has no one
+	// else's score); the host's agreeing report carries the real metrics. The
+	// recorded result -- GAME_ENDED, the stored run, the Postgres match -- must
+	// be the host's, not the first-arrived guest's.
+	const mmD = await matchmake([p1, p2], PREFIX + 'rk', 'ranked')
+	const [hostD, guestD] = await hostFirst(mmD.code, [p1, p2])
+	const runD = (await startGame([hostD, guestD], {})).runId
+	const withMetric = (order, metrics) => order.map((p, i) => ({ playerId: p.userId, place: i + 1, metric: metrics[i] }))
+	since = p1.socket.mark()
+	await guestD.socket.ask('mpapi_report_result', { placements: withMetric([hostD, guestD], [0, 0]) })
+	await sleep(300)
+	await hostD.socket.ask('mpapi_report_result', { placements: withMetric([hostD, guestD], [4321, 1234]) })
+	const endedD = await waitEnded(p1, since)
+	const metricsOf = (placements) => JSON.stringify((placements || []).slice().sort((x, y) => x.place - y.place).map((x) => x.metric))
+	check('D: guest-first agreed game ends agreed with the host metrics', endedD && endedD.data.data.status === 'agreed' && metricsOf(endedD.data.data.placements) === '[4321,1234]', endedD && JSON.stringify(endedD.data.data).slice(0, 220))
+	const runDRec = JSON.parse(psql('nakama', `select value from storage where collection='match_runs' and key=${q(runD)}`)[0][0])
+	check('D: stored run keeps the host metrics', metricsOf(runDRec.placements) === '[4321,1234]', JSON.stringify(runDRec.placements))
+	const mmRowD = await poll(() => {
+		const r = psql('bmp', `select result_placements::text from matchmaking_matches where match_id=${q(runD)}`)
+		return r.length ? r[0][0] : null
+	}, 30000)
+	// result_placements carries places only; a metric reaches Postgres as a
+	// rating's seasonBest, and only for mods with a metric (PvP, SPDRN), which a
+	// throwaway mod id isn't.
+	const placesD = mmRowD ? Object.fromEntries(JSON.parse(mmRowD).map((x) => [x.playerId, x.place])) : {}
+	check('D: mirrored match has the agreed places', placesD[pgPlayer(hostD.userId)] === 1 && placesD[pgPlayer(guestD.userId)] === 2, mmRowD)
 	for (const p of [p1, p2]) p.socket.sendOp(1, {})
 	await sleep(800)
 
@@ -207,15 +251,15 @@ async function main() {
 	await sleep(11000)
 	const counts = psql(
 		'bmp',
-		`select (select count(*) from lobby_runs where id in (${q(runA)},${q(runB)},${q(runC)})),
+		`select (select count(*) from lobby_runs where id in (${q(runA)},${q(runB)},${q(runC)},${q(runD)})),
 		        (select count(*) from match_run_logs where run_id in (${q(runA)},${q(runB)},${q(runC)})),
-		        (select count(*) from matchmaking_matches where match_id in (${q(runB)},${q(runC)})),
+		        (select count(*) from matchmaking_matches where match_id in (${q(runB)},${q(runC)},${q(runD)})),
 		        (select count(*) from match_result_conflicts where match_id=${q(runB)}),
 		        (select count(*) from service_queue_items where source_id=${q(runA)})`,
 	)[0]
-	check('mirror rows exactly once (3 runs, 7 logs, 2 matches, 1 conflict, 1 AC item)', counts.join(',') === '3,7,2,1,1', counts.join(','))
+	check('mirror rows exactly once (4 runs, 7 logs, 3 matches, 1 conflict, 1 AC item)', counts.join(',') === '4,7,3,1,1', counts.join(','))
 	const outbox = await admin('admin_mirror_pull', { limit: 50 })
-	const mine2 = (outbox.body.entries || []).filter((e) => e.kind === 'run' && [runA, runB, runC].includes(e.run.runId))
+	const mine2 = (outbox.body.entries || []).filter((e) => e.kind === 'run' && [runA, runB, runC, runD].includes(e.run.runId))
 	check('outbox drained of these runs', outbox.ok && mine2.length === 0, `${(outbox.body.entries || []).length} entries in outbox`)
 	console.log('OUTPUTS ' + JSON.stringify(outputs))
 	for (const p of [p1, p2, p3]) p.socket.close()
