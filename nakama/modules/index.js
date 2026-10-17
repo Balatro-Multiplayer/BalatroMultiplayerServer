@@ -3969,7 +3969,7 @@ function reconcile(reports, reportOrder, participants, hostId) {
     const everyone = participants.every((p) => reports[p.id] !== void 0);
     return {
       status: everyone ? "agreed" : "partial",
-      placements: reports[reporters[0]]
+      placements: reports[preferHost(groups[keys[0]], hostId)]
     };
   }
   let best = keys[0];
@@ -3981,7 +3981,10 @@ function reconcile(reports, reportOrder, participants, hostId) {
     if (size > bestSize || size === bestSize && hasHost && !bestHasHost)
       best = key;
   }
-  return { status: "disputed", placements: reports[groups[best][0]] };
+  return { status: "disputed", placements: reports[preferHost(groups[best], hostId)] };
+}
+function preferHost(group, hostId) {
+  return group.indexOf(hostId) !== -1 ? hostId : group[0];
 }
 function remainingParticipants(lobby) {
   const started = lobby.game.started;
@@ -4559,8 +4562,11 @@ function readRun(nk, runId) {
   return objects[0].value;
 }
 function rpcRunGet(ctx, logger, nk, payload) {
-  requireUser(ctx);
-  return JSON.stringify(readRun(nk, parsePayload(payload).runId));
+  const userId = requireUser(ctx);
+  const run = readRun(nk, parsePayload(payload).runId);
+  if (!run.players.some((p) => p.id === userId))
+    throw runtimeError(NOT_FOUND, "Run not found");
+  return JSON.stringify(run);
 }
 function rpcRunLogs(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -4680,7 +4686,11 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
       return;
     }
     case "setCurrent":
-      writeCurrent(nk, ctx, lobby, effect.userId);
+      try {
+        writeCurrent(nk, ctx, lobby, effect.userId);
+      } catch (e) {
+        logger.warn("Lobby %s: could not record %s as in it: %v", lobby.code, effect.userId, e);
+      }
       return;
     case "saveRun":
       try {
@@ -4783,6 +4793,14 @@ function joinInfoOf(nk, presence, meta) {
     mods: sentMods
   };
 }
+function accountExists(nk, userId) {
+  try {
+    nk.accountGetId(userId);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 function otherLobbyOf(nk, ctx, userId) {
   const objects = nk.storageRead([
     { collection: CURRENT_LOBBY_COLLECTION, key: CURRENT_LOBBY_KEY, userId }
@@ -4796,6 +4814,9 @@ function otherLobbyOf(nk, ctx, userId) {
 }
 function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, presence, metadata) {
   const meta = metadata || {};
+  if (!accountExists(nk, presence.userId)) {
+    return { state, accept: false, rejectMessage: "No such account" };
+  }
   if (meta.role === SPECTATOR_ROLE) {
     const refused = spectateRejection(state.lobby, presence.userId);
     if (refused) return { state, accept: false, rejectMessage: refused };
@@ -4934,7 +4955,7 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
   }
 }
 function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages) {
-  if (state.stopping) return null;
+  if (state.stopping || state.lobby.closed) return null;
   let current = state;
   for (const message of messages) {
     if (!current) break;
@@ -5571,19 +5592,35 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   } catch (e) {
     return JSON.stringify({ entries: [], cursor: "" });
   }
+  const records = page.records || [];
+  const stored = storedRatings(nk, records.map((r) => r.ownerId), boardId(modId, mode, currentSeason(nk)));
   return JSON.stringify({
-    entries: (page.records || []).map((r) => ({
-      rank: r.rank,
+    entries: boardEntries(records, stored, Date.now()),
+    cursor: page.nextCursor || ""
+  });
+}
+function storedRatings(nk, userIds, key) {
+  const out = {};
+  if (userIds.length === 0) return out;
+  for (const object of nk.storageRead(userIds.map((userId) => ({ collection: RATINGS_COLLECTION, key, userId }))))
+    out[object.userId] = object.value;
+  return out;
+}
+function boardEntries(records, stored, now) {
+  if (records.length === 0) return [];
+  const firstRank = Math.min(...records.map((r) => r.rank));
+  return records.map((r) => {
+    const record = stored[r.ownerId];
+    return {
       playerId: r.ownerId,
       name: r.username,
-      rating: r.score,
+      rating: record ? decayedRating(__spreadProps(__spreadValues({}, record), { rating: r.score }), now) : r.score,
       wins: r.subscore,
       losses: r.metadata.losses,
       gamesPlayed: r.metadata.gamesPlayed,
       seasonBest: r.metadata.seasonBest
-    })),
-    cursor: page.nextCursor || ""
-  });
+    };
+  }).sort((a, b) => b.rating - a.rating || b.wins - a.wins).map((e, i) => __spreadValues({ rank: firstRank + i }, e));
 }
 
 // src/lobby/retention.ts
