@@ -214,21 +214,25 @@ async function main() {
 	es[0].close()
 
 	// --- oversize messages: the server's own limits vs Nakama's socket frame limit ---
-	// relay.ts refuses params over 16KB (too_large) and start options over 4KB,
-	// but Nakama's socket.max_message_size_bytes (default 4096, unset in
-	// local.yml/prod.yml) closes the socket (1009) first, from ~2.9KB of params.
+	// relay.ts refuses params over 16KB (too_large) and start options over 4KB.
+	// socket.max_message_size_bytes (32KB since 6d48a8a; Nakama's default 4096
+	// closed the socket with 1009 from ~2.9KB of params) must leave room for
+	// both, so a 3KB message is relayed and the bigger ones are refused by
+	// relay.ts, all without dropping the socket.
 	let szn = 0
-	async function oversize(label, send) {
+	async function oversize(label, send, expectRefusal = true) {
 		szn++
 		const p = await player(`sz${szn}a`)
 		const q2 = await player(`sz${szn}b`)
 		const { sockets: ss } = await lobbyWith([p, q2])
 		const r = await send(ss[0], ss[1])
 		await sleep(500)
-		check(`${label}: refused without dropping the socket`, !!r.rejected && !ss[0].closed, `${JSON.stringify(r)} closed=${ss[0].closed} code=${ss[0].closeCode}`)
+		const outcome = expectRefusal ? 'refused' : 'relayed'
+		const answered = expectRefusal ? !!r.rejected : !!r.ok
+		check(`${label}: ${outcome} without dropping the socket`, answered && !ss[0].closed, `${JSON.stringify(r)} closed=${ss[0].closed} code=${ss[0].closeCode}`)
 		for (const s of ss) s.close()
 	}
-	await oversize('params 3KB (under the 16KB relay cap)', (s) => s.ask('mpapi_ready', { ready: true, pad: 'x'.repeat(3000) }, 3000))
+	await oversize('params 3KB (under the 16KB relay cap)', (s) => s.ask('mpapi_ready', { ready: true, pad: 'x'.repeat(3000) }, 3000), false)
 	await oversize('params over 16KB', (s) => s.ask('mpapi_ready', { pad: 'x'.repeat(17 * 1024) }, 3000))
 	await oversize('start options over 4KB', async (s, s2) => {
 		await s2.ask('mpapi_ready', { ready: true })
