@@ -7,6 +7,10 @@
 //      out: the queries are one-sided (matchmaker.rev_precision off).
 //   2. matchmaker_remove of a ticket the matchmaker already spent answers an
 //      error, so the client knows to keep its matched callback.
+//   3. A ticket with min_count == max_count searches only on its first pass
+//      (then it is "passive": only found by other tickets' searches), so a
+//      queued player's wide window must be re-submitted now and then, even at
+//      the cap, to find players who queued after it.
 // Casual tickets on the test mod: no rating board, no ranked gate.
 // Run: BMP_TEST_PREFIX=f1test_ node nakama/scripts/live/f1-widening.live.mjs
 // Clean up: BMP_TEST_PREFIX=f1test_ node nakama/scripts/live/cleanup.live.mjs
@@ -70,6 +74,22 @@ async function main() {
 
 		const late = await remove(a, ta)
 		check('withdrawing a spent (matched) ticket answers an error', !!late.error, JSON.stringify(late))
+
+		// 3. A wide ticket left alone goes passive: a later narrow one it takes in
+		// is not found by it.
+		const marks2 = [a.socket.mark(), b.socket.mark()]
+		const ta3 = ticketOf(await add(a, 550, 400))
+		check('A queued again at 550 +-400', !!ta3)
+		await sleep(PASSES_MS)
+		const tb3 = ticketOf(await add(b, 900, 150))
+		check('B queued at 900 +-150', !!tb3)
+		const passive = await matched(a, marks2[0], PASSES_MS)
+		check("A's wide ticket, past its first pass, never finds B", passive === null, JSON.stringify(passive))
+		// Re-submitted, the same window finds B at once.
+		await remove(a, ta3)
+		const ta4 = ticketOf(await add(a, 550, 400))
+		const [m3a, m3b] = await Promise.all([matched(a, marks2[0], PASSES_MS * 2), matched(b, marks2[1], PASSES_MS * 2)])
+		check('the same window re-submitted finds B', !!m3a && !!m3b && m3a.ticket === ta4 && m3b.ticket === tb3, JSON.stringify({ a: m3a && m3a.ticket, b: m3b && m3b.ticket }))
 	} finally {
 		a.socket.close()
 		b.socket.close()
