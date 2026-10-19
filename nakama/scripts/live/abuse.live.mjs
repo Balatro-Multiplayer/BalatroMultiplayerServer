@@ -190,6 +190,15 @@ async function main() {
 		}
 	}
 	check('no player RPC answers malformed input with a 5xx', fivehundreds.length === 0, fivehundreds.slice(0, 8).join(' | '))
+	// A cursor Nakama never handed out (1928434, needs deploy).
+	for (const [id, payload] of [
+		['runs_mine', { cursor: 'junk' }],
+		['leaderboard_get', { modId: PREFIX + 'mod', mode: PREFIX + 'rk', cursor: 'junk' }],
+		['spectate_list', { cursor: 'junk' }],
+	]) {
+		const r = await rawRpc(c.token, id, JSON.stringify(payload))
+		check(`${id} with a junk cursor: no 5xx (1928434 needs deploy)`, r.status < 500, `${r.status} ${r.text.slice(0, 80)}`)
+	}
 
 	// --- a deleted account's token ---
 	const d = await player('d')

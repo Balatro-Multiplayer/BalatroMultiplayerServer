@@ -144,7 +144,8 @@ export const q = (s) => `'${String(s).replace(/'/g, "''")}'`
 // The JWT Express's authenticate middleware accepts, signed with the local
 // api-green's JWT_SECRET (read from the container). HS256 by hand: no deps.
 let jwtSecret = null
-export function webJwt(playerId, steamName) {
+// `extra` adds claims, e.g. { purpose: 'tos-accept' } for the ToS-pending token.
+export function webJwt(playerId, steamName, extra = {}) {
 	if (!jwtSecret) {
 		const env = execFileSync('docker', ['inspect', 'bmp-api-green', '--format', '{{range .Config.Env}}{{println .}}{{end}}'], {
 			encoding: 'utf8',
@@ -156,7 +157,7 @@ export function webJwt(playerId, steamName) {
 	const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url')
 	const now = Math.floor(Date.now() / 1000)
 	const head = b64({ alg: 'HS256', typ: 'JWT' })
-	const body = b64({ playerId, steamName, iat: now, exp: now + 3600 })
+	const body = b64({ playerId, steamName, iat: now, exp: now + 3600, ...extra })
 	const sig = createHmac('sha256', jwtSecret).update(`${head}.${body}`).digest('base64url')
 	return `${head}.${body}.${sig}`
 }

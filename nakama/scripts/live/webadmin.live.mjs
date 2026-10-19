@@ -246,7 +246,6 @@ async function main() {
 		['DELETE', `${W}/players/not-a-uuid/bans/1`],
 		['DELETE', `${W}/players/${out.honestPlayer}/bans/not-a-uuid`],
 		['GET', `/api/stats/players/not-a-uuid?${board}`],
-		['GET', `/api/stats/leaderboard?${board}&page=abc`],
 		['GET', `/api/stats/leaderboard?${board}&season=1.5`],
 		['GET', '/api/runs/not-a-uuid/replay'],
 	]) {
@@ -254,6 +253,42 @@ async function main() {
 		const r = await express(method, path, { token, body })
 		check(`${method} ${path.split('?')[0]}${path.includes('?') ? '?' + path.split('&').pop() : ''}: 4xx, not 500 (f12644c needs deploy)`, r.status >= 400 && r.status < 500, `${r.status} ${r.text.slice(0, 80)}`)
 	}
+	const bigSeason = await express('GET', `/api/stats/leaderboard?${board}&season=1e10`)
+	check('leaderboard ?season=1e10: 400, not 500 (436f725 needs deploy)', bigSeason.status === 400, `${bigSeason.status} ${bigSeason.text.slice(0, 80)}`)
+
+	// A non-number page/limit falls back to the default instead of dropping
+	// the LIMIT (c919fb0, needs deploy).
+	const abcPage = await express('GET', `/api/stats/leaderboard?${board}&page=abc`)
+	check('leaderboard ?page=abc: page 1 (c919fb0 needs deploy)', abcPage.ok && abcPage.body.page === 1, `${abcPage.status} ${abcPage.text.slice(0, 80)}`)
+	const histCount = Number(psql('bmp', 'select count(*) from matchmaking_matches')[0][0])
+	const hist = await express('GET', '/api/stats/history?limit=abc')
+	const histLen = hist.body && Array.isArray(hist.body.matches) ? hist.body.matches.length : -1
+	check(`stats/history ?limit=abc: the default 25, not all ${histCount} (c919fb0 needs deploy)`, histLen === Math.min(25, histCount), `${hist.status} got ${histLen}`)
+	const wp = await express('GET', `${W}/players?limit=abc`, { token: adm.token })
+	const wpLen = wp.body && Array.isArray(wp.body.players) ? wp.body.players.length : -1
+	check('webadmin players ?limit=abc: at most the default 50 (c919fb0 needs deploy)', wp.ok && wpLen >= 0 && wpLen <= 50, `${wp.status} got ${wpLen}`)
+
+	// Body-parser errors are the client's: 4xx, not 500 (436f725, needs deploy).
+	const raw = async (path, body, headers = {}) => {
+		const res = await fetch(`http://127.0.0.1:8788${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body })
+		return { status: res.status, text: await res.text() }
+	}
+	const badJson = await raw('/api/auth/accept-tos', '{bad')
+	check('malformed JSON body: 400 (436f725 needs deploy)', badJson.status === 400, `${badJson.status} ${badJson.text.slice(0, 80)}`)
+	const bigBody = await raw('/api/auth/accept-tos', JSON.stringify({ a: 'x'.repeat(200_000) }))
+	check('200KB JSON body: 413 (436f725 needs deploy)', bigBody.status === 413, `${bigBody.status} ${bigBody.text.slice(0, 80)}`)
+	const badCharset = await raw('/api/auth/accept-tos', '{}', { 'content-type': 'application/json; charset=bogus' })
+	check('unsupported charset: 415 (436f725 needs deploy)', badCharset.status === 415, `${badCharset.status} ${badCharset.text.slice(0, 80)}`)
+
+	// The 10-minute ToS-pending token is not a session (bd5b872, needs deploy).
+	const tosToken = webJwt(out.honestPlayer, undefined, { purpose: 'tos-accept', exp: Math.floor(Date.now() / 1000) + 600 })
+	for (const path of ['/api/auth/me', '/api/runs/mine']) {
+		const r = await express('GET', path, { token: tosToken })
+		check(`ToS-pending token on ${path}: 401 (bd5b872 needs deploy)`, r.status === 401, `${r.status} ${r.text.slice(0, 80)}`)
+	}
+	const linkToken = webJwt(undefined, undefined, { nonce: 'x', purpose: 'discord-link' })
+	const lr = await express('GET', '/api/auth/me', { token: linkToken })
+	check('link-state token on /api/auth/me: 401 (bd5b872 needs deploy)', lr.status === 401, `${lr.status} ${lr.text.slice(0, 80)}`)
 
 	// Report resolve on one of this run's throwaway reports.
 	if (mine[0]) {
