@@ -290,6 +290,13 @@ async function main() {
 	const lr = await express('GET', '/api/auth/me', { token: linkToken })
 	check('link-state token on /api/auth/me: 401 (bd5b872 needs deploy)', lr.status === 401, `${lr.status} ${lr.text.slice(0, 80)}`)
 
+	// Season changes are admin-only (f5d4ed8, needs deploy). A season id that
+	// doesn't exist and an empty name, so nothing changes even if the gate fails.
+	for (const [path, body] of [[`${W}/seasons/999999/activate`, {}], [`${W}/seasons/999999/end`, {}], [`${W}/seasons`, { name: '' }]]) {
+		const r = await express('POST', path, { token: mod.token, body })
+		check(`moderator POST ${path.slice(W.length)}: 403 (f5d4ed8 needs deploy)`, r.status === 403, `${r.status} ${r.text.slice(0, 80)}`)
+	}
+
 	// Report resolve on one of this run's throwaway reports.
 	if (mine[0]) {
 		const resolved = await express('PATCH', `${W}/reports/${mine[0].id}/resolve`, { token: mod.token, body: {} })
