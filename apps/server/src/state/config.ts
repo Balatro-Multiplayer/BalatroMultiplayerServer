@@ -21,6 +21,9 @@ export interface AppConfig {
 	// DB-backed (server_config.casual_queue_enabled). When falsy, non-ranked
 	// queue requests are rejected; ranked is unaffected.
 	casualQueueEnabled: boolean
+	// DB-backed (server_config.group_queue_enabled). When falsy, a private
+	// lobby can't queue casual as a group (Nakama's group queue).
+	groupQueueEnabled: boolean
 	// DB-backed (server_config.lobby_creation_enabled). When falsy, manual
 	// lobby creation (POST /lobbies) is rejected. Does NOT gate lobbies the
 	// matchmaking system auto-creates on match found -- see rankedEnabled/
@@ -42,6 +45,7 @@ let _config: AppConfig = {
 	testingMode: false,
 	rankedEnabled: true,
 	casualQueueEnabled: true,
+	groupQueueEnabled: true,
 	lobbyCreationEnabled: true,
 	achievementsEnabled: false,
 }

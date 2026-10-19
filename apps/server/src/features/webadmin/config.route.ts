@@ -18,8 +18,9 @@ import { getConfig } from '../../state/config.js'
 // precedent), not the router-level admin-or-moderator webAdmin gate, since
 // platform config has the same self-inflicted-blast-radius shape.
 //
-// chatEnabled/rankedEnabled/casualQueueEnabled/lobbyCreationEnabled (and
-// achievementsEnabled, migration 0048) are DB-backed columns on server_config (migration 0036) and writable via
+// chatEnabled/rankedEnabled/casualQueueEnabled/lobbyCreationEnabled are now
+// DB-backed columns on server_config (migration 0036; achievementsEnabled
+// migration 0048, groupQueueEnabled migration 0050) and writable via
 // PATCH /config/feature-flags below. testingMode remains env-var-only
 // (env.TESTING_MODE), surfaced read-only.
 const router = Router()
@@ -35,6 +36,7 @@ router.get('/config', async (_req, res, next) => {
 			testingMode: config.testingMode ?? false,
 			rankedEnabled: config.rankedEnabled,
 			casualQueueEnabled: config.casualQueueEnabled,
+			groupQueueEnabled: config.groupQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
 			achievementsEnabled: config.achievementsEnabled,
 		})
@@ -50,12 +52,14 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled,
 			rankedEnabled,
 			casualQueueEnabled,
+			groupQueueEnabled,
 			lobbyCreationEnabled,
 			achievementsEnabled,
 		} = req.body as {
 			chatEnabled?: unknown
 			rankedEnabled?: unknown
 			casualQueueEnabled?: unknown
+			groupQueueEnabled?: unknown
 			lobbyCreationEnabled?: unknown
 			achievementsEnabled?: unknown
 		}
@@ -64,6 +68,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled: boolean
 			rankedEnabled: boolean
 			casualQueueEnabled: boolean
+			groupQueueEnabled: boolean
 			lobbyCreationEnabled: boolean
 			achievementsEnabled: boolean
 		}> = {}
@@ -71,6 +76,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled,
 			rankedEnabled,
 			casualQueueEnabled,
+			groupQueueEnabled,
 			lobbyCreationEnabled,
 			achievementsEnabled,
 		})) {
@@ -94,6 +100,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled: config.chatEnabled,
 			rankedEnabled: config.rankedEnabled,
 			casualQueueEnabled: config.casualQueueEnabled,
+			groupQueueEnabled: config.groupQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
 			achievementsEnabled: config.achievementsEnabled,
 		})

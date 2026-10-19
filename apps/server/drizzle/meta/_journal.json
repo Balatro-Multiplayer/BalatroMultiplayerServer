@@ -351,6 +351,13 @@
       "when": 1792500000000,
       "tag": "0049_reset_preferred_jokers",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0050_group_queue_enabled",
+      "breakpoints": true
     }
   ]
 }

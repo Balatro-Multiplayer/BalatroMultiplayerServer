@@ -27,16 +27,24 @@ interface ConfigResponse {
   testingMode: boolean
   rankedEnabled: boolean
   casualQueueEnabled: boolean
+  groupQueueEnabled: boolean
   lobbyCreationEnabled: boolean
   achievementsEnabled: boolean
 }
 
-type FeatureFlag = 'chatEnabled' | 'rankedEnabled' | 'casualQueueEnabled' | 'lobbyCreationEnabled' | 'achievementsEnabled'
+type FeatureFlag =
+  | 'chatEnabled'
+  | 'rankedEnabled'
+  | 'casualQueueEnabled'
+  | 'groupQueueEnabled'
+  | 'lobbyCreationEnabled'
+  | 'achievementsEnabled'
 
 const FEATURE_FLAGS: { key: FeatureFlag; label: string; description: string }[] = [
   { key: 'chatEnabled', label: 'Text Chat', description: 'Lobby chat sends are rejected when off.' },
   { key: 'rankedEnabled', label: 'Ranked Queue', description: 'Ranked matchmaking requests are rejected when off.' },
   { key: 'casualQueueEnabled', label: 'Casual Queue', description: 'Casual matchmaking requests are rejected when off.' },
+  { key: 'groupQueueEnabled', label: 'Group Queue', description: 'Private lobbies queueing casual together are rejected when off.' },
   { key: 'lobbyCreationEnabled', label: 'Lobby Creation', description: 'Manual lobby creation is rejected when off.' },
   {
     key: 'achievementsEnabled',

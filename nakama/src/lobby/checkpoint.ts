@@ -7,6 +7,7 @@ import { bindCode } from './codes'
 import {
 	CHECKPOINT_TTL_MS,
 	CURRENT_LOBBY_COLLECTION,
+	checkpointExpiry,
 	CURRENT_LOBBY_KEY,
 	LOBBY_CHECKPOINT_COLLECTION,
 	LOBBY_MATCH,
@@ -25,16 +26,23 @@ export interface Checkpoint {
 	at: number
 	// When a resume claimed it, or null.
 	claimedAt: number | null
+	// When it is dropped unclaimed. Absent on checkpoints written before it
+	// was kept: at + CHECKPOINT_TTL_MS.
+	expiresAt?: number
 }
 
 // What a lobby is worth keeping across a restart: one with players in it.
+// A lobby whose group is away (lobby/group_queue.ts) waits for its players as
+// long as their seats are parked, not just the usual ten minutes.
 export function checkpointOf(lobby: Lobby, now: number): Checkpoint | null {
 	if (lobby.closed || lobby.players.length === 0) return null
-	return { lobby, at: now, claimedAt: null }
+	const gq = lobby.groupQueue
+	const parkedUntil = gq && gq.phase === 'away' ? gq.until : 0
+	return { lobby, at: now, claimedAt: null, expiresAt: Math.max(now + CHECKPOINT_TTL_MS, parkedUntil) }
 }
 
 export function isExpired(checkpoint: Checkpoint, now: number): boolean {
-	return now - checkpoint.at >= CHECKPOINT_TTL_MS
+	return now >= checkpointExpiry(checkpoint as unknown as { [key: string]: unknown })
 }
 
 export function isClaimable(checkpoint: Checkpoint, now: number): boolean {
@@ -47,13 +55,17 @@ export function isClaimable(checkpoint: Checkpoint, now: number): boolean {
 // The lobby a resumed match starts with. Every player is away (nobody is
 // attached yet) from now, so each gets the whole grace period; the result
 // clock moves on by the time the server was down, so the restart doesn't eat
-// into it. Spectators and rate-limit buckets don't carry over.
+// into it. Spectators and rate-limit buckets don't carry over, nor does a
+// group queue still forming or queued: its party went with the server. (Its
+// index is left to go stale: matchmaking/group/binding.ts asks the lobby.)
 export function resumeFrom(checkpoint: Checkpoint, now: number): Lobby {
 	const lobby = checkpoint.lobby
 	const downtime = Math.max(0, now - checkpoint.at)
 	const settleFrom = lobby.game.settleFrom
+	const gq = lobby.groupQueue
 	return {
 		...lobby,
+		groupQueue: gq && gq.phase === 'away' ? gq : null,
 		createdAt: now,
 		players: lobby.players.map((p) => ({ ...p, sessionId: '', awaySince: now })),
 		spectators: [],
@@ -63,6 +75,14 @@ export function resumeFrom(checkpoint: Checkpoint, now: number): Lobby {
 			settleFrom: settleFrom === null ? null : settleFrom + downtime,
 		},
 	}
+}
+
+// Whose current-lobby record a resumed lobby takes back: everyone's but its
+// away group's, whose records name the public game they are in.
+export function seatHoldersOf(lobby: Lobby): string[] {
+	const gq = lobby.groupQueue
+	const away = gq && gq.phase === 'away' ? gq.memberIds : []
+	return lobby.players.map((p) => p.id).filter((id) => away.indexOf(id) === -1)
 }
 
 function keyOf(code: string) {
@@ -129,12 +149,12 @@ export function resumeLobby(
 	const lobby = checkpoint.lobby
 	const matchId = nk.matchCreate(LOBBY_MATCH, { resumeCode: code })
 	bindCode(nk, code, matchId, lobby.modId)
-	for (const p of lobby.players) {
+	for (const id of seatHoldersOf(lobby)) {
 		nk.storageWrite([
 			{
 				collection: CURRENT_LOBBY_COLLECTION,
 				key: CURRENT_LOBBY_KEY,
-				userId: p.id,
+				userId: id,
 				value: { matchId, code, modId: lobby.modId },
 				permissionRead: 0,
 				permissionWrite: 0,

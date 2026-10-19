@@ -118,6 +118,9 @@ const startGame: AuthoritativeAction = {
 			return { reject: 'bad_params' }
 		if (lobby.hostId !== ctx.from) return { reject: 'not_host' }
 		if (lobby.game.started) return { reject: 'in_game' }
+		// Queueing as a group (lobby/group_queue.ts): the group's game is the
+		// public one it's matched into.
+		if (lobby.groupQueue) return { reject: 'group_queue' }
 		const minPlayers = Math.min(
 			Math.max(MIN_GAME_PLAYERS, typeof p.minPlayers === 'number' ? p.minPlayers : 0),
 			lobby.maxPlayers,

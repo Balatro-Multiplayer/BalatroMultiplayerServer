@@ -13,6 +13,9 @@ export interface ServerConfig {
 	chatEnabled: boolean
 	rankedEnabled: boolean
 	casualQueueEnabled: boolean
+	// A private lobby may queue casual matchmaking as one group
+	// (matchmaking/group); its members still need casualQueueEnabled.
+	groupQueueEnabled: boolean
 	lobbyCreationEnabled: boolean
 	// Only 'tester'-privileged players may create lobbies or queue.
 	testingMode: boolean
@@ -34,6 +37,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	chatEnabled: true,
 	rankedEnabled: true,
 	casualQueueEnabled: true,
+	groupQueueEnabled: true,
 	lobbyCreationEnabled: true,
 	testingMode: false,
 	integrityEnforced: false,
@@ -55,6 +59,7 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 		'chatEnabled',
 		'rankedEnabled',
 		'casualQueueEnabled',
+		'groupQueueEnabled',
 		'lobbyCreationEnabled',
 		'testingMode',
 		'integrityEnforced',

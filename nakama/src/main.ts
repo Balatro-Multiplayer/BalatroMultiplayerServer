@@ -44,6 +44,16 @@ import { rpcChatEnable, rpcChatSend } from './chat/rpc'
 import { beforeMatchmakerAdd } from './matchmaking/gate'
 import { matchmakerMatched } from './matchmaking/matched'
 import {
+	afterPartyMatchmakerAdd,
+	beforePartyClose,
+	beforePartyJoin,
+	beforePartyLeave,
+	beforePartyMatchmakerAdd,
+	beforePartyMatchmakerRemove,
+	beforePartyRemove,
+} from './matchmaking/group/hooks'
+import { rpcGroupQueueCancel, rpcGroupQueueOpen } from './matchmaking/group/rpc'
+import {
 	afterMatchmakerAdd,
 	beforeMatchmakerRemove,
 	rpcQueueCounts,
@@ -95,6 +105,15 @@ function InitModule(
 	initializer.registerRtBefore('MatchmakerAdd', beforeMatchmakerAdd)
 	initializer.registerRtAfter('MatchmakerAdd', afterMatchmakerAdd)
 	initializer.registerRtBefore('MatchmakerRemove', beforeMatchmakerRemove)
+	initializer.registerRtBefore('PartyJoin', beforePartyJoin)
+	initializer.registerRtBefore('PartyMatchmakerAdd', beforePartyMatchmakerAdd)
+	initializer.registerRtAfter('PartyMatchmakerAdd', afterPartyMatchmakerAdd)
+	initializer.registerRtBefore('PartyMatchmakerRemove', beforePartyMatchmakerRemove)
+	initializer.registerRtBefore('PartyLeave', beforePartyLeave)
+	initializer.registerRtBefore('PartyRemove', beforePartyRemove)
+	initializer.registerRtBefore('PartyClose', beforePartyClose)
+	initializer.registerRpc('group_queue_open', rpcGroupQueueOpen)
+	initializer.registerRpc('group_queue_cancel', rpcGroupQueueCancel)
 	initializer.registerRpc('queue_counts', rpcQueueCounts)
 	initializer.registerRpc('session_init', rpcSessionInit)
 	initializer.registerRpc('tos_accept', rpcTosAccept)

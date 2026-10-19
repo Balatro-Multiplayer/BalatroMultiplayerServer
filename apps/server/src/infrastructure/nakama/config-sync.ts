@@ -18,6 +18,7 @@ export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 		chatEnabled: config.chatEnabled,
 		rankedEnabled: config.rankedEnabled,
 		casualQueueEnabled: config.casualQueueEnabled,
+		groupQueueEnabled: config.groupQueueEnabled,
 		lobbyCreationEnabled: config.lobbyCreationEnabled,
 		achievementsEnabled: config.achievementsEnabled,
 		testingMode: config.testingMode === true,

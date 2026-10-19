@@ -1,0 +1,351 @@
+// The group queue's effectful side (binding, hooks, RPCs and the matched
+// hook) against a fake Nakama whose one home lobby answers its signals the
+// way lobby/match.ts does: through answerGroupSignal, running the group's
+// effects.
+import { describe, expect, it } from 'vitest'
+import { DEFAULT_CONFIG, writeConfig } from '../../config'
+import { bindCode } from '../../lobby/codes'
+import { answerGroupSignal, isGroupSignal } from '../../lobby/group_signals'
+import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY, type LobbySignal } from '../../lobby/protocol'
+import { join, newLobby, type Lobby } from '../../lobby/state'
+import { writeBans } from '../../moderation/bans'
+import { fakeLogger, fakeNk, playerCtx, type FakeNk } from '../../testing/fake_nk'
+import { beforeMatchmakerAdd, IN_GROUP_QUEUE } from '../gate'
+import { matchmakerMatched, type MatchedEntry } from '../matched'
+import { QUEUE_COLLECTION, clearMatched, recordKey } from '../queue'
+import { deleteBinding, dissolveParty, groupOf, readBinding, signalHome, writeBinding } from './binding'
+import {
+	afterPartyMatchmakerAdd,
+	beforePartyJoin,
+	beforePartyLeave,
+	beforePartyMatchmakerAdd,
+	beforePartyMatchmakerRemove,
+} from './hooks'
+import { groupFits } from './matched'
+import { rpcGroupQueueCancel, rpcGroupQueueOpen } from './rpc'
+
+const PARTY = '0b0c4a9e-7f43-4f43-9f6e-1d2c3b4a5f60.bmp-local'
+const HOME_MATCH = 'home-uuid.bmp-local'
+const MOD = 'MultiplayerSPDRN'
+const CASUAL = { modId: MOD, mode: 'standard', kind: 'casual' }
+const info = (name: string) => ({ displayName: name, preferredJoker: null, mods: null })
+
+interface World {
+	nk: FakeNk
+	lobby: () => Lobby
+	party: Set<string>
+	created: { [key: string]: unknown }[]
+	signals: LobbySignal[]
+}
+
+// A private lobby HOME12 with ids seated (the first hosting), and an empty
+// party PARTY the RPCs and hooks look at through its stream.
+function world(...ids: string[]): World {
+	let lobby = newLobby({ code: 'HOME12', modId: MOD, maxPlayers: 4, creatorId: ids[0], now: 0, graceMs: 10_000 })
+	for (const id of ids) lobby = join(lobby, id, `${id}-s`, info(id)).lobby
+	const party = new Set<string>()
+	const created: { [key: string]: unknown }[] = []
+	const signals: LobbySignal[] = []
+	const nk: FakeNk = fakeNk({
+		matchGet: (id: string) => (id === HOME_MATCH ? { matchId: id } : null),
+		matchCreate: (_module: string, params: { [key: string]: unknown }) => {
+			created.push(params)
+			return 'pub-uuid.bmp-local'
+		},
+		matchSignal: (id: string, data: string) => {
+			if (id !== HOME_MATCH) throw new Error('no such match')
+			const signal = JSON.parse(data) as LobbySignal
+			signals.push(signal)
+			if (signal.type === 'has_player') return lobby.players.some((p) => p.id === signal.userId) ? 'yes' : 'no'
+			if (!isGroupSignal(signal)) return ''
+			const answer = answerGroupSignal(lobby, signal, { groupQueueEnabled: true }, Date.now())
+			lobby = answer.step.lobby
+			for (const effect of answer.step.out) {
+				if (effect.kind === 'groupBind')
+					writeBinding(nk as any, { partyId: effect.partyId, homeCode: lobby.code, modId: lobby.modId, memberIds: effect.memberIds })
+				if (effect.kind === 'groupUnbind') {
+					deleteBinding(nk as any, effect.partyId, effect.memberIds)
+					clearMatched(nk as any, lobby.modId, effect.gameMode, effect.memberIds)
+					dissolveParty(nk as any, effect.partyId)
+				}
+				if (effect.kind === 'groupDissolve') dissolveParty(nk as any, effect.partyId)
+			}
+			return answer.reply
+		},
+		streamUserList: () => [...party].map((userId) => ({ userId, sessionId: `${userId}-s`, nodeId: 'bmp-local' })),
+		streamUserKick: (presence: { userId: string }) => party.delete(presence.userId),
+	})
+	bindCode(nk as any, 'HOME12', HOME_MATCH, MOD)
+	nk.storageWrite(
+		ids.map((userId) => ({
+			collection: CURRENT_LOBBY_COLLECTION,
+			key: CURRENT_LOBBY_KEY,
+			userId,
+			value: { matchId: HOME_MATCH, code: 'HOME12', modId: MOD },
+		})),
+	)
+	return { nk, lobby: () => lobby, party, created, signals }
+}
+
+const rpc = (fn: typeof rpcGroupQueueOpen, w: World, userId: string, payload: unknown) =>
+	JSON.parse(fn(playerCtx(userId), fakeLogger, w.nk as any, JSON.stringify(payload)))
+
+const openFor = (w: World, by = 'a', extra: { [key: string]: unknown } = {}) =>
+	rpc(rpcGroupQueueOpen, w, by, { partyId: PARTY, mode: 'standard', ...extra })
+
+const ticketOf = (size: number, props: { [key: string]: unknown } = CASUAL, counts = { minCount: size + 1, maxCount: 4 }) => ({
+	partyMatchmakerAdd: {
+		partyId: PARTY,
+		...counts,
+		countMultiple: null,
+		query: '*',
+		stringProperties: props,
+		numericProperties: { groupSize: size },
+	},
+})
+
+function addTicket(w: World, by: string, ticket: string, size = 2) {
+	const envelope = ticketOf(size)
+	beforePartyMatchmakerAdd(playerCtx(by), fakeLogger, w.nk as any, envelope as any)
+	afterPartyMatchmakerAdd(
+		playerCtx(by),
+		fakeLogger,
+		w.nk as any,
+		{ partyMatchmakerTicket: { partyId: PARTY, ticket } } as any,
+		envelope as any,
+	)
+}
+
+// a hosts, b joins the party, a queues the party's ticket.
+function queuedWorld(): World {
+	const w = world('a', 'b')
+	w.party.add('a')
+	openFor(w)
+	w.party.add('b')
+	addTicket(w, 'a', 'T1')
+	return w
+}
+
+const entry = (userId: string, props: { [k: string]: string | number }, partyId?: string): MatchedEntry => ({
+	presence: { userId },
+	properties: props,
+	partyId,
+})
+const grouped = (id: string) => entry(id, { ...CASUAL, groupSize: 2 }, PARTY)
+
+describe('group_queue_open', () => {
+	it('forms the lobby as the group and binds the party to it', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		const reply = openFor(w)
+		expect(reply.groupQueue).toMatchObject({ phase: 'forming', partyId: PARTY, homeCode: 'HOME12', memberIds: ['a', 'b'] })
+		expect(readBinding(w.nk as any, PARTY)).toEqual({ partyId: PARTY, homeCode: 'HOME12', modId: MOD, memberIds: ['a', 'b'] })
+		expect(groupOf(w.nk as any, 'b')).toMatchObject({ phase: 'forming' })
+	})
+	it('answers a refusal as a value, naming who is in the way', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		expect(openFor(w, 'b').refused).toMatchObject({ code: 'not_host' })
+		expect(openFor(w, 'a', { kind: 'ranked' }).refused).toMatchObject({ code: 'ranked' })
+		w.party.add('stranger')
+		expect(openFor(w).refused).toMatchObject({ code: 'party_mismatch', userId: 'stranger' })
+		w.party.delete('stranger')
+		writeBans(w.nk as any, 'b', { queue: { banId: 'x', expiresAt: null, reason: 'r' } })
+		expect(openFor(w).refused).toMatchObject({ code: 'member_refused', userId: 'b' })
+		expect(typeof openFor(w).refused.message).toBe('string')
+		expect(readBinding(w.nk as any, PARTY)).toBeNull()
+	})
+	it('refuses a party another lobby is queueing with', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		writeBinding(w.nk as any, { partyId: PARTY, homeCode: 'ELSE12', modId: MOD, memberIds: ['x'] })
+		expect(openFor(w).refused).toMatchObject({ code: 'party_in_use' })
+	})
+	it('refuses someone in no lobby', () => {
+		const w = world('a', 'b')
+		expect(openFor(w, 'nobody').refused).toMatchObject({ code: 'not_in_lobby' })
+	})
+})
+
+describe('party hooks', () => {
+	it('lets only members join the party, while forming', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		openFor(w)
+		const join = (id: string) => beforePartyJoin(playerCtx(id), fakeLogger, w.nk as any, { partyJoin: { partyId: PARTY } } as any)
+		expect(() => join('b')).not.toThrow()
+		expect(() => join('stranger')).toThrow(/lobby/)
+	})
+	it('lets an unbound party do anything but queue', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		expect(() => beforePartyJoin(playerCtx('x'), fakeLogger, w.nk as any, { partyJoin: { partyId: PARTY } } as any)).not.toThrow()
+		expect(() => beforePartyMatchmakerAdd(playerCtx('a'), fakeLogger, w.nk as any, ticketOf(1) as any)).toThrow()
+	})
+	it("refuses a ticket before the whole group is in the party, or that isn't the group's", () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		openFor(w)
+		expect(() => beforePartyMatchmakerAdd(playerCtx('a'), fakeLogger, w.nk as any, ticketOf(2) as any)).toThrow()
+		w.party.add('b')
+		const ranked = ticketOf(2, { ...CASUAL, kind: 'ranked' })
+		expect(() => beforePartyMatchmakerAdd(playerCtx('a'), fakeLogger, w.nk as any, ranked as any)).toThrow()
+		const selfMatch = ticketOf(2, CASUAL, { minCount: 2, maxCount: 2 })
+		expect(() => beforePartyMatchmakerAdd(playerCtx('a'), fakeLogger, w.nk as any, selfMatch as any)).toThrow()
+		expect(() => beforePartyMatchmakerAdd(playerCtx('b'), fakeLogger, w.nk as any, ticketOf(2) as any)).toThrow()
+		expect(() => beforePartyMatchmakerAdd(playerCtx('a'), fakeLogger, w.nk as any, ticketOf(2) as any)).not.toThrow()
+	})
+	it('queues the group on its ticket, counting every member as queued', () => {
+		const w = queuedWorld()
+		expect(w.lobby().groupQueue).toMatchObject({ phase: 'queued', ticket: 'T1' })
+		const key = recordKey(MOD, 'standard')
+		const records = w.nk.storageRead(['a', 'b'].map((userId) => ({ collection: QUEUE_COLLECTION, key, userId })))
+		expect(records.map((r: { value: { ticket: string } }) => r.value.ticket)).toEqual(['T1', 'T1'])
+	})
+	it("refuses a member's solo ticket while the group queues", () => {
+		const w = queuedWorld()
+		const solo = { matchmakerAdd: { stringProperties: CASUAL } }
+		expect(() => beforeMatchmakerAdd(playerCtx('b'), fakeLogger, w.nk as any, solo as any)).toThrow(IN_GROUP_QUEUE)
+		expect(() => beforeMatchmakerAdd(playerCtx('z'), fakeLogger, w.nk as any, solo as any)).not.toThrow()
+	})
+	it('takes the ticket back to forming, and drops the records', () => {
+		const w = queuedWorld()
+		beforePartyMatchmakerRemove(
+			playerCtx('a'),
+			fakeLogger,
+			w.nk as any,
+			{ partyMatchmakerRemove: { partyId: PARTY, ticket: 'T1' } } as any,
+		)
+		expect(w.lobby().groupQueue).toMatchObject({ phase: 'forming' })
+		expect(w.nk.storageList('a', QUEUE_COLLECTION).objects).toHaveLength(0)
+	})
+	it('ignores a ticket taken back before its add finished', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		openFor(w)
+		w.party.add('b')
+		const remove = { partyMatchmakerRemove: { partyId: PARTY, ticket: 'T9' } }
+		beforePartyMatchmakerRemove(playerCtx('a'), fakeLogger, w.nk as any, remove as any)
+		afterPartyMatchmakerAdd(
+			playerCtx('a'),
+			fakeLogger,
+			w.nk as any,
+			{ partyMatchmakerTicket: { partyId: PARTY, ticket: 'T9' } } as any,
+			ticketOf(2) as any,
+		)
+		expect(w.lobby().groupQueue).toMatchObject({ phase: 'forming' })
+	})
+	it('ends the group queue when a member leaves the party, breaking up the party', () => {
+		const w = queuedWorld()
+		beforePartyLeave(playerCtx('b'), fakeLogger, w.nk as any, { partyLeave: { partyId: PARTY } } as any)
+		expect(w.lobby().groupQueue).toBeNull()
+		expect(readBinding(w.nk as any, PARTY)).toBeNull()
+		expect(groupOf(w.nk as any, 'a')).toBeNull()
+		expect(w.party.size).toBe(0)
+		expect(w.nk.storageList('a', QUEUE_COLLECTION).objects).toHaveLength(0)
+	})
+	it('drops a binding whose lobby no longer has the group', () => {
+		const w = world('a', 'b')
+		writeBinding(w.nk as any, { partyId: PARTY, homeCode: 'HOME12', modId: MOD, memberIds: ['a', 'b'] })
+		expect(groupOf(w.nk as any, 'a')).toBeNull()
+		expect(readBinding(w.nk as any, PARTY)).toBeNull()
+	})
+})
+
+describe('group_queue_cancel', () => {
+	it('lets any member end the group queue', () => {
+		const w = queuedWorld()
+		expect(rpc(rpcGroupQueueCancel, w, 'b', {})).toEqual({ groupQueue: null })
+		expect(w.lobby().groupQueue).toBeNull()
+		expect(rpc(rpcGroupQueueCancel, w, 'b', {})).toEqual({ groupQueue: null })
+	})
+})
+
+describe('matchmakerMatched with a group', () => {
+	it('seats the group with a solo player, telling the home where it went', () => {
+		const w = queuedWorld()
+		const matchId = matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [
+			grouped('a'),
+			entry('s', { ...CASUAL, groupSize: 1 }),
+			grouped('b'),
+		])
+		expect(matchId).toBe('pub-uuid.bmp-local')
+		const params = w.created[0]
+		expect(JSON.parse(String(params.groups))).toEqual([{ partyId: PARTY, homeCode: 'HOME12', memberIds: ['a', 'b'] }])
+		expect(params.teamPlan).toBe('')
+		expect(w.lobby().groupQueue).toMatchObject({ phase: 'away', matchId, code: params.code })
+	})
+	it("queues the group again when a solo player can't play", () => {
+		const w = queuedWorld()
+		writeBans(w.nk as any, 's', { queue: { banId: 'x', expiresAt: null, reason: 'r' } })
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [grouped('a'), grouped('b'), entry('s', CASUAL)]),
+		).toThrow()
+		expect(w.lobby().groupQueue).toMatchObject({ phase: 'forming' })
+		expect(w.signals.some((s) => s.type === 'group_requeue')).toBe(true)
+		expect(w.created).toHaveLength(0)
+	})
+	it("lets the group go when one of its members can't play", () => {
+		const w = queuedWorld()
+		writeBans(w.nk as any, 'b', { queue: { banId: 'x', expiresAt: null, reason: 'r' } })
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [grouped('a'), grouped('b'), entry('s', CASUAL)]),
+		).toThrow()
+		expect(w.lobby().groupQueue).toBeNull()
+		expect(w.nk.notifications.map((n) => n.userId)).toEqual(['s'])
+	})
+	it('refuses a party ticket no lobby is queueing', () => {
+		const w = world('a', 'b')
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [grouped('a'), grouped('b'), entry('s', CASUAL)]),
+		).toThrow()
+		expect(w.created).toHaveLength(0)
+	})
+	it('queues the group again when the match cannot even be planned', () => {
+		const w = queuedWorld()
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [grouped('a'), grouped('b'), entry('s', { ...CASUAL, mode: 'x' })]),
+		).toThrow()
+		expect(w.lobby().groupQueue).toMatchObject({ phase: 'forming' })
+	})
+	it('is off with the switch', () => {
+		const w = world('a', 'b')
+		w.party.add('a')
+		writeConfig(w.nk as any, { ...DEFAULT_CONFIG, groupQueueEnabled: false })
+		expect(openFor(w).refused).toMatchObject({ code: 'disabled' })
+	})
+})
+
+describe('groupFits', () => {
+	const view = {
+		phase: 'queued' as const,
+		partyId: PARTY,
+		homeCode: 'HOME12',
+		modId: MOD,
+		mode: 'standard',
+		teams: false,
+		hostId: 'a',
+		memberIds: ['a', 'b'],
+		ticket: 'T1',
+		matchId: null,
+		code: null,
+	}
+	const plan = { modId: MOD, gameMode: 'standard' }
+	const group = { partyId: PARTY, memberIds: ['b', 'a'] }
+	it('fits a queued group with the same members, mod and mode', () => {
+		expect(groupFits(view, group, plan)).toBe(true)
+	})
+	it("doesn't fit otherwise", () => {
+		expect(groupFits(null, group, plan)).toBe(false)
+		expect(groupFits({ ...view, phase: 'forming' }, group, plan)).toBe(false)
+		expect(groupFits(view, { partyId: PARTY, memberIds: ['a'] }, plan)).toBe(false)
+		expect(groupFits(view, group, { modId: MOD, gameMode: 'other' })).toBe(false)
+	})
+})
+
+describe('signalHome', () => {
+	it('is null for a code with no live lobby', () => {
+		const w = world('a')
+		expect(signalHome(w.nk as any, 'NOPE12', { type: 'group_status', partyId: PARTY })).toBeNull()
+	})
+})

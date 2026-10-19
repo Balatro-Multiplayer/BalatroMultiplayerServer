@@ -25,6 +25,8 @@ const plan = (playerIds: string[], rankedMode = '') => ({
 	rankedMode,
 	gameMode: rankedMode ? 'ranked:' + rankedMode : 'casual-mode',
 	playerIds,
+	groups: [],
+	teamPlan: null,
 })
 
 describe('refuseMatchedGroup', () => {
