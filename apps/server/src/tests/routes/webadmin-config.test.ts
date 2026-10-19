@@ -41,6 +41,7 @@ describe('GET /api/webadmin/config', () => {
 			testingMode: false,
 			rankedEnabled: false,
 			casualQueueEnabled: true,
+			groupQueueEnabled: false,
 			lobbyCreationEnabled: true,
 		})
 
@@ -57,6 +58,7 @@ describe('GET /api/webadmin/config', () => {
 		expect(res.body.testingMode).toBe(false)
 		expect(res.body.rankedEnabled).toBe(false)
 		expect(res.body.casualQueueEnabled).toBe(true)
+		expect(res.body.groupQueueEnabled).toBe(false)
 		expect(res.body.lobbyCreationEnabled).toBe(true)
 
 		setConfig(original)
@@ -150,6 +152,7 @@ describe('PATCH /api/webadmin/config/feature-flags', () => {
 			testingMode: false,
 			rankedEnabled: false,
 			casualQueueEnabled: true,
+			groupQueueEnabled: false,
 			lobbyCreationEnabled: true,
 		} as any)
 
@@ -165,6 +168,7 @@ describe('PATCH /api/webadmin/config/feature-flags', () => {
 		expect(patch.rankedEnabled).toBe(false)
 		expect(patch).not.toHaveProperty('chatEnabled')
 		expect(patch).not.toHaveProperty('casualQueueEnabled')
+		expect(patch).not.toHaveProperty('groupQueueEnabled')
 		expect(patch).not.toHaveProperty('lobbyCreationEnabled')
 		expect(patch.updatedAt).toBeInstanceOf(Date)
 	})

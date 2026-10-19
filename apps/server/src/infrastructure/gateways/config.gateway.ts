@@ -43,6 +43,7 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 		testingMode: env.TESTING_MODE,
 		rankedEnabled: configRow?.rankedEnabled ?? true,
 		casualQueueEnabled: configRow?.casualQueueEnabled ?? true,
+		groupQueueEnabled: configRow?.groupQueueEnabled ?? true,
 		lobbyCreationEnabled: configRow?.lobbyCreationEnabled ?? true,
 	}
 	setConfig(config)

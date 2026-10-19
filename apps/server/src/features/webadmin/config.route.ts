@@ -19,7 +19,8 @@ import { getConfig } from '../../state/config.js'
 // platform config has the same self-inflicted-blast-radius shape.
 //
 // chatEnabled/rankedEnabled/casualQueueEnabled/lobbyCreationEnabled are now
-// DB-backed columns on server_config (migration 0036) and writable via
+// DB-backed columns on server_config (migration 0036; groupQueueEnabled
+// migration 0050) and writable via
 // PATCH /config/feature-flags below. testingMode remains env-var-only
 // (env.TESTING_MODE), surfaced read-only.
 const router = Router()
@@ -35,6 +36,7 @@ router.get('/config', async (_req, res, next) => {
 			testingMode: config.testingMode ?? false,
 			rankedEnabled: config.rankedEnabled,
 			casualQueueEnabled: config.casualQueueEnabled,
+			groupQueueEnabled: config.groupQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
 		})
 	} catch (err) {
@@ -49,11 +51,13 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled,
 			rankedEnabled,
 			casualQueueEnabled,
+			groupQueueEnabled,
 			lobbyCreationEnabled,
 		} = req.body as {
 			chatEnabled?: unknown
 			rankedEnabled?: unknown
 			casualQueueEnabled?: unknown
+			groupQueueEnabled?: unknown
 			lobbyCreationEnabled?: unknown
 		}
 
@@ -61,12 +65,14 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled: boolean
 			rankedEnabled: boolean
 			casualQueueEnabled: boolean
+			groupQueueEnabled: boolean
 			lobbyCreationEnabled: boolean
 		}> = {}
 		for (const [key, value] of Object.entries({
 			chatEnabled,
 			rankedEnabled,
 			casualQueueEnabled,
+			groupQueueEnabled,
 			lobbyCreationEnabled,
 		})) {
 			if (value === undefined) continue
@@ -89,6 +95,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			chatEnabled: config.chatEnabled,
 			rankedEnabled: config.rankedEnabled,
 			casualQueueEnabled: config.casualQueueEnabled,
+			groupQueueEnabled: config.groupQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
 		})
 	} catch (err) {

@@ -11,6 +11,7 @@ const config: AppConfig = {
 	testingMode: undefined,
 	rankedEnabled: true,
 	casualQueueEnabled: false,
+	groupQueueEnabled: false,
 	lobbyCreationEnabled: true,
 }
 
@@ -32,6 +33,7 @@ describe('pushing config to Nakama', () => {
 			chatEnabled: false,
 			rankedEnabled: true,
 			casualQueueEnabled: false,
+			groupQueueEnabled: false,
 			lobbyCreationEnabled: true,
 			testingMode: false,
 			integrityEnforced: false,

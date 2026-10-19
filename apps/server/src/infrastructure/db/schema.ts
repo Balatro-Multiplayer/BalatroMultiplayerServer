@@ -130,6 +130,7 @@ export const serverConfig = pgTable('server_config', {
 	chatEnabled: boolean('chat_enabled').notNull().default(false),
 	rankedEnabled: boolean('ranked_enabled').notNull().default(true),
 	casualQueueEnabled: boolean('casual_queue_enabled').notNull().default(true),
+	groupQueueEnabled: boolean('group_queue_enabled').notNull().default(true),
 	lobbyCreationEnabled: boolean('lobby_creation_enabled')
 		.notNull()
 		.default(true),
