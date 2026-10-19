@@ -8,13 +8,14 @@ import { AppError } from '../../shared/utils/errors.js'
 import { requireAdmin } from '../../shared/utils/require-admin.js'
 import { DESTRUCTIVE_ACTION_KEYS, dispatchServiceQueueAction } from './service-queue-actions.js'
 import { getServiceQueueItemDetail } from './service-queue-detail.js'
+import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 const router = Router()
 
 router.get('/service-queue', async (req, res, next) => {
 	try {
-		const page = Math.max(1, Number(req.query.page ?? 1))
-		const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50)))
+		const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
+		const limit = queryInt(req.query.limit, 50, 1, 100)
 		const itemType = isServiceQueueItemType(req.query.itemType) ? req.query.itemType : undefined
 		const status =
 			req.query.status === 'open' || req.query.status === 'resolved' ? req.query.status : undefined

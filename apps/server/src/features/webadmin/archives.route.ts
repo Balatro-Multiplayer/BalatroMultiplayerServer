@@ -9,6 +9,7 @@ import {
 	resolveBundleDir,
 	resolveBundleFile,
 } from './archives.service.js'
+import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 const router = Router()
 
@@ -24,8 +25,8 @@ router.get('/archives', (req, res) => {
 router.get('/archives/:bundlePath', (req, res, next) => {
 	try {
 		const bundleDir = resolveBundleDir(req.params.bundlePath)
-		const page = Math.max(1, Number(req.query.page ?? 1))
-		const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 200)))
+		const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
+		const limit = queryInt(req.query.limit, 200, 1, 500)
 		const search =
 			typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : ''
 

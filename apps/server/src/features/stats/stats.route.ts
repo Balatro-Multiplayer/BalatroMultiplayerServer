@@ -15,6 +15,7 @@ import {
 	PLACEMENT_GAMES,
 	RATING_FLOOR,
 } from '../ratings/elo.js'
+import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 const router = Router()
 
@@ -91,11 +92,8 @@ router.get('/leaderboard', async (req, res, next) => {
 		// function over the whole board (rating desc, wins desc), so an optional
 		// name search returns matching players with their true global rank,
 		// spanning every page rather than just the current one.
-		const page = Math.max(1, Number(req.query.page ?? 1))
-		const pageSize = Math.min(
-			200,
-			Math.max(1, Number(req.query.pageSize ?? 100)),
-		)
+		const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
+		const pageSize = queryInt(req.query.pageSize, 100, 1, 200)
 		const offset = (page - 1) * pageSize
 		const search =
 			typeof req.query.search === 'string' ? req.query.search.trim() : ''
@@ -348,7 +346,7 @@ router.get('/season-overview', async (_req, res, next) => {
 // which is player-scoped by design for the "My Matches" replay list).
 router.get('/history', async (req, res, next) => {
 	try {
-		const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 25)))
+		const limit = queryInt(req.query.limit, 25, 1, 100)
 		const rows = await db
 			.select({
 				matchId: matchmakingMatches.matchId,

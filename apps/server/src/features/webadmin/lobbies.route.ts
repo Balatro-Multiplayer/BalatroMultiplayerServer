@@ -6,13 +6,14 @@ import {
 	listNakamaLobbies,
 } from '../../infrastructure/nakama/moderation-sync.js'
 import { AppError } from '../../shared/utils/errors.js'
+import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 const router = Router()
 
 router.get('/lobbies', async (req, res, next) => {
 	try {
-		const page = Math.max(1, Number(req.query.page ?? 1))
-		const limit = Math.min(100, Math.max(1, Number(req.query.limit ?? 50)))
+		const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
+		const limit = queryInt(req.query.limit, 50, 1, 100)
 		const search =
 			typeof req.query.search === 'string'
 				? req.query.search.trim().toLowerCase()

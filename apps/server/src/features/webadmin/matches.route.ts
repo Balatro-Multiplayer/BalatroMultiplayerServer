@@ -3,6 +3,7 @@ import { and, count, desc, eq } from 'drizzle-orm'
 import { db } from '../../infrastructure/db/index.js'
 import { matchmakingMatches } from '../../infrastructure/db/schema.js'
 import { replayLogService } from '../replay-log/replay-log.service.js'
+import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 // Sparse compared to the old log-extracted "games" table — the new backend only
 // records matchmaking matches (no per-card extraction). Player display names are
@@ -11,8 +12,8 @@ const router = Router()
 
 router.get('/matches', async (req, res, next) => {
 	try {
-		const page = Math.max(1, Number(req.query.page ?? 1))
-		const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize ?? 50)))
+		const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
+		const pageSize = queryInt(req.query.pageSize, 50, 1, 100)
 		const offset = (page - 1) * pageSize
 
 		const conds = []
