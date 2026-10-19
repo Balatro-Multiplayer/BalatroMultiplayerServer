@@ -2,7 +2,8 @@
 // server running the group-queue module.
 //   1. Two players in a private lobby queue as one party and meet a solo
 //      player in one public match; the home lobby keeps its code and host
-//      while they are away, and they rejoin it afterwards (all_returned).
+//      while they are away, and they rejoin it afterwards (all_returned, or
+//      away_over once the public lobby is done).
 //   2. While the group queues, a member's own solo ticket is refused.
 //   3. A member leaving the party, or the lobby, cancels the group queue.
 //   4. Ranked is refused; so is a non-host opening, and a stranger joining
@@ -174,6 +175,39 @@ async function cancels(c, d) {
 	c.socket.sendOp(ClientOp.LEAVE, {}, first.lobby.matchId)
 }
 
+// 1b. The public lobby closing (everyone left it, as after its game) sends
+// the group home: the home's group queue ends with away_over.
+async function awayOverOnClose(c, d, g) {
+	const mode = MODE + 'o'
+	const { lobby, partyId } = await formedGroup([c, d], mode)
+	await partyAdd(c, partyId, 2, mode)
+	await c.socket.waitFor(groupOp((x) => x.phase === 'queued'), 5000)
+	const since = [c, d, g].map((p) => p.socket.mark())
+	await soloAdd(g, 3, mode)
+	const found = await Promise.all([c, d, g].map((p, i) => p.socket.waitFor((x) => x.kind === 'matched', MATCH_MS, since[i])))
+	check('a second group is matched', found.every(Boolean))
+	if (!found.every(Boolean)) return
+	const publicId = found[0].match_id
+	for (const p of [c, d]) await p.socket.request({ match_leave: { match_id: lobby.matchId } })
+	for (const p of [c, d, g]) await p.socket.join(publicId, { modId: MOD, displayName: p.username })
+	const at = c.socket.mark()
+	for (const p of [c, d, g]) p.socket.sendOp(ClientOp.LEAVE, {}, publicId)
+	await sleep(500)
+	const found2 = await rpc(c.token, 'lobby_find', { code: lobby.code })
+	const r = await c.socket.join(found2.body.matchId, { modId: MOD, displayName: c.username })
+	// c was out of the home when it heard, so c sees it in the snapshot: no
+	// group queue, though d is still away (all_returned can't be why).
+	const snap = await c.socket.waitFor(snapshot(found2.body.matchId), 5000, at)
+	check('the host rejoins its home after', !r.error && !!snap && snap.data.hostId === c.userId && snap.data.code === lobby.code)
+	const dSeat = snap && snap.data.players.filter((p) => p.id === d.userId)[0]
+	check(
+		'the public lobby closing ends the away group (away_over)',
+		!!snap && snap.data.groupQueue === null && !!dSeat && dSeat.isAway,
+		JSON.stringify(snap && { groupQueue: snap.data.groupQueue, d: dSeat }),
+	)
+	c.socket.sendOp(ClientOp.LEAVE, {}, lobby.matchId)
+}
+
 async function refusals(e, f, g) {
 	const mode = MODE + 'r'
 	const lobby = await lobbyWith([e, f], { modId: MOD })
@@ -195,13 +229,16 @@ async function refusals(e, f, g) {
 }
 
 async function main() {
-	const [a, b, s, c, d, e, f, g] = await Promise.all(['a', 'b', 's', 'c', 'd', 'e', 'f', 'g'].map((n) => player('gq_' + n)))
+	const names = ['a', 'b', 's', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
+	const players = await Promise.all(names.map((n) => player('gq_' + n)))
+	const [a, b, s, c, d, e, f, g, h, i, j] = players
 	try {
 		await meetInPublic(a, b, s)
 		await cancels(c, d)
+		await awayOverOnClose(h, i, j)
 		await refusals(e, f, g)
 	} finally {
-		for (const p of [a, b, s, c, d, e, f, g]) p.socket.close()
+		for (const p of players) p.socket.close()
 	}
 	process.exit(summary('group-queue') === 0 ? 0 : 1)
 }
