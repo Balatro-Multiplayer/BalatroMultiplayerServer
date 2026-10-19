@@ -42,6 +42,7 @@ describe('GET /api/webadmin/config', () => {
 			rankedEnabled: false,
 			casualQueueEnabled: true,
 			lobbyCreationEnabled: true,
+			achievementsEnabled: true,
 		})
 
 		const token = authAsModerator('mod-cfg-1', 'Mod')
@@ -58,6 +59,7 @@ describe('GET /api/webadmin/config', () => {
 		expect(res.body.rankedEnabled).toBe(false)
 		expect(res.body.casualQueueEnabled).toBe(true)
 		expect(res.body.lobbyCreationEnabled).toBe(true)
+		expect(res.body.achievementsEnabled).toBe(true)
 
 		setConfig(original)
 	})
@@ -167,6 +169,29 @@ describe('PATCH /api/webadmin/config/feature-flags', () => {
 		expect(patch).not.toHaveProperty('casualQueueEnabled')
 		expect(patch).not.toHaveProperty('lobbyCreationEnabled')
 		expect(patch.updatedAt).toBeInstanceOf(Date)
+	})
+
+	it('switches achievements on for an admin', async () => {
+		const token = authAsAdmin('admin-cfg-flags-4', 'AdminFlags4')
+		const setMock = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) })
+		;(db as any).update = vi.fn().mockReturnValue({ set: setMock })
+		vi.mocked(configGateway.loadConfigFromDb).mockResolvedValue({
+			chatEnabled: false,
+			rankedEnabled: true,
+			casualQueueEnabled: true,
+			lobbyCreationEnabled: true,
+			achievementsEnabled: true,
+		} as any)
+
+		const res = await request(app)
+			.patch('/api/webadmin/config/feature-flags')
+			.set('Authorization', token)
+			.send({ achievementsEnabled: true })
+
+		expect(res.status).toBe(200)
+		expect(res.body.achievementsEnabled).toBe(true)
+		expect(setMock.mock.calls[0][0]).toMatchObject({ achievementsEnabled: true })
+		expect(setMock.mock.calls[0][0]).not.toHaveProperty('rankedEnabled')
 	})
 })
 

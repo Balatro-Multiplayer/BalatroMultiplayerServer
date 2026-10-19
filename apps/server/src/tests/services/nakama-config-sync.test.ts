@@ -12,6 +12,7 @@ const config: AppConfig = {
 	rankedEnabled: true,
 	casualQueueEnabled: false,
 	lobbyCreationEnabled: true,
+	achievementsEnabled: true,
 }
 
 describe('pushing config to Nakama', () => {
@@ -33,6 +34,7 @@ describe('pushing config to Nakama', () => {
 			rankedEnabled: true,
 			casualQueueEnabled: false,
 			lobbyCreationEnabled: true,
+			achievementsEnabled: true,
 			testingMode: false,
 			integrityEnforced: false,
 			chatAllowlist: ['gg'],

@@ -337,6 +337,20 @@
       "when": 1792300000000,
       "tag": "0047_nakama_mirror",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792400000000,
+      "tag": "0048_achievements_enabled",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792500000000,
+      "tag": "0049_reset_preferred_jokers",
+      "breakpoints": true
     }
   ]
 }

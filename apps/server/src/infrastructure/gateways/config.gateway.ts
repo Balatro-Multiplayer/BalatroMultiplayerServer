@@ -44,6 +44,7 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 		rankedEnabled: configRow?.rankedEnabled ?? true,
 		casualQueueEnabled: configRow?.casualQueueEnabled ?? true,
 		lobbyCreationEnabled: configRow?.lobbyCreationEnabled ?? true,
+		achievementsEnabled: configRow?.achievementsEnabled ?? false,
 	}
 	setConfig(config)
 	// Every config load (boot, admin refresh, webadmin edits) reaches Nakama.
