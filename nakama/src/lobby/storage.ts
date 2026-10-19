@@ -178,7 +178,15 @@ export function rpcRunsMine(
 	const userId = requireUser(ctx)
 	const input = parsePayload(payload)
 	const cursor = typeof input.cursor === 'string' ? input.cursor : ''
-	const page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor)
+	let page: ReturnType<nkruntime.Nakama['storageList']>
+	try {
+		page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor)
+	} catch (e) {
+		// Nakama throws "Malformed cursor was used" for a cursor it didn't
+		// hand out: the caller's mistake, not an uncaught 500.
+		if (cursor !== '') throw runtimeError(INVALID_ARGUMENT, 'Invalid cursor')
+		throw e
+	}
 	return JSON.stringify({
 		runs: (page.objects || []).map((o) => o.value),
 		cursor: page.cursor || '',
