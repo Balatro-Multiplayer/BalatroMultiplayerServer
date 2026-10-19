@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { authenticate } from '../../middleware/authenticate.js'
-import { signJwt } from '../../features/auth/jwt.js'
+import jwt from 'jsonwebtoken'
+import { env } from '../../env.js'
+import { signJwt, signTosPendingToken } from '../../features/auth/jwt.js'
+import { generateLinkState } from '../../features/auth/link-state.js'
 import type { Request, Response, NextFunction } from 'express'
 
 function mockReqRes(authHeader?: string) {
@@ -58,5 +61,34 @@ describe('authenticate middleware', () => {
 		expect(req.player).toMatchObject({ playerId: 'steam1', steamName: 'Alice' })
 		expect(next).toHaveBeenCalled()
 		expect(res.status).not.toHaveBeenCalled()
+	})
+
+	it('refuses the ToS-pending token as a session (the ToS gate would be skipped)', () => {
+		const { req, res, next } = mockReqRes(`Bearer ${signTosPendingToken('p-no-tos')}`)
+
+		authenticate(req, res, next)
+
+		expect(res.status).toHaveBeenCalledWith(401)
+		expect(next).not.toHaveBeenCalled()
+		expect(req.player).toBeUndefined()
+	})
+
+	it('refuses the Discord link-state token as a session', () => {
+		const { req, res, next } = mockReqRes(`Bearer ${generateLinkState('p-link')}`)
+
+		authenticate(req, res, next)
+
+		expect(res.status).toHaveBeenCalledWith(401)
+		expect(next).not.toHaveBeenCalled()
+	})
+
+	it('refuses a signed token without a playerId', () => {
+		const token = jwt.sign({ steamName: 'NoId' }, env.JWT_SECRET)
+		const { req, res, next } = mockReqRes(`Bearer ${token}`)
+
+		authenticate(req, res, next)
+
+		expect(res.status).toHaveBeenCalledWith(401)
+		expect(next).not.toHaveBeenCalled()
 	})
 })

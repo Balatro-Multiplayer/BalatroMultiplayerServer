@@ -8,9 +8,17 @@ export function signJwt(payload: JwtPayload): string {
 	})
 }
 
+// A session token. The single-purpose tokens signed with the same secret
+// (the ToS-pending token, the Discord link state) carry a `purpose` and are
+// not sessions: accepting them would let a player who hasn't accepted the
+// ToS use the site with their 10-minute ToS token.
 export function verifyJwt(token: string): JwtPayload | null {
 	try {
-		return jwt.verify(token, env.JWT_SECRET) as JwtPayload
+		const decoded = jwt.verify(token, env.JWT_SECRET)
+		if (typeof decoded !== 'object' || decoded === null) return null
+		if ('purpose' in decoded) return null
+		if (typeof decoded.playerId !== 'string') return null
+		return decoded as JwtPayload
 	} catch {
 		return null
 	}
