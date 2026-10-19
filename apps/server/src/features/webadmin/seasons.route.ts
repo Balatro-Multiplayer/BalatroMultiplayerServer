@@ -4,10 +4,13 @@ import { db } from '../../infrastructure/db/index.js'
 import { seasons } from '../../infrastructure/db/schema.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
+import { requireAdmin } from '../../shared/utils/require-admin.js'
 
 // Season model: the active season is the row with ended_at IS NULL.
 // Exactly one season is active at a time. Every change reloads the config,
 // which pushes the season to Nakama (it rates games into it).
+// Changes are admin-only (like the feature flags and the ToS version):
+// starting, activating or ending a season moves every player's ratings.
 const router = Router()
 
 router.get('/seasons', async (_req, res, next) => {
@@ -30,6 +33,7 @@ router.get('/seasons', async (_req, res, next) => {
 
 router.post('/seasons', async (req, res, next) => {
 	try {
+		await requireAdmin(req)
 		const { name, endsAt } = req.body as { name?: unknown; endsAt?: unknown }
 		if (typeof name !== 'string' || !name.trim()) {
 			throw new AppError('name is required', 400)
@@ -65,6 +69,7 @@ router.post('/seasons', async (req, res, next) => {
 
 router.post('/seasons/:id/activate', async (req, res, next) => {
 	try {
+		await requireAdmin(req)
 		const id = Number(req.params.id)
 		if (!Number.isInteger(id)) throw new AppError('Invalid season id', 400)
 
@@ -93,6 +98,7 @@ router.post('/seasons/:id/activate', async (req, res, next) => {
 
 router.post('/seasons/:id/end', async (req, res, next) => {
 	try {
+		await requireAdmin(req)
 		const id = Number(req.params.id)
 		if (!Number.isInteger(id)) throw new AppError('Invalid season id', 400)
 
