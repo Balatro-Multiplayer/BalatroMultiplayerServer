@@ -176,6 +176,7 @@ export const ServerOp = {
 	ACTION: 105,
 	ACTION_REJECTED: 106,
 	CHAT: 107,
+	GROUP_QUEUE: 112,
 }
 
 export class Socket {
