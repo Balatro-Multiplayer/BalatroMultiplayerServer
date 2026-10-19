@@ -28,15 +28,21 @@ interface ConfigResponse {
   rankedEnabled: boolean
   casualQueueEnabled: boolean
   lobbyCreationEnabled: boolean
+  achievementsEnabled: boolean
 }
 
-type FeatureFlag = 'chatEnabled' | 'rankedEnabled' | 'casualQueueEnabled' | 'lobbyCreationEnabled'
+type FeatureFlag = 'chatEnabled' | 'rankedEnabled' | 'casualQueueEnabled' | 'lobbyCreationEnabled' | 'achievementsEnabled'
 
 const FEATURE_FLAGS: { key: FeatureFlag; label: string; description: string }[] = [
   { key: 'chatEnabled', label: 'Text Chat', description: 'Lobby chat sends are rejected when off.' },
   { key: 'rankedEnabled', label: 'Ranked Queue', description: 'Ranked matchmaking requests are rejected when off.' },
   { key: 'casualQueueEnabled', label: 'Casual Queue', description: 'Casual matchmaking requests are rejected when off.' },
   { key: 'lobbyCreationEnabled', label: 'Lobby Creation', description: 'Manual lobby creation is rejected when off.' },
+  {
+    key: 'achievementsEnabled',
+    label: 'Avatar Achievements',
+    description: 'Games count toward unlocking avatars. Turn on only after the avatar reset has run.',
+  },
 ]
 
 export default function AdminConfigPage() {

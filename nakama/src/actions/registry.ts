@@ -91,7 +91,11 @@ function newGame(
 		hostId: lobby.hostId,
 		players: lobby.players
 			.filter((pl) => pl.awaySince === null)
-			.map((pl) => ({ id: pl.id, displayName: pl.info.displayName })),
+			.map((pl) => ({
+				id: pl.id,
+				displayName: pl.info.displayName,
+				...(pl.info.preferredJoker ? { avatar: pl.info.preferredJoker } : {}),
+			})),
 	}
 }
 

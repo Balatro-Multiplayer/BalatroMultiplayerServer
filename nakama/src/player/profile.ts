@@ -3,7 +3,8 @@
 // privileges, mutes). Owned by the player, readable by them, written only by
 // the server. Brought over from Postgres once, at the first session_init
 // (player/session.ts).
-import { DEFAULT_JOKER, privilegeTable } from '../shared/jokers'
+import { DEFAULT_AVATAR } from '../shared/avatars/ids'
+import { privilegeTable, selectableOrDefault } from '../shared/avatars/unlocked'
 
 export const PLAYER_COLLECTION = 'player'
 export const PROFILE_KEY = 'profile'
@@ -63,7 +64,7 @@ export function defaultProfile(steamName: string): Profile {
 	return {
 		steamName,
 		useDiscordName: false,
-		preferredJoker: DEFAULT_JOKER,
+		preferredJoker: DEFAULT_AVATAR,
 		mods: null,
 		discordIdHash: null,
 		discordUsername: null,
@@ -105,15 +106,18 @@ export function profileOf(value: { [key: string]: unknown }, fallbackName: strin
 	}
 }
 
-// profile with the player's Postgres data applied.
-export function withSync(profile: Profile, sync: PlayerSync): Profile {
+// profile with the player's Postgres data applied. The synced joker is kept
+// only if the synced privileges and the earned avatars (unlocked) allow it.
+export function withSync(profile: Profile, sync: PlayerSync, unlocked: readonly string[] = []): Profile {
+	const privileges = stringList(sync.privileges)
+	const joker = typeof sync.preferredJoker === 'string' ? sync.preferredJoker : profile.preferredJoker
 	return {
 		...profile,
 		useDiscordName: sync.useDiscordName === true,
-		preferredJoker: typeof sync.preferredJoker === 'string' ? sync.preferredJoker : profile.preferredJoker,
+		preferredJoker: selectableOrDefault(joker, { privileges, unlocked }),
 		discordIdHash: sync.discordIdHash ?? null,
 		discordUsername: sync.discordUsername ?? null,
-		privileges: stringList(sync.privileges),
+		privileges,
 		tosAcceptedVersion: typeof sync.tosAcceptedVersion === 'number' ? sync.tosAcceptedVersion : 0,
 		chatEnabled: sync.chatEnabled === true,
 		chatBlocked: sync.chatBlocked === true,

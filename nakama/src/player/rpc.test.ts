@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
+import { emptyProgress } from '../achievements/progress'
+import { writeProgress } from '../achievements/storage'
 import { defaultProfile, readProfile, writeProfile } from './profile'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './rpc'
 
@@ -45,16 +47,38 @@ describe('profile_set_display', () => {
 })
 
 describe('profile_set_joker', () => {
-	it('takes a standard joker', () => {
+	it('takes a default joker', () => {
 		const { nk } = nkWith()
-		expect(call(rpcProfileSetJoker, nk, { preferredJoker: 'j_mime' }).player.preferredJoker).toBe('j_mime')
-		expect(readProfile(nk as any, USER)!.profile.preferredJoker).toBe('j_mime')
+		expect(call(rpcProfileSetJoker, nk, { preferredJoker: 'j_jolly' }).player.preferredJoker).toBe('j_jolly')
+		expect(readProfile(nk as any, USER)!.profile.preferredJoker).toBe('j_jolly')
+	})
+
+	it('takes an earned joker only once it is earned', () => {
+		const { nk } = nkWith()
+		expect(() => call(rpcProfileSetJoker, nk, { preferredJoker: 'j_baron' })).toThrow(/Invalid joker/)
+		writeProgress(nk as any, USER, { ...emptyProgress(), unlocked: ['j_baron'] })
+		expect(call(rpcProfileSetJoker, nk, { preferredJoker: 'j_baron' }).player.preferredJoker).toBe('j_baron')
+	})
+
+	it('never takes a reserved joker', () => {
+		const { nk } = nkWith()
+		writeProgress(nk as any, USER, { ...emptyProgress(), unlocked: ['j_blueprint' as any] })
+		expect(() => call(rpcProfileSetJoker, nk, { preferredJoker: 'j_blueprint' })).toThrow(/Invalid joker/)
 	})
 
 	it('refuses unknown jokers and privilege jokers without the privilege', () => {
 		const { nk } = nkWith()
 		expect(() => call(rpcProfileSetJoker, nk, { preferredJoker: 'j_nope' })).toThrow(/Invalid joker/)
 		expect(() => call(rpcProfileSetJoker, nk, { preferredJoker: 'j_turtle_bean' })).toThrow(/Invalid joker/)
+		expect(() => call(rpcProfileSetJoker, nk, { preferredJoker: 'j_mime' })).toThrow(/Invalid joker/)
+	})
+
+	it('takes Mime and Showman with the staff privilege', () => {
+		const { nk } = nkWith({ ...defaultProfile('Alice'), privileges: ['staff'] })
+		expect(call(rpcProfileSetJoker, nk, { preferredJoker: 'j_mime' }).player.preferredJoker).toBe('j_mime')
+		const res = call(rpcProfileSetJoker, nk, { preferredJoker: 'j_ring_master' })
+		expect(res.player.preferredJoker).toBe('j_ring_master')
+		expect(res.player.privileges).toEqual({ jokers: ['j_ring_master', 'j_mime'] })
 	})
 
 	it('takes a privilege joker with the privilege', () => {

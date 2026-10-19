@@ -6,16 +6,15 @@ import {
 	updateChatStatus,
 } from '../../infrastructure/gateways/player.gateway.js'
 import {
+	avatarsFor,
+	setNakamaAvatar,
+} from '../../infrastructure/nakama/avatar-sync.js'
+import {
 	deleteNakamaAccount,
 	editNakamaProfile,
 	linkNakamaDiscord,
 } from '../../infrastructure/nakama/profile-sync.js'
 import { authenticate } from '../../middleware/authenticate.js'
-import {
-	PRIVILEGE_JOKERS,
-	STANDARD_JOKERS,
-} from '../../shared/constants/jokers.js'
-import { buildPrivilegeTable } from '../../shared/constants/privileges.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { getConfig } from '../../state/config.js'
 import { getSession, removeSession } from '../../state/index.js'
@@ -40,7 +39,7 @@ function playerPayload(session: PlayerSession) {
 		preferredJoker: session.preferredJoker,
 		discordLinked: session.discordIdHash != null,
 		discordUsername: session.discordUsername ?? null,
-		privileges: buildPrivilegeTable(session.privileges),
+		privileges: session.privileges,
 		chatEnabled: session.chatEnabled,
 		chatBlocked: session.chatBlocked,
 	}
@@ -341,27 +340,19 @@ export function createAuthRouter(service: AuthService): Router {
 		}
 	})
 
-	// §5.2 avatar picker (website): the in-game client already validates its own
-	// preferredJoker choice against STANDARD_JOKERS/PRIVILEGE_JOKERS client-side
-	// with no server list to read -- the website has no such baked-in list, so it
-	// needs this to render real, valid choices instead of duplicating the set.
+	// §5.2 avatar picker (website): every avatar with whether the player may
+	// pick it and its goal, from Nakama (nakama/src/achievements/rpc.ts).
 	router.get('/jokers', authenticate, async (req, res, next) => {
 		try {
-			const session = getSession(req.player!.playerId)
-			if (!session) throw new AppError('Session not found', 401)
-
-			const privilegeJokers = Array.from(PRIVILEGE_JOKERS.entries())
-				.filter(([priv]) => session.privileges.includes(priv))
-				.map(([, joker]) => joker)
-
-			res.json({
-				jokers: [...STANDARD_JOKERS, ...privilegeJokers],
-			})
+			const catalog = await avatarsFor(req.player!.playerId)
+			if (!catalog.ok) throw new AppError('Avatars are unavailable right now', 503)
+			res.json(catalog.value)
 		} catch (err) {
 			next(err)
 		}
 	})
 
+	// Nakama first (it refuses a joker the player may not pick), then Postgres.
 	router.post('/preferences/joker', authenticate, async (req, res, next) => {
 		try {
 			const { preferredJoker } = req.body
@@ -369,13 +360,16 @@ export function createAuthRouter(service: AuthService): Router {
 				throw new AppError('Missing or invalid preferredJoker (string)', 400)
 			}
 
+			const set = await setNakamaAvatar(req.player!.playerId, preferredJoker)
+			if (!set.ok) {
+				throw set.error === 'refused'
+					? new AppError('Invalid joker ID', 400)
+					: new AppError('Avatars are unavailable right now', 503)
+			}
 			const { session, token } = await service.setPreferredJoker(
 				req.player!.playerId,
 				preferredJoker,
 			)
-			await editNakamaProfile(req.player!.playerId, {
-				preferredJoker: session.preferredJoker,
-			})
 
 			res.json({
 				token,

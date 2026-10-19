@@ -50,7 +50,12 @@ import {
 	removeSpectator,
 	spectateRejection,
 } from './spectate'
+import { recordRun } from '../achievements/record'
+import { holdingsOf } from '../achievements/storage'
+import { DEFAULT_AVATAR } from '../shared/avatars/ids'
+import { selectableOrDefault } from '../shared/avatars/unlocked'
 import { runFlags } from './anticheat'
+import { eventsByPlayer, type LogEvent } from '../shared/replay/events'
 import { recordForfeit } from './forfeits'
 import { logChecksOf, saveRun } from './storage'
 
@@ -165,8 +170,9 @@ function judged(
 	logger: nkruntime.Logger,
 	run: RunRecord,
 	logs: { [userId: string]: PlayerLog },
+	events: { [userId: string]: LogEvent[] },
 ): RunRecord {
-	const flags = runFlags(run, logs, logChecksOf(run, logs, (input) => nk.sha256Hash(input)))
+	const flags = runFlags(run, events, logChecksOf(run, logs, (input) => nk.sha256Hash(input)))
 	const flagged = { ...run, flags }
 	if (!run.rankedMode) return flagged
 	try {
@@ -217,10 +223,14 @@ function runEffect(
 				logger.warn('Lobby %s: could not record %s as in it: %v', lobby.code, effect.userId, e)
 			}
 			return
-		case 'saveRun':
+		case 'saveRun': {
+			let stored: RunRecord | null = null
+			let events: { [userId: string]: LogEvent[] } = {}
 			try {
-				const run = judged(nk, logger, effect.run, effect.logs)
+				events = eventsByPlayer(effect.logs)
+				const run = judged(nk, logger, effect.run, effect.logs, events)
 				saveRun(nk, run, effect.logs)
+				stored = run
 				enqueue(nk, {
 					kind: 'run',
 					at: Date.now(),
@@ -238,7 +248,16 @@ function runEffect(
 					e,
 				)
 			}
+			// Achievements read the stored run; a failure here never touches it.
+			if (stored) {
+				try {
+					recordRun(nk, logger, stored, events)
+				} catch (e) {
+					logger.error('Lobby %s: could not record achievements for run %s: %v', lobby.code, stored.runId, e)
+				}
+			}
 			return
+		}
 		case 'forfeited':
 			try {
 				recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at })
@@ -324,16 +343,21 @@ export function joinInfoOf(
 ): PlayerInfo {
 	const sentMods = parseMods(meta.mods)
 	const stored = readProfile(nk, presence.userId, presence.username)
+	// The joker is never taken from the join metadata: only the stored pick,
+	// if the player may still show it.
+	const joker = stored
+		? selectableOrDefault(stored.profile.preferredJoker, holdingsOf(nk, presence.userId, stored.profile.privileges))
+		: DEFAULT_AVATAR
 	if (stored && stored.profile.nakamaLogin) {
 		return {
 			displayName: displayNameOf(stored.profile),
-			preferredJoker: stored.profile.preferredJoker,
+			preferredJoker: joker,
 			mods: sentMods !== null ? sentMods : stored.profile.mods,
 		}
 	}
 	return {
 		displayName: meta.displayName || presence.username,
-		preferredJoker: meta.preferredJoker || null,
+		preferredJoker: joker,
 		mods: sentMods,
 	}
 }

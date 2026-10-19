@@ -26,6 +26,9 @@ export interface AppConfig {
 	// matchmaking system auto-creates on match found -- see rankedEnabled/
 	// casualQueueEnabled for that.
 	lobbyCreationEnabled: boolean
+	// DB-backed (server_config.achievements_enabled). When falsy, Nakama
+	// counts no games toward avatar achievements; locked avatars stay locked.
+	achievementsEnabled: boolean
 	// The rating season (seasons table): the active one, else the latest.
 	// Pushed to Nakama, which rates games into it. Unset: no seasons yet.
 	season?: number
@@ -40,6 +43,7 @@ let _config: AppConfig = {
 	rankedEnabled: true,
 	casualQueueEnabled: true,
 	lobbyCreationEnabled: true,
+	achievementsEnabled: false,
 }
 
 export function getConfig(): AppConfig {

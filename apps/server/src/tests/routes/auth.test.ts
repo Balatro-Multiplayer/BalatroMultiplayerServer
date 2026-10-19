@@ -3,10 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../../env.js'
 import { signJwt, signTosPendingToken } from '../../features/auth/jwt.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
+import * as adminClient from '../../infrastructure/nakama/admin-client.js'
+import { err, ok } from '../../shared/utils/result.js'
 import { setConfig } from '../../state/config.js'
 import { createSession, lobbies, sessions } from '../../state/index.js'
 import { Lobby } from '../../state/lobby.js'
 import { createTestApp } from './app.js'
+
+vi.mock('../../infrastructure/nakama/admin-client.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../infrastructure/nakama/admin-client.js')>()),
+	callNakamaRpc: vi.fn(),
+	isNakamaAdminEnabled: vi.fn(() => true),
+}))
 
 const app = createTestApp()
 const originalNodeEnv = env.NODE_ENV
@@ -134,36 +142,108 @@ describe('POST /api/auth/chat/enable', () => {
 	})
 })
 
-describe('GET /api/auth/jokers', () => {
-	it('returns 401 without auth', async () => {
-		const res = await request(app).get('/api/auth/jokers')
-		expect(res.status).toBe(401)
+describe('avatars (Nakama)', () => {
+	const NAKAMA_ID = '11111111-1111-4111-8111-111111111111'
+	const CATALOG = {
+		avatars: [
+			{ id: 'j_joker', unlocked: true, goal: null },
+			{ id: 'j_baron', unlocked: false, goal: { kind: 'counter', key: 'wins', threshold: 1, progress: 0 } },
+		],
+		selected: 'j_joker',
+		enabled: true,
+		jokers: ['j_joker'],
+	}
+	const rpc = () => vi.mocked(adminClient.callNakamaRpc)
+
+	function signedIn(id: string, nakamaUserId: string | null, privileges: string[] = []) {
+		createSession('Alice', { id, privileges })
+		vi.mocked(playerGateway.findPlayerById).mockResolvedValue({ id, nakamaUserId, privileges } as any)
+		return signJwt({ playerId: id, steamName: 'Alice' })
+	}
+
+	afterEach(() => {
+		rpc().mockReset()
 	})
 
-	it('returns the standard joker pool for a plain account', async () => {
-		createSession('Alice', { id: 'plain-account' })
-		const token = signJwt({ playerId: 'plain-account', steamName: 'Alice' })
+	describe('GET /api/auth/jokers', () => {
+		it('returns 401 without auth', async () => {
+			const res = await request(app).get('/api/auth/jokers')
+			expect(res.status).toBe(401)
+		})
 
-		const res = await request(app)
-			.get('/api/auth/jokers')
-			.set('Authorization', `Bearer ${token}`)
+		it("returns Nakama's view of the player's avatars", async () => {
+			const token = signedIn('avatar-p1', NAKAMA_ID)
+			rpc().mockResolvedValue(ok(CATALOG))
+			const res = await request(app).get('/api/auth/jokers').set('Authorization', `Bearer ${token}`)
+			expect(res.status).toBe(200)
+			expect(res.body).toEqual(CATALOG)
+			expect(rpc()).toHaveBeenCalledWith('admin_avatars_for', { userId: NAKAMA_ID })
+		})
 
-		expect(res.status).toBe(200)
-		expect(res.body.jokers).toContain('j_joker')
-		expect(res.body.jokers).not.toContain('j_perkeo')
+		it('asks by privileges for a player with no Nakama account', async () => {
+			const token = signedIn('avatar-p2', null, ['bean'])
+			rpc().mockResolvedValue(ok(CATALOG))
+			await request(app).get('/api/auth/jokers').set('Authorization', `Bearer ${token}`)
+			expect(rpc()).toHaveBeenCalledWith('admin_avatars_for', { privileges: ['bean'] })
+		})
+
+		it('is unavailable while Nakama is', async () => {
+			const token = signedIn('avatar-p3', NAKAMA_ID)
+			rpc().mockResolvedValue(err('unreachable'))
+			const res = await request(app).get('/api/auth/jokers').set('Authorization', `Bearer ${token}`)
+			expect(res.status).toBe(503)
+		})
 	})
 
-	it('includes a privilege joker only for an account holding that privilege', async () => {
-		createSession('Bean', { id: 'privileged-account', privileges: ['bean'] })
-		const token = signJwt({ playerId: 'privileged-account', steamName: 'Bean' })
+	describe('POST /api/auth/preferences/joker', () => {
+		const post = (token: string, preferredJoker: unknown) =>
+			request(app).post('/api/auth/preferences/joker').set('Authorization', `Bearer ${token}`).send({ preferredJoker })
 
-		const res = await request(app)
-			.get('/api/auth/jokers')
-			.set('Authorization', `Bearer ${token}`)
+		it('sets the joker in Nakama first, then Postgres', async () => {
+			const token = signedIn('avatar-p4', NAKAMA_ID)
+			const order: string[] = []
+			rpc().mockImplementation(async () => {
+				order.push('nakama')
+				return ok({})
+			})
+			vi.mocked(playerGateway.updatePreferredJoker).mockImplementation(async () => {
+				order.push('postgres')
+			})
+			const res = await post(token, 'j_baron')
+			expect(res.status).toBe(200)
+			expect(res.body.player.preferredJoker).toBe('j_baron')
+			expect(rpc()).toHaveBeenCalledWith('admin_profile_set', { userId: NAKAMA_ID, preferredJoker: 'j_baron' })
+			expect(order).toEqual(['nakama', 'postgres'])
+		})
 
-		expect(res.status).toBe(200)
-		expect(res.body.jokers).toContain('j_turtle_bean')
-		expect(res.body.jokers).not.toContain('j_vagabond')
+		it("doesn't touch Postgres when Nakama refuses the joker", async () => {
+			const token = signedIn('avatar-p5', NAKAMA_ID)
+			rpc().mockResolvedValue(err('rejected'))
+			vi.mocked(playerGateway.updatePreferredJoker).mockClear()
+			const res = await post(token, 'j_mime')
+			expect(res.status).toBe(400)
+			expect(vi.mocked(playerGateway.updatePreferredJoker)).not.toHaveBeenCalled()
+		})
+
+		it('is unavailable while Nakama is', async () => {
+			const token = signedIn('avatar-p6', NAKAMA_ID)
+			rpc().mockResolvedValue(err('disabled'))
+			expect((await post(token, 'j_jolly')).status).toBe(503)
+		})
+
+		it('checks the catalog for a player with no Nakama account', async () => {
+			const token = signedIn('avatar-p7', null)
+			rpc().mockResolvedValue(ok(CATALOG))
+			expect((await post(token, 'j_baron')).status).toBe(400)
+			expect((await post(token, 'j_joker')).status).toBe(200)
+			expect(rpc()).not.toHaveBeenCalledWith('admin_profile_set', expect.anything())
+		})
+
+		it('rejects a missing joker', async () => {
+			const token = signedIn('avatar-p8', NAKAMA_ID)
+			expect((await post(token, 7)).status).toBe(400)
+			expect(rpc()).not.toHaveBeenCalled()
+		})
 	})
 })
 

@@ -18,8 +18,8 @@ import { getConfig } from '../../state/config.js'
 // precedent), not the router-level admin-or-moderator webAdmin gate, since
 // platform config has the same self-inflicted-blast-radius shape.
 //
-// chatEnabled/rankedEnabled/casualQueueEnabled/lobbyCreationEnabled are now
-// DB-backed columns on server_config (migration 0036) and writable via
+// chatEnabled/rankedEnabled/casualQueueEnabled/lobbyCreationEnabled (and
+// achievementsEnabled, migration 0048) are DB-backed columns on server_config (migration 0036) and writable via
 // PATCH /config/feature-flags below. testingMode remains env-var-only
 // (env.TESTING_MODE), surfaced read-only.
 const router = Router()
@@ -36,6 +36,7 @@ router.get('/config', async (_req, res, next) => {
 			rankedEnabled: config.rankedEnabled,
 			casualQueueEnabled: config.casualQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
+			achievementsEnabled: config.achievementsEnabled,
 		})
 	} catch (err) {
 		next(err)
@@ -50,11 +51,13 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			rankedEnabled,
 			casualQueueEnabled,
 			lobbyCreationEnabled,
+			achievementsEnabled,
 		} = req.body as {
 			chatEnabled?: unknown
 			rankedEnabled?: unknown
 			casualQueueEnabled?: unknown
 			lobbyCreationEnabled?: unknown
+			achievementsEnabled?: unknown
 		}
 
 		const patch: Partial<{
@@ -62,12 +65,14 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			rankedEnabled: boolean
 			casualQueueEnabled: boolean
 			lobbyCreationEnabled: boolean
+			achievementsEnabled: boolean
 		}> = {}
 		for (const [key, value] of Object.entries({
 			chatEnabled,
 			rankedEnabled,
 			casualQueueEnabled,
 			lobbyCreationEnabled,
+			achievementsEnabled,
 		})) {
 			if (value === undefined) continue
 			if (typeof value !== 'boolean') {
@@ -90,6 +95,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			rankedEnabled: config.rankedEnabled,
 			casualQueueEnabled: config.casualQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
+			achievementsEnabled: config.achievementsEnabled,
 		})
 	} catch (err) {
 		next(err)

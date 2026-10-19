@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { writeConfig, DEFAULT_CONFIG } from '../config'
+import { emptyProgress } from '../achievements/progress'
+import { readProgress, writeProgress } from '../achievements/storage'
 import { readBans } from '../moderation/bans'
+import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
 import { readProfile } from './profile'
 import { rpcSessionInit, rpcTosAccept, withResolvedMutes } from './session'
@@ -51,7 +54,8 @@ describe('session_init', () => {
 		writeConfig(nk as any, { ...DEFAULT_CONFIG, tosVersion: 3 })
 		const res = JSON.parse(rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, JSON.stringify({ steamName: 'Alice' })))
 		expect(res.tosRequired).toBe(false)
-		expect(res.player).toMatchObject({ id: USER, displayName: 'Alice', preferredJoker: 'j_mime', chatEnabled: true })
+		// j_mime needs the staff privilege, which the sync didn't bring: reset.
+		expect(res.player).toMatchObject({ id: USER, displayName: 'Alice', preferredJoker: 'j_joker', chatEnabled: true })
 		expect(res.player.privileges).toEqual({ jokers: ['j_turtle_bean'] })
 		expect(res.player.mutedPlayerIds).toEqual(SYNC.mutedUserIds)
 		expect(readBans(nk as any, USER).chat).toEqual({ banId: 'b1', expiresAt: null, reason: 'spam' })
@@ -98,5 +102,40 @@ describe('withResolvedMutes', () => {
 		const next = withResolvedMutes(p, { x: 'nx' })
 		expect(next.mutedUserIds).toEqual(['nx'])
 		expect(next.unresolvedMutedPlayerIds).toEqual(['y'])
+	})
+})
+
+describe('session_init avatars', () => {
+	function syncing(sync: object) {
+		return fakeNk({
+			...account('steam:765'),
+			httpRequest: () => ({ code: 200, headers: {}, body: JSON.stringify({ ...SYNC, ...sync }) }),
+		})
+	}
+	const login = (nk: unknown) =>
+		JSON.parse(rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, JSON.stringify({ steamName: 'Alice' })))
+
+	it('keeps a synced joker the synced privileges or earned avatars allow', () => {
+		expect(login(syncing({ preferredJoker: 'j_turtle_bean' })).player.preferredJoker).toBe('j_turtle_bean')
+		const nk = syncing({ preferredJoker: 'j_baron' })
+		writeProgress(nk as any, USER, { ...emptyProgress(), unlocked: ['j_baron'] })
+		expect(login(nk).player.preferredJoker).toBe('j_baron')
+		expect(login(syncing({ preferredJoker: 'j_nope' })).player.preferredJoker).toBe('j_joker')
+	})
+
+	it('earns Scholar for a linked Discord once achievements are on', () => {
+		const linked = { discordIdHash: 'h'.repeat(64), discordUsername: 'ally' }
+		const off = syncing(linked)
+		login(off)
+		expect(off.notifications.filter((n) => n.code === NotifyCode.AVATAR_UNLOCKED)).toEqual([])
+
+		const on = syncing(linked)
+		writeConfig(on as any, { ...DEFAULT_CONFIG, achievementsEnabled: true })
+		login(on)
+		login(on)
+		const pushed = on.notifications.filter((n) => n.code === NotifyCode.AVATAR_UNLOCKED)
+		expect(pushed).toHaveLength(1)
+		expect(pushed[0]).toMatchObject({ persistent: true, content: { avatarIds: ['j_scholar'], runId: null } })
+		expect(readProgress(on as any, USER)!.progress.milestones).toEqual(['discordLinked'])
 	})
 })

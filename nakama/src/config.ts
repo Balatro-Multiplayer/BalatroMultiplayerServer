@@ -18,6 +18,9 @@ export interface ServerConfig {
 	testingMode: boolean
 	// Ranked needs a launcher-integrity verdict from the API.
 	integrityEnforced: boolean
+	// Finished games count toward avatar achievements (achievements/record.ts).
+	// Locked avatars stay locked either way.
+	achievementsEnabled: boolean
 	// Chat messages that skip moderation, as webadmin lists them (looked up by
 	// chat/filter.ts normalizeForAllowlist).
 	chatAllowlist: string[]
@@ -34,6 +37,8 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	lobbyCreationEnabled: true,
 	testingMode: false,
 	integrityEnforced: false,
+	// Off until the avatar reset (achievements/reset.ts) has run.
+	achievementsEnabled: false,
 	chatAllowlist: [],
 	season: 0,
 }
@@ -53,6 +58,7 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 		'lobbyCreationEnabled',
 		'testingMode',
 		'integrityEnforced',
+		'achievementsEnabled',
 	]
 	for (const flag of flags) {
 		const value = update[flag]

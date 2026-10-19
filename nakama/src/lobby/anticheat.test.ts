@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { MIN_MS_PER_HAND, handCount, runFlags } from './anticheat'
-import type { PlayerLog, RunRecord } from './protocol'
+import type { RunRecord } from './protocol'
+import { eventsOf, type LogEvent } from '../shared/replay/events'
 
-function log(...opcodes: string[]): PlayerLog {
+function log(...opcodes: string[]): LogEvent[] {
 	const lines = opcodes.map((op, t) => JSON.stringify([t, op, null]))
-	return { lines, bytes: 0, truncated: false }
+	return eventsOf({ lines, bytes: 0, truncated: false })
 }
 
 const run = (elapsedMs: number) =>

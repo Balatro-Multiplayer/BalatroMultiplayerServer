@@ -6,7 +6,9 @@ import { FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND, runtimeError } from '
 import { currentLobby } from '../lobby/rpc'
 import type { LobbySignal } from '../lobby/protocol'
 import { parsePayload, requireServer } from '../rpc'
-import { isValidJoker } from '../shared/jokers'
+import { progressFor } from '../achievements/storage'
+import { DEFAULT_AVATAR } from '../shared/avatars/ids'
+import { isSelectable } from '../shared/avatars/unlocked'
 import { releaseDiscord, withoutDiscord } from './discord'
 import { playerView, profileFor, updateProfile, type Profile } from './profile'
 import { profileChanged } from './rpc'
@@ -58,17 +60,23 @@ export function parseEdit(input: { [key: string]: unknown }): ProfileEdit {
 }
 
 // Pure: profile with edit applied, checked as the player's own RPCs check it
-// (a Discord name needs a linked Discord, a joker needs its privilege).
-export function applyEdit(profile: Profile, edit: ProfileEdit): Profile {
+// (a Discord name needs a linked Discord, a joker must be one the player may
+// pick: a default, one their privileges grant, or one they earned, unlocked).
+// Losing the privilege behind the current joker resets it to the default.
+export function applyEdit(profile: Profile, edit: ProfileEdit, unlocked: readonly string[] = []): Profile {
 	let next = { ...profile }
-	if (edit.privileges !== undefined) next.privileges = edit.privileges
+	if (edit.privileges !== undefined) {
+		next.privileges = edit.privileges
+		if (!isSelectable(next.preferredJoker, { privileges: next.privileges, unlocked })) next.preferredJoker = DEFAULT_AVATAR
+	}
 	if (edit.discord === null) next = withoutDiscord(next)
 	if (edit.useDiscordName !== undefined) {
 		if (edit.useDiscordName && !next.discordIdHash) throw runtimeError(FAILED_PRECONDITION, 'Discord account not linked')
 		next.useDiscordName = edit.useDiscordName
 	}
 	if (edit.preferredJoker !== undefined) {
-		if (!isValidJoker(edit.preferredJoker, next.privileges)) throw runtimeError(INVALID_ARGUMENT, 'Invalid joker')
+		if (!isSelectable(edit.preferredJoker, { privileges: next.privileges, unlocked }))
+			throw runtimeError(INVALID_ARGUMENT, 'Invalid joker')
 		next.preferredJoker = edit.preferredJoker
 	}
 	return next
@@ -86,9 +94,10 @@ export function rpcAdminProfileSet(
 	const userId = requireAccount(nk, input.userId)
 	const edit = parseEdit(input)
 	let previousDiscord: string | null = null
+	const unlocked = progressFor(nk, userId).unlocked
 	const profile = updateProfile(nk, userId, (current) => {
 		previousDiscord = current.discordIdHash
-		return applyEdit(current, edit)
+		return applyEdit(current, edit, unlocked)
 	})
 	if (edit.discord === null) releaseDiscord(nk, userId, previousDiscord)
 	profileChanged(nk, userId, profile)

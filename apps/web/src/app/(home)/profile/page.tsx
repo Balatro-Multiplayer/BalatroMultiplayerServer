@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { ApiError, apiFetch } from '@/lib/api'
@@ -8,9 +9,10 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { jokers } from '@/shared/jokers'
+import { type AvatarCatalog, type AvatarEntry, goalText, shownProgress } from './avatar-goals'
 
 function ProfileInfoCard({
   player,
@@ -176,8 +178,9 @@ function DisplayNameCard({
   )
 }
 
-// §5.2: avatar (preferredJoker) picker. Fetches the valid pool from the server
-// (GET /auth/jokers) instead of baking in a duplicate copy of STANDARD_JOKERS.
+// §5.2: avatar (preferredJoker) picker. Every avatar from the server
+// (GET /auth/jokers, Nakama's catalog): unlocked ones can be picked, locked
+// ones are greyed with their goal and progress.
 function AvatarCard({
   player,
   onRefresh,
@@ -185,14 +188,15 @@ function AvatarCard({
   player: { preferredJoker: string | null }
   onRefresh: () => Promise<unknown>
 }) {
-  const [jokers, setJokers] = useState<string[] | null>(null)
+  const [catalog, setCatalog] = useState<AvatarCatalog | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    apiFetch<{ jokers: string[] }>('/auth/jokers')
-      .then((res) => setJokers(res.jokers))
-      .catch(() => setJokers([]))
+    apiFetch<AvatarCatalog>('/auth/jokers')
+      .then(setCatalog)
+      .catch(() => setLoadFailed(true))
   }, [])
 
   async function handleChange(preferredJoker: string) {
@@ -211,32 +215,80 @@ function AvatarCard({
     }
   }
 
+  const unlockedCount = catalog?.avatars.filter((a) => a.unlocked).length ?? 0
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Avatar</CardTitle>
-        <CardDescription>The joker card shown as your avatar to other players.</CardDescription>
+        <CardDescription>
+          The joker card shown as your avatar to other players.
+          {catalog && ` ${unlockedCount} of ${catalog.avatars.length} unlocked.`}
+        </CardDescription>
       </CardHeader>
       <CardContent className='space-y-3'>
-        <Select
-          value={player.preferredJoker ?? undefined}
-          onValueChange={handleChange}
-          disabled={saving || !jokers || jokers.length === 0}
-        >
-          <SelectTrigger className='w-full max-w-[240px]'>
-            <SelectValue placeholder='Choose a joker' />
-          </SelectTrigger>
-          <SelectContent>
-            {(jokers ?? []).map((key) => (
-              <SelectItem key={key} value={key}>
-                {key}
-              </SelectItem>
+        {loadFailed && <p className='text-sm text-muted-foreground'>Avatars are unavailable right now.</p>}
+        {catalog && !catalog.enabled && (
+          <p className='text-sm text-muted-foreground'>Avatar achievements are paused: games don&apos;t count toward goals right now.</p>
+        )}
+        {catalog && (
+          <div className='grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-3'>
+            {catalog.avatars.map((avatar) => (
+              <AvatarTile
+                key={avatar.id}
+                avatar={avatar}
+                selected={avatar.id === player.preferredJoker}
+                disabled={saving}
+                onPick={handleChange}
+              />
             ))}
-          </SelectContent>
-        </Select>
+          </div>
+        )}
         {error && <p className='text-sm text-destructive'>{error}</p>}
       </CardContent>
     </Card>
+  )
+}
+
+function AvatarTile({
+  avatar,
+  selected,
+  disabled,
+  onPick,
+}: {
+  avatar: AvatarEntry
+  selected: boolean
+  disabled: boolean
+  onPick: (id: string) => void
+}) {
+  const art = jokers[avatar.id]
+  const name = art?.name ?? avatar.id
+  const goal = avatar.goal ? goalText(avatar.goal) : null
+  const progress = !avatar.unlocked && avatar.goal ? shownProgress(avatar.goal) : null
+  return (
+    <button
+      type='button'
+      title={goal ? `${name}: ${goal}` : name}
+      aria-pressed={selected}
+      disabled={disabled || !avatar.unlocked || selected}
+      onClick={() => onPick(avatar.id)}
+      className={`flex flex-col items-center gap-1 rounded-md border p-2 text-center text-xs transition-colors ${
+        selected ? 'border-primary ring-2 ring-primary' : 'border-transparent'
+      } ${avatar.unlocked ? 'hover:bg-muted' : 'cursor-not-allowed'}`}
+    >
+      {art && (
+        <Image
+          src={`/cards/${art.file}`}
+          alt={name}
+          width={56}
+          height={75}
+          className={`rounded-sm ${avatar.unlocked ? '' : 'opacity-40 grayscale'}`}
+        />
+      )}
+      <span className={avatar.unlocked ? 'font-medium' : 'text-muted-foreground'}>{name}</span>
+      {!avatar.unlocked && goal && <span className='text-[10px] leading-tight text-muted-foreground'>{goal}</span>}
+      {progress && <span className='text-[10px] font-medium text-muted-foreground'>{progress}</span>}
+    </button>
   )
 }
 

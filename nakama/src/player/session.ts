@@ -4,6 +4,8 @@
 // At a Steam account's first call the player's Postgres data is synced over
 // through the API (player-sync); if that fails the login still succeeds and
 // the sync is tried again next time.
+import { recordMilestone } from '../achievements/record'
+import { progressFor } from '../achievements/storage'
 import { noteReturn } from '../lobby/forfeits'
 import { clientConfig, readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
@@ -118,12 +120,13 @@ export function rpcSessionInit(
 		resolved = resolveMutes(ctx, logger, nk, stored.profile)
 	}
 
+	const unlocked = sync ? progressFor(nk, userId).unlocked : []
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
 			let next: Profile = { ...current, steamName, nakamaLogin: true }
-			if (sync) next = withSync(next, sync)
+			if (sync) next = withSync(next, sync, unlocked)
 			else if (!steamId) next.synced = true // device login: nothing to sync
 			return withResolvedMutes(next, resolved)
 		},
@@ -147,6 +150,8 @@ export function rpcSessionInit(
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan))
 	}
 	syncDisplayName(nk, userId, profile)
+	// Accounts linked before achievements existed earn Scholar here.
+	if (profile.discordIdHash) recordMilestone(nk, logger, userId, 'discordLinked', profile.privileges)
 	// A new login is unverified until launcher_session_start's challenge passes.
 	writeIntegrity(nk, userId, UNVERIFIED)
 	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))
