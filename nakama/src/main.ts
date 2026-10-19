@@ -1,6 +1,8 @@
 // Nakama JavaScript runtime entry point (bundled to modules/index.js by
 // build.mjs). Nakama resolves every function registered here by its name in
 // the script's global scope, so they are passed as plain identifiers.
+import { rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './achievements/rpc'
+import { rpcAdminAvatarsReset } from './achievements/reset'
 import {
 	rpcAdminBanApply,
 	rpcAdminBanLift,
@@ -99,6 +101,7 @@ function InitModule(
 	initializer.registerRpc('profile_set_display', rpcProfileSetDisplay)
 	initializer.registerRpc('profile_set_joker', rpcProfileSetJoker)
 	initializer.registerRpc('profile_set_mods', rpcProfileSetMods)
+	initializer.registerRpc('avatar_catalog', rpcAvatarCatalog)
 	initializer.registerRpc('mute_set', rpcMuteSet)
 	initializer.registerRpc('discord_link_start', rpcDiscordLinkStart)
 	initializer.registerRpc('discord_unlink', rpcDiscordUnlink)
@@ -137,6 +140,9 @@ function InitModule(
 	initializer.registerRpc('admin_mirror_ack', rpcAdminMirrorAck)
 	initializer.registerRpc('admin_profile_set', rpcAdminProfileSet)
 	initializer.registerRpc('admin_account_delete', rpcAdminAccountDelete)
+	initializer.registerRpc('admin_avatars_for', rpcAdminAvatarsFor)
+	initializer.registerRpc('admin_progress_set', rpcAdminProgressSet)
+	initializer.registerRpc('admin_avatars_reset', rpcAdminAvatarsReset)
 	initializer.registerRpc('admin_runs_purge', rpcAdminRunsPurge)
 	initializer.registerRpc('admin_ratings_set', rpcAdminRatingsSet)
 	logger.info('BMP lobby module loaded')

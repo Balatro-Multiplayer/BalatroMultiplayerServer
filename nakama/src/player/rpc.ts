@@ -8,7 +8,8 @@ import { currentLobby } from '../lobby/rpc'
 import type { LobbySignal, PlayerInfo } from '../lobby/protocol'
 import { notify, NotifyCode } from '../notify'
 import { parsePayload, requireUser } from '../rpc'
-import { isValidJoker } from '../shared/jokers'
+import { progressFor } from '../achievements/storage'
+import { isSelectable } from '../shared/avatars/unlocked'
 import { displayNameOf, playerView, updateProfile, type Profile } from './profile'
 import { syncDisplayName } from './session'
 
@@ -62,7 +63,8 @@ export function rpcProfileSetDisplay(
 	return JSON.stringify({ player: playerView(userId, profile) })
 }
 
-// {preferredJoker} -> {player}. Privilege jokers need the privilege.
+// {preferredJoker} -> {player}. Only a default joker, one the player's
+// privileges grant, or one they have earned.
 export function rpcProfileSetJoker(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -72,11 +74,13 @@ export function rpcProfileSetJoker(
 	const userId = requireUser(ctx)
 	const joker = parsePayload(payload).preferredJoker
 	if (typeof joker !== 'string' || !joker) throw runtimeError(INVALID_ARGUMENT, 'Missing or invalid preferredJoker (string)')
+	const unlocked = progressFor(nk, userId).unlocked
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
-			if (!isValidJoker(joker, current.privileges)) throw runtimeError(INVALID_ARGUMENT, 'Invalid joker')
+			if (!isSelectable(joker, { privileges: current.privileges, unlocked }))
+				throw runtimeError(INVALID_ARGUMENT, 'Invalid joker')
 			return { ...current, preferredJoker: joker }
 		},
 		ctx.username,

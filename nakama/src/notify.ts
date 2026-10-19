@@ -9,6 +9,9 @@ export const NotifyCode = {
 	QUEUE_CANCELLED: 103,
 	// 104 and 106 are retired (never sent); don't reuse them.
 	INTEGRITY: 105,
+	// {avatarIds, runId}: avatars just earned (runId null for one earned
+	// outside a game). Persistent, so an offline player sees it at login.
+	AVATAR_UNLOCKED: 107,
 }
 
 const CODES: number[] = Object.keys(NotifyCode).map((k) => (NotifyCode as { [k: string]: number })[k])

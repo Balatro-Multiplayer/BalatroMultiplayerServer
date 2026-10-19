@@ -3,6 +3,8 @@ import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from '../testing/fake_nk'
 import { rpcAdminAccountDelete, rpcAdminProfileSet } from './admin'
 import { discordOwner, rpcAdminDiscordSet } from './discord'
+import { emptyProgress } from '../achievements/progress'
+import { writeProgress } from '../achievements/storage'
 import { defaultProfile, readProfile, writeProfile } from './profile'
 
 const ALICE = '11111111-1111-4111-8111-111111111111'
@@ -39,6 +41,22 @@ describe('admin_profile_set', () => {
 		const { nk } = setup()
 		expect(() => set(nk, { preferredJoker: 'j_perkeo' })).toThrow(/Invalid joker/)
 		expect(set(nk, { privileges: ['virtualized'], preferredJoker: 'j_perkeo' }).player.preferredJoker).toBe('j_perkeo')
+	})
+
+	it('resets the joker when the privilege behind it is taken away', () => {
+		const { nk } = setup()
+		set(nk, { privileges: ['virtualized', 'staff'], preferredJoker: 'j_perkeo' })
+		expect(set(nk, { privileges: ['staff'] }).player.preferredJoker).toBe('j_joker')
+		set(nk, { preferredJoker: 'j_ring_master' })
+		expect(set(nk, { privileges: ['staff', 'bean'] }).player.preferredJoker).toBe('j_ring_master')
+		expect(set(nk, { privileges: [] }).player.preferredJoker).toBe('j_joker')
+	})
+
+	it('keeps an earned joker when privileges change', () => {
+		const { nk } = setup()
+		writeProgress(nk as any, ALICE, { ...emptyProgress(), unlocked: ['j_ring_master'] })
+		set(nk, { privileges: ['staff'], preferredJoker: 'j_ring_master' })
+		expect(set(nk, { privileges: [] }).player.preferredJoker).toBe('j_ring_master')
 	})
 
 	it('needs a linked Discord for the Discord name, and unlinks it', () => {

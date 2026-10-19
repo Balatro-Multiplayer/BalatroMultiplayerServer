@@ -4,6 +4,7 @@
 // the API calls admin_discord_set. One Discord account links to one player:
 // discord_index (system-owned, keyed by the Discord id hash) is written
 // create-only.
+import { recordMilestone } from '../achievements/record'
 import { ALREADY_EXISTS, INVALID_ARGUMENT, UNAVAILABLE, runtimeError } from '../errors'
 import { callExpress } from '../express'
 import { SYSTEM_USER_ID } from '../lobby/protocol'
@@ -113,6 +114,7 @@ export function rpcAdminDiscordSet(
 	})
 	if (previous !== discordIdHash) releaseDiscord(nk, userId, previous)
 	profileChanged(nk, userId, profile)
+	recordMilestone(nk, logger, userId, 'discordLinked', profile.privileges)
 	logger.info('Linked Discord to %s', userId)
 	return JSON.stringify({ player: playerView(userId, profile) })
 }

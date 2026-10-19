@@ -89,6 +89,9 @@ export interface Placement {
 export interface Participant {
 	id: string
 	displayName: string
+	// The avatar they showed at the start (already validated at join and on
+	// every change). Absent in runs from before it was recorded.
+	avatar?: string
 }
 
 export interface StartedGame {
