@@ -5,11 +5,22 @@ import { generateCode, CODE_ATTEMPTS, MATCHMADE_CODE_LENGTH } from '../lobby/rpc
 import { bindCode, releaseCode, reserveCode } from '../lobby/codes'
 import { LOBBY_MATCH } from '../lobby/protocol'
 import { refuseMatchedGroup } from './gate'
+import { GROUP_SIZE_PROPERTY, TEAMS_PROPERTY } from './group/refusal'
+import { partitionTeams, type TeamPlan } from './group/teams'
 import { clearMatched } from './queue'
 
+// A matched ticket's player. Numeric ticket properties arrive merged into
+// properties; partyId is set for a party ticket's members.
 export interface MatchedEntry {
 	presence: { userId: string }
-	properties: { [key: string]: string }
+	properties: { [key: string]: string | number }
+	partyId?: string
+}
+
+// A party's members, matched together off its one ticket.
+export interface PlannedGroup {
+	partyId: string
+	memberIds: string[]
 }
 
 export interface MatchPlan {
@@ -19,6 +30,9 @@ export interface MatchPlan {
 	// The queue, keyed as the API keys it: 'mode', or 'ranked:mode'.
 	gameMode: string
 	playerIds: string[]
+	groups: PlannedGroup[]
+	// A Teams game: who plays on which team, each group on one.
+	teamPlan: TeamPlan | null
 }
 
 // How the API names a queue: the bare mode, 'ranked:'-prefixed when ranked.
@@ -28,16 +42,48 @@ export function queueKey(mode: string, kind: string): string {
 
 const NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/
 
+// The parties of a match in the order their first member was matched, a
+// solo player as a group of one; or why the tickets' group sizes don't add up.
+function groupsOf(entries: MatchedEntry[]): { party: PlannedGroup[]; all: string[][] } | string {
+	const party: PlannedGroup[] = []
+	const all: string[][] = []
+	for (const entry of entries) {
+		const size = entry.properties[GROUP_SIZE_PROPERTY]
+		if (!entry.partyId) {
+			if (size !== undefined && size !== 1) return 'A solo ticket claims a group'
+			all.push([entry.presence.userId])
+			continue
+		}
+		let group = party.filter((g) => g.partyId === entry.partyId)[0]
+		if (!group) {
+			group = { partyId: entry.partyId, memberIds: [] }
+			party.push(group)
+			all.push(group.memberIds)
+		}
+		group.memberIds.push(entry.presence.userId)
+	}
+	for (const group of party) {
+		for (const entry of entries) {
+			if (entry.partyId === group.partyId && entry.properties[GROUP_SIZE_PROPERTY] !== group.memberIds.length)
+				return 'A group ticket disagrees with its group size'
+		}
+	}
+	return { party, all }
+}
+
 // What a matched group queued for, or why it can't be a lobby. Everyone must
 // have asked for the same mod, mode and kind: the query already ensures it,
 // this stops a hand-built ticket from dragging others into a different game.
+// Groups are casual only, and a Teams game (every ticket teams = 1) must
+// split into two equal teams with each group kept whole.
 export function planMatch(entries: MatchedEntry[]): MatchPlan | string {
 	if (entries.length < 2) return 'A match needs at least two players'
 	const first = entries[0].properties
 	const modId = first.modId
 	const mode = first.mode
 	const kind = first.kind === 'ranked' ? 'ranked' : 'casual'
-	if (!NAME_PATTERN.test(modId || '') || !NAME_PATTERN.test(mode || ''))
+	const teams = first[TEAMS_PROPERTY] === 1
+	if (typeof modId !== 'string' || typeof mode !== 'string' || !NAME_PATTERN.test(modId) || !NAME_PATTERN.test(mode))
 		return 'Ticket has no valid modId and mode'
 	const ids: string[] = []
 	for (const entry of entries) {
@@ -48,15 +94,27 @@ export function planMatch(entries: MatchedEntry[]): MatchPlan | string {
 			(p.kind === 'ranked' ? 'ranked' : 'casual') !== kind
 		)
 			return 'Tickets disagree on what they queued for'
+		if ((p[TEAMS_PROPERTY] === 1) !== teams) return 'Tickets disagree on Teams'
 		if (ids.indexOf(entry.presence.userId) !== -1)
 			return 'A player is in the match twice'
 		ids.push(entry.presence.userId)
+	}
+	const groups = groupsOf(entries)
+	if (typeof groups === 'string') return groups
+	if (groups.party.length > 0 && kind === 'ranked') return 'A group may not queue ranked'
+	let teamPlan: TeamPlan | null = null
+	if (teams) {
+		const split = partitionTeams(groups.all)
+		if (!split.ok) return 'Teams cannot be split: ' + split.error
+		teamPlan = split.value
 	}
 	return {
 		modId,
 		rankedMode: kind === 'ranked' ? mode : '',
 		gameMode: queueKey(mode, kind),
 		playerIds: ids,
+		groups: groups.party,
+		teamPlan,
 	}
 }
 

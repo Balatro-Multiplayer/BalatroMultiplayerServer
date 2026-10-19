@@ -53,7 +53,7 @@ function nakama() {
 describe('checkpointOf / resumeFrom', () => {
 	it('keeps a lobby with players, not an empty or closed one', () => {
 		const lobby = startedLobby()
-		expect(checkpointOf(lobby, 5)).toEqual({ lobby, at: 5, claimedAt: null })
+		expect(checkpointOf(lobby, 5)).toEqual({ lobby, at: 5, claimedAt: null, expiresAt: 5 + CHECKPOINT_TTL_MS })
 		expect(checkpointOf({ ...lobby, players: [] }, 5)).toBeNull()
 		expect(checkpointOf({ ...lobby, closed: true }, 5)).toBeNull()
 	})

@@ -45,6 +45,9 @@ export const ServerOp = {
 	// ReplayTail, to a participant rejoining a running game: what the others
 	// logged, so its view of them catches up.
 	REPLAY_TAIL: 111,
+	// GroupQueueMessage, to the home lobby's players: its group queue moved on
+	// (matchmaking/group).
+	GROUP_QUEUE: 112,
 } as const
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included),
@@ -292,11 +295,70 @@ export interface Snapshot {
 	players: SnapshotPlayer[]
 	ownState: unknown
 	game: GameView
+	// The home lobby's group queue, null when it isn't queueing.
+	groupQueue: GroupQueueView | null
+	// A matchmade Teams game: the two teams, each group kept whole.
+	teamPlan: string[][] | null
+}
+
+// A private lobby queueing as one group (matchmaking/group): forming while
+// the members gather in the queue's party, queued while its ticket is out,
+// away while they play the public game it found. Idle is no group queue.
+export type GroupPhase = 'forming' | 'queued' | 'away'
+
+// Why a group queue ended or went back to forming.
+export type GroupEndReason =
+	| 'host_cancelled'
+	| 'member_left'
+	| 'member_left_party'
+	| 'member_disconnected'
+	| 'member_kicked'
+	| 'lobby_closed'
+	| 'ticket_removed'
+	| 'match_refused'
+	| 'member_refused'
+	| 'away_over'
+	| 'away_cap'
+	| 'all_returned'
+
+// What a home lobby's players see of its group queue.
+export interface GroupQueueView {
+	phase: GroupPhase
+	partyId: string
+	homeCode: string
+	modId: string
+	mode: string
+	teams: boolean
+	hostId: string
+	memberIds: string[]
+	// Queued: the party's ticket.
+	ticket: string | null
+	// Away: the public lobby they were matched into.
+	matchId: string | null
+	code: string | null
+}
+
+// ServerOp.GROUP_QUEUE. phase 'idle' ends the group queue (reason says why);
+// a 'forming' with requeue: the matched game fell through and the leader
+// queues the party again.
+export type GroupQueueMessage =
+	| (GroupQueueView & { reason: GroupEndReason | null; requeue: boolean })
+	| { phase: 'idle'; partyId: string; homeCode: string; reason: GroupEndReason; requeue: false }
+
+// A group a matchmade lobby was made with, and the home lobby to tell once
+// its game is over.
+export interface MatchedGroup {
+	partyId: string
+	homeCode: string
+	memberIds: string[]
 }
 
 // matchSignal payloads (from RPCs) and replies.
 export type LobbySignal =
-	| { type: 'has_player'; userId: string }
+	// 'yes', 'no', or (with forMatchId) 'away': a member of this home lobby's
+	// group, away at that public lobby, which doesn't hold their seat here
+	// against joining it.
+	| { type: 'has_player'; userId: string; forMatchId?: string }
 	| { type: 'leave'; userId: string }
 	| { type: 'get_active'; userId: string }
 	// chat_send's two steps around the (slow) moderation call, kept out of the
@@ -311,6 +373,19 @@ export type LobbySignal =
 	| { type: 'admin_view' }
 	// report_submit (moderation/report.ts): the evidence a report carries.
 	| { type: 'report_evidence'; reporterId: string; reportedId: string }
+	// The group queue (matchmaking/group): the home lobby is its source of
+	// truth, so the RPCs and hooks ask it and tell it. group_members answers
+	// GroupHomeFacts, group_status GroupQueueView or null.
+	| { type: 'group_members' }
+	| { type: 'group_status'; partyId: string }
+	| { type: 'group_open'; userId: string; partyId: string; mode: string; teams: boolean }
+	| { type: 'group_queued'; partyId: string; ticket: string }
+	| { type: 'group_unqueued'; partyId: string }
+	| { type: 'group_requeue'; partyId: string }
+	| { type: 'group_matched'; partyId: string; matchId: string; code: string }
+	| { type: 'group_cancel'; partyId: string; reason: GroupEndReason; userId?: string }
+	// From the public lobby, once its first game is over (or it closed).
+	| { type: 'away_over'; partyId: string; code: string }
 
 // Storage object (per user) naming the lobby they are in, for reconnect after
 // a game restart. Written and removed by the match only.
@@ -329,6 +404,13 @@ export const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
 export const LOBBY_CHECKPOINT_COLLECTION = 'lobby_checkpoints'
 // A checkpoint nobody came back for in this long is dropped.
 export const CHECKPOINT_TTL_MS = 10 * 60 * 1000
+
+// When a checkpoint ({at, expiresAt?}, as stored) is dropped unclaimed: its
+// own expiresAt (a lobby whose group is away waits longer), else the TTL.
+export function checkpointExpiry(stored: { [key: string]: unknown }): number {
+	if (typeof stored.expiresAt === 'number') return stored.expiresAt
+	return Number(stored.at) + CHECKPOINT_TTL_MS
+}
 
 // Finished games (src/lobby/storage.ts). Runs and logs are owned by the
 // system user; each participant gets a pointer in MY_RUNS_COLLECTION.

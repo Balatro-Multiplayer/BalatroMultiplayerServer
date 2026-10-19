@@ -24,6 +24,9 @@ describe('server config', () => {
 	it('merge applies valid fields only', () => {
 		const next = mergeConfig(DEFAULT_CONFIG, { tosVersion: 3, chatEnabled: false, rankedEnabled: 'no', bogus: 1, tosVersion2: 9 })
 		expect(next).toEqual({ ...DEFAULT_CONFIG, tosVersion: 3, chatEnabled: false })
+		expect(DEFAULT_CONFIG.groupQueueEnabled).toBe(true)
+		expect(mergeConfig(DEFAULT_CONFIG, { groupQueueEnabled: false }).groupQueueEnabled).toBe(false)
+		expect(mergeConfig(DEFAULT_CONFIG, { groupQueueEnabled: 'off' }).groupQueueEnabled).toBe(true)
 		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: -1 }).tosVersion).toBe(1)
 		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: 1.5 }).tosVersion).toBe(1)
 		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 'glhf'] }).chatAllowlist).toEqual(['gg', 'glhf'])

@@ -57,7 +57,7 @@ describe('the ranked queue gate', () => {
 		const nk = fakeNk()
 		writeConfig(nk as any, ENFORCED)
 		writeIntegrity(nk as any, 'a', verdictRecord(true, true, 0))
-		const plan = { modId: 'M', rankedMode: 'std', gameMode: 'ranked:std', playerIds: ['a', 'b'] }
+		const plan = { modId: 'M', rankedMode: 'std', gameMode: 'ranked:std', playerIds: ['a', 'b'], groups: [], teamPlan: null }
 		expect(refuseMatchedGroup(nk as any, fakeLogger, plan)).toBe(true)
 		expect(nk.notifications.map((n) => [n.userId, n.code, n.content.requeue])).toEqual([
 			['a', NotifyCode.QUEUE_CANCELLED, true],

@@ -3,11 +3,25 @@
 // instead of mutating. Nakama round-trips match state through Go between
 // calls, where Set/Map values are lost and in-place nested mutation can
 // silently not stick, so the state holds only plain objects and arrays.
+import type { TeamPlan } from '../matchmaking/group/teams'
 import { replayTailOf } from './active'
+import {
+	endGroup,
+	groupAwayCapped,
+	groupReturned,
+	isParked,
+	memberDisconnected,
+	memberGone,
+	viewOf,
+	type GroupOutbound,
+	type GroupQueue,
+} from './group_queue'
 import {
 	type GameState,
 	type LobbyEventMessage,
+	type GroupEndReason,
 	type LobbyEventType,
+	type MatchedGroup,
 	type PlayerInfo,
 	type PlayerLog,
 	type RunRecord,
@@ -75,6 +89,15 @@ export interface Lobby {
 	lastRunId?: string
 	// userId -> the sender's ACTION rate-limit bucket (relay.ts).
 	actionBudget: { [userId: string]: { tokens: number; at: number } }
+	// A private lobby queueing as a group (group_queue.ts); absent or null
+	// while it isn't.
+	groupQueue?: GroupQueue | null
+	// A matchmade lobby: the groups it was made with, whose home lobbies are
+	// told (once: groupsReleased) when its first game is over.
+	groups?: MatchedGroup[]
+	groupsReleased?: boolean
+	// A matchmade Teams game's teams.
+	teamPlan?: TeamPlan | null
 }
 
 export type Outbound =
@@ -89,6 +112,7 @@ export type Outbound =
 			run: RunRecord
 			logs: { [userId: string]: PlayerLog }
 	  }
+	| GroupOutbound
 
 export interface Step {
 	lobby: Lobby
@@ -103,6 +127,8 @@ export function newLobby(params: {
 	rankedMode?: string
 	allowedIds?: string[]
 	gameMode?: string
+	groups?: MatchedGroup[]
+	teamPlan?: TeamPlan | null
 	now: number
 	graceMs: number
 	resultTimeoutMs?: number
@@ -125,6 +151,8 @@ export function newLobby(params: {
 		closed: false,
 		game: emptyGame(),
 		actionBudget: {},
+		groups: params.groups,
+		teamPlan: params.teamPlan,
 	}
 }
 
@@ -224,6 +252,7 @@ export function joinRejection(
 		return 'You were kicked from this lobby'
 	if (modId !== lobby.modId) return 'Lobby is for a different mod'
 	if (lobby.game.started) return 'The game has already started'
+	if (lobby.groupQueue) return 'This lobby is queueing as a group'
 	if (lobby.allowedIds) {
 		if (lobby.allowedIds.indexOf(userId) === -1)
 			return 'This lobby is reserved for matched players'
@@ -256,6 +285,8 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 			started: lobby.game.started,
 			reported: Object.keys(lobby.game.reports),
 		},
+		groupQueue: viewOf(lobby),
+		teamPlan: lobby.teamPlan || null,
 	}
 }
 
@@ -274,7 +305,10 @@ export function join(
 			...lobby,
 			players: lobby.players.map((p) => (p.id === userId ? back : p)),
 		}
+		// Back from somewhere else (a group's public game) their current-lobby
+		// record names that lobby, so it is written again.
 		const out: Outbound[] = [
+			{ kind: 'setCurrent', userId },
 			{
 				kind: 'send',
 				op: ServerOp.SNAPSHOT,
@@ -295,7 +329,7 @@ export function join(
 			const tail = replayTailOf(next, userId)
 			if (tail) out.push({ kind: 'send', op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] })
 		}
-		return { lobby: next, out }
+		return then({ lobby: next, out }, groupReturned)
 	}
 
 	const player: LobbyPlayer = {
@@ -339,6 +373,12 @@ export function join(
 	}
 }
 
+// step, then f on its lobby: their effects in order.
+function then(step: Step, f: (lobby: Lobby) => Step): Step {
+	const next = f(step.lobby)
+	return { lobby: next.lobby, out: step.out.concat(next.out) }
+}
+
 // The actionBudget key of a player's replay-log bucket (relay.ts), separate
 // so a busy log stream can't starve their other actions.
 export function logBudgetKey(userId: string): string {
@@ -346,9 +386,11 @@ export function logBudgetKey(userId: string): string {
 }
 
 // Next host after `leavingId`: the earliest-joined player still connected.
+// While the lobby's group is away nobody is, so the earliest player at all.
 function nextHost(lobby: Lobby, leavingId: string): string | null {
+	const parked = isParked(lobby)
 	for (const p of lobby.players) {
-		if (p.id !== leavingId && p.awaySince === null) return p.id
+		if (p.id !== leavingId && (p.awaySince === null || parked)) return p.id
 	}
 	return null
 }
@@ -366,20 +408,22 @@ function transferHostFrom(lobby: Lobby, userId: string): Step {
 
 export function close(lobby: Lobby): Step {
 	if (lobby.closed) return { lobby, out: [] }
-	const next = { ...lobby, closed: true }
+	const ended = endGroup(lobby, 'lobby_closed')
+	const next = { ...ended.lobby, closed: true }
 	// Spectators hear it too: the match ends with it.
 	const out: Outbound[] = [
 		event(next, 'lobby_closed', {}, allIds(next).concat(next.spectators || [])),
 	]
 	for (const id of allIds(next)) out.push({ kind: 'clearCurrent', userId: id })
-	return { lobby: next, out }
+	return { lobby: next, out: ended.out.concat(out) }
 }
 
 // A lobby nobody is connected to any more is closed straight away rather than
-// waiting out every player's grace period.
+// waiting out every player's grace period -- unless its group is away, which
+// is everyone gone on purpose.
 function closeIfAbandoned(step: Step): Step {
 	const lobby = step.lobby
-	if (lobby.closed) return step
+	if (lobby.closed || isParked(lobby)) return step
 	const anyoneHere = lobby.players.some((p) => p.awaySince === null)
 	if (anyoneHere) return step
 	const closed = close(lobby)
@@ -387,17 +431,20 @@ function closeIfAbandoned(step: Step): Step {
 }
 
 // Drops userId from the roster: `type` is the event the others get
-// (player_left, or none when the caller already announced a kick).
+// (player_left, or none when the caller already announced a kick), `why`
+// what it does to the lobby's group queue.
 function remove(
 	lobby: Lobby,
 	userId: string,
 	type: 'player_left' | null,
+	why: GroupEndReason,
 ): Step {
 	const player = findPlayer(lobby, userId)
 	if (!player) return { lobby, out: [] }
 
+	const grouped = memberGone(lobby, userId, why)
 	// Host moves on before the player is gone, so the new host is never them.
-	const transferred = transferHostFrom(lobby, userId)
+	const transferred = transferHostFrom(grouped.lobby, userId)
 	const ready = { ...transferred.lobby.game.ready }
 	delete ready[userId]
 	const actionBudget = { ...transferred.lobby.actionBudget }
@@ -410,7 +457,7 @@ function remove(
 		actionBudget,
 	}
 	const others = allIds(next)
-	const out: Outbound[] = [{ kind: 'clearCurrent', userId }]
+	const out: Outbound[] = grouped.out.concat([{ kind: 'clearCurrent', userId }])
 	if (type)
 		out.push(
 			event(
@@ -442,13 +489,14 @@ function remove(
 // The player asked to leave (op LEAVE, or the leave RPC): gone for good.
 export function leave(lobby: Lobby, userId: string): Step {
 	if (!findPlayer(lobby, userId)) return { lobby, out: [] }
-	const step = remove(lobby, userId, 'player_left')
+	const step = remove(lobby, userId, 'player_left', 'member_left')
 	return { lobby: step.lobby, out: step.out.concat([{ kind: 'kick', userId }]) }
 }
 
 // The player's socket dropped without a LEAVE: keep their seat for the grace
 // period. A leave from an older session of a player who already rejoined is
-// stale and ignored.
+// stale and ignored. A group can't queue without them; one that is away
+// left on purpose, and keeps its host.
 export function disconnect(
 	lobby: Lobby,
 	userId: string,
@@ -460,19 +508,20 @@ export function disconnect(
 		return { lobby, out: [] }
 
 	const away: LobbyPlayer = { ...player, awaySince: now }
+	const grouped = memberDisconnected(lobby, userId)
 	const marked = {
-		...lobby,
-		players: lobby.players.map((p) => (p.id === userId ? away : p)),
+		...grouped.lobby,
+		players: grouped.lobby.players.map((p) => (p.id === userId ? away : p)),
 	}
-	const transferred = transferHostFrom(marked, userId)
-	const out: Outbound[] = [
+	const transferred = isParked(marked) ? { lobby: marked, out: [] } : transferHostFrom(marked, userId)
+	const out: Outbound[] = grouped.out.concat([
 		event(
 			transferred.lobby,
 			'player_disconnected',
 			{ playerId: userId, displayName: player.info.displayName },
 			othersThan(transferred.lobby, userId),
 		),
-	]
+	])
 	return closeIfAbandoned({
 		lobby: transferred.lobby,
 		out: out.concat(transferred.out),
@@ -501,7 +550,7 @@ function removeKicked(lobby: Lobby, targetId: string, data: { [key: string]: unk
 		allIds(lobby),
 	)
 	const marked = { ...lobby, kickedIds: lobby.kickedIds.concat([targetId]) }
-	const step = remove(marked, targetId, null)
+	const step = remove(marked, targetId, null, 'member_kicked')
 	return {
 		lobby: step.lobby,
 		out: [announced as Outbound].concat(step.out, [
@@ -603,16 +652,19 @@ export function tick(lobby: Lobby, now: number): Step {
 			: { lobby, out: [] }
 	}
 
-	let step: Step = { lobby, out: [] }
+	// An away group's members are in their public game, not timing out.
+	let step: Step = groupAwayCapped(lobby, now)
 	for (const p of lobby.players) {
 		if (step.lobby.closed) break
-		if (p.awaySince !== null && now - p.awaySince >= lobby.graceMs) {
+		const parked = isParked(step.lobby) && step.lobby.groupQueue!.memberIds.indexOf(p.id) !== -1
+		const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince
+		if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
 			const started = step.lobby.game.started
 			const forfeited: Outbound[] =
 				started && lobby.gameMode && started.players.some((q) => q.id === p.id)
 					? [{ kind: 'forfeited', userId: p.id, runId: started.runId, code: lobby.code, at: now }]
 					: []
-			const removed = remove(step.lobby, p.id, 'player_left')
+			const removed = remove(step.lobby, p.id, 'player_left', 'member_disconnected')
 			step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) }
 		}
 	}
