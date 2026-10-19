@@ -4630,7 +4630,13 @@ function rpcRunsMine(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
   const input = parsePayload(payload);
   const cursor = typeof input.cursor === "string" ? input.cursor : "";
-  const page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
+  let page;
+  try {
+    page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
   return JSON.stringify({
     runs: (page.objects || []).map((o) => o.value),
     cursor: page.cursor || ""
