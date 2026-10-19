@@ -4,7 +4,6 @@ import type {
 } from '../../contracts/IPlayerRepository.js'
 import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/history.gateway.js'
 import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
-import { isValidJoker } from '../../shared/constants/jokers.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 import { getConfig } from '../../state/config.js'
@@ -224,12 +223,9 @@ export function createAuthService(deps: AuthServiceDeps) {
 		return sessionAndToken(session)
 	}
 
+	// The route has Nakama validate the joker first (infrastructure/nakama/avatar-sync.ts).
 	async function setPreferredJoker(playerId: string, value: string) {
 		const session = await ensureSession(playerId)
-
-		if (!isValidJoker(value, session.privileges)) {
-			throw new AppError('Invalid joker ID', 400)
-		}
 
 		session.preferredJoker = value
 		await playerRepository.updatePreferredJoker(playerId, value)
