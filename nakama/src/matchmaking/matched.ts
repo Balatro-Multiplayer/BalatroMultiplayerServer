@@ -4,8 +4,16 @@
 import { generateCode, CODE_ATTEMPTS, MATCHMADE_CODE_LENGTH } from '../lobby/rpc'
 import { bindCode, releaseCode, reserveCode } from '../lobby/codes'
 import { LOBBY_MATCH } from '../lobby/protocol'
-import { refuseMatchedGroup } from './gate'
+import { refusedPlayers, requeueSolos } from './gate'
 import { GROUP_SIZE_PROPERTY, TEAMS_PROPERTY } from './group/refusal'
+import {
+	announceMatched,
+	cancelGroupFor,
+	requeueGroup,
+	requeuePartiesOf,
+	resolveGroups,
+	type ResolvedGroups,
+} from './group/matched'
 import { partitionTeams, type TeamPlan } from './group/teams'
 import { clearMatched } from './queue'
 
@@ -127,14 +135,23 @@ export function matchmakerMatched(
 	const plan = planMatch(matches)
 	if (typeof plan === 'string') {
 		logger.warn('Matchmaker group refused: %s', plan)
+		requeuePartiesOf(nk, partyIdsOf(matches))
 		throw new Error(plan)
 	}
-	if (refuseMatchedGroup(nk, logger, plan)) {
+	const refused = refusedPlayers(nk, plan)
+	const groups = resolveGroups(nk, plan)
+	if (refused.length > 0 || groups.faulty.length > 0) {
 		// The matchmaker spent every ticket of the group all the same, so their
 		// queue records go too; left, Find Game counted these players as queued
 		// until they reconnected. One still allowed to queue queues again,
 		// which writes a fresh record.
+		refuseMatch(nk, plan, refused, groups)
 		clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds)
+		logger.warn(
+			'Matched group refused: %d player(s) may not queue, %d group(s) not queueing',
+			refused.length,
+			groups.faulty.length,
+		)
 		throw new Error('A matched player may not queue')
 	}
 	for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
@@ -150,6 +167,8 @@ export function matchmakerMatched(
 				rankedMode: plan.rankedMode,
 				allowedIds: plan.playerIds.join(','),
 				gameMode: plan.gameMode,
+				groups: groups.homes.length > 0 ? JSON.stringify(groups.homes) : '',
+				teamPlan: plan.teamPlan ? JSON.stringify(plan.teamPlan) : '',
 			})
 		} catch (e) {
 			releaseCode(nk, code, '')
@@ -157,6 +176,7 @@ export function matchmakerMatched(
 		}
 		bindCode(nk, code, matchId, plan.modId)
 		clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds)
+		for (const home of groups.homes) announceMatched(nk, home, matchId, code)
 		logger.info(
 			'Matchmaker made lobby %s for %d players (%s%s)',
 			code,
@@ -167,4 +187,24 @@ export function matchmakerMatched(
 		return matchId
 	}
 	throw new Error('Could not allocate a lobby code')
+}
+
+function partyIdsOf(matches: MatchedEntry[]): string[] {
+	const ids: string[] = []
+	for (const m of matches) if (m.partyId && ids.indexOf(m.partyId) === -1) ids.push(m.partyId)
+	return ids
+}
+
+// Who is told what about a refused match: solo players allowed to queue queue
+// again; a group queues again unless one of its members was refused or it no
+// longer fits, in which case its home lets it go.
+function refuseMatch(nk: nkruntime.Nakama, plan: MatchPlan, refused: string[], groups: ResolvedGroups) {
+	requeueSolos(nk, plan, refused)
+	for (const home of groups.homes) {
+		if (home.memberIds.some((id) => refused.indexOf(id) !== -1)) cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused')
+		else requeueGroup(nk, home)
+	}
+	for (const fault of groups.faulty) {
+		if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, 'match_refused')
+	}
 }
