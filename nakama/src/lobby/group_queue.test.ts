@@ -110,14 +110,14 @@ describe('the queue phases', () => {
 	})
 
 	it('a member may cancel while forming or queued, not away; nobody else may', () => {
-		const cancelled = unwrap(cancelGroup(queued(home('a', 'b')), PARTY, 'host_cancelled', 'b'))
+		const cancelled = unwrap(cancelGroup(queued(home('a', 'b')), PARTY, 'cancelled', 'b'))
 		expect(cancelled.lobby.groupQueue).toBeNull()
 		expect(cancelled.out[0]).toEqual({ kind: 'groupUnbind', partyId: PARTY, memberIds: ['a', 'b'], gameMode: 'std' })
-		expect(groupOps(cancelled)[0]).toEqual({ phase: 'idle', partyId: PARTY, homeCode: 'HOME12', reason: 'host_cancelled', requeue: false })
+		expect(groupOps(cancelled)[0]).toEqual({ phase: 'idle', partyId: PARTY, homeCode: 'HOME12', reason: 'cancelled', requeue: false })
 		const refused = (r: ReturnType<typeof cancelGroup>) => (r.ok ? null : r.error.code)
-		expect(refused(cancelGroup(queued(home('a', 'b')), PARTY, 'host_cancelled', 'z'))).toBe('not_member')
+		expect(refused(cancelGroup(queued(home('a', 'b')), PARTY, 'cancelled', 'z'))).toBe('not_member')
 		expect(refused(cancelGroup(away(home('a', 'b')), PARTY, 'member_left_party', null))).toBe('group_away')
-		expect(refused(cancelGroup(home('a', 'b'), PARTY, 'host_cancelled', 'a'))).toBe('not_bound')
+		expect(refused(cancelGroup(home('a', 'b'), PARTY, 'cancelled', 'a'))).toBe('not_bound')
 	})
 })
 

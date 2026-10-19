@@ -84,6 +84,9 @@ declare namespace nkruntime {
 			includeHidden?: boolean,
 			includeNotHidden?: boolean,
 		): Presence[]
+		// Removes a presence from a stream. On a party's stream (mode 7) the
+		// member is out of the party (its tickets go) without being told.
+		streamUserKick(presence: { userId: string; sessionId: string; node: string }, stream: { mode: number; subject?: string; subcontext?: string; label?: string }): void
 		storageRead(reads: StorageReadRequest[]): StorageObject[]
 		storageWrite(writes: StorageWriteRequest[]): unknown
 		storageDelete(deletes: StorageReadRequest[]): void
@@ -342,9 +345,12 @@ declare namespace nkruntime {
 				ctx: Context,
 				logger: Logger,
 				nk: Nakama,
+				// Numeric ticket properties arrive merged into properties;
+				// partyId is set on a party ticket's members.
 				matches: {
 					presence: Presence
-					properties: { [key: string]: string }
+					properties: { [key: string]: string | number }
+					partyId?: string
 				}[],
 			) => string | void,
 		): void

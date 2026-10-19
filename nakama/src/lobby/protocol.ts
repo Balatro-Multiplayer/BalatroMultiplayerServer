@@ -308,7 +308,7 @@ export type GroupPhase = 'forming' | 'queued' | 'away'
 
 // Why a group queue ended or went back to forming.
 export type GroupEndReason =
-	| 'host_cancelled'
+	| 'cancelled'
 	| 'member_left'
 	| 'member_left_party'
 	| 'member_disconnected'

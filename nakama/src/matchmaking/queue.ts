@@ -192,6 +192,50 @@ export function clearMatched(
 	for (const userId of userIds) deleteRecords(nk, userId, [recordKey(modId, gameMode)])
 }
 
+// A group's party ticket (matchmaking/group/hooks.ts): one record per
+// member, under the session the member is in the party with, so Find Game
+// counts them as queued.
+export function writeGroupRecords(
+	nk: nkruntime.Nakama,
+	record: Omit<QueueRecord, 'sessionId'>,
+	members: { userId: string; sessionId: string }[],
+) {
+	if (members.length === 0) return
+	nk.storageWrite(
+		members.map((m) => ({
+			collection: QUEUE_COLLECTION,
+			key: recordKey(record.modId, record.gameMode),
+			userId: m.userId,
+			value: { ...record, sessionId: m.sessionId },
+			permissionRead: 0,
+			permissionWrite: 0,
+		})),
+	)
+}
+
+function sessionsOf(nk: nkruntime.Nakama, userId: string): string[] {
+	return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId)
+}
+
+// Which of userIds hold a live ticket (a fresh record whose session is still
+// connected) other than exceptTicket.
+export function liveTicketHolders(
+	nk: nkruntime.Nakama,
+	userIds: string[],
+	exceptTicket: string | null,
+	now: number,
+): string[] {
+	return userIds.filter((userId) => {
+		const records = ownRecords(nk, userId)
+			.filter(isRecord)
+			.map((o) => o.value as unknown as QueueRecord)
+			.filter((r) => r.ticket !== exceptTicket && now - r.at <= QUEUE_STALE_MS)
+		if (records.length === 0) return false
+		const sessions = sessionsOf(nk, userId)
+		return records.some((r) => sessions.indexOf(r.sessionId) !== -1)
+	})
+}
+
 // The mod's records whose session is still connected (Nakama keeps every
 // connected session on the user's notifications stream); the rest are
 // deleted.
@@ -214,9 +258,7 @@ export function liveRecords(nk: nkruntime.Nakama, modId: string, now: number): Q
 	} while (cursor)
 	const live: QueueRecord[] = []
 	for (const userId in byUser) {
-		const sessions = nk
-			.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true)
-			.map((p) => p.sessionId)
+		const sessions = sessionsOf(nk, userId)
 		const dead: string[] = []
 		for (const o of byUser[userId]) {
 			const record = o.value as unknown as QueueRecord

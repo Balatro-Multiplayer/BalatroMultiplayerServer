@@ -12,10 +12,16 @@ import {
 	ClientOp,
 	ServerOp,
 	type LobbySignal,
+	type MatchedGroup,
 	type PlayerInfo,
 	type PlayerLog,
 	type RunRecord,
 } from './protocol'
+import { readConfig } from '../config'
+import { deleteBinding, dissolveParty, signalHome, writeBinding } from '../matchmaking/group/binding'
+import { clearMatched } from '../matchmaking/queue'
+import { hasPlayerAnswer, releaseGroups } from './group_queue'
+import { answerGroupSignal, isGroupSignal } from './group_signals'
 import { action } from './relay'
 import {
 	DEFAULT_GRACE_MS,
@@ -138,6 +144,9 @@ function apply(
 		const finished = finishGame(step.lobby, Date.now())
 		step = { lobby: finished.lobby, out: step.out.concat(finished.out) }
 	}
+	// A matchmade lobby's groups go home once its first game is over.
+	const released = releaseGroups(state.lobby.game.started !== null, step.lobby)
+	step = { lobby: released.lobby, out: step.out.concat(released.out) }
 	const presences = { ...state.presences }
 	for (const effect of step.out) {
 		runEffect(ctx, logger, nk, dispatcher, step.lobby, presences, effect)
@@ -246,6 +255,36 @@ function runEffect(
 				logger.warn('Lobby %s: could not record %s timing out: %v', lobby.code, effect.userId, e)
 			}
 			return
+		case 'groupBind':
+			try {
+				writeBinding(nk, { partyId: effect.partyId, homeCode: lobby.code, modId: lobby.modId, memberIds: effect.memberIds })
+			} catch (e) {
+				logger.warn('Lobby %s: could not bind party %s: %v', lobby.code, effect.partyId, e)
+			}
+			return
+		case 'groupUnbind':
+			try {
+				deleteBinding(nk, effect.partyId, effect.memberIds)
+				clearMatched(nk, lobby.modId, effect.gameMode, effect.memberIds)
+				dissolveParty(nk, effect.partyId)
+			} catch (e) {
+				logger.warn('Lobby %s: could not unbind party %s: %v', lobby.code, effect.partyId, e)
+			}
+			return
+		case 'groupDissolve':
+			try {
+				dissolveParty(nk, effect.partyId)
+			} catch (e) {
+				logger.warn('Lobby %s: could not break up party %s: %v', lobby.code, effect.partyId, e)
+			}
+			return
+		case 'awayOver':
+			try {
+				signalHome(nk, effect.homeCode, { type: 'away_over', partyId: effect.partyId, code: lobby.code })
+			} catch (e) {
+				logger.warn('Lobby %s: could not send group %s home to %s: %v', lobby.code, effect.partyId, effect.homeCode, e)
+			}
+			return
 		case 'clearCurrent':
 			try {
 				clearCurrent(nk, ctx, effect.userId)
@@ -266,6 +305,32 @@ function stringParam(params: { [key: string]: unknown }, key: string): string {
 	return typeof value === 'string' ? value : ''
 }
 
+function jsonParam(params: { [key: string]: unknown }, key: string): unknown {
+	const raw = stringParam(params, key)
+	if (!raw) return null
+	try {
+		return JSON.parse(raw)
+	} catch (e) {
+		return null
+	}
+}
+
+// matchmakerMatched's groups param: [{partyId, homeCode, memberIds}].
+function groupsParam(params: { [key: string]: unknown }): MatchedGroup[] | undefined {
+	const value = jsonParam(params, 'groups')
+	if (!Array.isArray(value) || value.length === 0) return undefined
+	return value.filter(
+		(g) => g && typeof g.partyId === 'string' && typeof g.homeCode === 'string' && Array.isArray(g.memberIds),
+	)
+}
+
+// matchmakerMatched's teamPlan param: two arrays of player ids.
+function teamPlanParam(params: { [key: string]: unknown }): [string[], string[]] | null {
+	const value = jsonParam(params, 'teamPlan')
+	if (!Array.isArray(value) || value.length !== 2 || !value.every((t) => Array.isArray(t))) return null
+	return [value[0], value[1]]
+}
+
 export function lobbyMatchInit(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -284,6 +349,8 @@ export function lobbyMatchInit(
 			? stringParam(params, 'allowedIds').split(',')
 			: undefined,
 		gameMode: stringParam(params, 'gameMode') || undefined,
+		groups: groupsParam(params),
+		teamPlan: teamPlanParam(params),
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
 		resultTimeoutMs: secondsFromEnv(
@@ -348,7 +415,8 @@ function accountExists(nk: nkruntime.Nakama, userId: string): boolean {
 }
 
 // One lobby at a time: a player whose current-lobby record names another
-// live match they are still in must leave that one first.
+// live match they are still in must leave that one first -- unless that is
+// their home lobby, whose group is away here (it answers 'away').
 function otherLobbyOf(
 	nk: nkruntime.Nakama,
 	ctx: nkruntime.Context,
@@ -365,7 +433,7 @@ function otherLobbyOf(
 		!nk.matchGet(matchId)
 	)
 		return null
-	const signal: LobbySignal = { type: 'has_player', userId }
+	const signal: LobbySignal = { type: 'has_player', userId, forMatchId: ctx.matchId }
 	return nk.matchSignal(matchId, JSON.stringify(signal)) === 'yes'
 		? String(objects[0].value.code)
 		: null
@@ -631,8 +699,12 @@ export function lobbyMatchSignal(
 		return { state, data: 'bad_signal' }
 	}
 	if (signal.type === 'has_player') {
-		const member = state.lobby.players.some((p) => p.id === signal.userId)
-		return { state, data: member ? 'yes' : 'no' }
+		return { state, data: hasPlayerAnswer(state.lobby, signal.userId, signal.forMatchId) }
+	}
+	if (isGroupSignal(signal)) {
+		const answer = answerGroupSignal(state.lobby, signal, readConfig(nk), Date.now())
+		const next = apply(ctx, logger, nk, dispatcher, state, answer.step)
+		return { state: next || { ...state, lobby: { ...state.lobby, closed: true } }, data: answer.reply }
 	}
 	if (signal.type === 'get_active') {
 		return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) }
