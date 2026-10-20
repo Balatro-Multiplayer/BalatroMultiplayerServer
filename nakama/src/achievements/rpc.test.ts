@@ -5,7 +5,7 @@ import { A, B } from '../testing/achievement_fixtures'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from '../testing/fake_nk'
 import { emptyProgress } from './progress'
 import { editedProgress, rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './rpc'
-import { progressFor, writeProgress } from './storage'
+import { PROGRESS_COLLECTION, PROGRESS_KEY, progressFor, writeProgress } from './storage'
 
 const TESTING = { ALLOW_DEVICE_AUTH: 'true' }
 
@@ -95,5 +95,11 @@ describe('admin_progress_set', () => {
 		expect(() => editedProgress(p, { milestones: ['nope'] })).toThrow(/milestones/)
 		expect(() => editedProgress(p, { unlocked: ['j_nope'] })).toThrow(/unlocked/)
 		expect(() => rpcAdminProgressSet(serverCtx(TESTING), fakeLogger, stack() as any, JSON.stringify({ userId: 'x' }))).toThrow(/Invalid userId/)
+	})
+
+	it('refuses an unknown player and writes nothing', () => {
+		const nk = stack()
+		expect(() => rpcAdminProgressSet(serverCtx(TESTING), fakeLogger, nk as any, JSON.stringify({ userId: B, counters: { wins: 1 } }))).toThrow(/No such player/)
+		expect(nk.storageRead([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId: B }])).toEqual([])
 	})
 })

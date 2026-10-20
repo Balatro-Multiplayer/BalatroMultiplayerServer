@@ -137,6 +137,8 @@ export function rpcAdminProgressSet(ctx: nkruntime.Context, logger: nkruntime.Lo
 	const input = parsePayload(payload)
 	if (typeof input.userId !== 'string' || !USER_ID.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, 'Invalid userId')
 	const userId = input.userId
+	// Progress for an id with no player would be an orphan row.
+	if (!readProfile(nk, userId)) throw runtimeError(NOT_FOUND, 'No such player')
 	const { after } = updateProgress(nk, userId, (progress) => editedProgress(input.reset === true ? emptyProgress() : progress, input))
 	logger.info('Achievement progress of %s set for testing', userId)
 	return JSON.stringify({ progress: after })
