@@ -30,6 +30,9 @@ interface ConfigResponse {
   groupQueueEnabled: boolean
   lobbyCreationEnabled: boolean
   achievementsEnabled: boolean
+  queueModsEnforced: boolean
+  // The SMODS ids of every ranked-pinned mod (Ranked Mods page).
+  queueAllowedModIds: string[]
 }
 
 type FeatureFlag =
@@ -39,6 +42,7 @@ type FeatureFlag =
   | 'groupQueueEnabled'
   | 'lobbyCreationEnabled'
   | 'achievementsEnabled'
+  | 'queueModsEnforced'
 
 const FEATURE_FLAGS: { key: FeatureFlag; label: string; description: string }[] = [
   { key: 'chatEnabled', label: 'Text Chat', description: 'Lobby chat sends are rejected when off.' },
@@ -50,6 +54,12 @@ const FEATURE_FLAGS: { key: FeatureFlag; label: string; description: string }[] 
     key: 'achievementsEnabled',
     label: 'Avatar Achievements',
     description: 'Games count toward unlocking avatars. Turn on only after the avatar reset has run.',
+  },
+  {
+    key: 'queueModsEnforced',
+    label: 'Enforce Allowed Mods',
+    description:
+      "Matchmaking is refused to players running a mod that isn't ranked-pinned (Ranked Mods page) or in Nakama's baseline. Private lobbies are never checked.",
   },
 ]
 
@@ -283,6 +293,12 @@ export default function AdminConfigPage() {
                   />
                 </div>
               ))}
+              <div className='border-t border-border pt-3 text-sm text-muted-foreground'>
+                Allowed mod ids (from ranked pins):{' '}
+                <span className='font-mono'>
+                  {data.queueAllowedModIds.length > 0 ? data.queueAllowedModIds.join(', ') : 'none yet'}
+                </span>
+              </div>
               <div className='border-t border-border pt-3 text-sm text-muted-foreground'>
                 Testing mode: <span className='font-semibold'>{data.testingMode ? 'Yes' : 'No'}</span> (set via environment variable at deploy time — not editable here)
               </div>

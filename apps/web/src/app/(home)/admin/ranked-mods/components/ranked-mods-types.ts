@@ -21,6 +21,9 @@ export interface ModSummary {
   rankedDownloadUrl: string | null
   rankedSource: VersionSource | null
   rankedDownloadStatus: 'ok' | 'unavailable' | null
+  // The SMODS ids the pin's files declare (read at pin time, admin-editable):
+  // what a client running this mod reports, so what matchmaking allows.
+  smodsIds: string[]
   featured: boolean
   hidden: boolean
   thunderstoreFullName: string | null
@@ -31,8 +34,19 @@ export interface ModSummary {
 }
 
 export type ModPatch = Partial<
-  Pick<ModSummary, 'rankedVersion' | 'featured' | 'hidden' | 'trackGithub'>
+  Pick<
+    ModSummary,
+    'rankedVersion' | 'featured' | 'hidden' | 'trackGithub' | 'smodsIds'
+  >
 > & { rankedCommit?: string }
+
+// The comma-separated id list the SMODS ids editor takes.
+export function parseIdList(text: string): string[] {
+  return text
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+}
 
 // One entry of a mod's merged version list (GET /webadmin/mods/:id/versions),
 // Thunderstore versions first.

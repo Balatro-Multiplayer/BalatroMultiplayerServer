@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectContent,
@@ -21,11 +22,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { apiFetch } from '@/lib/api'
-import type {
-  ModPatch,
-  ModSummary,
-  ModVersion,
-  VersionSource,
+import {
+  type ModPatch,
+  type ModSummary,
+  type ModVersion,
+  parseIdList,
+  type VersionSource,
 } from './ranked-mods-types'
 
 // Radix Select items can't have an empty string value -- this sentinel
@@ -62,6 +64,77 @@ function PinDetails({ mod }: { mod: ModSummary }) {
       </a>
       {mod.rankedDownloadStatus === 'unavailable' && (
         <Badge variant='destructive'>Unavailable — re-pin</Badge>
+      )}
+    </p>
+  )
+}
+
+// What the pinned mod reports as in a client's mod list -- the entries it
+// adds to matchmaking's allowed mods. Read from the pin's files; an admin can
+// correct them (a re-pin reads them again).
+function SmodsIds({
+  mod,
+  editable,
+  onSave,
+}: {
+  mod: ModSummary
+  editable: boolean
+  onSave: (smodsIds: string[]) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  if (!mod.rankedVersion) return null
+  if (draft !== null) {
+    return (
+      <form
+        className='mt-1 flex items-center gap-1'
+        onSubmit={(e) => {
+          e.preventDefault()
+          onSave(parseIdList(draft))
+          setDraft(null)
+        }}
+      >
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder='ModId, OtherId'
+          className='h-7 w-44 font-mono text-xs'
+          autoFocus
+        />
+        <Button size='sm' type='submit' className='h-7'>
+          Save
+        </Button>
+        <Button
+          size='sm'
+          variant='ghost'
+          type='button'
+          className='h-7'
+          onClick={() => setDraft(null)}
+        >
+          Cancel
+        </Button>
+      </form>
+    )
+  }
+  return (
+    <p className='mt-1 flex flex-wrap items-center gap-1 text-muted-foreground text-xs'>
+      SMODS ids:
+      {mod.smodsIds.length > 0 ? (
+        mod.smodsIds.map((id) => (
+          <Badge key={id} variant='outline' className='font-mono'>
+            {id}
+          </Badge>
+        ))
+      ) : (
+        <Badge variant='destructive'>none read</Badge>
+      )}
+      {editable && (
+        <button
+          type='button'
+          className='underline underline-offset-2'
+          onClick={() => setDraft(mod.smodsIds.join(', '))}
+        >
+          edit
+        </button>
       )}
     </p>
   )
@@ -198,6 +271,11 @@ export function ModsTable({
                   }
                 />
                 <PinDetails mod={mod} />
+                <SmodsIds
+                  mod={mod}
+                  editable={!disabled}
+                  onSave={(smodsIds) => onUpdate(mod, { smodsIds })}
+                />
               </TableCell>
               <TableCell>
                 <Switch

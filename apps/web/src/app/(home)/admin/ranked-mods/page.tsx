@@ -42,7 +42,10 @@ import {
 // (the pre-existing launcher self-update channel, mod_versions/mod_releases)
 // -- this is a separate system (mod_registry). Ranked status is enforced by
 // the launcher (it hashes installed mods against the pinned hash) and
-// attested to the server at queue time, not checked by the server itself.
+// attested to the server at queue time. Separately, each pin's SMODS ids
+// (read from its files at pin time, editable here) make up the mod allowlist
+// Nakama checks a player's reported mods against before matchmaking, while
+// the admin config page's "Enforce Allowed Mods" switch is on.
 export default function RankedModsPage() {
   const { isAdmin, isModerator, pending } = useAuth()
   const router = useRouter()
@@ -176,6 +179,28 @@ export default function RankedModsPage() {
     onError: onErr,
   })
 
+  // Reads the SMODS ids of pins made before they were read at pin time
+  // (smods-ids-backfill.service.ts server-side) and pushes the allowlist.
+  const backfillMut = useMutation({
+    mutationFn: () =>
+      apiFetch<{
+        ok: true
+        read: number
+        failed: number
+        skipped: number
+        queueAllowedModIds: string[]
+      }>('/webadmin/mods/smods-ids/backfill', { method: 'POST' }),
+    onSuccess: (result) => {
+      const summary =
+        `Read SMODS ids for ${result.read} pins` +
+        (result.failed ? ` (${result.failed} failed -- see server logs)` : '')
+      if (result.failed) toast.error(summary)
+      else toast.success(summary)
+      qc.invalidateQueries({ queryKey: ['ranked-mods'] })
+    },
+    onError: onErr,
+  })
+
   if (pending || !canView) return null
 
   const unavailablePins =
@@ -215,6 +240,15 @@ export default function RankedModsPage() {
             <div className='flex gap-2'>
               <Button size='sm' variant='outline' onClick={openCreate}>
                 New custom mod
+              </Button>
+              <Button
+                size='sm'
+                variant='outline'
+                onClick={() => backfillMut.mutate()}
+                disabled={backfillMut.isPending}
+                title='Read the SMODS ids of pins that have none yet'
+              >
+                {backfillMut.isPending ? 'Reading…' : 'Read SMODS ids'}
               </Button>
               <Button
                 size='sm'
