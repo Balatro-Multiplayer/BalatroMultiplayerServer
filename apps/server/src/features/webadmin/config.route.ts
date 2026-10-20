@@ -20,7 +20,8 @@ import { getConfig } from '../../state/config.js'
 //
 // chatEnabled/rankedEnabled/casualQueueEnabled/lobbyCreationEnabled are now
 // DB-backed columns on server_config (migration 0036; achievementsEnabled
-// migration 0048, groupQueueEnabled migration 0050) and writable via
+// migration 0048, groupQueueEnabled migration 0050, queueModsEnforced
+// migration 0051) and writable via
 // PATCH /config/feature-flags below. testingMode remains env-var-only
 // (env.TESTING_MODE), surfaced read-only.
 const router = Router()
@@ -39,6 +40,8 @@ router.get('/config', async (_req, res, next) => {
 			groupQueueEnabled: config.groupQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
 			achievementsEnabled: config.achievementsEnabled,
+			queueModsEnforced: config.queueModsEnforced,
+			queueAllowedModIds: config.queueAllowedModIds,
 		})
 	} catch (err) {
 		next(err)
@@ -55,6 +58,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			groupQueueEnabled,
 			lobbyCreationEnabled,
 			achievementsEnabled,
+			queueModsEnforced,
 		} = req.body as {
 			chatEnabled?: unknown
 			rankedEnabled?: unknown
@@ -62,6 +66,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			groupQueueEnabled?: unknown
 			lobbyCreationEnabled?: unknown
 			achievementsEnabled?: unknown
+			queueModsEnforced?: unknown
 		}
 
 		const patch: Partial<{
@@ -71,6 +76,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			groupQueueEnabled: boolean
 			lobbyCreationEnabled: boolean
 			achievementsEnabled: boolean
+			queueModsEnforced: boolean
 		}> = {}
 		for (const [key, value] of Object.entries({
 			chatEnabled,
@@ -79,6 +85,7 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			groupQueueEnabled,
 			lobbyCreationEnabled,
 			achievementsEnabled,
+			queueModsEnforced,
 		})) {
 			if (value === undefined) continue
 			if (typeof value !== 'boolean') {
@@ -103,6 +110,8 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			groupQueueEnabled: config.groupQueueEnabled,
 			lobbyCreationEnabled: config.lobbyCreationEnabled,
 			achievementsEnabled: config.achievementsEnabled,
+			queueModsEnforced: config.queueModsEnforced,
+			queueAllowedModIds: config.queueAllowedModIds,
 		})
 	} catch (err) {
 		next(err)

@@ -1,6 +1,6 @@
-import { desc, isNull } from 'drizzle-orm'
+import { desc, isNotNull, isNull } from 'drizzle-orm'
 import { db } from '../db/index.js'
-import { serverConfig, modVersions, chatAllowlist, seasons } from '../db/schema.js'
+import { serverConfig, modVersions, chatAllowlist, seasons, modRegistry } from '../db/schema.js'
 import type { AppConfig } from '../../state/config.js'
 import { setConfig } from '../../state/config.js'
 import { env } from '../../env.js'
@@ -12,6 +12,16 @@ async function ratingSeason(): Promise<number | undefined> {
 	if (active) return active.id
 	const [latest] = await db.select({ id: seasons.id }).from(seasons).orderBy(desc(seasons.id)).limit(1)
 	return latest?.id
+}
+
+// The SMODS ids of every ranked-pinned mod: what Nakama lets a player
+// report and still queue (with its own baseline ids and extras).
+export async function pinnedSmodsIds(): Promise<string[]> {
+	const rows = await db
+		.select({ smodsIds: modRegistry.smodsIds })
+		.from(modRegistry)
+		.where(isNotNull(modRegistry.rankedVersion))
+	return [...new Set(rows.flatMap((row) => row.smodsIds))].sort()
 }
 
 export async function loadConfigFromDb(): Promise<AppConfig> {
@@ -46,6 +56,8 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 		groupQueueEnabled: configRow?.groupQueueEnabled ?? true,
 		lobbyCreationEnabled: configRow?.lobbyCreationEnabled ?? true,
 		achievementsEnabled: configRow?.achievementsEnabled ?? false,
+		queueModsEnforced: configRow?.queueModsEnforced ?? false,
+		queueAllowedModIds: await pinnedSmodsIds(),
 	}
 	setConfig(config)
 	// Every config load (boot, admin refresh, webadmin edits) reaches Nakama.

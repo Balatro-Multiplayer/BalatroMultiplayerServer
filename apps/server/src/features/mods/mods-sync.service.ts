@@ -12,10 +12,11 @@ import {
 	storeRankedPin,
 	writeModFromIndex,
 } from '../../infrastructure/gateways/mods.gateway.js'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { checkCustomModVersion } from './custom-mod-version-check.service.js'
 import { listGithubVersions } from './github-mod-versions.service.js'
 import { planModRowClaims } from './mod-registry-claims.js'
-import { computeModFolderHashForRelease } from './mod-version-hash.js'
+import { inspectModRelease } from './mod-version-hash.js'
 import { checkDownloadAvailable } from './ranked-pin-health.js'
 import {
 	type ModIndexEntryInput,
@@ -109,22 +110,22 @@ async function reconcileRankedPins(
 		try {
 			if (!pin.rankedDownloadUrl || !pin.rankedVersionSha256) {
 				const target = await resolvePinTarget(pin.id, pin.repoUrl, version)
-				const hash = target?.downloadUrl
-					? await computeModFolderHashForRelease(
+				const inspected = target?.downloadUrl
+					? await inspectModRelease(
 							pin.id,
 							target.version,
 							target.downloadUrl,
 							target.source,
 						)
 					: null
-				if (target?.downloadUrl && hash) {
+				if (target?.downloadUrl && inspected) {
 					await storeRankedPin(
 						pin.id,
 						{
 							version: target.version,
 							downloadUrl: target.downloadUrl,
 							source: target.source,
-							hash,
+							...inspected,
 						},
 						version,
 					)
@@ -205,6 +206,9 @@ async function runSync(): Promise<ModRegistrySyncSummary> {
 	const pruned = await pruneModsNotIn(entries.map((e) => e.fullName))
 	const githubTrackedMods = await syncGithubVersions()
 	const pins = await reconcileRankedPins(entries)
+	// A newly inspected pin brings its SMODS ids and a pruned row takes its
+	// own away: either changes the matchmaking allowlist Nakama holds.
+	if (pins.hashed || pruned) await loadConfigFromDb()
 
 	console.log(
 		`[mods-sync] Synced ${entries.length} mods from thunderstore` +

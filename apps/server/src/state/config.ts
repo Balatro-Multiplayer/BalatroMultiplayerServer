@@ -32,6 +32,12 @@ export interface AppConfig {
 	// DB-backed (server_config.achievements_enabled). When falsy, Nakama
 	// counts no games toward avatar achievements; locked avatars stay locked.
 	achievementsEnabled: boolean
+	// DB-backed (server_config.queue_mods_enforced). When truthy, Nakama
+	// refuses matchmaking to a player reporting mods outside the allowlist.
+	queueModsEnforced: boolean
+	// The SMODS ids of every ranked-pinned mod (mod_registry.smods_ids), the
+	// allowlist pushed to Nakama as queueAllowedModIds.
+	queueAllowedModIds: string[]
 	// The rating season (seasons table): the active one, else the latest.
 	// Pushed to Nakama, which rates games into it. Unset: no seasons yet.
 	season?: number
@@ -48,6 +54,8 @@ let _config: AppConfig = {
 	groupQueueEnabled: true,
 	lobbyCreationEnabled: true,
 	achievementsEnabled: false,
+	queueModsEnforced: false,
+	queueAllowedModIds: [],
 }
 
 export function getConfig(): AppConfig {

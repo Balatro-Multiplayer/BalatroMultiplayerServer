@@ -139,6 +139,12 @@ export const serverConfig = pgTable('server_config', {
 	achievementsEnabled: boolean('achievements_enabled')
 		.notNull()
 		.default(false),
+	// Nakama refuses matchmaking to a player whose reported SMODS mods aren't
+	// all allowed (modRegistry.smodsIds of pinned mods, plus Nakama's own
+	// baseline and extras). Off: everyone is valid (migration 0051).
+	queueModsEnforced: boolean('queue_mods_enforced')
+		.notNull()
+		.default(false),
 	updatedAt: timestamp('updated_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),
@@ -760,6 +766,11 @@ export const modRegistry = pgTable('mod_registry', {
 	// rankedDownloadStatus).
 	rankedVersion: varchar('ranked_version', { length: 64 }),
 	rankedVersionSha256: varchar('ranked_version_sha256', { length: 64 }),
+	// The SMODS mod ids the pin's files declare (mod-smods-ids.ts), read when
+	// an admin pins and overridable by one; what a client reports this mod
+	// as. A pinned mod's ids are allowed in matchmaking (queueAllowedModIds).
+	// Empty for an unpinned mod, or a pin no id could be read from.
+	smodsIds: text('smods_ids').array().notNull().default(sql`'{}'::text[]`),
 	// The pin's permanent download: resolved once when an admin pins
 	// (a Thunderstore version URL, a GitHub release asset on a fixed tag, or a
 	// codeload tag/commit archive), hashed with rankedSource's layout, and

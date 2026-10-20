@@ -31,7 +31,7 @@ import {
 } from '../../features/mods/mod-version-aliases.js'
 import {
 	type ModLayout,
-	computeModFolderHashForRelease,
+	inspectModRelease,
 } from '../../features/mods/mod-version-hash.js'
 import type { ModIndexEntryInput } from '../../features/mods/thunderstore-mod-index.service.js'
 import { db } from '../db/index.js'
@@ -66,11 +66,13 @@ function sourceTypeOf(row: ModRow) {
 
 // The ranked pin, as served to the launcher: which version, the permanent URL
 // to download it from, the layout to deploy it with, the hash of the result,
-// and whether that download still works (see new-launcher
-// THUNDERSTORE_MIGRATION_PLAN.md section 3).
+// whether that download still works (see new-launcher
+// THUNDERSTORE_MIGRATION_PLAN.md section 3), and the SMODS ids it reports as
+// (the matchmaking allowlist's entries for it).
 function rankedFields(row: ModRow) {
 	return {
 		rankedVersion: row.rankedVersion,
+		smodsIds: row.smodsIds,
 		rankedVersionSha256: row.rankedVersionSha256,
 		rankedDownloadUrl: row.rankedDownloadUrl,
 		rankedSource: row.rankedSource,
@@ -466,6 +468,7 @@ export async function listRankedPins() {
 			rankedDownloadUrl: modRegistry.rankedDownloadUrl,
 			rankedSource: modRegistry.rankedSource,
 			rankedDownloadStatus: modRegistry.rankedDownloadStatus,
+			smodsIds: modRegistry.smodsIds,
 		})
 		.from(modRegistry)
 		.where(isNotNull(modRegistry.rankedVersion))
@@ -500,9 +503,10 @@ export async function resolvePinTarget(
 	return { version: row.version, source, downloadUrl }
 }
 
-// Stores a resolved + hashed pin. With expectedVersion set (the sync) it only
-// writes if the pin is still that version, so an admin re-pin that lands
-// mid-sync is never overwritten.
+// Stores a resolved + inspected pin, replacing its SMODS ids with the ones
+// read from it. With expectedVersion set (the sync) it only writes if the pin
+// is still that version, so an admin re-pin that lands mid-sync is never
+// overwritten.
 export async function storeRankedPin(
 	modId: string,
 	pin: {
@@ -510,6 +514,7 @@ export async function storeRankedPin(
 		downloadUrl: string
 		source: ModLayout
 		hash: string
+		smodsIds: string[]
 	},
 	expectedVersion?: string,
 ): Promise<void> {
@@ -518,6 +523,7 @@ export async function storeRankedPin(
 		.set({
 			rankedVersion: pin.version,
 			rankedVersionSha256: pin.hash,
+			smodsIds: pin.smodsIds,
 			rankedDownloadUrl: pin.downloadUrl,
 			rankedSource: pin.source,
 			rankedDownloadStatus: 'ok',
@@ -532,6 +538,45 @@ export async function storeRankedPin(
 						eq(modRegistry.rankedVersion, expectedVersion),
 					),
 		)
+}
+
+// A pin's SMODS ids, read again from its files (the backfill). Only writes
+// if the pin is still that version, like storeRankedPin with expectedVersion.
+export async function storePinSmodsIds(
+	modId: string,
+	version: string,
+	smodsIds: string[],
+): Promise<void> {
+	await db
+		.update(modRegistry)
+		.set({ smodsIds, updatedAt: new Date() })
+		.where(
+			and(eq(modRegistry.id, modId), eq(modRegistry.rankedVersion, version)),
+		)
+}
+
+export type SetSmodsIdsResult =
+	| { ok: true }
+	| { ok: false; reason: 'not-found' }
+	// Only a pinned mod's ids are allowed in matchmaking, and a pin replaces
+	// them with what it reads, so an unpinned mod has none to override.
+	| { ok: false; reason: 'not-pinned' }
+
+// An admin's override of what a pinned mod reports as (mod-smods-ids.ts's
+// parseSmodsIdsOverride has already validated them). The next pin replaces
+// it with the ids read from that version.
+export async function setSmodsIds(
+	modId: string,
+	smodsIds: string[],
+): Promise<SetSmodsIdsResult> {
+	const existing = await findModByIdOrFullName(modId)
+	if (!existing) return { ok: false, reason: 'not-found' }
+	if (existing.rankedVersion === null) return { ok: false, reason: 'not-pinned' }
+	await db
+		.update(modRegistry)
+		.set({ smodsIds, updatedAt: new Date() })
+		.where(eq(modRegistry.id, existing.id))
+	return { ok: true }
 }
 
 // The sync's health flag. Never touches the pin itself.
@@ -577,6 +622,7 @@ export async function setRankedVersion(
 			.set({
 				rankedVersion: null,
 				rankedVersionSha256: null,
+				smodsIds: [],
 				rankedDownloadUrl: null,
 				rankedSource: null,
 				rankedDownloadStatus: null,
@@ -595,19 +641,19 @@ export async function setRankedVersion(
 	if (!target) return { ok: false, reason: 'version-not-found' }
 	if (!target.downloadUrl) return { ok: false, reason: 'download-unresolvable' }
 
-	const hash = await computeModFolderHashForRelease(
+	const inspected = await inspectModRelease(
 		existing.id,
 		target.version,
 		target.downloadUrl,
 		target.source,
 	)
-	if (!hash) return { ok: false, reason: 'hash-failed' }
+	if (!inspected) return { ok: false, reason: 'hash-failed' }
 
 	await storeRankedPin(existing.id, {
 		version: target.version,
 		downloadUrl: target.downloadUrl,
 		source: target.source,
-		hash,
+		...inspected,
 	})
 	return { ok: true }
 }

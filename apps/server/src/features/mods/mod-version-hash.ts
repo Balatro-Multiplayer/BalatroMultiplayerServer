@@ -4,6 +4,7 @@ import path from 'node:path'
 import AdmZip from 'adm-zip'
 import { relocateModRoot } from './mod-archive-flatten.js'
 import { computeModFolderHash } from './mod-folder-hash.js'
+import { readSmodsIds } from './mod-smods-ids.js'
 
 const HASH_FETCH_TIMEOUT_MS = 30_000
 
@@ -31,18 +32,26 @@ function extractedFolderName(version: string): string {
 	return `${sanitized || '_default'}_extracted`
 }
 
+// What a pin records about the folder it deploys as.
+export interface ReleaseInspection {
+	hash: string
+	// The SMODS ids its files declare (mod-smods-ids.ts); [] when none.
+	smodsIds: string[]
+}
+
 // Reproduces exactly what the launcher deploys into a player's Mods folder:
 // downloads the archive, extracts it, lays it out per `layout`, then hashes
 // the resulting folder (computeModFolderHash(), a port of the launcher's
-// ModFileHash::hashDirectory()). Called when an admin pins a version and by
-// the sync for a pin that has no hash yet -- only ranked pins are hashed.
+// ModFileHash::hashDirectory()) and reads the SMODS ids it declares. Called
+// when an admin pins a version and by the sync for a pin that has no hash
+// yet -- only ranked pins are inspected.
 // Best-effort: a dead URL or unreadable archive logs and returns null.
-export async function computeModFolderHashForRelease(
+export async function inspectModRelease(
 	modId: string,
 	version: string,
 	downloadUrl: string,
 	layout: ModLayout,
-): Promise<string | null> {
+): Promise<ReleaseInspection | null> {
 	let tmpRoot: string | null = null
 	try {
 		const res = await fetch(downloadUrl, {
@@ -63,7 +72,10 @@ export async function computeModFolderHashForRelease(
 		new AdmZip(rawBytes).extractAllTo(extractedDir, true)
 		await applyLayout(extractedDir, layout)
 
-		return await computeModFolderHash(extractedDir)
+		return {
+			hash: await computeModFolderHash(extractedDir),
+			smodsIds: await readSmodsIds(extractedDir),
+		}
 	} catch (err) {
 		console.error(`[mod-version-hash] Failed to hash ${modId}@${version}:`, err)
 		return null

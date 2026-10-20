@@ -44,6 +44,8 @@ describe('GET /api/webadmin/config', () => {
 			groupQueueEnabled: false,
 			lobbyCreationEnabled: true,
 			achievementsEnabled: true,
+			queueModsEnforced: true,
+			queueAllowedModIds: ['MultiplayerPvP'],
 		})
 
 		const token = authAsModerator('mod-cfg-1', 'Mod')
@@ -62,6 +64,8 @@ describe('GET /api/webadmin/config', () => {
 		expect(res.body.groupQueueEnabled).toBe(false)
 		expect(res.body.lobbyCreationEnabled).toBe(true)
 		expect(res.body.achievementsEnabled).toBe(true)
+		expect(res.body.queueModsEnforced).toBe(true)
+		expect(res.body.queueAllowedModIds).toEqual(['MultiplayerPvP'])
 
 		setConfig(original)
 	})
@@ -285,5 +289,21 @@ describe('POST/DELETE /api/webadmin/config/chat-allowlist', () => {
 			.set('Authorization', token)
 
 		expect(res.status).toBe(403)
+	})
+
+	it('switches mod enforcement for an admin', async () => {
+		const token = authAsAdmin('admin-cfg-flags-5', 'AdminFlags5')
+		const setMock = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) })
+		;(db as any).update = vi.fn().mockReturnValue({ set: setMock })
+		vi.mocked(configGateway.loadConfigFromDb).mockResolvedValue({ queueModsEnforced: true } as any)
+
+		const res = await request(app)
+			.patch('/api/webadmin/config/feature-flags')
+			.set('Authorization', token)
+			.send({ queueModsEnforced: true })
+
+		expect(res.status).toBe(200)
+		expect(res.body.queueModsEnforced).toBe(true)
+		expect(setMock.mock.calls[0][0]).toMatchObject({ queueModsEnforced: true })
 	})
 })

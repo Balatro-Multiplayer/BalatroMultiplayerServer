@@ -136,6 +136,7 @@ function modRow(overrides: Record<string, unknown> = {}) {
 			'https://thunderstore.io/package/download/BalatroMultiplayer/MultiplayerAPI/0.1.2/',
 		rankedVersion: '0.1.2',
 		rankedVersionSha256: 'a'.repeat(64),
+		smodsIds: ['MultiplayerAPI'],
 		rankedDownloadUrl:
 			'https://thunderstore.io/package/download/BalatroMultiplayer/MultiplayerAPI/0.1.2/',
 		rankedSource: 'thunderstore',
@@ -200,6 +201,7 @@ describe('mods routes', () => {
 					'https://thunderstore.io/package/download/BalatroMultiplayer/MultiplayerAPI/0.1.2/',
 				rankedSource: 'thunderstore',
 				rankedDownloadStatus: 'ok',
+				smodsIds: ['MultiplayerAPI'],
 				trackGithub: false,
 			})
 		})

@@ -358,6 +358,13 @@
       "when": 1792600000000,
       "tag": "0050_group_queue_enabled",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792700000000,
+      "tag": "0051_smods_ids_queue_mods_enforced",
+      "breakpoints": true
     }
   ]
 }

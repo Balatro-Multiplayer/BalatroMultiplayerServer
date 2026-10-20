@@ -22,14 +22,24 @@ vi.mock('../../infrastructure/gateways/mods.gateway.js', async () => {
 		findModByIdOrFullName: vi.fn(),
 		setModFlags: vi.fn(),
 		setRankedVersion: vi.fn(),
+		setSmodsIds: vi.fn(),
 	}
 })
+
+vi.mock('../../infrastructure/gateways/config.gateway.js', () => ({
+	loadConfigFromDb: vi.fn().mockResolvedValue({ queueAllowedModIds: ['AuthorMod'] }),
+}))
+vi.mock('../../features/mods/smods-ids-backfill.service.js', () => ({
+	backfillSmodsIds: vi.fn(),
+}))
 
 vi.mock('../../features/mods/custom-mod-version-check.service.js', () => ({
 	resolveSourceInput: vi.fn(),
 }))
 
 import { resolveSourceInput } from '../../features/mods/custom-mod-version-check.service.js'
+import { backfillSmodsIds } from '../../features/mods/smods-ids-backfill.service.js'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 
 const app = createTestApp()
 
@@ -522,4 +532,60 @@ describe('custom mod admin routes', () => {
 			expect(res.status).toBe(400)
 		},
 	)
+})
+
+describe('SMODS ids', () => {
+	it('pushes the allowlist again after a pin', async () => {
+		vi.mocked(loadConfigFromDb).mockClear()
+		vi.mocked(modsGateway.setRankedVersion).mockResolvedValue({ ok: true })
+		const token = authAsAdmin('admin-smods-1', 'Admin')
+		await request(app).put('/api/webadmin/mods/Author-Mod').set('Authorization', token).send({ rankedVersion: '1.0.0' })
+		expect(loadConfigFromDb).toHaveBeenCalledTimes(1)
+	})
+
+	it('does not push for a featured/hidden change', async () => {
+		vi.mocked(loadConfigFromDb).mockClear()
+		const token = authAsAdmin('admin-smods-2', 'Admin')
+		await request(app).put('/api/webadmin/mods/Author-Mod').set('Authorization', token).send({ featured: true })
+		expect(loadConfigFromDb).not.toHaveBeenCalled()
+	})
+
+	it("overrides a pinned mod's ids, cleaned up, and pushes", async () => {
+		vi.mocked(loadConfigFromDb).mockClear()
+		vi.mocked(modsGateway.setSmodsIds).mockResolvedValue({ ok: true })
+		const token = authAsAdmin('admin-smods-3', 'Admin')
+		const res = await request(app)
+			.put('/api/webadmin/mods/Author-Mod')
+			.set('Authorization', token)
+			.send({ smodsIds: [' Bravo', 'Alpha', 'Bravo'] })
+		expect(res.status).toBe(200)
+		expect(modsGateway.setSmodsIds).toHaveBeenCalledWith('Author@Mod', ['Alpha', 'Bravo'])
+		expect(loadConfigFromDb).toHaveBeenCalledTimes(1)
+	})
+
+	it('refuses ids that are not ids, and an unpinned mod', async () => {
+		const token = authAsAdmin('admin-smods-4', 'Admin')
+		const bad = await request(app)
+			.put('/api/webadmin/mods/Author-Mod')
+			.set('Authorization', token)
+			.send({ smodsIds: ['two words'] })
+		expect(bad.status).toBe(400)
+		vi.mocked(modsGateway.setSmodsIds).mockResolvedValue({ ok: false, reason: 'not-pinned' })
+		const unpinned = await request(app)
+			.put('/api/webadmin/mods/Author-Mod')
+			.set('Authorization', token)
+			.send({ smodsIds: ['Alpha'] })
+		expect(unpinned.status).toBe(400)
+		expect(unpinned.body.error ?? unpinned.text).toMatch(/pinned/)
+	})
+
+	it('backfills for an admin only and reports the new allowlist', async () => {
+		vi.mocked(backfillSmodsIds).mockResolvedValue({ read: 2, failed: 0, skipped: 1 })
+		const moderator = authAsModerator('mod-smods-5', 'Mod')
+		expect((await request(app).post('/api/webadmin/mods/smods-ids/backfill').set('Authorization', moderator)).status).toBe(403)
+		const admin = authAsAdmin('admin-smods-5', 'Admin')
+		const res = await request(app).post('/api/webadmin/mods/smods-ids/backfill').set('Authorization', admin)
+		expect(res.status).toBe(200)
+		expect(res.body).toEqual({ ok: true, read: 2, failed: 0, skipped: 1, queueAllowedModIds: ['AuthorMod'] })
+	})
 })

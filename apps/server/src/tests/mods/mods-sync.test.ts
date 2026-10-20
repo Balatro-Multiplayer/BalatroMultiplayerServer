@@ -14,6 +14,9 @@ vi.mock('../../infrastructure/gateways/mods.gateway.js', () => ({
 	storeRankedPin: vi.fn(),
 	writeModFromIndex: vi.fn(),
 }))
+vi.mock('../../infrastructure/gateways/config.gateway.js', () => ({
+	loadConfigFromDb: vi.fn(),
+}))
 vi.mock('../../features/mods/thunderstore-mod-index.service.js', () => ({
 	fetchThunderstoreModIndex: vi.fn(),
 }))
@@ -24,7 +27,7 @@ vi.mock('../../features/mods/github-mod-versions.service.js', () => ({
 	listGithubVersions: vi.fn(),
 }))
 vi.mock('../../features/mods/mod-version-hash.js', () => ({
-	computeModFolderHashForRelease: vi.fn(),
+	inspectModRelease: vi.fn(),
 }))
 vi.mock('../../features/mods/ranked-pin-health.js', () => ({
 	checkDownloadAvailable: vi.fn(),
@@ -32,7 +35,8 @@ vi.mock('../../features/mods/ranked-pin-health.js', () => ({
 
 import { checkCustomModVersion } from '../../features/mods/custom-mod-version-check.service.js'
 import { listGithubVersions } from '../../features/mods/github-mod-versions.service.js'
-import { computeModFolderHashForRelease } from '../../features/mods/mod-version-hash.js'
+import { inspectModRelease } from '../../features/mods/mod-version-hash.js'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { syncModRegistry } from '../../features/mods/mods-sync.service.js'
 import { checkDownloadAvailable } from '../../features/mods/ranked-pin-health.js'
 import { fetchThunderstoreModIndex } from '../../features/mods/thunderstore-mod-index.service.js'
@@ -230,13 +234,14 @@ describe('syncModRegistry', () => {
 				source: 'thunderstore',
 				downloadUrl: 'https://ts/Alice-Mod/2.0.0/',
 			})
-			vi.mocked(computeModFolderHashForRelease).mockResolvedValue(
-				'c'.repeat(64),
-			)
+			vi.mocked(inspectModRelease).mockResolvedValue({
+				hash: 'c'.repeat(64),
+				smodsIds: ['AliceMod'],
+			})
 
 			const summary = await syncModRegistry()
 
-			expect(computeModFolderHashForRelease).toHaveBeenCalledWith(
+			expect(inspectModRelease).toHaveBeenCalledWith(
 				'Alice-Mod',
 				'2.0.0',
 				'https://ts/Alice-Mod/2.0.0/',
@@ -249,10 +254,12 @@ describe('syncModRegistry', () => {
 					downloadUrl: 'https://ts/Alice-Mod/2.0.0/',
 					source: 'thunderstore',
 					hash: 'c'.repeat(64),
+					smodsIds: ['AliceMod'],
 				},
 				'2.0.0',
 			)
 			expect(summary.pinsHashed).toBe(1)
+			expect(loadConfigFromDb).toHaveBeenCalled()
 		})
 
 		it('flags (not clears) a carried-over pin whose hash fails, for the next sync to retry', async () => {
@@ -264,7 +271,7 @@ describe('syncModRegistry', () => {
 				source: 'thunderstore',
 				downloadUrl: 'https://ts/Alice-Mod/2.0.0/',
 			})
-			vi.mocked(computeModFolderHashForRelease).mockResolvedValue(null)
+			vi.mocked(inspectModRelease).mockResolvedValue(null)
 
 			const summary = await syncModRegistry()
 
@@ -285,7 +292,7 @@ describe('syncModRegistry', () => {
 
 			await syncModRegistry()
 
-			expect(computeModFolderHashForRelease).not.toHaveBeenCalled()
+			expect(inspectModRelease).not.toHaveBeenCalled()
 			expect(gateway.setRankedPinStatus).toHaveBeenCalledWith(
 				'Alice-Mod',
 				'1.0.0-beta-1620a',

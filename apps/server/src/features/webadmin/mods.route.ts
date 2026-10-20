@@ -10,9 +10,11 @@ import {
 	pinCommit,
 	setModFlags,
 	setRankedVersion,
+	setSmodsIds,
 	setTrackGithub,
 	updateCustomMod,
 } from '../../infrastructure/gateways/mods.gateway.js'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import {
@@ -20,7 +22,9 @@ import {
 	type SourceInput,
 	resolveSourceInput,
 } from '../mods/custom-mod-version-check.service.js'
+import { parseSmodsIdsOverride } from '../mods/mod-smods-ids.js'
 import { syncModRegistry } from '../mods/mods-sync.service.js'
+import { backfillSmodsIds } from '../mods/smods-ids-backfill.service.js'
 
 // Ranked mod catalog admin surface: sync Thunderstore-sourced mods on demand,
 // manage the admin-owned fields -- the ranked pin (see schema.ts's own doc
@@ -47,6 +51,20 @@ async function requireAdmin(req: import('express').Request) {
 router.get('/mods', async (_req, res, next) => {
 	try {
 		res.json(await listPublicMods({ includeHidden: true }))
+	} catch (err) {
+		next(err)
+	}
+})
+
+// Reads the SMODS ids of every pin that has none (pinned before migration
+// 0051) from its download -- see smods-ids-backfill.service.ts -- and pushes
+// the resulting matchmaking allowlist to Nakama.
+router.post('/mods/smods-ids/backfill', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const summary = await backfillSmodsIds()
+		const config = await loadConfigFromDb()
+		res.json({ ok: true, ...summary, queueAllowedModIds: config.queueAllowedModIds })
 	} catch (err) {
 		next(err)
 	}
@@ -116,8 +134,11 @@ function throwPinError(result: Exclude<PinCommitResult, { ok: true }>): never {
 //  - rankedCommit: pins a GitHub commit by SHA (recorded as a version first).
 //  - trackGithub: Thunderstore mods only -- also list the repo's GitHub
 //    releases/tags as versions (applied on the next sync).
-// A pin is resolved to a permanent URL and hashed before it's stored -- see
-// mods.gateway.ts's setRankedVersion.
+//  - smodsIds: overrides the SMODS ids a pinned mod reports as (applied
+//    after a pin in the same request; a later pin replaces them).
+// A pin is resolved to a permanent URL, hashed and its SMODS ids read before
+// it's stored -- see mods.gateway.ts's setRankedVersion. A change to a pin or
+// its ids changes the matchmaking allowlist, so the config is pushed again.
 router.put('/mods/:modId', async (req, res, next) => {
 	try {
 		await requireAdmin(req)
@@ -127,8 +148,17 @@ router.put('/mods/:modId', async (req, res, next) => {
 			featured?: unknown
 			hidden?: unknown
 			trackGithub?: unknown
+			smodsIds?: unknown
 		}
 		const { rankedVersion, rankedCommit, featured, hidden, trackGithub } = body
+		const smodsIds =
+			body.smodsIds === undefined ? undefined : parseSmodsIdsOverride(body.smodsIds)
+		if (smodsIds === null) {
+			throw new AppError(
+				'smodsIds must be a list of SMODS mod ids (no spaces, at most 128 characters each)',
+				400,
+			)
+		}
 		if (
 			'rankedVersion' in body &&
 			rankedVersion !== null &&
@@ -171,6 +201,16 @@ router.put('/mods/:modId', async (req, res, next) => {
 					? await pinCommit(mod.id, rankedCommit.trim())
 					: await setRankedVersion(mod.id, rankedVersion as string | null)
 			if (!result.ok) throwPinError(result)
+		}
+		if (smodsIds !== undefined) {
+			const result = await setSmodsIds(mod.id, smodsIds)
+			if (!result.ok && result.reason === 'not-found') throw new AppError('Mod not found', 404)
+			if (!result.ok) {
+				throw new AppError("Only a pinned mod's SMODS ids can be set -- pin a version first", 400)
+			}
+		}
+		if ('rankedVersion' in body || rankedCommit !== undefined || smodsIds !== undefined) {
+			await loadConfigFromDb()
 		}
 		res.json({ ok: true })
 	} catch (err) {
