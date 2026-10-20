@@ -3,7 +3,12 @@ import { DEFAULT_CONFIG, writeConfig } from '../config'
 import { writeBans } from '../moderation/bans'
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
-import { beforeMatchmakerAdd, refuseMatchedGroup } from './gate'
+import { verdictRecord, writeIntegrity } from '../integrity'
+import { writeModReport } from '../standing/storage'
+import { beforeMatchmakerAdd, queueRefusalFor, refuseMatchedGroup } from './gate'
+
+const ENFORCED = { ...DEFAULT_CONFIG, queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'] }
+const report = (nk: any, userId: string, mods: string[]) => writeModReport(nk, userId, { mods, reportedAt: 0 })
 
 const ADD = (kind: string) => ({ matchmakerAdd: { stringProperties: { modId: 'M', mode: 'standard', kind } } })
 
@@ -27,6 +32,7 @@ const plan = (playerIds: string[], rankedMode = '') => ({
 	playerIds,
 	groups: [],
 	teamPlan: null,
+	requiredStanding: 'valid' as const,
 })
 
 describe('refuseMatchedGroup', () => {
@@ -42,5 +48,59 @@ describe('refuseMatchedGroup', () => {
 			['c', NotifyCode.QUEUE_CANCELLED],
 		])
 		expect(nk.notifications[0].content).toMatchObject({ modId: 'M', mode: 'std', requeue: true })
+	})
+})
+
+describe('the standing gate', () => {
+	it('lets everyone through while queueModsEnforced is off', () => {
+		const nk = fakeNk()
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toBeNull()
+		report(nk, 'u', ['Talisman-2.0'])
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toBeNull()
+	})
+	it('refuses casual without a report, or with a mod that is not allowed, naming it', () => {
+		const nk = fakeNk()
+		writeConfig(nk as any, ENFORCED)
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toEqual({ code: 'mods_unreported' })
+		report(nk, 'u', ['Steamodded-1.0.0~BETA-1814a', 'Lovely-0.9.0', 'MultiplayerAPI-0.1.2', 'Talisman-2.0'])
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toEqual({ code: 'mods_not_allowed', mods: ['Talisman'] })
+		expect(() => beforeMatchmakerAdd(playerCtx('u'), fakeLogger, nk as any, ADD('casual'))).toThrow(
+			"These mods aren't allowed in matchmaking: Talisman",
+		)
+		writeConfig(nk as any, { ...ENFORCED, queueAllowedModIdsExtra: ['Talisman'] })
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toBeNull()
+	})
+	it('keeps ranked behind the launcher, and a verdict skips the mod check', () => {
+		const nk = fakeNk()
+		writeConfig(nk as any, { ...ENFORCED, integrityEnforced: true })
+		report(nk, 'u', ['MultiplayerAPI-0.1.2'])
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toBeNull()
+		expect(queueRefusalFor(nk as any, 'u', true, 0)).toEqual({ code: 'integrity_required' })
+		report(nk, 'u', ['Talisman-2.0'])
+		writeIntegrity(nk as any, 'u', verdictRecord(true, true, 0))
+		expect(queueRefusalFor(nk as any, 'u', true, 0)).toBeNull()
+		expect(queueRefusalFor(nk as any, 'u', false, 0)).toBeNull()
+	})
+	it('applies the mod check to ranked while integrity is not enforced', () => {
+		const nk = fakeNk()
+		writeConfig(nk as any, ENFORCED)
+		report(nk, 'u', ['Talisman-2.0'])
+		expect(queueRefusalFor(nk as any, 'u', true, 0)).toEqual({ code: 'mods_not_allowed', mods: ['Talisman'] })
+	})
+	it('tells a matched solo refused over their mods why, and requeues the rest', () => {
+		const nk = fakeNk()
+		writeConfig(nk as any, ENFORCED)
+		report(nk, 'a', ['MultiplayerAPI-0.1.2'])
+		report(nk, 'b', ['Talisman-2.0'])
+		expect(refuseMatchedGroup(nk as any, fakeLogger, plan(['a', 'b']))).toBe(true)
+		expect(nk.notifications.map((n) => [n.userId, n.content.requeue, n.content.code])).toEqual([
+			['a', true, undefined],
+			['b', false, 'mods_not_allowed'],
+		])
+		expect(nk.notifications[1].content).toMatchObject({
+			mode: 'casual-mode',
+			mods: ['Talisman'],
+			reason: "These mods aren't allowed in matchmaking: Talisman",
+		})
 	})
 })

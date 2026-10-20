@@ -29,6 +29,13 @@ export interface ServerConfig {
 	chatAllowlist: string[]
 	// The API's active rating season (rating/season.ts); 0 until pushed.
 	season: number
+	// Queueing needs a valid standing (standing/): every reported mod allowed.
+	queueModsEnforced: boolean
+	// The SMODS ids of the ranked-pinned mods, as the API pushes them.
+	queueAllowedModIds: string[]
+	// More allowed ids, set here only (test harnesses' dev mods); the API
+	// never sends it, so its pushes leave it be.
+	queueAllowedModIdsExtra: string[]
 }
 
 // Until the API's first push: everything Nakama already did stays allowed.
@@ -45,6 +52,19 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	achievementsEnabled: false,
 	chatAllowlist: [],
 	season: 0,
+	// Off until the API's pinned mods carry their ids.
+	queueModsEnforced: false,
+	queueAllowedModIds: [],
+	queueAllowedModIdsExtra: [],
+}
+
+const MAX_MOD_IDS = 500
+const MOD_ID_PATTERN = /^[^\s]{1,128}$/
+
+function modIdsOf(value: unknown): string[] | null {
+	if (!Array.isArray(value) || value.length > MAX_MOD_IDS) return null
+	if (!value.every((id) => typeof id === 'string' && MOD_ID_PATTERN.test(id))) return null
+	return value as string[]
 }
 
 // current with every valid field of update applied; unknown keys and wrongly
@@ -64,6 +84,7 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 		'testingMode',
 		'integrityEnforced',
 		'achievementsEnabled',
+		'queueModsEnforced',
 	]
 	for (const flag of flags) {
 		const value = update[flag]
@@ -72,13 +93,20 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 	const allowlist = update.chatAllowlist
 	if (Array.isArray(allowlist) && allowlist.every((m) => typeof m === 'string'))
 		next.chatAllowlist = allowlist as string[]
+	const allowedIds = modIdsOf(update.queueAllowedModIds)
+	if (allowedIds) next.queueAllowedModIds = allowedIds
+	const extraIds = modIdsOf(update.queueAllowedModIdsExtra)
+	if (extraIds) next.queueAllowedModIdsExtra = extraIds
 	return next
 }
 
+export type ClientConfig = Omit<ServerConfig, 'chatAllowlist' | 'queueAllowedModIds' | 'queueAllowedModIdsExtra'>
+
 // What a client is shown (the login response): the switches, not the
-// moderators' allowlist.
-export function clientConfig(config: ServerConfig): Omit<ServerConfig, 'chatAllowlist'> {
-	const { chatAllowlist, ...shown } = config
+// moderators' allowlist nor the mod allowlists (account_standing answers
+// for those).
+export function clientConfig(config: ServerConfig): ClientConfig {
+	const { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, ...shown } = config
 	return shown
 }
 

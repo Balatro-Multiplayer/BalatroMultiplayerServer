@@ -64,6 +64,9 @@ import { runFlags } from './anticheat'
 import { eventsByPlayer, type LogEvent } from '../shared/replay/events'
 import { recordForfeit } from './forfeits'
 import { logChecksOf, saveRun } from './storage'
+import { standingFor } from '../standing/current'
+import { rejoinRefusal, rejoinRejectMessage } from '../standing/rejoin'
+import type { RequiredStanding } from '../standing/standing'
 
 const TICK_RATE = 5
 const MAX_MESSAGE_BYTES = 64 * 1024
@@ -350,6 +353,12 @@ function teamPlanParam(params: { [key: string]: unknown }): [string[], string[]]
 	return [value[0], value[1]]
 }
 
+// matchmakerMatched's requiredStanding param.
+function requiredStandingParam(params: { [key: string]: unknown }): RequiredStanding | undefined {
+	const value = stringParam(params, 'requiredStanding')
+	return value === 'valid' || value === 'verified' ? value : undefined
+}
+
 export function lobbyMatchInit(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -370,6 +379,7 @@ export function lobbyMatchInit(
 		gameMode: stringParam(params, 'gameMode') || undefined,
 		groups: groupsParam(params),
 		teamPlan: teamPlanParam(params),
+		requiredStanding: requiredStandingParam(params),
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
 		resultTimeoutMs: secondsFromEnv(
@@ -409,6 +419,8 @@ export function joinInfoOf(
 	meta: { [key: string]: string },
 ): PlayerInfo {
 	const sentMods = parseMods(meta.mods)
+	// Never the client's word for it (a standing in meta is ignored).
+	const standing = standingFor(nk, presence.userId, Date.now()).standing
 	const stored = readProfile(nk, presence.userId, presence.username)
 	// The joker is never taken from the join metadata: only the stored pick,
 	// if the player may still show it.
@@ -420,12 +432,14 @@ export function joinInfoOf(
 			displayName: displayNameOf(stored.profile),
 			preferredJoker: joker,
 			mods: sentMods !== null ? sentMods : stored.profile.mods,
+			standing,
 		}
 	}
 	return {
 		displayName: meta.displayName || presence.username,
 		preferredJoker: joker,
 		mods: sentMods,
+		standing,
 	}
 }
 
@@ -496,6 +510,13 @@ export function lobbyMatchJoinAttempt(
 	)
 	if (rejection) {
 		return { state, accept: false, rejectMessage: rejection }
+	}
+	const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, presence.userId, Date.now()))
+	if (standingRefused) {
+		// The seat stays: a returning player's grace period keeps running, so
+		// they can fix their mods (or wait for the verdict) and come back.
+		logger.info('Lobby %s refused %s: %s', state.lobby.code, presence.userId, standingRefused.reason)
+		return { state, accept: false, rejectMessage: rejoinRejectMessage(standingRefused) }
 	}
 	const otherCode = otherLobbyOf(nk, ctx, presence.userId)
 	if (otherCode) {

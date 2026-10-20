@@ -16,6 +16,7 @@ export function activeRunOf(lobby: Lobby, userId: string): ActiveRun | null {
 		code: lobby.code,
 		modId: lobby.modId,
 		events: eventsOf(lobby.game.logs[userId]),
+		requiredStanding: lobby.requiredStanding || null,
 	}
 }
 

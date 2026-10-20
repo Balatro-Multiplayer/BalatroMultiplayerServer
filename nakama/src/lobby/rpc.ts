@@ -1,5 +1,6 @@
 // Lobby RPCs. Joining itself is a socket match_join on the id lobby_find (or
 // lobby_create) returns; these only find, create and leave matches.
+import { standingViewFor } from '../standing/current'
 import {
 	ALREADY_EXISTS,
 	INVALID_ARGUMENT,
@@ -234,8 +235,9 @@ export function rpcLobbyCurrent(
 }
 
 // {} when the caller isn't in a running game, else {active: {runId, code,
-// modId, events}}: what the reconnect prompt needs to catch a restarted client
-// up (the API's GET /runs/mine/active, on Nakama).
+// modId, events, requiredStanding}, standing}: what the reconnect prompt
+// needs to catch a restarted client up (the API's GET /runs/mine/active, on
+// Nakama), and whether it may come back (standing/rejoin.ts).
 export function rpcRunActive(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -247,7 +249,9 @@ export function rpcRunActive(
 	if (!current) return JSON.stringify({})
 	const signal: LobbySignal = { type: 'get_active', userId }
 	const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)))
-	return JSON.stringify(active ? { active } : {})
+	// With the caller's standing, so the client knows before it tries whether
+	// it meets active.requiredStanding.
+	return JSON.stringify(active ? { active, standing: standingViewFor(nk, userId, Date.now()) } : {})
 }
 
 // Leave the current lobby without joining its match first (the reconnect

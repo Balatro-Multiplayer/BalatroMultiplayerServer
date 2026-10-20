@@ -9,6 +9,9 @@ import { answerGroupSignal, isGroupSignal } from '../../lobby/group_signals'
 import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY, type LobbySignal } from '../../lobby/protocol'
 import { join, newLobby, type Lobby } from '../../lobby/state'
 import { writeBans } from '../../moderation/bans'
+import { NotifyCode } from '../../notify'
+import { standingInputsUpdated } from '../../standing/changed'
+import { writeModReport } from '../../standing/storage'
 import { fakeLogger, fakeNk, playerCtx, type FakeNk } from '../../testing/fake_nk'
 import { beforeMatchmakerAdd, IN_GROUP_QUEUE } from '../gate'
 import { matchmakerMatched, type MatchedEntry } from '../matched'
@@ -36,6 +39,8 @@ interface World {
 	party: Set<string>
 	created: { [key: string]: unknown }[]
 	signals: LobbySignal[]
+	// What the home lobby sent its players.
+	sent: unknown[]
 }
 
 // A private lobby HOME12 with ids seated (the first hosting), and an empty
@@ -46,6 +51,7 @@ function world(...ids: string[]): World {
 	const party = new Set<string>()
 	const created: { [key: string]: unknown }[] = []
 	const signals: LobbySignal[] = []
+	const sent: unknown[] = []
 	const nk: FakeNk = fakeNk({
 		matchGet: (id: string) => (id === HOME_MATCH ? { matchId: id } : null),
 		matchCreate: (_module: string, params: { [key: string]: unknown }) => {
@@ -61,6 +67,7 @@ function world(...ids: string[]): World {
 			const answer = answerGroupSignal(lobby, signal, { groupQueueEnabled: true }, Date.now())
 			lobby = answer.step.lobby
 			for (const effect of answer.step.out) {
+				if (effect.kind === 'send') sent.push(effect.payload)
 				if (effect.kind === 'groupBind')
 					writeBinding(nk as any, { partyId: effect.partyId, homeCode: lobby.code, modId: lobby.modId, memberIds: effect.memberIds })
 				if (effect.kind === 'groupUnbind') {
@@ -84,7 +91,7 @@ function world(...ids: string[]): World {
 			value: { matchId: HOME_MATCH, code: 'HOME12', modId: MOD },
 		})),
 	)
-	return { nk, lobby: () => lobby, party, created, signals }
+	return { nk, lobby: () => lobby, party, created, signals, sent }
 }
 
 const rpc = (fn: typeof rpcGroupQueueOpen, w: World, userId: string, payload: unknown) =>
@@ -347,5 +354,91 @@ describe('signalHome', () => {
 	it('is null for a code with no live lobby', () => {
 		const w = world('a')
 		expect(signalHome(w.nk as any, 'NOPE12', { type: 'group_status', partyId: PARTY })).toBeNull()
+	})
+})
+
+const ENFORCED = { ...DEFAULT_CONFIG, queueModsEnforced: true, queueAllowedModIds: ['MultiplayerSPDRN'] }
+const reportFor = (w: World, userId: string, mods: string[]) => writeModReport(w.nk as any, userId, { mods, reportedAt: 0 })
+
+describe('the group queue and standings', () => {
+	it("refuses to open while a member's mods aren't allowed, naming them and the mods", () => {
+		const w = world('a', 'b')
+		writeConfig(w.nk as any, ENFORCED)
+		reportFor(w, 'a', ['MultiplayerSPDRN-0.1.1'])
+		reportFor(w, 'b', ['MultiplayerSPDRN-0.1.1', 'Cryptid-0.5.3'])
+		w.party.add('a')
+		expect(openFor(w).refused).toEqual({
+			code: 'member_refused',
+			userId: 'b',
+			reason: 'mods_not_allowed',
+			mods: ['Cryptid'],
+			detail: "These mods aren't allowed in matchmaking: Cryptid",
+			message: "A player in the lobby may not queue. These mods aren't allowed in matchmaking: Cryptid",
+		})
+		writeModReport(w.nk as any, 'b', { mods: [], reportedAt: 0 })
+		expect(openFor(w).groupQueue).toMatchObject({ phase: 'forming' })
+	})
+	it('says so for a member who never reported, and refuses them the party', () => {
+		const w = world('a', 'b')
+		writeConfig(w.nk as any, ENFORCED)
+		reportFor(w, 'a', [])
+		w.party.add('a')
+		expect(openFor(w).refused).toMatchObject({ code: 'member_refused', userId: 'b', reason: 'mods_unreported', mods: [] })
+		writeConfig(w.nk as any, DEFAULT_CONFIG)
+		openFor(w)
+		writeConfig(w.nk as any, ENFORCED)
+		const join = () => beforePartyJoin(playerCtx('b'), fakeLogger, w.nk as any, { partyJoin: { partyId: PARTY } } as any)
+		expect(join).toThrow(/reported its mods/)
+	})
+	it('cancels the whole group when a member is refused at matched time, saying who and why', () => {
+		const w = queuedWorld()
+		writeConfig(w.nk as any, ENFORCED)
+		reportFor(w, 'a', [])
+		reportFor(w, 's', [])
+		reportFor(w, 'b', ['Cryptid-0.5.3'])
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [grouped('a'), grouped('b'), entry('s', CASUAL)]),
+		).toThrow()
+		expect(w.lobby().groupQueue).toBeNull()
+		expect(w.lobby().code).toBe('HOME12')
+		expect(w.sent[w.sent.length - 1]).toMatchObject({
+			phase: 'idle',
+			reason: 'member_refused',
+			refused: { userId: 'b', reason: 'mods_not_allowed', mods: ['Cryptid'] },
+		})
+	})
+	it('re-gates queued tickets when the allowlist changes: a group goes, a solo is told why', () => {
+		const w = queuedWorld()
+		w.party.add('s')
+		reportFor(w, 'a', [])
+		reportFor(w, 'b', ['Cryptid-0.5.3'])
+		reportFor(w, 's', ['Talisman-2.0'])
+		w.nk.storageWrite([
+			{
+				collection: QUEUE_COLLECTION,
+				key: recordKey(MOD, 'standard'),
+				userId: 's',
+				value: { modId: MOD, gameMode: 'standard', ticket: 'TS', sessionId: 's-s', at: Date.now() },
+			},
+		])
+		writeConfig(w.nk as any, ENFORCED)
+		standingInputsUpdated(w.nk as any, fakeLogger, Date.now())
+		expect(w.lobby().groupQueue).toBeNull()
+		expect(w.sent[w.sent.length - 1]).toMatchObject({ phase: 'idle', refused: { userId: 'b', mods: ['Cryptid'] } })
+		const told = (code: number) => w.nk.notifications.filter((n) => n.code === code)
+		expect(told(NotifyCode.QUEUE_CANCELLED).map((n) => [n.userId, n.content.code, n.content.mods])).toEqual([
+			['s', 'mods_not_allowed', ['Talisman']],
+		])
+		expect(told(NotifyCode.QUEUE_CANCELLED)[0].content).toMatchObject({ modId: MOD, mode: 'standard', requeue: false })
+		expect(w.nk.objects.has(`${QUEUE_COLLECTION}/s/${recordKey(MOD, 'standard')}`)).toBe(false)
+		expect(
+			told(NotifyCode.STANDING_CHANGED)
+				.map((n) => [n.userId, n.content.standing])
+				.sort(),
+		).toEqual([
+			['a', 'valid'],
+			['b', 'none'],
+			['s', 'none'],
+		])
 	})
 })

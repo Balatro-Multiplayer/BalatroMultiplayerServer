@@ -1,6 +1,9 @@
 // Wire protocol between MPAPI (networking/nakama_lobby.lua) and the bmp_lobby
 // match. Every payload is JSON. Op codes are plain objects rather than enums:
 // isolatedModules builds can't inline const enums.
+import type { QueueRefusalCode } from '../matchmaking/queue_refusal'
+import type { AccountStanding, RequiredStanding } from '../standing/standing'
+
 export const LOBBY_MATCH = 'bmp_lobby'
 
 export const ClientOp = {
@@ -206,6 +209,9 @@ export interface ActiveRun {
 	code: string
 	modId: string
 	events: ReplayEvent[]
+	// A matchmade game's bar for coming back (lobby/match.ts); null for a
+	// private lobby, which never gates.
+	requiredStanding: RequiredStanding | null
 }
 
 // The other participants' logs so far, each as ActiveRun's events.
@@ -281,11 +287,17 @@ export interface PlayerInfo {
 	displayName: string
 	preferredJoker: string | null
 	mods: unknown
+	// Worked out by the server (standing/current.ts) at join and kept current
+	// as the player reports mods or gets a launcher verdict; never taken from
+	// the client. Absent on a player seated before standings existed.
+	standing?: AccountStanding
 }
 
-export interface SnapshotPlayer extends PlayerInfo {
+export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing'> {
 	id: string
 	isAway: boolean
+	// null when the server never worked it out (see PlayerInfo).
+	standing: AccountStanding | null
 }
 
 export interface Snapshot {
@@ -344,9 +356,25 @@ export interface GroupQueueView {
 // ServerOp.GROUP_QUEUE. phase 'idle' ends the group queue (reason says why);
 // a 'forming' with requeue: the matched game fell through and the leader
 // queues the party again.
+// Who a group queue ended over (member_refused), and why: their refusal's
+// code (matchmaking/queue_refusal.ts) and the mods it names.
+export interface RefusedMember {
+	userId: string
+	reason: QueueRefusalCode
+	mods: string[]
+}
+
 export type GroupQueueMessage =
 	| (GroupQueueView & { reason: GroupEndReason | null; requeue: boolean })
-	| { phase: 'idle'; partyId: string; homeCode: string; reason: GroupEndReason; requeue: false }
+	| {
+			phase: 'idle'
+			partyId: string
+			homeCode: string
+			reason: GroupEndReason
+			requeue: false
+			// Set when reason is member_refused and the server knows who.
+			refused?: RefusedMember
+	  }
 
 // A group a matchmade lobby was made with, and the home lobby to tell once
 // its game is over.
@@ -386,7 +414,7 @@ export type LobbySignal =
 	| { type: 'group_unqueued'; partyId: string }
 	| { type: 'group_requeue'; partyId: string }
 	| { type: 'group_matched'; partyId: string; matchId: string; code: string }
-	| { type: 'group_cancel'; partyId: string; reason: GroupEndReason; userId?: string }
+	| { type: 'group_cancel'; partyId: string; reason: GroupEndReason; userId?: string; refused?: RefusedMember }
 	// From the public lobby, once its first game is over (or it closed).
 	| { type: 'away_over'; partyId: string; code: string }
 

@@ -91,7 +91,7 @@ export function answerGroupSignal(lobby: Lobby, signal: GroupSignal, switches: G
 		case 'group_matched':
 			return answered(lobby, groupMatched(lobby, signal.partyId, signal.matchId, signal.code, now))
 		case 'group_cancel':
-			return answered(lobby, cancelGroup(lobby, signal.partyId, signal.reason, signal.userId || null))
+			return answered(lobby, cancelGroup(lobby, signal.partyId, signal.reason, signal.userId || null, signal.refused))
 		case 'away_over':
 			return stepped(awayOver(lobby, signal.partyId, signal.code, now))
 	}

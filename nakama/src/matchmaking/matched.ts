@@ -4,7 +4,7 @@
 import { generateCode, CODE_ATTEMPTS, MATCHMADE_CODE_LENGTH } from '../lobby/rpc'
 import { bindCode, releaseCode, reserveCode } from '../lobby/codes'
 import { LOBBY_MATCH } from '../lobby/protocol'
-import { refusedPlayers, requeueSolos } from './gate'
+import { refusedMemberOf, refusedPlayers, requeueSolos, type RefusedPlayer } from './gate'
 import { GROUP_SIZE_PROPERTY, TEAMS_PROPERTY } from './group/refusal'
 import {
 	announceMatched,
@@ -16,6 +16,8 @@ import {
 } from './group/matched'
 import { partitionTeams, type TeamPlan } from './group/teams'
 import { clearMatched } from './queue'
+import { readConfig } from '../config'
+import { requiredStandingFor, type RequiredStanding } from '../standing/standing'
 
 // A matched ticket's player. Numeric ticket properties arrive merged into
 // properties; partyId is set for a party ticket's members.
@@ -41,6 +43,9 @@ export interface MatchPlan {
 	groups: PlannedGroup[]
 	// A Teams game: who plays on which team, each group on one.
 	teamPlan: TeamPlan | null
+	// What a returning player must have again (lobby/match.ts), worked out
+	// from the config when the match is made (matchmakerMatched).
+	requiredStanding: RequiredStanding
 }
 
 // How the API names a queue: the bare mode, 'ranked:'-prefixed when ranked.
@@ -84,7 +89,7 @@ function groupsOf(entries: MatchedEntry[]): { party: PlannedGroup[]; all: string
 // this stops a hand-built ticket from dragging others into a different game.
 // Groups are casual only, and a Teams game (every ticket teams = 1) must
 // split into two equal teams with each group kept whole.
-export function planMatch(entries: MatchedEntry[]): MatchPlan | string {
+export function planMatch(entries: MatchedEntry[], integrityEnforced = false): MatchPlan | string {
 	if (entries.length < 2) return 'A match needs at least two players'
 	const first = entries[0].properties
 	const modId = first.modId
@@ -123,6 +128,7 @@ export function planMatch(entries: MatchedEntry[]): MatchPlan | string {
 		playerIds: ids,
 		groups: groups.party,
 		teamPlan,
+		requiredStanding: requiredStandingFor(kind === 'ranked', integrityEnforced),
 	}
 }
 
@@ -132,7 +138,7 @@ export function matchmakerMatched(
 	nk: nkruntime.Nakama,
 	matches: MatchedEntry[],
 ): string {
-	const plan = planMatch(matches)
+	const plan = planMatch(matches, readConfig(nk).integrityEnforced)
 	if (typeof plan === 'string') {
 		logger.warn('Matchmaker group refused: %s', plan)
 		requeuePartiesOf(nk, partyIdsOf(matches))
@@ -169,6 +175,7 @@ export function matchmakerMatched(
 				gameMode: plan.gameMode,
 				groups: groups.homes.length > 0 ? JSON.stringify(groups.homes) : '',
 				teamPlan: plan.teamPlan ? JSON.stringify(plan.teamPlan) : '',
+				requiredStanding: plan.requiredStanding,
 			})
 		} catch (e) {
 			releaseCode(nk, code, '')
@@ -198,10 +205,11 @@ function partyIdsOf(matches: MatchedEntry[]): string[] {
 // Who is told what about a refused match: solo players allowed to queue queue
 // again; a group queues again unless one of its members was refused or it no
 // longer fits, in which case its home lets it go.
-function refuseMatch(nk: nkruntime.Nakama, plan: MatchPlan, refused: string[], groups: ResolvedGroups) {
+function refuseMatch(nk: nkruntime.Nakama, plan: MatchPlan, refused: RefusedPlayer[], groups: ResolvedGroups) {
 	requeueSolos(nk, plan, refused)
 	for (const home of groups.homes) {
-		if (home.memberIds.some((id) => refused.indexOf(id) !== -1)) cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused')
+		const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0]
+		if (member) cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused', refusedMemberOf(member))
 		else requeueGroup(nk, home)
 	}
 	for (const fault of groups.faulty) {

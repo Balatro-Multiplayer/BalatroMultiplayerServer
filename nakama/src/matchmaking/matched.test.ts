@@ -18,12 +18,16 @@ describe('planMatch', () => {
 			playerIds: ['a', 'b'],
 			groups: [],
 			teamPlan: null,
+			requiredStanding: 'valid',
 		})
+		expect(planMatch([entry('a', RANKED), entry('b', RANKED)], true)).toMatchObject({ requiredStanding: 'verified' })
 	})
 	it('plans a casual lobby with no rating board', () => {
 		const casual = { modId: 'MultiplayerSPDRN', mode: 'standard', kind: 'casual' }
 		const plan = planMatch([entry('a', casual), entry('b', casual), entry('c', casual)])
 		expect(plan).toMatchObject({ rankedMode: '', gameMode: 'standard', playerIds: ['a', 'b', 'c'] })
+		// A casual game asks for valid whether or not ranked needs the launcher.
+		expect(planMatch([entry('a', casual), entry('b', casual)], true)).toMatchObject({ requiredStanding: 'valid' })
 	})
 	it('refuses a group that queued for different things', () => {
 		const other = { ...RANKED, kind: 'casual' }

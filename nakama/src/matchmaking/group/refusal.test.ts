@@ -99,11 +99,24 @@ describe('homeRefusal', () => {
 
 describe('memberRefusal / partyRefusal / joinRefusal', () => {
 	it('refuses a member who may not queue, with their reason, then one already queued', () => {
-		const refused = memberRefusal(['a', 'b'], { refusals: { b: 'Banned.' }, queuedIds: ['a'] })
-		expect(refused).toEqual({ code: 'member_refused', userId: 'b', detail: 'Banned.' })
+		const banned = { code: 'access_denied' as const, message: 'Banned.' }
+		const refused = memberRefusal(['a', 'b'], { refusals: { b: banned }, queuedIds: ['a'] })
+		expect(refused).toEqual({ code: 'member_refused', userId: 'b', detail: 'Banned.', reason: 'access_denied', mods: [] })
 		expect(refusalMessage(refused!)).toBe('A player in the lobby may not queue. Banned.')
 		expect(memberRefusal(['a', 'b'], { refusals: {}, queuedIds: ['a'] })).toEqual({ code: 'member_queued', userId: 'a' })
 		expect(memberRefusal(['a', 'b'], { refusals: {}, queuedIds: ['z'] })).toBeNull()
+	})
+	it("names a member's disallowed mods", () => {
+		const mods = { code: 'mods_not_allowed' as const, mods: ['ClaudeControl', 'Talisman'] }
+		expect(memberRefusal(['a'], { refusals: { a: mods }, queuedIds: [] })).toEqual({
+			code: 'member_refused',
+			userId: 'a',
+			detail: "These mods aren't allowed in matchmaking: ClaudeControl, Talisman",
+			reason: 'mods_not_allowed',
+			mods: ['ClaudeControl', 'Talisman'],
+		})
+		const unreported = memberRefusal(['a'], { refusals: { a: { code: 'mods_unreported' } }, queuedIds: [] })
+		expect(unreported).toMatchObject({ code: 'member_refused', reason: 'mods_unreported', mods: [] })
 	})
 	it('wants the host in the party and no strangers', () => {
 		expect(partyRefusal(['a'], ['a', 'b'], 'a')).toBeNull()
@@ -151,7 +164,7 @@ describe('ticketRefusal', () => {
 		expect(props({}, {})).toBe('ticket_mismatch')
 		expect(props({}, { groupSize: 2, teams: 1 })).toBe('ticket_mismatch')
 		expect(code(ticketRefusal(facts({ ticket: ticket({ minCount: 2 }) })))).toBe('bad_counts')
-		expect(code(ticketRefusal(facts({ members: { refusals: { b: 'x' }, queuedIds: [] } })))).toBe('member_refused')
+		expect(code(ticketRefusal(facts({ members: { refusals: { b: { code: 'mods_unreported' } }, queuedIds: [] } })))).toBe('member_refused')
 	})
 	it('a Teams group ticket says so and asks for whole teams', () => {
 		const teams = facts({

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_CONFIG, writeConfig } from '../config'
 import { NotifyCode } from '../notify'
+import { readModReport } from '../standing/storage'
 import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
 import { emptyProgress } from '../achievements/progress'
 import { writeProgress } from '../achievements/storage'
@@ -90,11 +92,23 @@ describe('profile_set_joker', () => {
 describe('profile_set_mods', () => {
 	it('stores a list of strings, capped', () => {
 		const { nk } = nkWith()
-		expect(call(rpcProfileSetMods, nk, { mods: ['A-1', 'B-2'] })).toEqual({ mods: ['A-1', 'B-2'] })
+		expect(call(rpcProfileSetMods, nk, { mods: ['A-1', 'B-2'] })).toEqual({
+			mods: ['A-1', 'B-2'],
+			standing: { standing: 'valid', disallowed: [], reason: null, enforced: false },
+		})
 		expect(readProfile(nk as any, USER)!.profile.mods).toEqual(['A-1', 'B-2'])
 		const many = call(rpcProfileSetMods, nk, { mods: Array.from({ length: 400 }, (_, i) => 'M' + i) })
 		expect(many.mods.length).toBe(300)
 		expect(() => call(rpcProfileSetMods, nk, { mods: [1] })).toThrow(/mods/)
+	})
+
+	it("stores this session's report and answers with the standing it gives", () => {
+		const { nk } = nkWith()
+		writeConfig(nk as any, { ...DEFAULT_CONFIG, queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'] })
+		const reply = call(rpcProfileSetMods, nk, { mods: ['Steamodded-1.0.0~BETA-1814a', 'MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'] })
+		expect(reply.standing).toEqual({ standing: 'none', disallowed: ['Cryptid'], reason: 'mods_not_allowed', enforced: true })
+		expect(readModReport(nk as any, USER)!.mods).toEqual(['Steamodded-1.0.0~BETA-1814a', 'MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'])
+		expect(call(rpcProfileSetMods, nk, { mods: ['MultiplayerAPI-0.1.2'] }).standing.standing).toBe('valid')
 	})
 })
 

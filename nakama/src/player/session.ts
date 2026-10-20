@@ -10,6 +10,7 @@ import { noteReturn } from '../lobby/forfeits'
 import { clientConfig, readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
 import { UNVERIFIED, writeIntegrity } from '../integrity'
+import { clearModReport } from '../standing/storage'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
 import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
 import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
@@ -152,8 +153,10 @@ export function rpcSessionInit(
 	syncDisplayName(nk, userId, profile)
 	// Accounts linked before achievements existed earn Scholar here.
 	if (profile.discordIdHash) recordMilestone(nk, logger, userId, 'discordLinked', profile.privileges)
-	// A new login is unverified until launcher_session_start's challenge passes.
+	// A new login is unverified until launcher_session_start's challenge passes,
+	// and unreported until this session's profile_set_mods.
 	writeIntegrity(nk, userId, UNVERIFIED)
+	clearModReport(nk, userId)
 	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))
 }
 

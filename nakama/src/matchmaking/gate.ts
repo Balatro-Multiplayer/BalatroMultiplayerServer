@@ -1,7 +1,8 @@
 // Who may queue: the server switches (ranked/casual queues, testing mode)
-// queue bans (moderation/access.ts) and, for ranked, launcher integrity
-// (integrity.ts), checked when a ticket is added and
-// again when a group is matched (a ban or switch can land in between).
+// queue bans (moderation/access.ts), for ranked launcher integrity
+// (integrity.ts), and the account's standing (standing/: its reported mods),
+// checked when a ticket is added and again when a group is matched (a ban or
+// switch can land in between).
 import { readConfig } from '../config'
 import { checkRankedReadiness, integrityRefusal, readIntegrity } from '../integrity'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
@@ -9,15 +10,22 @@ import { queueRefusal } from '../moderation/access'
 import { readBans } from '../moderation/bans'
 import { notify, NotifyCode } from '../notify'
 import { profileFor } from '../player/profile'
+import { standingFor } from '../standing/current'
 import { groupOf } from './group/binding'
 import { blocksSoloQueue } from './group/refusal'
+import type { RefusedMember } from '../lobby/protocol'
 import type { MatchPlan } from './matched'
+import { isStandingRefusal, queueRefusalMessage, refusedMods, standingRefusal, type QueueRefusal } from './queue_refusal'
 
-export function queueRefusalFor(nk: nkruntime.Nakama, userId: string, ranked: boolean, now: number): string | null {
+// Ranked while integrityEnforced needs a verdict, which also passes any mods
+// (a verified account skips the mod check); otherwise the standing must be
+// valid -- with queueModsEnforced off everyone's is.
+export function queueRefusalFor(nk: nkruntime.Nakama, userId: string, ranked: boolean, now: number): QueueRefusal | null {
 	const config = readConfig(nk)
-	const refused = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now)
-	if (refused || !ranked) return refused
-	return integrityRefusal(config, readIntegrity(nk, userId), now)
+	const access = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now)
+	if (access) return { code: 'access_denied', message: access }
+	if (ranked && integrityRefusal(config, readIntegrity(nk, userId), now)) return { code: 'integrity_required' }
+	return standingRefusal(standingFor(nk, userId, now, config))
 }
 
 function stringProperties(envelope: nkruntime.Envelope): { [key: string]: unknown } {
@@ -39,28 +47,63 @@ export function beforeMatchmakerAdd(
 	if (!ctx.userId) return envelope
 	const ranked = stringProperties(envelope).kind === 'ranked'
 	const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now())
-	if (refused) throw runtimeError(PERMISSION_DENIED, refused)
+	if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused))
 	const group = groupOf(nk, ctx.userId)
 	if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE)
 	if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId)
 	return envelope
 }
 
-// The matched players who may no longer queue.
-export function refusedPlayers(nk: nkruntime.Nakama, plan: MatchPlan): string[] {
+export interface RefusedPlayer {
+	userId: string
+	refusal: QueueRefusal
+}
+
+// A group's refused member, as its home lobby tells its players (op 112 idle).
+export function refusedMemberOf(player: RefusedPlayer): RefusedMember {
+	return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) }
+}
+
+// The matched players who may no longer queue, and why.
+export function refusedPlayers(nk: nkruntime.Nakama, plan: MatchPlan): RefusedPlayer[] {
 	const now = Date.now()
 	const ranked = plan.rankedMode !== ''
-	return plan.playerIds.filter((id) => queueRefusalFor(nk, id, ranked, now) !== null)
+	const out: RefusedPlayer[] = []
+	for (const userId of plan.playerIds) {
+		const refusal = queueRefusalFor(nk, userId, ranked, now)
+		if (refusal) out.push({ userId, refusal })
+	}
+	return out
+}
+
+// Tells a solo player their ticket is gone because their standing no longer
+// lets them queue ({modId, mode} name the queue as the client does). reason
+// stays the displayable text, as on every QUEUE_CANCELLED; code and mods say
+// why in a form the client can render itself.
+export function cancelSoloQueue(nk: nkruntime.Nakama, userId: string, modId: string, mode: string, refusal: QueueRefusal) {
+	notify(nk, userId, NotifyCode.QUEUE_CANCELLED, 'queue_cancelled', {
+		modId,
+		mode,
+		reason: queueRefusalMessage(refusal),
+		code: refusal.code,
+		mods: refusedMods(refusal),
+		requeue: false,
+	})
 }
 
 // A refused match spent everyone's ticket, so the solo players still allowed
-// to are told to queue again ({modId, mode} name the queue as the client
-// does). A group's members hear it from their lobby instead (matched.ts).
-export function requeueSolos(nk: nkruntime.Nakama, plan: MatchPlan, refusedIds: string[]) {
+// to are told to queue again, and a solo refused for their standing is told
+// why. A group's members hear it from their lobby instead (matched.ts).
+export function requeueSolos(nk: nkruntime.Nakama, plan: MatchPlan, refused: RefusedPlayer[]) {
 	const mode = plan.rankedMode !== '' ? plan.rankedMode : plan.gameMode
 	const grouped = plan.groups.reduce((ids: string[], g) => ids.concat(g.memberIds), [])
 	for (const id of plan.playerIds) {
-		if (refusedIds.indexOf(id) !== -1 || grouped.indexOf(id) !== -1) continue
+		if (grouped.indexOf(id) !== -1) continue
+		const own = refused.filter((r) => r.userId === id)[0]
+		if (own) {
+			if (isStandingRefusal(own.refusal)) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal)
+			continue
+		}
 		notify(nk, id, NotifyCode.QUEUE_CANCELLED, 'queue_cancelled', {
 			modId: plan.modId,
 			mode,

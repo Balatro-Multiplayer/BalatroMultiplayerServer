@@ -24,6 +24,7 @@ import {
 	type GroupQueueMessage,
 	type GroupQueueView,
 	type MatchedGroup,
+	type RefusedMember,
 } from './protocol'
 import type { Lobby, Outbound, Step } from './state'
 
@@ -175,11 +176,12 @@ export function groupMatched(
 
 // The group queue is over: everyone is told (with why), and its index, queue
 // records and party go.
-export function endGroup(lobby: Lobby, reason: GroupEndReason): Step {
+export function endGroup(lobby: Lobby, reason: GroupEndReason, refused?: RefusedMember): Step {
 	const gq = lobby.groupQueue
 	if (!gq) return { lobby, out: [] }
 	const next = withGroup(lobby, null)
 	const idle: GroupQueueMessage = { phase: 'idle', partyId: gq.partyId, homeCode: lobby.code, reason, requeue: false }
+	if (refused) idle.refused = refused
 	return {
 		lobby: next,
 		out: [
@@ -196,12 +198,13 @@ export function cancelGroup(
 	partyId: string,
 	reason: GroupEndReason,
 	byId: string | null,
+	refused?: RefusedMember,
 ): Result<Step, GroupRefusal> {
 	const gq = ownGroup(lobby, partyId)
 	if (!gq) return err({ code: 'not_bound' })
 	if (byId !== null && gq.memberIds.indexOf(byId) === -1) return err({ code: 'not_member', userId: byId })
 	if (gq.phase === 'away') return err({ code: 'group_away' })
-	return ok(endGroup(lobby, reason))
+	return ok(endGroup(lobby, reason, refused))
 }
 
 // A member leaving or kicked (or timed out): forming or queued, the group

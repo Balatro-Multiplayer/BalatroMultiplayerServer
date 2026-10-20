@@ -3,6 +3,7 @@
 // members' (from storage and the party's stream) and the server switches.
 // Each check answers the first refusal it finds, or null.
 import type { GroupPhase, GroupQueueView } from '../../lobby/protocol'
+import { queueRefusalMessage, refusedMods, type QueueRefusal, type QueueRefusalCode } from '../queue_refusal'
 
 // The largest group that may queue together. A group needs at least one
 // stranger in its match (min_count = size + 1), and a Teams group a whole
@@ -51,8 +52,11 @@ export interface GroupRefusal {
 	code: GroupRefusalCode
 	// The member it is about, when it's about one.
 	userId?: string
-	// A member refused: their refusal (moderation/access.ts) as they'd get it.
+	// A member refused: their refusal (matchmaking/queue_refusal.ts) as
+	// they'd get it, its code, and the mods it names (mods_not_allowed).
 	detail?: string
+	reason?: QueueRefusalCode
+	mods?: string[]
 }
 
 const MESSAGES: { [code in GroupRefusalCode]: string } = {
@@ -117,7 +121,7 @@ export interface OpenRequest {
 // What the members' own records say: each refused member's reason
 // (queueRefusalFor), and who already holds a ticket of their own.
 export interface MemberFacts {
-	refusals: { [userId: string]: string }
+	refusals: { [userId: string]: QueueRefusal }
 	queuedIds: string[]
 }
 
@@ -153,11 +157,21 @@ export function homeRefusal(home: GroupHomeFacts, byId: string, switches: GroupS
 	return null
 }
 
+export function memberRefused(userId: string, refusal: QueueRefusal): GroupRefusal {
+	return {
+		code: 'member_refused',
+		userId,
+		detail: queueRefusalMessage(refusal),
+		reason: refusal.code,
+		mods: refusedMods(refusal),
+	}
+}
+
 // Whether every member may queue right now.
 export function memberRefusal(memberIds: string[], facts: MemberFacts): GroupRefusal | null {
 	for (const id of memberIds) {
 		const refused = facts.refusals[id]
-		if (refused) return { code: 'member_refused', userId: id, detail: refused }
+		if (refused) return memberRefused(id, refused)
 	}
 	for (const id of memberIds) {
 		if (facts.queuedIds.indexOf(id) !== -1) return { code: 'member_queued', userId: id }

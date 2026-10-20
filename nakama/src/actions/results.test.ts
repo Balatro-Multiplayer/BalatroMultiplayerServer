@@ -447,6 +447,12 @@ describe('active run', () => {
 		expect(activeRunOf(lobby, 'b')?.events).toEqual([])
 	})
 
+	it("names the game's bar for coming back, null for a lobby without one", () => {
+		const lobby = log2(started('a', 'b'))
+		expect(activeRunOf(lobby, 'a')?.requiredStanding).toBeNull()
+		expect(activeRunOf({ ...lobby, requiredStanding: 'verified' }, 'a')?.requiredStanding).toBe('verified')
+	})
+
 	it('is null for someone who is not playing or has left', () => {
 		const lobby = started('a', 'b')
 		expect(activeRunOf(lobby, 'z')).toBeNull()

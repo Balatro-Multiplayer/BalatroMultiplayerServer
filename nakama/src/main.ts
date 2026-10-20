@@ -1,6 +1,7 @@
 // Nakama JavaScript runtime entry point (bundled to modules/index.js by
 // build.mjs). Nakama resolves every function registered here by its name in
 // the script's global scope, so they are passed as plain identifiers.
+import { rpcAccountStanding } from './standing/rpc'
 import { rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './achievements/rpc'
 import { rpcAdminAvatarsReset } from './achievements/reset'
 import {
@@ -120,6 +121,7 @@ function InitModule(
 	initializer.registerRpc('profile_set_display', rpcProfileSetDisplay)
 	initializer.registerRpc('profile_set_joker', rpcProfileSetJoker)
 	initializer.registerRpc('profile_set_mods', rpcProfileSetMods)
+	initializer.registerRpc('account_standing', rpcAccountStanding)
 	initializer.registerRpc('avatar_catalog', rpcAvatarCatalog)
 	initializer.registerRpc('mute_set', rpcMuteSet)
 	initializer.registerRpc('discord_link_start', rpcDiscordLinkStart)

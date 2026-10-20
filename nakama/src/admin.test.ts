@@ -8,7 +8,7 @@ import {
 	rpcAdminNotify,
 	rpcAdminPing,
 } from './admin'
-import { DEFAULT_CONFIG, mergeConfig, readConfig } from './config'
+import { clientConfig, DEFAULT_CONFIG, mergeConfig, readConfig } from './config'
 import { NotifyCode } from './notify'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from './testing/fake_nk'
 
@@ -31,6 +31,20 @@ describe('server config', () => {
 		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: 1.5 }).tosVersion).toBe(1)
 		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 'glhf'] }).chatAllowlist).toEqual(['gg', 'glhf'])
 		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 3] }).chatAllowlist).toEqual([])
+	})
+
+	it('takes the mod allowlists as id arrays, and keeps the extra ids across an API push', () => {
+		expect(DEFAULT_CONFIG.queueModsEnforced).toBe(false)
+		const pushed = mergeConfig(DEFAULT_CONFIG, { queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'] })
+		expect(pushed).toMatchObject({ queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'], queueAllowedModIdsExtra: [] })
+		const local = mergeConfig(pushed, { queueAllowedModIdsExtra: ['ClaudeControl'] })
+		// The API never sends the extra ids, so its next push leaves them.
+		expect(mergeConfig(local, { queueAllowedModIds: [] }).queueAllowedModIdsExtra).toEqual(['ClaudeControl'])
+		expect(mergeConfig(local, { queueAllowedModIds: ['ok', 3] }).queueAllowedModIds).toEqual(['MultiplayerAPI'])
+		expect(mergeConfig(local, { queueAllowedModIds: ['has space'] }).queueAllowedModIds).toEqual(['MultiplayerAPI'])
+		const shown = clientConfig(local) as { [key: string]: unknown }
+		expect(shown.queueModsEnforced).toBe(true)
+		expect('queueAllowedModIds' in shown || 'queueAllowedModIdsExtra' in shown || 'chatAllowlist' in shown).toBe(false)
 	})
 
 	it('admin_config_set stores the merged config and returns it', () => {

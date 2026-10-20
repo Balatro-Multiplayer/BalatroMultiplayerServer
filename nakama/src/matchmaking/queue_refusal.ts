@@ -1,0 +1,48 @@
+// Why a player may not queue, as a closed set the client can tell apart, each
+// with an English message built here as the fallback text. Pure.
+import { INTEGRITY_REQUIRED } from '../integrity'
+import type { StandingResult } from '../standing/standing'
+
+export type QueueRefusal =
+	// A switch, a queue ban or testing mode (moderation/access.ts), as worded there.
+	| { code: 'access_denied'; message: string }
+	// Ranked while integrityEnforced, without a launcher verdict (integrity.ts).
+	| { code: 'integrity_required' }
+	// The session's mod report lists mods that aren't allowed.
+	| { code: 'mods_not_allowed'; mods: string[] }
+	// No mod report this session.
+	| { code: 'mods_unreported' }
+
+export type QueueRefusalCode = QueueRefusal['code']
+
+export function queueRefusalMessage(refusal: QueueRefusal): string {
+	switch (refusal.code) {
+		case 'access_denied':
+			return refusal.message
+		case 'integrity_required':
+			return INTEGRITY_REQUIRED
+		case 'mods_not_allowed':
+			return "These mods aren't allowed in matchmaking: " + refusal.mods.join(', ')
+		case 'mods_unreported':
+			return "Your game hasn't reported its mods yet. Reconnect and try again."
+	}
+}
+
+// The refusal a standing of none answers with; null for valid or verified.
+export function standingRefusal(result: StandingResult): QueueRefusal | null {
+	if (result.standing !== 'none') return null
+	return result.reason === 'mods_not_allowed'
+		? { code: 'mods_not_allowed', mods: result.disallowed }
+		: { code: 'mods_unreported' }
+}
+
+// The mods a refusal names; [] for the others.
+export function refusedMods(refusal: QueueRefusal): string[] {
+	return refusal.code === 'mods_not_allowed' ? refusal.mods : []
+}
+
+// A refusal over the account's standing, which a fresh report or an
+// allowlist change can lift (the others are switches, bans and the launcher).
+export function isStandingRefusal(refusal: QueueRefusal): boolean {
+	return refusal.code === 'mods_not_allowed' || refusal.code === 'mods_unreported'
+}

@@ -236,10 +236,15 @@ export function liveTicketHolders(
 	})
 }
 
-// The mod's records whose session is still connected (Nakama keeps every
-// connected session on the user's notifications stream); the rest are
-// deleted.
-export function liveRecords(nk: nkruntime.Nakama, modId: string, now: number): QueueRecord[] {
+export interface QueuedPlayer {
+	userId: string
+	record: QueueRecord
+}
+
+// The records (of one mod, or every mod for null) whose session is still
+// connected (Nakama keeps every connected session on the user's
+// notifications stream); the rest are deleted.
+export function liveQueuedPlayers(nk: nkruntime.Nakama, modId: string | null, now: number): QueuedPlayer[] {
 	const byUser: { [userId: string]: nkruntime.StorageObject[] } = {}
 	let cursor = ''
 	do {
@@ -251,23 +256,28 @@ export function liveRecords(nk: nkruntime.Nakama, modId: string, now: number): Q
 				if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key])
 				continue
 			}
-			if ((o.value as unknown as QueueRecord).modId !== modId) continue
+			if (modId !== null && (o.value as unknown as QueueRecord).modId !== modId) continue
 			;(byUser[o.userId] = byUser[o.userId] || []).push(o)
 		}
 		cursor = page.cursor || ''
 	} while (cursor)
-	const live: QueueRecord[] = []
+	const live: QueuedPlayer[] = []
 	for (const userId in byUser) {
 		const sessions = sessionsOf(nk, userId)
 		const dead: string[] = []
 		for (const o of byUser[userId]) {
 			const record = o.value as unknown as QueueRecord
 			if (sessions.indexOf(record.sessionId) === -1) dead.push(o.key)
-			else live.push(record)
+			else live.push({ userId, record })
 		}
 		deleteRecords(nk, userId, dead)
 	}
 	return live
+}
+
+// The mod's live records.
+export function liveRecords(nk: nkruntime.Nakama, modId: string, now: number): QueueRecord[] {
+	return liveQueuedPlayers(nk, modId, now).map((q) => q.record)
 }
 
 // {modId} -> {modId, gameModes}. In-match counts cover the first 100 of the

@@ -3,6 +3,8 @@
 // installed mods and mutes. Each answers with what the API answered; a change
 // others can see also reaches the player's lobby, and the player's other
 // sessions hear of it through ACCOUNT_UPDATED.
+import { standingViewFor } from '../standing/current'
+import { writeModReport } from '../standing/storage'
 import { FAILED_PRECONDITION, INVALID_ARGUMENT, runtimeError } from '../errors'
 import { currentLobby } from '../lobby/rpc'
 import type { LobbySignal, PlayerInfo } from '../lobby/protocol'
@@ -104,8 +106,11 @@ export function rpcProfileSetMods(
 		throw runtimeError(INVALID_ARGUMENT, 'Missing or invalid mods (array of strings)')
 	const list = (mods as string[]).slice(0, MAX_MODS).map((m) => m.slice(0, MAX_MOD_LENGTH))
 	updateProfile(nk, userId, (current) => ({ ...current, mods: list }), ctx.username)
-	pushToLobby(nk, userId, { mods: list })
-	return JSON.stringify({ mods: list })
+	const now = Date.now()
+	writeModReport(nk, userId, { mods: list, reportedAt: now })
+	const standing = standingViewFor(nk, userId, now)
+	pushToLobby(nk, userId, { mods: list, standing: standing.standing })
+	return JSON.stringify({ mods: list, standing })
 }
 
 // {userId, muted} -> {mutedPlayerIds}.

@@ -19,6 +19,7 @@ import {
 } from './binding'
 import {
 	joinRefusal,
+	memberRefused,
 	refusalMessage,
 	ticketRefusal,
 	type GroupRefusal,
@@ -51,7 +52,7 @@ export function memberFactsOf(
 	exceptTicket: string | null,
 	now: number,
 ): MemberFacts {
-	const refusals: { [userId: string]: string } = {}
+	const refusals: MemberFacts['refusals'] = {}
 	for (const id of memberIds) {
 		const refused = queueRefusalFor(nk, id, false, now)
 		if (refused) refusals[id] = refused
@@ -74,7 +75,7 @@ export function partyTicketOf(add: unknown): PartyTicket {
 }
 
 // registerRtBefore('PartyJoin'): a lobby's party takes only its members,
-// while the group is forming.
+// while the group is forming, and only one who may queue casual.
 export function beforePartyJoin(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -87,6 +88,8 @@ export function beforePartyJoin(
 	if (!found) return envelope
 	const refused = joinRefusal(found.status, ctx.userId)
 	if (refused) throw refuse(refused)
+	const queueRefused = queueRefusalFor(nk, ctx.userId, false, Date.now())
+	if (queueRefused) throw refuse(memberRefused(ctx.userId, queueRefused))
 	return envelope
 }
 

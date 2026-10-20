@@ -6,6 +6,8 @@
 // admin_integrity_set. Nakama only keeps the latest
 // verdict and gates the ranked queue on it while config.integrityEnforced.
 
+import { pushToLobby } from './player/rpc'
+import { standingFor } from './standing/current'
 import type { ServerConfig } from './config'
 import { callExpress } from './express'
 import { INVALID_ARGUMENT, UNAVAILABLE, runtimeError } from './errors'
@@ -149,6 +151,8 @@ export function rpcAdminIntegritySet(
 		reason: optionalString(input.reason),
 		message: optionalString(input.message),
 	})
+	// A verdict moves the standing; the lobby's snapshot follows.
+	pushToLobby(nk, userId, { standing: standingFor(nk, userId, Date.now()).standing })
 	return JSON.stringify({})
 }
 

@@ -4,6 +4,7 @@ import { emptyProgress } from '../achievements/progress'
 import { readProgress, writeProgress } from '../achievements/storage'
 import { readBans } from '../moderation/bans'
 import { NotifyCode } from '../notify'
+import { readModReport, writeModReport } from '../standing/storage'
 import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
 import { readProfile } from './profile'
 import { rpcSessionInit, rpcTosAccept, withResolvedMutes } from './session'
@@ -102,6 +103,15 @@ describe('withResolvedMutes', () => {
 		const next = withResolvedMutes(p, { x: 'nx' })
 		expect(next.mutedUserIds).toEqual(['nx'])
 		expect(next.unresolvedMutedPlayerIds).toEqual(['y'])
+	})
+})
+
+describe('session_init mod report', () => {
+	it("clears the last session's report, so the new session starts unreported", () => {
+		const nk = fakeNk({ ...account(''), httpRequest: () => ({ code: 502, headers: {}, body: '{}' }) })
+		writeModReport(nk as any, USER, { mods: ['MultiplayerAPI-0.1.2'], reportedAt: 1 })
+		rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, '{}')
+		expect(readModReport(nk as any, USER)).toBeNull()
 	})
 })
 

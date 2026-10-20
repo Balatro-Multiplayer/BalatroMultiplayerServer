@@ -1,6 +1,8 @@
 // Admin RPCs: server to server only (the runtime http key, no player
 // session), for the BMP API to drive Nakama. Called as
 // POST /v2/rpc/<id>?http_key=...&unwrap with a JSON body.
+import { standingInputsChanged } from './standing/allowed'
+import { standingInputsUpdated } from './standing/changed'
 import { INVALID_ARGUMENT, NOT_FOUND, runtimeError } from './errors'
 import { lookupCode } from './lobby/codes'
 import type { LobbySignal } from './lobby/protocol'
@@ -74,9 +76,11 @@ export function rpcAdminConfigSet(
 	payload: string,
 ) {
 	requireServer(ctx)
-	const config = mergeConfig(readConfig(nk), parsePayload(payload))
+	const before = readConfig(nk)
+	const config = mergeConfig(before, parsePayload(payload))
 	writeConfig(nk, config)
 	logger.info('Server config updated: %v', JSON.stringify(config))
+	if (standingInputsChanged(before, config)) standingInputsUpdated(nk, logger, Date.now())
 	return JSON.stringify(config)
 }
 

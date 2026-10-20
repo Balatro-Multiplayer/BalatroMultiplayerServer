@@ -4,6 +4,7 @@
 // calls, where Set/Map values are lost and in-place nested mutation can
 // silently not stick, so the state holds only plain objects and arrays.
 import type { TeamPlan } from '../matchmaking/group/teams'
+import type { RequiredStanding } from '../standing/standing'
 import { replayTailOf } from './active'
 import {
 	endGroup,
@@ -98,6 +99,11 @@ export interface Lobby {
 	groupsReleased?: boolean
 	// A matchmade Teams game's teams.
 	teamPlan?: TeamPlan | null
+	// A matchmade lobby: the standing its players queued with, which a
+	// returning player must have again (lobby/match.ts). Fixed when the match
+	// is planned, so a config change can't move the bar mid-game; absent on
+	// a private lobby (never gated) and on one made before standings existed.
+	requiredStanding?: RequiredStanding
 }
 
 export type Outbound =
@@ -129,6 +135,7 @@ export function newLobby(params: {
 	gameMode?: string
 	groups?: MatchedGroup[]
 	teamPlan?: TeamPlan | null
+	requiredStanding?: RequiredStanding
 	now: number
 	graceMs: number
 	resultTimeoutMs?: number
@@ -153,6 +160,7 @@ export function newLobby(params: {
 		actionBudget: {},
 		groups: params.groups,
 		teamPlan: params.teamPlan,
+		requiredStanding: params.requiredStanding,
 	}
 }
 
@@ -277,6 +285,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 			displayName: p.info.displayName,
 			preferredJoker: p.info.preferredJoker,
 			mods: p.info.mods,
+			standing: p.info.standing || null,
 			isAway: p.awaySince !== null,
 		})),
 		ownState: self ? self.ownState : null,

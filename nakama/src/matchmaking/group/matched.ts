@@ -1,7 +1,7 @@
 // A matched game's groups: each party's home lobby must still be queueing it,
 // for this game, with exactly these members; the home is told when its group
 // is matched, queues again, or is let go.
-import type { GroupEndReason, GroupQueueView, LobbySignal, MatchedGroup } from '../../lobby/protocol'
+import type { GroupEndReason, GroupQueueView, LobbySignal, MatchedGroup, RefusedMember } from '../../lobby/protocol'
 import { queueKey, type MatchPlan, type PlannedGroup } from '../matched'
 import { clearMatched } from '../queue'
 import { readBinding, signalHome, statusOf, type GroupBinding } from './binding'
@@ -54,8 +54,14 @@ export function requeueGroup(nk: nkruntime.Nakama, home: MatchedGroup) {
 	tell(nk, home.homeCode, { type: 'group_requeue', partyId: home.partyId })
 }
 
-export function cancelGroupFor(nk: nkruntime.Nakama, homeCode: string, partyId: string, reason: GroupEndReason) {
-	tell(nk, homeCode, { type: 'group_cancel', partyId, reason })
+export function cancelGroupFor(
+	nk: nkruntime.Nakama,
+	homeCode: string,
+	partyId: string,
+	reason: GroupEndReason,
+	refused?: RefusedMember,
+) {
+	tell(nk, homeCode, refused ? { type: 'group_cancel', partyId, reason, refused } : { type: 'group_cancel', partyId, reason })
 }
 
 export function announceMatched(nk: nkruntime.Nakama, home: MatchedGroup, matchId: string, code: string) {
