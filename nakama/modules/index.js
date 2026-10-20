@@ -1108,11 +1108,11 @@ var require_Pattern = __commonJS({
     exports.parseRawPattern = parseRawPattern2;
     var Parser_1 = require_Parser();
     var parser = new Parser_1.Parser();
-    function pattern2(strings, ...expressions) {
-      let result = strings.raw[0];
+    function pattern2(strings2, ...expressions) {
+      let result = strings2.raw[0];
       for (const [i, expression] of expressions.entries()) {
         result += String(expression);
-        result += strings.raw[i + 1];
+        result += strings2.raw[i + 1];
       }
       return parser.parse(result);
     }
@@ -1479,19 +1479,6 @@ var require_dist = __commonJS({
   }
 });
 
-// src/errors.ts
-var INVALID_ARGUMENT = 3;
-var NOT_FOUND = 5;
-var ALREADY_EXISTS = 6;
-var PERMISSION_DENIED = 7;
-var RESOURCE_EXHAUSTED = 8;
-var FAILED_PRECONDITION = 9;
-var UNAVAILABLE = 14;
-var UNAUTHENTICATED = 16;
-function runtimeError(code, message) {
-  return { code, message };
-}
-
 // src/lobby/protocol.ts
 var LOBBY_MATCH = "bmp_lobby";
 var ClientOp = {
@@ -1534,7 +1521,10 @@ var ServerOp = {
   SERVER_RESTARTING: 110,
   // ReplayTail, to a participant rejoining a running game: what the others
   // logged, so its view of them catches up.
-  REPLAY_TAIL: 111
+  REPLAY_TAIL: 111,
+  // GroupQueueMessage, to the home lobby's players: its group queue moved on
+  // (matchmaking/group).
+  GROUP_QUEUE: 112
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -1544,72 +1534,14 @@ var LOBBY_CODE_COLLECTION = "lobby_codes";
 var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
 var LOBBY_CHECKPOINT_COLLECTION = "lobby_checkpoints";
 var CHECKPOINT_TTL_MS = 10 * 60 * 1e3;
+function checkpointExpiry(stored) {
+  if (typeof stored.expiresAt === "number") return stored.expiresAt;
+  return Number(stored.at) + CHECKPOINT_TTL_MS;
+}
 var RUNS_COLLECTION = "match_runs";
 var LOGS_COLLECTION = "match_logs";
 var MY_RUNS_COLLECTION = "my_runs";
 var RATINGS_COLLECTION = "ratings";
-
-// src/lobby/codes.ts
-function keyOf(code) {
-  return {
-    collection: LOBBY_CODE_COLLECTION,
-    key: code,
-    userId: SYSTEM_USER_ID
-  };
-}
-function write(nk, code, entry, version) {
-  nk.storageWrite([
-    __spreadProps(__spreadValues({}, keyOf(code)), {
-      value: __spreadValues({}, entry),
-      permissionRead: 0,
-      permissionWrite: 0,
-      version
-    })
-  ]);
-}
-function read(nk, code) {
-  const objects = nk.storageRead([keyOf(code)]);
-  if (objects.length === 0) return null;
-  const value = objects[0].value;
-  return {
-    matchId: String(value.matchId || ""),
-    modId: String(value.modId || "")
-  };
-}
-function heldByCheckpoint(nk, code) {
-  const objects = nk.storageRead([
-    { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID }
-  ]);
-  return objects.length > 0 && Date.now() - Number(objects[0].value.at) < CHECKPOINT_TTL_MS;
-}
-function reserveCode(nk, code, modId) {
-  if (heldByCheckpoint(nk, code)) return false;
-  const existing = read(nk, code);
-  if (existing) {
-    if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
-    nk.storageDelete([keyOf(code)]);
-  }
-  try {
-    write(nk, code, { matchId: "", modId }, "*");
-    return true;
-  } catch (e) {
-    return false;
-  }
-}
-function bindCode(nk, code, matchId, modId) {
-  write(nk, code, { matchId, modId });
-}
-function lookupCode(nk, code) {
-  const entry = read(nk, code);
-  if (!entry || !entry.matchId || !nk.matchGet(entry.matchId)) return null;
-  return entry;
-}
-function releaseCode(nk, code, matchId) {
-  const entry = read(nk, code);
-  if (entry && entry.matchId === matchId) {
-    nk.storageDelete([keyOf(code)]);
-  }
-}
 
 // src/config.ts
 var CONFIG_COLLECTION = "server_config";
@@ -1619,9 +1551,12 @@ var DEFAULT_CONFIG = {
   chatEnabled: true,
   rankedEnabled: true,
   casualQueueEnabled: true,
+  groupQueueEnabled: true,
   lobbyCreationEnabled: true,
   testingMode: false,
   integrityEnforced: false,
+  // Off until the avatar reset (achievements/reset.ts) has run.
+  achievementsEnabled: false,
   chatAllowlist: [],
   season: 0
 };
@@ -1635,9 +1570,11 @@ function mergeConfig(current, update) {
     "chatEnabled",
     "rankedEnabled",
     "casualQueueEnabled",
+    "groupQueueEnabled",
     "lobbyCreationEnabled",
     "testingMode",
-    "integrityEnforced"
+    "integrityEnforced",
+    "achievementsEnabled"
   ];
   for (const flag of flags) {
     const value = update[flag];
@@ -1667,6 +1604,785 @@ function writeConfig(nk, config) {
       permissionWrite: 0
     }
   ]);
+}
+
+// src/errors.ts
+var INVALID_ARGUMENT = 3;
+var NOT_FOUND = 5;
+var ALREADY_EXISTS = 6;
+var PERMISSION_DENIED = 7;
+var RESOURCE_EXHAUSTED = 8;
+var FAILED_PRECONDITION = 9;
+var UNAVAILABLE = 14;
+var UNAUTHENTICATED = 16;
+function runtimeError(code, message) {
+  return { code, message };
+}
+
+// src/shared/avatars/ids.ts
+var AVATAR_IDS = [
+  // Defaults
+  "j_joker",
+  "j_jolly",
+  "j_zany",
+  "j_mad",
+  "j_crazy",
+  "j_droll",
+  "j_sly",
+  "j_wily",
+  "j_clever",
+  "j_devious",
+  "j_crafty",
+  // Wins
+  "j_baron",
+  "j_lucky_cat",
+  "j_smiley",
+  "j_midas_mask",
+  // Games played
+  "j_swashbuckler",
+  "j_vampire",
+  "j_photograph",
+  "j_square",
+  "j_scary_face",
+  "j_madness",
+  // Days played
+  "j_odd_todd",
+  "j_even_steven",
+  "j_ancient",
+  // Win streak
+  "j_fortune_teller",
+  "j_sixth_sense",
+  // PvP games
+  "j_faceless",
+  "j_bull",
+  "j_card_sharp",
+  // Speedrun games
+  "j_space",
+  "j_astronomer",
+  "j_constellation",
+  // Speedrun milestones
+  "j_runner",
+  "j_hiker",
+  // Unique achievements
+  "j_idol",
+  "j_luchador",
+  "j_matador",
+  "j_scholar",
+  "j_stuntman",
+  "j_wee",
+  "j_burglar",
+  "j_chaos",
+  "j_egg",
+  "j_mr_bones",
+  "j_ring_master",
+  "j_pareidolia",
+  "j_throwback",
+  "j_blue_joker",
+  "j_green_joker",
+  "j_golden",
+  "j_smeared",
+  // Reserved for modes that don't exist yet
+  "j_troubadour",
+  "j_blueprint",
+  "j_merry_andy",
+  "j_brainstorm",
+  "j_abstract",
+  // Privileges
+  "j_turtle_bean",
+  "j_vagabond",
+  "j_dusk",
+  "j_burnt",
+  "j_mime",
+  "j_perkeo",
+  "j_stone"
+];
+var DEFAULT_AVATAR = "j_joker";
+function isAvatarId(value) {
+  return typeof value === "string" && AVATAR_IDS.indexOf(value) !== -1;
+}
+
+// src/shared/avatars/catalog.ts
+var DEFAULT = { rule: { kind: "default" } };
+var counter = (counter2, threshold) => ({
+  rule: { kind: "counter", counter: counter2, threshold }
+});
+var privilege = (privilege2) => ({ rule: { kind: "privilege", privilege: privilege2 } });
+var SHEET = {
+  j_joker: DEFAULT,
+  j_jolly: DEFAULT,
+  j_zany: DEFAULT,
+  j_mad: DEFAULT,
+  j_crazy: DEFAULT,
+  j_droll: DEFAULT,
+  j_sly: DEFAULT,
+  j_wily: DEFAULT,
+  j_clever: DEFAULT,
+  j_devious: DEFAULT,
+  j_crafty: DEFAULT,
+  j_baron: counter("wins", 1),
+  j_lucky_cat: counter("wins", 10),
+  j_smiley: counter("wins", 50),
+  j_midas_mask: counter("wins", 100),
+  j_swashbuckler: counter("games", 5),
+  j_vampire: counter("games", 10),
+  j_photograph: counter("games", 50),
+  j_square: counter("games", 64),
+  j_scary_face: counter("games", 100),
+  j_madness: counter("games", 200),
+  j_odd_todd: counter("daysPlayed", 7),
+  j_even_steven: counter("daysPlayed", 14),
+  j_ancient: counter("daysPlayed", 30),
+  j_fortune_teller: counter("bestWinStreak", 3),
+  j_sixth_sense: counter("bestWinStreak", 5),
+  j_faceless: counter("pvpGames", 10),
+  j_bull: counter("pvpGames", 25),
+  j_card_sharp: counter("pvpGames", 50),
+  j_space: counter("spdrnGames", 10),
+  j_astronomer: counter("spdrnGames", 25),
+  j_constellation: counter("spdrnGames", 50),
+  j_runner: { rule: { kind: "milestone", milestone: "sub8SpdrnRun" } },
+  j_hiker: { rule: { kind: "allOf", collection: "spdrnModes" } },
+  j_idol: { rule: { kind: "allOf", collection: "vanillaDecks" } },
+  j_luchador: counter("winsVs3Plus", 1),
+  j_matador: counter("winsVs7Plus", 1),
+  j_scholar: { rule: { kind: "milestone", milestone: "discordLinked" } },
+  j_stuntman: { rule: { kind: "milestone", milestone: "scoredOver1e11" } },
+  j_wee: counter("smallworldGames", 10),
+  j_burglar: counter("hands", 1e3),
+  j_chaos: counter("rerolls", 100),
+  j_egg: counter("moneySpent", 3e3),
+  j_mr_bones: counter("livesLost", 100),
+  j_ring_master: { rule: { kind: "milestone", milestone: "metShowman" }, alsoGrantedBy: "staff" },
+  j_pareidolia: { rule: { kind: "allUnlockable" } },
+  j_throwback: counter("skips", 100),
+  j_blue_joker: { rule: { kind: "deckGames", deck: "b_blue", threshold: 10 } },
+  j_green_joker: { rule: { kind: "deckGames", deck: "b_green", threshold: 3 } },
+  j_golden: { rule: { kind: "deckGames", deck: "b_yellow", threshold: 3 } },
+  j_smeared: counter("suitChangers", 100),
+  j_troubadour: { rule: { kind: "reserved", reservedFor: "coop" } },
+  j_blueprint: { rule: { kind: "reserved", reservedFor: "coop" } },
+  j_merry_andy: { rule: { kind: "reserved", reservedFor: "coop" } },
+  j_brainstorm: { rule: { kind: "reserved", reservedFor: "coop" } },
+  j_abstract: { rule: { kind: "reserved", reservedFor: "practice" } },
+  j_turtle_bean: privilege("bean"),
+  j_vagabond: privilege("vagabond"),
+  j_dusk: privilege("sizaak"),
+  j_burnt: privilege("lava"),
+  j_mime: privilege("staff"),
+  j_perkeo: privilege("virtualized"),
+  j_stone: privilege("twelve")
+};
+var CATALOG = AVATAR_IDS.map((id) => __spreadValues({ id }, SHEET[id]));
+function entryOf(id) {
+  return __spreadValues({ id }, SHEET[id]);
+}
+
+// src/shared/avatars/unlocked.ts
+function grantedByPrivilege(entry, privileges) {
+  if (entry.rule.kind === "privilege" && privileges.indexOf(entry.rule.privilege) !== -1) return true;
+  return entry.alsoGrantedBy !== void 0 && privileges.indexOf(entry.alsoGrantedBy) !== -1;
+}
+function isSelectable(id, holdings) {
+  if (!isAvatarId(id)) return false;
+  const entry = entryOf(id);
+  if (entry.rule.kind === "default") return true;
+  if (grantedByPrivilege(entry, holdings.privileges)) return true;
+  if (entry.rule.kind === "reserved" || entry.rule.kind === "privilege") return false;
+  return holdings.unlocked.indexOf(id) !== -1;
+}
+function selectableOrDefault(id, holdings) {
+  return isSelectable(id, holdings) ? id : DEFAULT_AVATAR;
+}
+function privilegeTable(privileges) {
+  const jokers = CATALOG.filter((entry) => grantedByPrivilege(entry, privileges)).map((entry) => entry.id);
+  return jokers.length > 0 ? { jokers } : {};
+}
+
+// src/player/profile.ts
+var PLAYER_COLLECTION = "player";
+var PROFILE_KEY = "profile";
+var MAX_NAME_LENGTH = 64;
+var WRITE_ATTEMPTS = 3;
+function cleanName(name) {
+  if (typeof name !== "string") return "";
+  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
+}
+function defaultProfile(steamName) {
+  return {
+    steamName,
+    useDiscordName: false,
+    preferredJoker: DEFAULT_AVATAR,
+    mods: null,
+    discordIdHash: null,
+    discordUsername: null,
+    privileges: [],
+    tosAcceptedVersion: 0,
+    chatEnabled: false,
+    chatBlocked: false,
+    mutedUserIds: [],
+    unresolvedMutedPlayerIds: [],
+    legacyPlayerId: null,
+    synced: false,
+    nakamaLogin: false
+  };
+}
+function stringList(value) {
+  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+}
+function profileOf(value, fallbackName) {
+  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
+  return __spreadProps(__spreadValues({}, base), {
+    useDiscordName: value.useDiscordName === true,
+    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
+    mods: value.mods === void 0 ? null : value.mods,
+    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
+    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
+    privileges: stringList(value.privileges),
+    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
+    chatEnabled: value.chatEnabled === true,
+    chatBlocked: value.chatBlocked === true,
+    mutedUserIds: stringList(value.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
+    synced: value.synced === true,
+    nakamaLogin: value.nakamaLogin === true
+  });
+}
+function withSync(profile, sync, unlocked = []) {
+  var _a, _b;
+  const privileges = stringList(sync.privileges);
+  const joker = typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker;
+  return __spreadProps(__spreadValues({}, profile), {
+    useDiscordName: sync.useDiscordName === true,
+    preferredJoker: selectableOrDefault(joker, { privileges, unlocked }),
+    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
+    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
+    privileges,
+    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
+    chatEnabled: sync.chatEnabled === true,
+    chatBlocked: sync.chatBlocked === true,
+    mutedUserIds: stringList(sync.mutedUserIds),
+    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
+    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
+    synced: true
+  });
+}
+function displayNameOf(profile) {
+  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
+  return profile.steamName;
+}
+function playerView(userId, profile) {
+  return {
+    id: userId,
+    steamName: profile.steamName,
+    displayName: displayNameOf(profile),
+    useDiscordName: profile.useDiscordName,
+    preferredJoker: profile.preferredJoker,
+    discordLinked: profile.discordIdHash !== null,
+    discordUsername: profile.discordUsername,
+    privileges: privilegeTable(profile.privileges),
+    chatEnabled: profile.chatEnabled,
+    chatBlocked: profile.chatBlocked,
+    mutedPlayerIds: profile.mutedUserIds
+  };
+}
+function readProfile(nk, userId, fallbackName = "") {
+  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
+  if (objects.length === 0) return null;
+  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
+}
+function writeProfile(nk, userId, profile, version) {
+  nk.storageWrite([
+    {
+      collection: PLAYER_COLLECTION,
+      key: PROFILE_KEY,
+      userId,
+      value: profile,
+      version,
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+}
+function updateProfile(nk, userId, change, fallbackName = "") {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
+    const stored = readProfile(nk, userId, fallbackName);
+    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
+    try {
+      writeProfile(nk, userId, next, stored ? stored.version : "*");
+      return next;
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+function profileFor(nk, userId, fallbackName = "") {
+  const stored = readProfile(nk, userId, fallbackName);
+  return stored ? stored.profile : defaultProfile(fallbackName);
+}
+
+// src/rpc.ts
+function requireUser(ctx) {
+  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "This RPC needs a player session");
+  return ctx.userId;
+}
+function requireServer(ctx) {
+  if (ctx.userId) throw runtimeError(PERMISSION_DENIED, "Only the server may call this RPC");
+}
+function parsePayload(payload) {
+  if (!payload) return {};
+  try {
+    const data = JSON.parse(payload);
+    if (Array.isArray(data) && data.length === 0) return {};
+    if (typeof data === "object" && data !== null && !Array.isArray(data)) return data;
+  } catch (e) {
+  }
+  throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+}
+
+// src/shared/avatars/rules.ts
+var COUNTERS = [
+  "wins",
+  "games",
+  "pvpGames",
+  "spdrnGames",
+  "winsVs3Plus",
+  "winsVs7Plus",
+  "hands",
+  "rerolls",
+  "moneySpent",
+  "livesLost",
+  "skips",
+  "suitChangers",
+  "smallworldGames",
+  "daysPlayed",
+  "bestWinStreak"
+];
+var MILESTONES = ["discordLinked", "sub8SpdrnRun", "scoredOver1e11", "metShowman"];
+var VANILLA_DECKS = [
+  "b_red",
+  "b_blue",
+  "b_yellow",
+  "b_green",
+  "b_black",
+  "b_magic",
+  "b_nebula",
+  "b_ghost",
+  "b_abandoned",
+  "b_checkered",
+  "b_zodiac",
+  "b_painted",
+  "b_anaglyph",
+  "b_plasma",
+  "b_erratic"
+];
+var SPDRN_MODES = [
+  "spdrn_white_stake_triple",
+  "spdrn_gold_stake_single",
+  "spdrn_seed_scout",
+  "spdrn_challenge",
+  "spdrn_all_deck",
+  "spdrn_stake_climb"
+];
+function membersOf(collection) {
+  switch (collection) {
+    case "vanillaDecks":
+      return VANILLA_DECKS;
+    case "spdrnModes":
+      return SPDRN_MODES;
+  }
+}
+function isEarnedByPlay(rule) {
+  return rule.kind === "counter" || rule.kind === "deckGames" || rule.kind === "allOf" || rule.kind === "milestone";
+}
+
+// src/achievements/facts/decks.ts
+var DECK_NAMES = {
+  "Red Deck": "b_red",
+  "Blue Deck": "b_blue",
+  "Yellow Deck": "b_yellow",
+  "Green Deck": "b_green",
+  "Black Deck": "b_black",
+  "Magic Deck": "b_magic",
+  "Nebula Deck": "b_nebula",
+  "Ghost Deck": "b_ghost",
+  "Abandoned Deck": "b_abandoned",
+  "Checkered Deck": "b_checkered",
+  "Zodiac Deck": "b_zodiac",
+  "Painted Deck": "b_painted",
+  "Anaglyph Deck": "b_anaglyph",
+  "Plasma Deck": "b_plasma",
+  "Erratic Deck": "b_erratic"
+};
+function deckKeyOf(value) {
+  var _a;
+  if (typeof value === "string") {
+    if (VANILLA_DECKS.indexOf(value) !== -1) return value;
+    return (_a = DECK_NAMES[value]) != null ? _a : null;
+  }
+  if (value !== null && typeof value === "object" && !Array.isArray(value))
+    return deckKeyOf(value.key);
+  return null;
+}
+
+// src/achievements/facts/setup.ts
+var SMALLWORLD_RULESET = "ruleset_mp_smallworld";
+function fieldsOf(args) {
+  return args !== null && typeof args === "object" && !Array.isArray(args) ? args : {};
+}
+function distinct(values) {
+  const out = [];
+  for (const value of values) if (value !== null && out.indexOf(value) === -1) out.push(value);
+  return out;
+}
+function spdrnModeOf(value) {
+  return typeof value === "string" && SPDRN_MODES.indexOf(value) !== -1 ? value : null;
+}
+function gameSetupOf(events, serverGamemode = null) {
+  var _a;
+  const lobbyInfo = fieldsOf((events.filter((e) => e.opcode === "lobby_info")[0] || { args: null }).args);
+  const lobbyOptions = fieldsOf(lobbyInfo.options);
+  const runDecks = distinct(events.filter((e) => e.opcode === "run_info").map((e) => deckKeyOf(fieldsOf(e.args).deck)));
+  const lobbyDecks = Array.isArray(lobbyInfo.decks) ? distinct(lobbyInfo.decks.map(deckKeyOf)) : [];
+  const ruleset = (_a = lobbyInfo.ruleset) != null ? _a : lobbyOptions.ruleset;
+  return {
+    decks: runDecks.length > 0 ? runDecks : lobbyDecks,
+    smallworld: ruleset === SMALLWORLD_RULESET,
+    spdrnMode: spdrnModeOf(serverGamemode) || spdrnModeOf(lobbyInfo.gamemode) || spdrnModeOf(lobbyOptions.gamemode)
+  };
+}
+
+// src/achievements/progress.ts
+var PROGRESS_SCHEMA = 1;
+var COUNTED_RUN_IDS_KEPT = 64;
+var STUNT_SCORE = 1e11;
+var SUB_8_MS = 8 * 60 * 1e3;
+function storedCounters() {
+  return COUNTERS.filter((c) => c !== "bestWinStreak");
+}
+function emptyProgress() {
+  const counters = {};
+  for (const counter2 of storedCounters()) counters[counter2] = 0;
+  return {
+    schema: PROGRESS_SCHEMA,
+    counters,
+    deckGames: {},
+    spdrnModesPlayed: [],
+    lastPlayedDay: null,
+    winStreak: { current: 0, best: 0 },
+    milestones: [],
+    unlocked: [],
+    countedRunIds: [],
+    privateGames: { day: "", counts: {} }
+  };
+}
+var fieldsOf2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+var count = (value) => typeof value === "number" && isFinite(value) && value > 0 ? value : 0;
+var strings = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+function progressOf(value) {
+  const stored = fieldsOf2(value);
+  const base = emptyProgress();
+  const counters = fieldsOf2(stored.counters);
+  for (const counter2 of storedCounters()) base.counters[counter2] = count(counters[counter2]);
+  const decks = fieldsOf2(stored.deckGames);
+  for (const deck of VANILLA_DECKS) if (count(decks[deck]) > 0) base.deckGames[deck] = count(decks[deck]);
+  const streak = fieldsOf2(stored.winStreak);
+  const privateGames = fieldsOf2(stored.privateGames);
+  const privateCounts = fieldsOf2(privateGames.counts);
+  const counts = {};
+  for (const key in privateCounts) if (count(privateCounts[key]) > 0) counts[key] = count(privateCounts[key]);
+  return __spreadProps(__spreadValues({}, base), {
+    spdrnModesPlayed: strings(stored.spdrnModesPlayed).map(spdrnModeOf).filter((m) => m !== null),
+    lastPlayedDay: typeof stored.lastPlayedDay === "string" ? stored.lastPlayedDay : null,
+    winStreak: { current: count(streak.current), best: count(streak.best) },
+    milestones: strings(stored.milestones).filter((m) => MILESTONES.indexOf(m) !== -1),
+    unlocked: strings(stored.unlocked).filter(isAvatarId),
+    countedRunIds: strings(stored.countedRunIds).slice(-COUNTED_RUN_IDS_KEPT),
+    privateGames: { day: typeof privateGames.day === "string" ? privateGames.day : "", counts }
+  });
+}
+function utcDayOf(epochMs) {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+function withMilestone(progress, milestone) {
+  if (progress.milestones.indexOf(milestone) !== -1) return progress;
+  return __spreadProps(__spreadValues({}, progress), { milestones: progress.milestones.concat([milestone]) });
+}
+function withUnlocked(progress, ids) {
+  const fresh = ids.filter((id) => progress.unlocked.indexOf(id) === -1);
+  return fresh.length === 0 ? progress : __spreadProps(__spreadValues({}, progress), { unlocked: progress.unlocked.concat(fresh) });
+}
+function streakAfter(streak, result) {
+  switch (result) {
+    case "win": {
+      const current = streak.current + 1;
+      return { current, best: Math.max(streak.best, current) };
+    }
+    case "loss":
+      return { current: 0, best: streak.best };
+    case "unknown":
+      return streak;
+  }
+}
+function privateGamesAfter(progress, game) {
+  if (game.privateOpponentsKey === null) return progress.privateGames;
+  const counts = progress.privateGames.day === game.day ? __spreadValues({}, progress.privateGames.counts) : {};
+  counts[game.privateOpponentsKey] = (counts[game.privateOpponentsKey] || 0) + 1;
+  return { day: game.day, counts };
+}
+function applyGame(progress, game) {
+  if (progress.countedRunIds.indexOf(game.runId) !== -1) return progress;
+  const facts = game.facts;
+  const won = game.result === "win";
+  const c = progress.counters;
+  const newDay = progress.lastPlayedDay !== game.day;
+  const counters = __spreadProps(__spreadValues({}, c), {
+    games: c.games + 1,
+    wins: c.wins + (won ? 1 : 0),
+    pvpGames: c.pvpGames + (game.kind === "pvp" ? 1 : 0),
+    spdrnGames: c.spdrnGames + (game.kind === "spdrn" ? 1 : 0),
+    winsVs3Plus: c.winsVs3Plus + (won && game.activeOpponents >= 3 ? 1 : 0),
+    winsVs7Plus: c.winsVs7Plus + (won && game.activeOpponents >= 7 ? 1 : 0),
+    hands: c.hands + facts.hands,
+    rerolls: c.rerolls + facts.rerolls,
+    moneySpent: c.moneySpent + facts.moneySpent,
+    livesLost: c.livesLost + facts.livesLost,
+    skips: c.skips + facts.skips,
+    suitChangers: c.suitChangers + facts.suitChangers,
+    smallworldGames: c.smallworldGames + (facts.setup.smallworld ? 1 : 0),
+    daysPlayed: c.daysPlayed + (newDay ? 1 : 0)
+  });
+  const deckGames = __spreadValues({}, progress.deckGames);
+  for (const deck of facts.setup.decks) deckGames[deck] = (deckGames[deck] || 0) + 1;
+  const mode = game.kind === "spdrn" ? facts.setup.spdrnMode : null;
+  const spdrnModesPlayed = mode !== null && progress.spdrnModesPlayed.indexOf(mode) === -1 ? progress.spdrnModesPlayed.concat([mode]) : progress.spdrnModesPlayed;
+  let next = __spreadProps(__spreadValues({}, progress), {
+    counters,
+    deckGames,
+    spdrnModesPlayed,
+    lastPlayedDay: progress.lastPlayedDay === null || game.day > progress.lastPlayedDay ? game.day : progress.lastPlayedDay,
+    winStreak: streakAfter(progress.winStreak, game.result),
+    countedRunIds: progress.countedRunIds.concat([game.runId]).slice(-COUNTED_RUN_IDS_KEPT),
+    privateGames: privateGamesAfter(progress, game)
+  });
+  if (facts.bestHandScore >= STUNT_SCORE) next = withMilestone(next, "scoredOver1e11");
+  if (game.kind === "spdrn" && facts.fastestSpdrnRunMs !== null && facts.fastestSpdrnRunMs < SUB_8_MS)
+    next = withMilestone(next, "sub8SpdrnRun");
+  if (game.metShowman) next = withMilestone(next, "metShowman");
+  return next;
+}
+
+// src/achievements/storage.ts
+var PROGRESS_COLLECTION = "avatar_progress";
+var PROGRESS_KEY = "progress";
+var WRITE_ATTEMPTS2 = 3;
+function readProgress(nk, userId) {
+  const objects = nk.storageRead([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId }]);
+  if (objects.length === 0) return null;
+  return { progress: progressOf(objects[0].value), version: objects[0].version || "" };
+}
+function progressFor(nk, userId) {
+  const stored = readProgress(nk, userId);
+  return stored ? stored.progress : emptyProgress();
+}
+function writeProgress(nk, userId, progress, version) {
+  nk.storageWrite([
+    {
+      collection: PROGRESS_COLLECTION,
+      key: PROGRESS_KEY,
+      userId,
+      value: progress,
+      version,
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+}
+function updateProgress(nk, userId, change) {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
+    const stored = readProgress(nk, userId);
+    const before = stored ? stored.progress : emptyProgress();
+    const after = change(before);
+    if (after === before) return { before, after };
+    try {
+      writeProgress(nk, userId, after, stored ? stored.version : "*");
+      return { before, after };
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+function deleteProgress(nk, userId) {
+  nk.storageDelete([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId }]);
+}
+function holdingsOf(nk, userId, privileges) {
+  return { privileges, unlocked: progressFor(nk, userId).unlocked };
+}
+
+// src/achievements/unlocks.ts
+function counterValue(progress, counter2) {
+  return counter2 === "bestWinStreak" ? progress.winStreak.best : progress.counters[counter2];
+}
+function covered(progress, rule) {
+  const members = membersOf(rule.collection);
+  const played = rule.collection === "vanillaDecks" ? members.filter((deck) => (progress.deckGames[deck] || 0) > 0) : members.filter((mode) => progress.spdrnModesPlayed.indexOf(mode) !== -1);
+  return played.length;
+}
+function unlockables(except) {
+  return CATALOG.filter((entry) => entry.id !== except && isEarnedByPlay(entry.rule));
+}
+function allUnlockableDone(progress, id, holdings) {
+  return unlockables(id).filter((entry) => isSelectable(entry.id, holdings)).length;
+}
+function goalOf(entry, progress, holdings) {
+  const rule = entry.rule;
+  switch (rule.kind) {
+    case "default":
+      return null;
+    case "privilege":
+      return { kind: "privilege", key: rule.privilege, threshold: 1, progress: holdings.privileges.indexOf(rule.privilege) !== -1 ? 1 : 0 };
+    case "counter":
+      return { kind: "counter", key: rule.counter, threshold: rule.threshold, progress: Math.min(counterValue(progress, rule.counter), rule.threshold) };
+    case "deckGames":
+      return { kind: "deckGames", key: rule.deck, threshold: rule.threshold, progress: Math.min(progress.deckGames[rule.deck] || 0, rule.threshold) };
+    case "allOf":
+      return { kind: "allOf", key: rule.collection, threshold: membersOf(rule.collection).length, progress: covered(progress, rule) };
+    case "milestone":
+      return { kind: "milestone", key: rule.milestone, threshold: 1, progress: progress.milestones.indexOf(rule.milestone) !== -1 ? 1 : 0 };
+    case "allUnlockable":
+      return { kind: "allUnlockable", key: "allUnlockable", threshold: unlockables(entry.id).length, progress: allUnlockableDone(progress, entry.id, holdings) };
+    case "reserved":
+      return { kind: "reserved", key: rule.reservedFor, threshold: 1, progress: 0 };
+  }
+}
+function meets(rule, progress) {
+  switch (rule.kind) {
+    case "counter":
+      return counterValue(progress, rule.counter) >= rule.threshold;
+    case "deckGames":
+      return (progress.deckGames[rule.deck] || 0) >= rule.threshold;
+    case "allOf":
+      return covered(progress, rule) >= membersOf(rule.collection).length;
+    case "milestone":
+      return progress.milestones.indexOf(rule.milestone) !== -1;
+    default:
+      return false;
+  }
+}
+function newlyUnlocked(progress, privileges) {
+  const fresh = CATALOG.filter((entry) => progress.unlocked.indexOf(entry.id) === -1 && meets(entry.rule, progress)).map(
+    (entry) => entry.id
+  );
+  const holdings = { privileges, unlocked: progress.unlocked.concat(fresh) };
+  for (const entry of CATALOG) {
+    if (entry.rule.kind !== "allUnlockable" || holdings.unlocked.indexOf(entry.id) !== -1) continue;
+    if (allUnlockableDone(progress, entry.id, holdings) >= unlockables(entry.id).length) fresh.push(entry.id);
+  }
+  return fresh;
+}
+
+// src/achievements/rpc.ts
+var USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var PRIVILEGE = /^[a-z0-9_-]{1,64}$/i;
+function catalogView(progress, holdings, selected, enabled) {
+  return {
+    avatars: CATALOG.map((entry) => ({
+      id: entry.id,
+      unlocked: isSelectable(entry.id, holdings),
+      goal: goalOf(entry, progress, holdings)
+    })),
+    selected,
+    enabled
+  };
+}
+function viewOf(nk, userId, fallbackName) {
+  const profile = profileFor(nk, userId, fallbackName);
+  const progress = progressFor(nk, userId);
+  const holdings = { privileges: profile.privileges, unlocked: progress.unlocked };
+  return catalogView(progress, holdings, profile.preferredJoker, readConfig(nk).achievementsEnabled);
+}
+function rpcAvatarCatalog(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  return JSON.stringify(viewOf(nk, userId, ctx.username));
+}
+function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  let view;
+  if (input.userId !== void 0) {
+    if (typeof input.userId !== "string" || !USER_ID.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
+    if (!readProfile(nk, input.userId)) throw runtimeError(NOT_FOUND, "No such player");
+    view = viewOf(nk, input.userId, "");
+  } else {
+    const privileges = input.privileges;
+    if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
+      throw runtimeError(INVALID_ARGUMENT, "userId or privileges is required");
+    const progress = emptyProgress();
+    view = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
+  }
+  return JSON.stringify(__spreadProps(__spreadValues({}, view), { jokers: view.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
+}
+function testingRpcsAllowed(ctx) {
+  return ctx.env.ALLOW_DEVICE_AUTH === "true";
+}
+var isFields = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var isCount = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0;
+function editedProgress(progress, edit) {
+  const next = __spreadProps(__spreadValues({}, progress), { counters: __spreadValues({}, progress.counters), deckGames: __spreadValues({}, progress.deckGames) });
+  if (edit.counters !== void 0) {
+    if (!isFields(edit.counters)) throw runtimeError(INVALID_ARGUMENT, "counters must be an object");
+    for (const key in edit.counters) {
+      const value = edit.counters[key];
+      if (key === "bestWinStreak") {
+        if (!isCount(value)) throw runtimeError(INVALID_ARGUMENT, "Invalid counter bestWinStreak");
+        next.winStreak = { current: Math.min(next.winStreak.current, value), best: value };
+        continue;
+      }
+      if (COUNTERS.indexOf(key) === -1 || !isCount(value))
+        throw runtimeError(INVALID_ARGUMENT, `Invalid counter ${key}`);
+      next.counters[key] = value;
+    }
+  }
+  if (edit.deckGames !== void 0) {
+    if (!isFields(edit.deckGames)) throw runtimeError(INVALID_ARGUMENT, "deckGames must be an object");
+    for (const deck in edit.deckGames) {
+      const value = edit.deckGames[deck];
+      if (VANILLA_DECKS.indexOf(deck) === -1 || !isCount(value))
+        throw runtimeError(INVALID_ARGUMENT, `Invalid deck ${deck}`);
+      next.deckGames[deck] = value;
+    }
+  }
+  if (edit.spdrnModesPlayed !== void 0) {
+    const modes = Array.isArray(edit.spdrnModesPlayed) ? edit.spdrnModesPlayed.map(spdrnModeOf) : [null];
+    if (modes.some((m) => m === null)) throw runtimeError(INVALID_ARGUMENT, "Invalid spdrnModesPlayed");
+    next.spdrnModesPlayed = modes;
+  }
+  if (edit.milestones !== void 0) {
+    const list = edit.milestones;
+    if (!Array.isArray(list) || !list.every((m) => MILESTONES.indexOf(m) !== -1))
+      throw runtimeError(INVALID_ARGUMENT, "Invalid milestones");
+    next.milestones = list;
+  }
+  if (edit.unlocked !== void 0) {
+    if (!Array.isArray(edit.unlocked) || !edit.unlocked.every(isAvatarId)) throw runtimeError(INVALID_ARGUMENT, "Invalid unlocked");
+    next.unlocked = edit.unlocked;
+  }
+  return next;
+}
+function rpcAdminProgressSet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  if (!testingRpcsAllowed(ctx)) throw runtimeError(PERMISSION_DENIED, "Testing RPCs are off on this server");
+  const input = parsePayload(payload);
+  if (typeof input.userId !== "string" || !USER_ID.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
+  const userId = input.userId;
+  if (!readProfile(nk, userId)) throw runtimeError(NOT_FOUND, "No such player");
+  const { after } = updateProgress(nk, userId, (progress) => editedProgress(input.reset === true ? emptyProgress() : progress, input));
+  logger.info("Achievement progress of %s set for testing", userId);
+  return JSON.stringify({ progress: after });
 }
 
 // src/moderation/bans.ts
@@ -1771,207 +2487,78 @@ function banMessage(what, ban) {
 }
 var ACCOUNT_BANNED = "Account banned";
 
-// src/shared/jokers.ts
-var STANDARD_JOKERS = [
-  "j_joker",
-  "j_mime",
-  "j_chaos",
-  "j_space",
-  "j_scholar",
-  "j_egg",
-  "j_burglar",
-  "j_runner",
-  "j_sixth_sense",
-  "j_hiker",
-  "j_card_sharp",
-  "j_madness",
-  "j_vampire",
-  "j_baron",
-  "j_fortune_teller",
-  "j_luchador",
-  "j_lucky_cat",
-  "j_bull",
-  "j_swashbuckler",
-  "j_throwback",
-  "j_mr_bones",
-  "j_ring_master",
-  "j_idol",
-  "j_merry_andy",
-  "j_stuntman",
-  "j_matador",
-  "j_troubadour",
-  "j_ancient",
-  "j_even_steven",
-  "j_odd_todd"
-];
-var PRIVILEGE_JOKERS = {
-  virtualized: "j_perkeo",
-  bean: "j_turtle_bean",
-  vagabond: "j_vagabond",
-  sizaak: "j_dusk",
-  lava: "j_burnt",
-  twelve: "j_stone"
-};
-var DEFAULT_JOKER = "j_joker";
-function isValidJoker(id, privileges = []) {
-  if (STANDARD_JOKERS.indexOf(id) !== -1) return true;
-  return privileges.some((p) => PRIVILEGE_JOKERS[p] === id);
-}
-function privilegeTable(privileges) {
-  const jokers = privileges.map((p) => PRIVILEGE_JOKERS[p]).filter((j) => !!j);
-  return jokers.length > 0 ? { jokers } : {};
-}
-
-// src/player/profile.ts
-var PLAYER_COLLECTION = "player";
-var PROFILE_KEY = "profile";
-var MAX_NAME_LENGTH = 64;
-var WRITE_ATTEMPTS = 3;
-function cleanName(name) {
-  if (typeof name !== "string") return "";
-  return name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, MAX_NAME_LENGTH);
-}
-function defaultProfile(steamName) {
+// src/lobby/codes.ts
+function keyOf(code) {
   return {
-    steamName,
-    useDiscordName: false,
-    preferredJoker: DEFAULT_JOKER,
-    mods: null,
-    discordIdHash: null,
-    discordUsername: null,
-    privileges: [],
-    tosAcceptedVersion: 0,
-    chatEnabled: false,
-    chatBlocked: false,
-    mutedUserIds: [],
-    unresolvedMutedPlayerIds: [],
-    legacyPlayerId: null,
-    synced: false,
-    nakamaLogin: false
+    collection: LOBBY_CODE_COLLECTION,
+    key: code,
+    userId: SYSTEM_USER_ID
   };
 }
-function stringList(value) {
-  return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
-}
-function profileOf(value, fallbackName) {
-  const base = defaultProfile(cleanName(value.steamName) || fallbackName);
-  return __spreadProps(__spreadValues({}, base), {
-    useDiscordName: value.useDiscordName === true,
-    preferredJoker: typeof value.preferredJoker === "string" ? value.preferredJoker : base.preferredJoker,
-    mods: value.mods === void 0 ? null : value.mods,
-    discordIdHash: typeof value.discordIdHash === "string" ? value.discordIdHash : null,
-    discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
-    privileges: stringList(value.privileges),
-    tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
-    chatEnabled: value.chatEnabled === true,
-    chatBlocked: value.chatBlocked === true,
-    mutedUserIds: stringList(value.mutedUserIds),
-    unresolvedMutedPlayerIds: stringList(value.unresolvedMutedPlayerIds),
-    legacyPlayerId: typeof value.legacyPlayerId === "string" ? value.legacyPlayerId : null,
-    synced: value.synced === true,
-    nakamaLogin: value.nakamaLogin === true
-  });
-}
-function withSync(profile, sync) {
-  var _a, _b;
-  return __spreadProps(__spreadValues({}, profile), {
-    useDiscordName: sync.useDiscordName === true,
-    preferredJoker: typeof sync.preferredJoker === "string" ? sync.preferredJoker : profile.preferredJoker,
-    discordIdHash: (_a = sync.discordIdHash) != null ? _a : null,
-    discordUsername: (_b = sync.discordUsername) != null ? _b : null,
-    privileges: stringList(sync.privileges),
-    tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
-    chatEnabled: sync.chatEnabled === true,
-    chatBlocked: sync.chatBlocked === true,
-    mutedUserIds: stringList(sync.mutedUserIds),
-    unresolvedMutedPlayerIds: stringList(sync.unresolvedMutedPlayerIds),
-    legacyPlayerId: typeof sync.playerId === "string" ? sync.playerId : null,
-    synced: true
-  });
-}
-function displayNameOf(profile) {
-  if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
-  return profile.steamName;
-}
-function playerView(userId, profile) {
-  return {
-    id: userId,
-    steamName: profile.steamName,
-    displayName: displayNameOf(profile),
-    useDiscordName: profile.useDiscordName,
-    preferredJoker: profile.preferredJoker,
-    discordLinked: profile.discordIdHash !== null,
-    discordUsername: profile.discordUsername,
-    privileges: privilegeTable(profile.privileges),
-    chatEnabled: profile.chatEnabled,
-    chatBlocked: profile.chatBlocked,
-    mutedPlayerIds: profile.mutedUserIds
-  };
-}
-function readProfile(nk, userId, fallbackName = "") {
-  const objects = nk.storageRead([{ collection: PLAYER_COLLECTION, key: PROFILE_KEY, userId }]);
-  if (objects.length === 0) return null;
-  return { profile: profileOf(objects[0].value, fallbackName), version: objects[0].version || "" };
-}
-function writeProfile(nk, userId, profile, version) {
+function write(nk, code, entry, version) {
   nk.storageWrite([
-    {
-      collection: PLAYER_COLLECTION,
-      key: PROFILE_KEY,
-      userId,
-      value: profile,
-      version,
-      permissionRead: 1,
-      permissionWrite: 0
-    }
+    __spreadProps(__spreadValues({}, keyOf(code)), {
+      value: __spreadValues({}, entry),
+      permissionRead: 0,
+      permissionWrite: 0,
+      version
+    })
   ]);
 }
-function updateProfile(nk, userId, change, fallbackName = "") {
-  let lastError = null;
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
-    const stored = readProfile(nk, userId, fallbackName);
-    const next = change(stored ? stored.profile : defaultProfile(fallbackName));
-    try {
-      writeProfile(nk, userId, next, stored ? stored.version : "*");
-      return next;
-    } catch (e) {
-      lastError = e;
-    }
+function read(nk, code) {
+  const objects = nk.storageRead([keyOf(code)]);
+  if (objects.length === 0) return null;
+  const value = objects[0].value;
+  return {
+    matchId: String(value.matchId || ""),
+    modId: String(value.modId || "")
+  };
+}
+function heldByCheckpoint(nk, code) {
+  const objects = nk.storageRead([
+    { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID }
+  ]);
+  return objects.length > 0 && Date.now() < checkpointExpiry(objects[0].value);
+}
+function reserveCode(nk, code, modId) {
+  if (heldByCheckpoint(nk, code)) return false;
+  const existing = read(nk, code);
+  if (existing) {
+    if (!existing.matchId || nk.matchGet(existing.matchId)) return false;
+    nk.storageDelete([keyOf(code)]);
   }
-  throw lastError;
-}
-function profileFor(nk, userId, fallbackName = "") {
-  const stored = readProfile(nk, userId, fallbackName);
-  return stored ? stored.profile : defaultProfile(fallbackName);
-}
-
-// src/rpc.ts
-function requireUser(ctx) {
-  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "This RPC needs a player session");
-  return ctx.userId;
-}
-function requireServer(ctx) {
-  if (ctx.userId) throw runtimeError(PERMISSION_DENIED, "Only the server may call this RPC");
-}
-function parsePayload(payload) {
-  if (!payload) return {};
   try {
-    const data = JSON.parse(payload);
-    if (Array.isArray(data) && data.length === 0) return {};
-    if (typeof data === "object" && data !== null && !Array.isArray(data)) return data;
+    write(nk, code, { matchId: "", modId }, "*");
+    return true;
   } catch (e) {
+    return false;
   }
-  throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
+}
+function bindCode(nk, code, matchId, modId) {
+  write(nk, code, { matchId, modId });
+}
+function lookupCode(nk, code) {
+  const entry = read(nk, code);
+  if (!entry || !entry.matchId || !nk.matchGet(entry.matchId)) return null;
+  return entry;
+}
+function releaseCode(nk, code, matchId) {
+  const entry = read(nk, code);
+  if (entry && entry.matchId === matchId) {
+    nk.storageDelete([keyOf(code)]);
+  }
 }
 
 // src/lobby/checkpoint.ts
 var CLAIM_TIMEOUT_MS = 3e4;
 function checkpointOf(lobby, now) {
   if (lobby.closed || lobby.players.length === 0) return null;
-  return { lobby, at: now, claimedAt: null };
+  const gq = lobby.groupQueue;
+  const parkedUntil = gq && gq.phase === "away" ? gq.until : 0;
+  return { lobby, at: now, claimedAt: null, expiresAt: Math.max(now + CHECKPOINT_TTL_MS, parkedUntil) };
 }
 function isExpired(checkpoint, now) {
-  return now - checkpoint.at >= CHECKPOINT_TTL_MS;
+  return now >= checkpointExpiry(checkpoint);
 }
 function isClaimable(checkpoint, now) {
   return !isExpired(checkpoint, now) && (checkpoint.claimedAt === null || now - checkpoint.claimedAt >= CLAIM_TIMEOUT_MS);
@@ -1980,7 +2567,9 @@ function resumeFrom(checkpoint, now) {
   const lobby = checkpoint.lobby;
   const downtime = Math.max(0, now - checkpoint.at);
   const settleFrom = lobby.game.settleFrom;
+  const gq = lobby.groupQueue;
   return __spreadProps(__spreadValues({}, lobby), {
+    groupQueue: gq && gq.phase === "away" ? gq : null,
     createdAt: now,
     players: lobby.players.map((p) => __spreadProps(__spreadValues({}, p), { sessionId: "", awaySince: now })),
     spectators: [],
@@ -1989,6 +2578,11 @@ function resumeFrom(checkpoint, now) {
       settleFrom: settleFrom === null ? null : settleFrom + downtime
     })
   });
+}
+function seatHoldersOf(lobby) {
+  const gq = lobby.groupQueue;
+  const away = gq && gq.phase === "away" ? gq.memberIds : [];
+  return lobby.players.map((p) => p.id).filter((id) => away.indexOf(id) === -1);
 }
 function keyOf2(code) {
   return { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID };
@@ -2031,12 +2625,12 @@ function resumeLobby(nk, logger, code, now) {
   const lobby = checkpoint.lobby;
   const matchId = nk.matchCreate(LOBBY_MATCH, { resumeCode: code });
   bindCode(nk, code, matchId, lobby.modId);
-  for (const p of lobby.players) {
+  for (const id of seatHoldersOf(lobby)) {
     nk.storageWrite([
       {
         collection: CURRENT_LOBBY_COLLECTION,
         key: CURRENT_LOBBY_KEY,
-        userId: p.id,
+        userId: id,
         value: { matchId, code, modId: lobby.modId },
         permissionRead: 0,
         permissionWrite: 0
@@ -2081,6 +2675,318 @@ function spendLobbyCreate(nk, userId, now) {
   return true;
 }
 
+// src/lobby/anticheat.ts
+var MIN_MS_PER_HAND = 3e3;
+var HAND_OPCODE = "hand_result";
+function handCount(events) {
+  if (!events) return 0;
+  return events.filter((event2) => event2.opcode === HAND_OPCODE).length;
+}
+function runFlags(run, events, checks) {
+  const flags = {};
+  const elapsedMs = run.endedAt - run.startedAt;
+  for (const player of run.players) {
+    if (checks[player.id] === "mismatch") flags[player.id] = "hash_mismatch";
+    else if (handCount(events[player.id]) * MIN_MS_PER_HAND > elapsedMs) flags[player.id] = "elapsed_time_gate";
+  }
+  return flags;
+}
+
+// src/notify.ts
+var NotifyCode = {
+  CHALLENGE: 100,
+  ACCOUNT_UPDATED: 101,
+  BANNED: 102,
+  QUEUE_CANCELLED: 103,
+  // 104 and 106 are retired (never sent); don't reuse them.
+  INTEGRITY: 105,
+  // {avatarIds, runId}: avatars just earned (runId null for one earned
+  // outside a game). Persistent, so an offline player sees it at login.
+  AVATAR_UNLOCKED: 107
+};
+var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
+function isNotifyCode(code) {
+  return typeof code === "number" && CODES.indexOf(code) !== -1;
+}
+function notify(nk, userId, code, subject, content, persistent = false) {
+  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
+}
+
+// src/achievements/eligibility.ts
+var MIN_HANDS = 3;
+var MIN_GAME_MS = 120 * 1e3;
+var MIN_ACTIVE_PLAYERS = 2;
+var PRIVATE_DAILY_CAP = 10;
+var MOD_KINDS = { MultiplayerPvP: "pvp", MultiplayerSPDRN: "spdrn" };
+function resultOf(run, playerId) {
+  if (run.status === "disputed") return "unknown";
+  const placement = run.placements.filter((p) => p.playerId === playerId)[0];
+  if (!placement) return "unknown";
+  return placement.place === 1 ? "win" : "loss";
+}
+function eligibilityOf(run, playerId, facts, metShowman2, progress, day) {
+  const skip = (reason) => ({ kind: "skipped", reason });
+  if (!run.players.some((p) => p.id === playerId)) return skip("not_participant");
+  if (run.status !== "agreed" && run.status !== "partial" && run.status !== "disputed") return skip("not_finished");
+  if (run.flags && run.flags[playerId]) return skip("flagged");
+  if (progress.countedRunIds.indexOf(run.runId) !== -1) return skip("already_counted");
+  const own = facts[playerId];
+  if (!own || own.hands < MIN_HANDS) return skip("too_few_hands");
+  if (run.endedAt - run.startedAt < MIN_GAME_MS) return skip("too_short");
+  const active = run.players.filter((p) => facts[p.id] && facts[p.id].hands > 0);
+  if (active.length < MIN_ACTIVE_PLAYERS) return skip("too_few_active");
+  const isPrivate = run.lobbyType !== "public";
+  const opponentsKey = isPrivate ? run.players.map((p) => p.id).filter((id) => id !== playerId).sort().join(",") : null;
+  if (opponentsKey !== null && progress.privateGames.day === day && (progress.privateGames.counts[opponentsKey] || 0) >= PRIVATE_DAILY_CAP)
+    return skip("private_cap");
+  return {
+    kind: "counts",
+    game: {
+      runId: run.runId,
+      day,
+      kind: MOD_KINDS[run.modId] || "other",
+      result: resultOf(run, playerId),
+      activeOpponents: active.filter((p) => p.id !== playerId).length,
+      metShowman: metShowman2,
+      privateOpponentsKey: opponentsKey,
+      facts: own
+    }
+  };
+}
+
+// src/achievements/facts/cards.ts
+function isFirstSeenRef(value) {
+  return Array.isArray(value) && typeof value[0] === "number" && value[0] < 0 && value[0] % 1 === 0 && typeof value[1] === "string";
+}
+function learnRefs(keys, args) {
+  if (isFirstSeenRef(args)) {
+    const id = -args[0];
+    if (args[1] !== "pc" && typeof args[2] === "string") keys[id] = args[2];
+    return;
+  }
+  if (Array.isArray(args)) for (const item of args) learnRefs(keys, item);
+  else if (args !== null && typeof args === "object")
+    for (const field3 in args) learnRefs(keys, args[field3]);
+}
+function keyOfRef(keys, ref) {
+  var _a;
+  if (!Array.isArray(ref) || typeof ref[0] !== "number") return null;
+  if (ref[0] < 0) return ref[1] !== "pc" && typeof ref[2] === "string" ? ref[2] : null;
+  return (_a = keys[ref[0]]) != null ? _a : null;
+}
+
+// src/achievements/facts/actions.ts
+var SUIT_CHANGERS = { c_star: true, c_moon: true, c_sun: true, c_world: true, c_sigil: true };
+var USED_REF_INDEX = 2;
+function countOf(events, opcode) {
+  let count2 = 0;
+  for (const event2 of events) if (event2.opcode === opcode) count2++;
+  return count2;
+}
+function suitChangersUsed(events) {
+  const keys = {};
+  let used = 0;
+  for (const event2 of events) {
+    learnRefs(keys, event2.args);
+    if (event2.opcode !== "use" && event2.opcode !== "pack_pick") continue;
+    const ref = Array.isArray(event2.args) ? event2.args[USED_REF_INDEX] : null;
+    const key = keyOfRef(keys, ref);
+    if (key !== null && SUIT_CHANGERS[key]) used++;
+  }
+  return used;
+}
+function livesLost(events) {
+  let lost = 0;
+  for (const event2 of events) {
+    if (event2.opcode !== "life_lost") continue;
+    const args = event2.args;
+    const value = args !== null && typeof args === "object" && !Array.isArray(args) ? args.lost : Array.isArray(args) ? args[0] : void 0;
+    lost += typeof value === "number" && isFinite(value) && value > 0 ? Math.floor(value) : 1;
+  }
+  return lost;
+}
+
+// src/achievements/facts/money.ts
+var PURCHASE_OPCODES = { buy: true, open_pack: true, voucher: true };
+function nonNegative(value) {
+  return typeof value === "number" && isFinite(value) && value >= 0 ? value : null;
+}
+function recordedCost(event2) {
+  const args = event2.args;
+  if (event2.opcode === "reroll") {
+    if (Array.isArray(args)) return nonNegative(args[0]);
+    if (args !== null && typeof args === "object") return nonNegative(args.cost);
+    return null;
+  }
+  return Array.isArray(args) ? nonNegative(args[3]) : null;
+}
+function followingSpend(next) {
+  if (!next || next.opcode !== "money_delta") return 0;
+  const delta = Array.isArray(next.args) ? next.args[0] : next.args;
+  return typeof delta === "number" && isFinite(delta) && delta < 0 ? -delta : 0;
+}
+function moneySpent(events) {
+  let spent = 0;
+  for (let i = 0; i < events.length; i++) {
+    const event2 = events[i];
+    if (event2.opcode !== "reroll" && !PURCHASE_OPCODES[event2.opcode]) continue;
+    const cost = recordedCost(event2);
+    spent += cost !== null ? cost : followingSpend(events[i + 1]);
+  }
+  return spent;
+}
+
+// src/achievements/facts/score.ts
+function parseScore(text) {
+  if (typeof text === "number") return text > 0 ? text : 0;
+  if (typeof text !== "string") return 0;
+  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
+  if (cleaned === "") return 0;
+  const value = Number(cleaned);
+  if (!isNaN(value)) return value > 0 ? value : 0;
+  if (cleaned === "naneinf" || cleaned === "inf" || cleaned === "infinity") return Infinity;
+  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return Infinity;
+  return 0;
+}
+function scoredArg(args) {
+  if (args !== null && typeof args === "object" && !Array.isArray(args)) return args.score;
+  return Array.isArray(args) ? args[0] : args;
+}
+function bestFromHandScored(events) {
+  let best = null;
+  for (const event2 of events) {
+    if (event2.opcode !== "hand_scored") continue;
+    const score = parseScore(scoredArg(event2.args));
+    best = best === null ? score : Math.max(best, score);
+  }
+  return best;
+}
+function bestFromRoundTotals(events) {
+  let best = 0;
+  let previous = 0;
+  for (const event2 of events) {
+    if (event2.opcode !== "hand_result") continue;
+    const total = parseScore(Array.isArray(event2.args) ? event2.args[0] : null);
+    const hand = total >= previous ? total - previous : total;
+    if (total === Infinity) return Infinity;
+    best = Math.max(best, hand);
+    previous = total;
+  }
+  return best;
+}
+function bestHandScore(events) {
+  const scored = bestFromHandScored(events);
+  return scored !== null ? scored : bestFromRoundTotals(events);
+}
+
+// src/achievements/facts/speedrun.ts
+var LEAST_HANDS_TO_WIN = 8;
+function fastestRunMs(events, serverElapsedMs, minMsPerHand) {
+  let fastest = null;
+  let runStart = null;
+  let plays = 0;
+  for (const event2 of events) {
+    if (event2.opcode === "run_info") {
+      runStart = event2.t;
+      plays = 0;
+    } else if (event2.opcode === "play") {
+      plays++;
+    } else if (event2.opcode === "run_complete" && runStart !== null) {
+      const ms = event2.t - runStart;
+      const plausible = plays >= LEAST_HANDS_TO_WIN && ms >= plays * minMsPerHand && ms <= serverElapsedMs;
+      if (plausible && (fastest === null || ms < fastest)) fastest = ms;
+      runStart = null;
+    }
+  }
+  return fastest;
+}
+
+// src/achievements/facts/index.ts
+function logFactsOf(events, context) {
+  return {
+    hands: countOf(events, "play"),
+    rerolls: countOf(events, "reroll"),
+    skips: countOf(events, "skip_blind"),
+    moneySpent: moneySpent(events),
+    suitChangers: suitChangersUsed(events),
+    livesLost: livesLost(events),
+    bestHandScore: bestHandScore(events),
+    setup: gameSetupOf(events, context.serverGamemode),
+    fastestSpdrnRunMs: fastestRunMs(events, context.serverElapsedMs, context.minMsPerHand)
+  };
+}
+
+// src/achievements/record.ts
+var SHOWMAN = "j_ring_master";
+function factsByPlayer(run, events) {
+  var _a, _b;
+  const context = {
+    serverElapsedMs: run.endedAt - run.startedAt,
+    serverGamemode: (_b = (_a = run.options) == null ? void 0 : _a.gamemode) != null ? _b : null,
+    minMsPerHand: MIN_MS_PER_HAND
+  };
+  const facts = {};
+  for (const player of run.players) facts[player.id] = logFactsOf(events[player.id] || [], context);
+  return facts;
+}
+function metShowman(run, playerId) {
+  return run.players.some((p) => p.id !== playerId && p.avatar === SHOWMAN);
+}
+function withEarned(progress, privileges) {
+  const unlocked = newlyUnlocked(progress, privileges);
+  return { progress: withUnlocked(progress, unlocked), unlocked };
+}
+function outcomeOf(progress, run, playerId, facts, privileges) {
+  const eligibility = eligibilityOf(run, playerId, facts, metShowman(run, playerId), progress, utcDayOf(run.endedAt));
+  if (eligibility.kind === "skipped") return { progress, eligibility, unlocked: [] };
+  const earned = withEarned(applyGame(progress, eligibility.game), privileges);
+  return { progress: earned.progress, eligibility, unlocked: earned.unlocked };
+}
+function announce(nk, userId, avatarIds, runId) {
+  if (avatarIds.length === 0) return;
+  notify(nk, userId, NotifyCode.AVATAR_UNLOCKED, "avatar_unlocked", { avatarIds, runId }, true);
+}
+function recordRun(nk, logger, run, events) {
+  if (!readConfig(nk).achievementsEnabled) return;
+  const facts = factsByPlayer(run, events);
+  for (const player of run.players) {
+    try {
+      const privileges = profileFor(nk, player.id).privileges;
+      let outcome = null;
+      updateProgress(nk, player.id, (progress) => {
+        outcome = outcomeOf(progress, run, player.id, facts, privileges);
+        return outcome.progress;
+      });
+      const result = outcome;
+      if (!result) continue;
+      if (result.eligibility.kind === "skipped")
+        logger.debug("Run %s: not counted for %s (%s)", run.runId, player.id, result.eligibility.reason);
+      announce(nk, player.id, result.unlocked, run.runId);
+    } catch (e) {
+      logger.error("Run %s: could not record achievements for %s: %v", run.runId, player.id, e);
+    }
+  }
+}
+function recordMilestone(nk, logger, userId, milestone, privileges) {
+  if (!readConfig(nk).achievementsEnabled) return;
+  try {
+    let unlocked = [];
+    updateProgress(nk, userId, (progress) => {
+      const marked = withMilestone(progress, milestone);
+      if (marked === progress) {
+        unlocked = [];
+        return progress;
+      }
+      const earned = withEarned(marked, privileges);
+      unlocked = earned.unlocked;
+      return earned.progress;
+    });
+    announce(nk, userId, unlocked, null);
+  } catch (e) {
+    logger.error("Could not record milestone %s for %s: %v", milestone, userId, e);
+  }
+}
+
 // src/express.ts
 var TIMEOUT_MS = 3e3;
 function callExpress(nk, logger, env, path, body) {
@@ -2110,23 +3016,6 @@ function callExpress(nk, logger, env, path, body) {
     logger.warn("Express call %s returned non-JSON (HTTP %d)", path, response.code);
   }
   return { status: response.code, body: parsed };
-}
-
-// src/notify.ts
-var NotifyCode = {
-  CHALLENGE: 100,
-  ACCOUNT_UPDATED: 101,
-  BANNED: 102,
-  QUEUE_CANCELLED: 103,
-  // 104 and 106 are retired (never sent); don't reuse them.
-  INTEGRITY: 105
-};
-var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
-function isNotifyCode(code) {
-  return typeof code === "number" && CODES.indexOf(code) !== -1;
-}
-function notify(nk, userId, code, subject, content, persistent = false) {
-  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
 }
 
 // src/integrity.ts
@@ -2259,8 +3148,8 @@ function deleteIndex(nk, userId) {
 function removeFromLobby(nk, userId, reason, onlyIfStarted) {
   const lobby = currentLobby(nk, userId);
   if (!lobby) return;
-  const signal = { type: "admin_remove", userId, reason, onlyIfStarted };
-  nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+  const signal2 = { type: "admin_remove", userId, reason, onlyIfStarted };
+  nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
 }
 function pushBan(nk, userId, type, ban) {
   notify(
@@ -2378,12 +3267,13 @@ function rpcSessionInit(ctx, logger, nk, payload) {
   } else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
     resolved = resolveMutes(ctx, logger, nk, stored.profile);
   }
+  const unlocked = sync ? progressFor(nk, userId).unlocked : [];
   const profile = updateProfile(
     nk,
     userId,
     (current) => {
       let next = __spreadProps(__spreadValues({}, current), { steamName, nakamaLogin: true });
-      if (sync) next = withSync(next, sync);
+      if (sync) next = withSync(next, sync, unlocked);
       else if (!steamId) next.synced = true;
       return withResolvedMutes(next, resolved);
     },
@@ -2405,6 +3295,7 @@ function rpcSessionInit(ctx, logger, nk, payload) {
     throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
   }
   syncDisplayName(nk, userId, profile);
+  if (profile.discordIdHash) recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
   writeIntegrity(nk, userId, UNVERIFIED);
   return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
 }
@@ -2569,6 +3460,295 @@ function eventsOf(log) {
   });
 }
 
+// src/matchmaking/group/refusal.ts
+var MAX_GROUP_SIZE = 8;
+var MIN_GROUP_SIZE = 2;
+var MESSAGES = {
+  disabled: "Group matchmaking is currently disabled.",
+  not_in_lobby: "You are not in a lobby.",
+  not_host: "Only the host can queue the lobby.",
+  not_private: "Only a private lobby can queue as a group.",
+  ranked: "Groups can only queue casual matchmaking.",
+  in_game: "The lobby is in a game.",
+  already_queued: "The lobby is already queueing.",
+  too_few: "A group needs at least " + MIN_GROUP_SIZE + " players.",
+  too_many: "A group can have at most " + MAX_GROUP_SIZE + " players.",
+  member_away: "Every player must be connected.",
+  member_refused: "A player in the lobby may not queue.",
+  member_queued: "A player in the lobby is already queueing.",
+  bad_request: "Invalid group queue request.",
+  party_in_use: "That party is already queueing.",
+  party_mismatch: "The party doesn't match the lobby.",
+  not_bound: "Queue as a group from your lobby.",
+  not_forming: "The group is not ready to queue.",
+  group_away: "The group is in a game.",
+  not_leader: "Only the host can queue the group.",
+  not_member: "Only players in the lobby can join its group.",
+  ticket_mismatch: "The ticket doesn't match the group.",
+  bad_counts: "Invalid player counts for a group ticket."
+};
+function refusalMessage(refusal) {
+  const base = MESSAGES[refusal.code];
+  return refusal.detail ? base + " " + refusal.detail : base;
+}
+var NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+var PARTY_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_.-]{1,64}$/;
+function isPartyId(value) {
+  return typeof value === "string" && PARTY_ID_PATTERN.test(value);
+}
+function requestRefusal(request) {
+  if (request.ranked) return { code: "ranked" };
+  if (!isPartyId(request.partyId) || !NAME_PATTERN.test(request.mode)) return { code: "bad_request" };
+  return null;
+}
+function homeRefusal(home, byId, switches) {
+  if (!switches.groupQueueEnabled) return { code: "disabled" };
+  if (home.closed || !home.members.some((m) => m.id === byId)) return { code: "not_in_lobby" };
+  if (home.hostId !== byId) return { code: "not_host" };
+  if (!home.isPrivate) return { code: "not_private" };
+  if (home.ranked) return { code: "ranked" };
+  if (home.started) return { code: "in_game" };
+  if (home.groupQueue) return { code: "already_queued" };
+  if (home.members.length < MIN_GROUP_SIZE) return { code: "too_few" };
+  if (home.members.length > MAX_GROUP_SIZE) return { code: "too_many" };
+  const away = home.members.filter((m) => !m.present)[0];
+  if (away) return { code: "member_away", userId: away.id };
+  return null;
+}
+function memberRefusal(memberIds, facts) {
+  for (const id of memberIds) {
+    const refused = facts.refusals[id];
+    if (refused) return { code: "member_refused", userId: id, detail: refused };
+  }
+  for (const id of memberIds) {
+    if (facts.queuedIds.indexOf(id) !== -1) return { code: "member_queued", userId: id };
+  }
+  return null;
+}
+function partyRefusal(partyUserIds, memberIds, hostId) {
+  if (partyUserIds.indexOf(hostId) === -1) return { code: "party_mismatch", userId: hostId };
+  const stranger = partyUserIds.filter((id) => memberIds.indexOf(id) === -1)[0];
+  if (stranger) return { code: "party_mismatch", userId: stranger };
+  return null;
+}
+function sameMembers(a, b) {
+  if (a.length !== b.length) return false;
+  return a.every((id) => b.indexOf(id) !== -1) && b.every((id) => a.indexOf(id) !== -1);
+}
+function joinRefusal(status, joinerId) {
+  if (status.memberIds.indexOf(joinerId) === -1) return { code: "not_member", userId: joinerId };
+  if (status.phase !== "forming") return { code: "not_forming" };
+  return null;
+}
+var GROUP_SIZE_PROPERTY = "groupSize";
+var TEAMS_PROPERTY = "teams";
+function countRefusal(size, teams, ticket) {
+  const { minCount, maxCount, countMultiple } = ticket;
+  if (!(minCount > size) || !(maxCount >= minCount)) return { code: "bad_counts" };
+  if (teams) {
+    if (countMultiple !== 2 || minCount < 2 * size || minCount % 2 !== 0) return { code: "bad_counts" };
+  } else if (countMultiple !== null && countMultiple !== 1) {
+    return { code: "bad_counts" };
+  }
+  return null;
+}
+function ticketPropsRefusal(status, ticket) {
+  const s = ticket.stringProperties;
+  const n = ticket.numericProperties;
+  if (s.kind === "ranked") return { code: "ranked" };
+  if (s.modId !== status.modId || s.mode !== status.mode || s.kind !== void 0 && s.kind !== "casual")
+    return { code: "ticket_mismatch" };
+  if (n[GROUP_SIZE_PROPERTY] !== status.memberIds.length) return { code: "ticket_mismatch" };
+  const teams = n[TEAMS_PROPERTY];
+  if (teams !== void 0 && teams !== 0 && teams !== 1) return { code: "ticket_mismatch" };
+  if (teams === 1 !== status.teams) return { code: "ticket_mismatch" };
+  return null;
+}
+function ticketRefusal(facts) {
+  const status = facts.status;
+  if (!status) return { code: "not_bound" };
+  if (!facts.switches.groupQueueEnabled) return { code: "disabled" };
+  if (status.phase !== "forming") return { code: "not_forming" };
+  if (facts.leaderId !== status.hostId) return { code: "not_leader" };
+  if (!sameMembers(facts.partyUserIds, status.memberIds)) return { code: "party_mismatch" };
+  return ticketPropsRefusal(status, facts.ticket) || countRefusal(status.memberIds.length, status.teams, facts.ticket) || memberRefusal(status.memberIds, facts.members);
+}
+function blocksSoloQueue(phase) {
+  return phase === "forming" || phase === "queued";
+}
+
+// src/shared/result.ts
+function ok(value) {
+  return { ok: true, value };
+}
+function err(error) {
+  return { ok: false, error };
+}
+
+// src/lobby/group_queue.ts
+var GROUP_AWAY_CAP_MS = 90 * 6e4;
+function viewOf2(lobby) {
+  const gq = lobby.groupQueue;
+  if (!gq) return null;
+  return {
+    phase: gq.phase,
+    partyId: gq.partyId,
+    homeCode: lobby.code,
+    modId: lobby.modId,
+    mode: gq.mode,
+    teams: gq.teams,
+    hostId: lobby.hostId,
+    memberIds: gq.memberIds,
+    ticket: gq.phase === "queued" ? gq.ticket : null,
+    matchId: gq.phase === "away" ? gq.matchId : null,
+    code: gq.phase === "away" ? gq.code : null
+  };
+}
+function homeFactsOf(lobby) {
+  return {
+    code: lobby.code,
+    modId: lobby.modId,
+    hostId: lobby.hostId,
+    isPrivate: !lobby.allowedIds,
+    ranked: !!lobby.rankedMode,
+    started: lobby.game.started !== null,
+    closed: lobby.closed,
+    members: lobby.players.map((p) => ({ id: p.id, present: p.awaySince === null })),
+    groupQueue: viewOf2(lobby)
+  };
+}
+function everyone(lobby) {
+  return lobby.players.map((p) => p.id);
+}
+function announce2(lobby, reason, requeue = false) {
+  const view = viewOf2(lobby);
+  const payload = view && __spreadProps(__spreadValues({}, view), { reason, requeue });
+  return { kind: "send", op: ServerOp.GROUP_QUEUE, payload, to: everyone(lobby) };
+}
+function withGroup(lobby, groupQueue) {
+  return __spreadProps(__spreadValues({}, lobby), { groupQueue });
+}
+function ownGroup(lobby, partyId) {
+  const gq = lobby.groupQueue;
+  return gq && gq.partyId === partyId ? gq : null;
+}
+function openGroupQueue(lobby, byId, request, switches, now) {
+  const refused = homeRefusal(homeFactsOf(lobby), byId, switches);
+  if (refused) return err(refused);
+  const memberIds = everyone(lobby);
+  const next = withGroup(lobby, {
+    phase: "forming",
+    partyId: request.partyId,
+    mode: request.mode,
+    teams: request.teams,
+    memberIds,
+    since: now
+  });
+  return ok({
+    lobby: next,
+    out: [{ kind: "groupBind", partyId: request.partyId, memberIds }, announce2(next, null)]
+  });
+}
+function groupQueued(lobby, partyId, ticket) {
+  const gq = ownGroup(lobby, partyId);
+  if (!gq) return err({ code: "not_bound" });
+  if (gq.phase !== "forming") return err({ code: "not_forming" });
+  const next = withGroup(lobby, __spreadProps(__spreadValues({}, gq), { phase: "queued", ticket }));
+  return ok({ lobby: next, out: [announce2(next, null)] });
+}
+function groupUnqueued(lobby, partyId, requeue) {
+  const gq = ownGroup(lobby, partyId);
+  if (!gq || gq.phase !== "queued") return { lobby, out: [] };
+  const _a = gq, { ticket } = _a, rest = __objRest(_a, ["ticket"]);
+  const next = withGroup(lobby, __spreadProps(__spreadValues({}, rest), { phase: "forming" }));
+  return { lobby: next, out: [announce2(next, requeue ? "match_refused" : "ticket_removed", requeue)] };
+}
+function groupMatched(lobby, partyId, matchId, code, now) {
+  const gq = ownGroup(lobby, partyId);
+  if (!gq) return err({ code: "not_bound" });
+  if (gq.phase !== "queued") return err({ code: "not_forming" });
+  const _a = gq, { ticket } = _a, rest = __objRest(_a, ["ticket"]);
+  const next = withGroup(lobby, __spreadProps(__spreadValues({}, rest), { phase: "away", matchId, code, until: now + GROUP_AWAY_CAP_MS }));
+  return ok({ lobby: next, out: [{ kind: "groupDissolve", partyId }, announce2(next, null)] });
+}
+function endGroup(lobby, reason) {
+  const gq = lobby.groupQueue;
+  if (!gq) return { lobby, out: [] };
+  const next = withGroup(lobby, null);
+  const idle = { phase: "idle", partyId: gq.partyId, homeCode: lobby.code, reason, requeue: false };
+  return {
+    lobby: next,
+    out: [
+      { kind: "groupUnbind", partyId: gq.partyId, memberIds: gq.memberIds, gameMode: gq.mode },
+      { kind: "send", op: ServerOp.GROUP_QUEUE, payload: idle, to: everyone(next) }
+    ]
+  };
+}
+function cancelGroup(lobby, partyId, reason, byId) {
+  const gq = ownGroup(lobby, partyId);
+  if (!gq) return err({ code: "not_bound" });
+  if (byId !== null && gq.memberIds.indexOf(byId) === -1) return err({ code: "not_member", userId: byId });
+  if (gq.phase === "away") return err({ code: "group_away" });
+  return ok(endGroup(lobby, reason));
+}
+function memberGone(lobby, userId, reason) {
+  const gq = lobby.groupQueue;
+  if (!gq || gq.memberIds.indexOf(userId) === -1) return { lobby, out: [] };
+  if (gq.phase !== "away") return endGroup(lobby, reason);
+  const memberIds = gq.memberIds.filter((id) => id !== userId);
+  if (memberIds.length === 0) return endGroup(lobby, reason);
+  return { lobby: withGroup(lobby, __spreadProps(__spreadValues({}, gq), { memberIds })), out: [] };
+}
+function memberDisconnected(lobby, userId) {
+  const gq = lobby.groupQueue;
+  if (!gq || gq.phase === "away" || gq.memberIds.indexOf(userId) === -1) return { lobby, out: [] };
+  return endGroup(lobby, "member_disconnected");
+}
+function endAway(lobby, reason, now) {
+  const gq = lobby.groupQueue;
+  if (!gq || gq.phase !== "away") return { lobby, out: [] };
+  const players = lobby.players.map(
+    (p) => p.awaySince !== null && gq.memberIds.indexOf(p.id) !== -1 ? __spreadProps(__spreadValues({}, p), { awaySince: now }) : p
+  );
+  return endGroup(__spreadProps(__spreadValues({}, lobby), { players }), reason);
+}
+function awayOver(lobby, partyId, code, now) {
+  const gq = ownGroup(lobby, partyId);
+  if (!gq || gq.phase !== "away" || gq.code !== code) return { lobby, out: [] };
+  return endAway(lobby, "away_over", now);
+}
+function groupReturned(lobby) {
+  const gq = lobby.groupQueue;
+  if (!gq || gq.phase !== "away") return { lobby, out: [] };
+  const back = lobby.players.every((p) => gq.memberIds.indexOf(p.id) === -1 || p.awaySince === null);
+  return back ? endGroup(lobby, "all_returned") : { lobby, out: [] };
+}
+function groupAwayCapped(lobby, now) {
+  const gq = lobby.groupQueue;
+  if (!gq || gq.phase !== "away" || now < gq.until) return { lobby, out: [] };
+  return endAway(lobby, "away_cap", now);
+}
+function isParked(lobby) {
+  return !!lobby.groupQueue && lobby.groupQueue.phase === "away";
+}
+function hasPlayerAnswer(lobby, userId, forMatchId) {
+  if (!lobby.players.some((p) => p.id === userId)) return "no";
+  const gq = lobby.groupQueue;
+  if (gq && gq.phase === "away" && forMatchId === gq.matchId && gq.memberIds.indexOf(userId) !== -1)
+    return "away";
+  return "yes";
+}
+function releaseGroups(previouslyStarted, lobby) {
+  const groups = lobby.groups || [];
+  if (groups.length === 0 || lobby.groupsReleased) return { lobby, out: [] };
+  const over = lobby.closed || previouslyStarted && lobby.game.started === null;
+  if (!over) return { lobby, out: [] };
+  return {
+    lobby: __spreadProps(__spreadValues({}, lobby), { groupsReleased: true }),
+    out: groups.map((g) => ({ kind: "awayOver", homeCode: g.homeCode, partyId: g.partyId }))
+  };
+}
+
 // src/lobby/state.ts
 var DEFAULT_GRACE_MS = 12e4;
 var DEFAULT_RESULT_TIMEOUT_MS = 6e4;
@@ -2594,7 +3774,9 @@ function newLobby(params) {
     resultTimeoutMs: (_a = params.resultTimeoutMs) != null ? _a : DEFAULT_RESULT_TIMEOUT_MS,
     closed: false,
     game: emptyGame(),
-    actionBudget: {}
+    actionBudget: {},
+    groups: params.groups,
+    teamPlan: params.teamPlan
   };
 }
 function emptyGame() {
@@ -2660,6 +3842,7 @@ function joinRejection(lobby, userId, modId) {
     return "You were kicked from this lobby";
   if (modId !== lobby.modId) return "Lobby is for a different mod";
   if (lobby.game.started) return "The game has already started";
+  if (lobby.groupQueue) return "This lobby is queueing as a group";
   if (lobby.allowedIds) {
     if (lobby.allowedIds.indexOf(userId) === -1)
       return "This lobby is reserved for matched players";
@@ -2690,7 +3873,9 @@ function snapshotFor(lobby, userId) {
       ready: lobby.game.ready,
       started: lobby.game.started,
       reported: Object.keys(lobby.game.reports)
-    }
+    },
+    groupQueue: viewOf2(lobby),
+    teamPlan: lobby.teamPlan || null
   };
 }
 function join(lobby, userId, sessionId, info) {
@@ -2702,6 +3887,7 @@ function join(lobby, userId, sessionId, info) {
       players: lobby.players.map((p) => p.id === userId ? back : p)
     });
     const out = [
+      { kind: "setCurrent", userId },
       {
         kind: "send",
         op: ServerOp.SNAPSHOT,
@@ -2721,7 +3907,7 @@ function join(lobby, userId, sessionId, info) {
       const tail = replayTailOf(next2, userId);
       if (tail) out.push({ kind: "send", op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] });
     }
-    return { lobby: next2, out };
+    return then({ lobby: next2, out }, groupReturned);
   }
   const player = {
     id: userId,
@@ -2760,12 +3946,17 @@ function join(lobby, userId, sessionId, info) {
     ]
   };
 }
+function then(step, f) {
+  const next = f(step.lobby);
+  return { lobby: next.lobby, out: step.out.concat(next.out) };
+}
 function logBudgetKey(userId) {
   return `${userId}:log`;
 }
 function nextHost(lobby, leavingId) {
+  const parked = isParked(lobby);
   for (const p of lobby.players) {
-    if (p.id !== leavingId && p.awaySince === null) return p.id;
+    if (p.id !== leavingId && (p.awaySince === null || parked)) return p.id;
   }
   return null;
 }
@@ -2781,25 +3972,27 @@ function transferHostFrom(lobby, userId) {
 }
 function close(lobby) {
   if (lobby.closed) return { lobby, out: [] };
-  const next = __spreadProps(__spreadValues({}, lobby), { closed: true });
+  const ended = endGroup(lobby, "lobby_closed");
+  const next = __spreadProps(__spreadValues({}, ended.lobby), { closed: true });
   const out = [
     event(next, "lobby_closed", {}, allIds(next).concat(next.spectators || []))
   ];
   for (const id of allIds(next)) out.push({ kind: "clearCurrent", userId: id });
-  return { lobby: next, out };
+  return { lobby: next, out: ended.out.concat(out) };
 }
 function closeIfAbandoned(step) {
   const lobby = step.lobby;
-  if (lobby.closed) return step;
+  if (lobby.closed || isParked(lobby)) return step;
   const anyoneHere = lobby.players.some((p) => p.awaySince === null);
   if (anyoneHere) return step;
   const closed = close(lobby);
   return { lobby: closed.lobby, out: step.out.concat(closed.out) };
 }
-function remove(lobby, userId, type) {
+function remove(lobby, userId, type, why) {
   const player = findPlayer(lobby, userId);
   if (!player) return { lobby, out: [] };
-  const transferred = transferHostFrom(lobby, userId);
+  const grouped = memberGone(lobby, userId, why);
+  const transferred = transferHostFrom(grouped.lobby, userId);
   const ready2 = __spreadValues({}, transferred.lobby.game.ready);
   delete ready2[userId];
   const actionBudget = __spreadValues({}, transferred.lobby.actionBudget);
@@ -2811,7 +4004,7 @@ function remove(lobby, userId, type) {
     actionBudget
   });
   const others = allIds(next);
-  const out = [{ kind: "clearCurrent", userId }];
+  const out = grouped.out.concat([{ kind: "clearCurrent", userId }]);
   if (type)
     out.push(
       event(
@@ -2840,7 +4033,7 @@ function remove(lobby, userId, type) {
 }
 function leave(lobby, userId) {
   if (!findPlayer(lobby, userId)) return { lobby, out: [] };
-  const step = remove(lobby, userId, "player_left");
+  const step = remove(lobby, userId, "player_left", "member_left");
   return { lobby: step.lobby, out: step.out.concat([{ kind: "kick", userId }]) };
 }
 function disconnect(lobby, userId, sessionId, now) {
@@ -2848,18 +4041,19 @@ function disconnect(lobby, userId, sessionId, now) {
   if (!player || player.sessionId !== sessionId || player.awaySince !== null)
     return { lobby, out: [] };
   const away = __spreadProps(__spreadValues({}, player), { awaySince: now });
-  const marked = __spreadProps(__spreadValues({}, lobby), {
-    players: lobby.players.map((p) => p.id === userId ? away : p)
+  const grouped = memberDisconnected(lobby, userId);
+  const marked = __spreadProps(__spreadValues({}, grouped.lobby), {
+    players: grouped.lobby.players.map((p) => p.id === userId ? away : p)
   });
-  const transferred = transferHostFrom(marked, userId);
-  const out = [
+  const transferred = isParked(marked) ? { lobby: marked, out: [] } : transferHostFrom(marked, userId);
+  const out = grouped.out.concat([
     event(
       transferred.lobby,
       "player_disconnected",
       { playerId: userId, displayName: player.info.displayName },
       othersThan(transferred.lobby, userId)
     )
-  ];
+  ]);
   return closeIfAbandoned({
     lobby: transferred.lobby,
     out: out.concat(transferred.out)
@@ -2884,7 +4078,7 @@ function removeKicked(lobby, targetId, data) {
     allIds(lobby)
   );
   const marked = __spreadProps(__spreadValues({}, lobby), { kickedIds: lobby.kickedIds.concat([targetId]) });
-  const step = remove(marked, targetId, null);
+  const step = remove(marked, targetId, null, "member_kicked");
   return {
     lobby: step.lobby,
     out: [announced].concat(step.out, [
@@ -2923,12 +4117,12 @@ function setMetadata(lobby, byId, patch) {
     return { lobby, out: [rejectOp(byId, "Metadata must be an object")] };
   const metadata = __spreadValues(__spreadValues({}, lobby.metadata), patch);
   const next = __spreadProps(__spreadValues({}, lobby), { metadata });
-  const everyone = allIds(next);
+  const everyone2 = allIds(next);
   return {
     lobby: next,
     out: [
-      { kind: "send", op: ServerOp.METADATA, payload: metadata, to: everyone },
-      event(next, "metadata_changed", { data: metadata }, everyone)
+      { kind: "send", op: ServerOp.METADATA, payload: metadata, to: everyone2 },
+      event(next, "metadata_changed", { data: metadata }, everyone2)
     ]
   };
 }
@@ -2959,13 +4153,15 @@ function tick(lobby, now) {
   if (lobby.players.length === 0) {
     return now - lobby.createdAt >= CREATOR_JOIN_TIMEOUT_MS ? close(lobby) : { lobby, out: [] };
   }
-  let step = { lobby, out: [] };
+  let step = groupAwayCapped(lobby, now);
   for (const p of lobby.players) {
     if (step.lobby.closed) break;
-    if (p.awaySince !== null && now - p.awaySince >= lobby.graceMs) {
+    const parked = isParked(step.lobby) && step.lobby.groupQueue.memberIds.indexOf(p.id) !== -1;
+    const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince;
+    if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
       const started = step.lobby.game.started;
       const forfeited = started && lobby.gameMode && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now }] : [];
-      const removed = remove(step.lobby, p.id, "player_left");
+      const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
       step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) };
     }
   }
@@ -3127,8 +4323,8 @@ function seatOf(nk, logger, userId) {
     }
   }
   if (typeof matchId === "string" && typeof code === "string" && nk.matchGet(matchId)) {
-    const signal = { type: "has_player", userId };
-    if (nk.matchSignal(matchId, JSON.stringify(signal)) === "yes")
+    const signal2 = { type: "has_player", userId };
+    if (nk.matchSignal(matchId, JSON.stringify(signal2)) === "yes")
       return { matchId, code, modId };
   }
   nk.storageDelete([key]);
@@ -3229,18 +4425,169 @@ function rpcRunActive(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
   const current = currentLobby(nk, userId);
   if (!current) return JSON.stringify({});
-  const signal = { type: "get_active", userId };
-  const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)));
+  const signal2 = { type: "get_active", userId };
+  const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal2)));
   return JSON.stringify(active ? { active } : {});
 }
 function rpcLobbyLeave(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
   const current = currentLobby(nk, userId);
   if (current) {
-    const signal = { type: "leave", userId };
-    nk.matchSignal(current.matchId, JSON.stringify(signal));
+    const signal2 = { type: "leave", userId };
+    nk.matchSignal(current.matchId, JSON.stringify(signal2));
   }
   return JSON.stringify({});
+}
+
+// src/player/rpc.ts
+var MAX_MODS = 300;
+var MAX_MOD_LENGTH = 128;
+var MAX_MUTES = 1e3;
+var USER_ID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function pushToLobby(nk, userId, info) {
+  const current = currentLobby(nk, userId);
+  if (!current) return;
+  const signal2 = { type: "player_info", userId, info };
+  nk.matchSignal(current.matchId, JSON.stringify(signal2));
+}
+function accountUpdated(nk, userId, profile) {
+  notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, "account_updated", { player: playerView(userId, profile) });
+}
+function profileChanged(nk, userId, profile) {
+  syncDisplayName(nk, userId, profile);
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
+}
+function rpcProfileSetDisplay(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const value = parsePayload(payload).useDiscordName;
+  if (typeof value !== "boolean") throw runtimeError(INVALID_ARGUMENT, "Missing or invalid useDiscordName (boolean)");
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      if (value && !current.discordIdHash) throw runtimeError(FAILED_PRECONDITION, "Discord account not linked");
+      return __spreadProps(__spreadValues({}, current), { useDiscordName: value });
+    },
+    ctx.username
+  );
+  syncDisplayName(nk, userId, profile);
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcProfileSetJoker(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const joker = parsePayload(payload).preferredJoker;
+  if (typeof joker !== "string" || !joker) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid preferredJoker (string)");
+  const unlocked = progressFor(nk, userId).unlocked;
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      if (!isSelectable(joker, { privileges: current.privileges, unlocked }))
+        throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
+      return __spreadProps(__spreadValues({}, current), { preferredJoker: joker });
+    },
+    ctx.username
+  );
+  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  accountUpdated(nk, userId, profile);
+  return JSON.stringify({ player: playerView(userId, profile) });
+}
+function rpcProfileSetMods(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const mods = parsePayload(payload).mods;
+  if (!Array.isArray(mods) || mods.some((m) => typeof m !== "string"))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid mods (array of strings)");
+  const list = mods.slice(0, MAX_MODS).map((m) => m.slice(0, MAX_MOD_LENGTH));
+  updateProfile(nk, userId, (current) => __spreadProps(__spreadValues({}, current), { mods: list }), ctx.username);
+  pushToLobby(nk, userId, { mods: list });
+  return JSON.stringify({ mods: list });
+}
+function rpcMuteSet(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const body = parsePayload(payload);
+  const target = body.userId;
+  if (typeof target !== "string" || !USER_ID2.test(target)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
+  if (target === userId) throw runtimeError(INVALID_ARGUMENT, "Cannot mute yourself");
+  if (typeof body.muted !== "boolean") throw runtimeError(INVALID_ARGUMENT, "Missing or invalid muted (boolean)");
+  const muted = body.muted;
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      const rest = current.mutedUserIds.filter((id) => id !== target);
+      if (muted && rest.length >= MAX_MUTES) throw runtimeError(FAILED_PRECONDITION, "Too many muted players");
+      return __spreadProps(__spreadValues({}, current), { mutedUserIds: muted ? rest.concat([target]) : rest });
+    },
+    ctx.username
+  );
+  return JSON.stringify({ mutedPlayerIds: profile.mutedUserIds });
+}
+
+// src/achievements/reset.ts
+var PAGE = 100;
+function parseCursor(value) {
+  if (value === void 0 || value === "") return { phase: "profiles", cursor: "" };
+  if (typeof value === "string") {
+    const at = value.indexOf(":");
+    const phase = value.slice(0, at);
+    if (at > 0 && (phase === "profiles" || phase === "progress")) return { phase, cursor: value.slice(at + 1) };
+  }
+  throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+}
+function cursorOf(position) {
+  return position ? `${position.phase}:${position.cursor}` : "";
+}
+function keepsJoker(joker, privileges) {
+  return isSelectable(joker, { privileges, unlocked: [] });
+}
+function listPage(nk, collection, cursor) {
+  try {
+    return nk.storageList(null, collection, PAGE, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+}
+function rpcAdminAvatarsReset(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const position = parseCursor(input.cursor);
+  if (input.dryRun !== void 0 && typeof input.dryRun !== "boolean") throw runtimeError(INVALID_ARGUMENT, "dryRun must be a boolean");
+  const dryRun = input.dryRun === true;
+  let checked = 0;
+  let jokersReset = 0;
+  let progressDeleted = 0;
+  let next;
+  if (position.phase === "profiles") {
+    const page = listPage(nk, PLAYER_COLLECTION, position.cursor);
+    for (const object of page.objects || []) {
+      if (object.key !== PROFILE_KEY) continue;
+      checked++;
+      const stored = profileOf(object.value, "");
+      if (keepsJoker(stored.preferredJoker, stored.privileges)) continue;
+      jokersReset++;
+      if (dryRun) continue;
+      const profile = updateProfile(
+        nk,
+        object.userId,
+        (current) => keepsJoker(current.preferredJoker, current.privileges) ? current : __spreadProps(__spreadValues({}, current), { preferredJoker: DEFAULT_AVATAR })
+      );
+      profileChanged(nk, object.userId, profile);
+    }
+    next = page.cursor ? { phase: "profiles", cursor: page.cursor } : { phase: "progress", cursor: "" };
+  } else {
+    const page = listPage(nk, PROGRESS_COLLECTION, position.cursor);
+    for (const object of page.objects || []) {
+      progressDeleted++;
+      if (!dryRun) deleteProgress(nk, object.userId);
+    }
+    next = page.cursor ? { phase: "progress", cursor: dryRun ? page.cursor : "" } : null;
+  }
+  logger.info("Avatar reset%s: %d checked, %d jokers reset, %d progress deleted", dryRun ? " (dry run)" : "", checked, jokersReset, progressDeleted);
+  return JSON.stringify({ dryRun, checked, jokersReset, progressDeleted, cursor: cursorOf(next) });
 }
 
 // src/admin.ts
@@ -3349,8 +4696,8 @@ function lobbyByCode(nk, code) {
 function rpcAdminLobbyGet(ctx, logger, nk, payload) {
   requireServer(ctx);
   const lobby = lobbyByCode(nk, parsePayload(payload).code);
-  const signal = { type: "admin_view" };
-  const view = nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+  const signal2 = { type: "admin_view" };
+  const view = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
   if (!view) throw runtimeError(NOT_FOUND, "No such lobby");
   return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view)), { matchId: lobby.matchId }) });
 }
@@ -3359,20 +4706,20 @@ function rpcAdminLobbyKick(ctx, logger, nk, payload) {
   const input = parsePayload(payload);
   const lobby = lobbyByCode(nk, input.code);
   if (typeof input.userId !== "string" || !input.userId) throw runtimeError(INVALID_ARGUMENT, "userId is required");
-  const signal = {
+  const signal2 = {
     type: "admin_remove",
     userId: input.userId,
     reason: typeof input.reason === "string" ? input.reason : "admin"
   };
-  if (nk.matchSignal(lobby.matchId, JSON.stringify(signal)) === "not_member")
+  if (nk.matchSignal(lobby.matchId, JSON.stringify(signal2)) === "not_member")
     throw runtimeError(NOT_FOUND, "Player is not in this lobby");
   return JSON.stringify({ ok: true });
 }
 function rpcAdminLobbyClose(ctx, logger, nk, payload) {
   requireServer(ctx);
   const lobby = lobbyByCode(nk, parsePayload(payload).code);
-  const signal = { type: "admin_close" };
-  nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+  const signal2 = { type: "admin_close" };
+  nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
   return JSON.stringify({ ok: true });
 }
 function rpcAdminPlayerGet(ctx, logger, nk, payload) {
@@ -3394,8 +4741,8 @@ var MIRROR_ACK_MAX = 500;
 function rpcAdminMirrorPull(ctx, logger, nk, payload) {
   requireServer(ctx);
   const limit = parsePayload(payload).limit;
-  const count = typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? Math.min(limit, MIRROR_PULL_MAX) : MIRROR_PULL_DEFAULT;
-  const pulled = pullEntries(nk, count);
+  const count2 = typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? Math.min(limit, MIRROR_PULL_MAX) : MIRROR_PULL_DEFAULT;
+  const pulled = pullEntries(nk, count2);
   if (pulled.dropped.length > 0) {
     logger.warn("Mirror: dropping %d entries that no longer resolve", pulled.dropped.length);
     ackEntries(nk, pulled.dropped);
@@ -3664,7 +5011,7 @@ function planRatings(run, flags, current) {
   }
   return plan;
 }
-var WRITE_ATTEMPTS2 = 5;
+var WRITE_ATTEMPTS3 = 5;
 function loadRatings(nk, modId, mode, playerIds, now, season) {
   const key = boardId(modId, mode, season);
   const current = {};
@@ -3695,7 +5042,7 @@ function loadRatings(nk, modId, mode, playerIds, now, season) {
 function applyRatings(nk, logger, run, mode, flags) {
   const season = currentSeason(nk);
   const key = boardId(run.modId, mode, season);
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS3; attempt++) {
     const { current, versions } = loadRatings(
       nk,
       run.modId,
@@ -3727,7 +5074,7 @@ function applyRatings(nk, logger, run, mode, flags) {
     mirrorToLeaderboard(nk, logger, run, key, mode, plan);
     return plan.results;
   }
-  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS2);
+  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS3);
   return {};
 }
 function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
@@ -4001,9 +5348,9 @@ function reconcile(reports, reportOrder, participants, hostId) {
     groups[key].push(id);
   }
   if (keys.length === 1) {
-    const everyone = participants.every((p) => reports[p.id] !== void 0);
+    const everyone2 = participants.every((p) => reports[p.id] !== void 0);
     return {
-      status: everyone ? "agreed" : "partial",
+      status: everyone2 ? "agreed" : "partial",
       placements: reports[preferHost(groups[keys[0]], hostId)]
     };
   }
@@ -4128,7 +5475,10 @@ function newGame(lobby, ctx, stake, options) {
     options,
     startedAt: ctx.now,
     hostId: lobby.hostId,
-    players: lobby.players.filter((pl) => pl.awaySince === null).map((pl) => ({ id: pl.id, displayName: pl.info.displayName }))
+    players: lobby.players.filter((pl) => pl.awaySince === null).map((pl) => __spreadValues({
+      id: pl.id,
+      displayName: pl.info.displayName
+    }, pl.info.preferredJoker ? { avatar: pl.info.preferredJoker } : {}))
   };
 }
 var startGame = {
@@ -4144,6 +5494,7 @@ var startGame = {
       return { reject: "bad_params" };
     if (lobby.hostId !== ctx.from) return { reject: "not_host" };
     if (lobby.game.started) return { reject: "in_game" };
+    if (lobby.groupQueue) return { reject: "group_queue" };
     const minPlayers = Math.min(
       Math.max(MIN_GAME_PLAYERS, typeof p.minPlayers === "number" ? p.minPlayers : 0),
       lobby.maxPlayers,
@@ -4294,6 +5645,560 @@ function seedFromHex(hex) {
   return seed;
 }
 
+// src/matchmaking/group/binding.ts
+var BINDING_COLLECTION = "group_parties";
+var MEMBER_COLLECTION = "group_member";
+var MEMBER_KEY = "current";
+var PARTY_STREAM = 7;
+var REMOVED_PREFIX = "removed:";
+function bindingKey(partyId) {
+  return { collection: BINDING_COLLECTION, key: partyId, userId: SYSTEM_USER_ID };
+}
+function memberKey(userId) {
+  return { collection: MEMBER_COLLECTION, key: MEMBER_KEY, userId };
+}
+function writeBinding(nk, binding) {
+  const write3 = (key, value) => __spreadProps(__spreadValues({}, key), { value, permissionRead: 0, permissionWrite: 0 });
+  nk.storageWrite(
+    [write3(bindingKey(binding.partyId), __spreadValues({}, binding))].concat(
+      binding.memberIds.map((id) => write3(memberKey(id), { partyId: binding.partyId, homeCode: binding.homeCode }))
+    )
+  );
+}
+function readBinding(nk, partyId) {
+  const objects = nk.storageRead([bindingKey(partyId)]);
+  return objects.length > 0 ? objects[0].value : null;
+}
+function deleteBinding(nk, partyId, memberIds) {
+  const pointers = nk.storageRead(memberIds.map(memberKey)).filter((o) => o.value.partyId === partyId);
+  nk.storageDelete([bindingKey(partyId)].concat(pointers.map((o) => memberKey(o.userId))));
+}
+function signalHome(nk, homeCode, signal2) {
+  const entry = lookupCode(nk, homeCode);
+  if (!entry) return null;
+  return nk.matchSignal(entry.matchId, JSON.stringify(signal2));
+}
+function statusOf(nk, partyId) {
+  const binding = readBinding(nk, partyId);
+  if (!binding) return null;
+  const reply = signalHome(nk, binding.homeCode, { type: "group_status", partyId });
+  const status = reply ? JSON.parse(reply) : null;
+  if (!status) {
+    deleteBinding(nk, partyId, binding.memberIds);
+    return null;
+  }
+  return { status, binding };
+}
+function groupOf(nk, userId) {
+  const objects = nk.storageRead([memberKey(userId)]);
+  if (objects.length === 0) return null;
+  const found = statusOf(nk, String(objects[0].value.partyId));
+  if (!found || found.status.memberIds.indexOf(userId) === -1) {
+    nk.storageDelete([memberKey(userId)]);
+    return null;
+  }
+  return found.status;
+}
+function partyStream(partyId) {
+  const dot = partyId.indexOf(".");
+  return { mode: PARTY_STREAM, subject: partyId.slice(0, dot), label: partyId.slice(dot + 1) };
+}
+function partyPresences(nk, partyId) {
+  if (partyId.indexOf(".") === -1) return [];
+  return nk.streamUserList(partyStream(partyId), true, true);
+}
+function dissolveParty(nk, partyId) {
+  const stream = partyStream(partyId);
+  for (const p of partyPresences(nk, partyId)) {
+    const node = p.node || p.nodeId || stream.label;
+    nk.streamUserKick({ userId: p.userId, sessionId: p.sessionId, node }, stream);
+  }
+}
+function markTicketRemoved(nk, ticket) {
+  nk.storageWrite([
+    {
+      collection: BINDING_COLLECTION,
+      key: REMOVED_PREFIX + ticket,
+      userId: SYSTEM_USER_ID,
+      value: { at: Date.now() },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function takeTicketRemoved(nk, ticket) {
+  const key = { collection: BINDING_COLLECTION, key: REMOVED_PREFIX + ticket, userId: SYSTEM_USER_ID };
+  if (nk.storageRead([key]).length === 0) return false;
+  nk.storageDelete([key]);
+  return true;
+}
+
+// src/matchmaking/gate.ts
+function queueRefusalFor(nk, userId, ranked, now) {
+  const config = readConfig(nk);
+  const refused = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
+  if (refused || !ranked) return refused;
+  return integrityRefusal(config, readIntegrity(nk, userId), now);
+}
+function stringProperties(envelope) {
+  const add = envelope.matchmakerAdd || envelope.matchmaker_add;
+  return add && (add.stringProperties || add.string_properties) || {};
+}
+var IN_GROUP_QUEUE = "You are queueing with your lobby.";
+function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
+  if (!ctx.userId) return envelope;
+  const ranked = stringProperties(envelope).kind === "ranked";
+  const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
+  if (refused) throw runtimeError(PERMISSION_DENIED, refused);
+  const group = groupOf(nk, ctx.userId);
+  if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE);
+  if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
+  return envelope;
+}
+function refusedPlayers(nk, plan) {
+  const now = Date.now();
+  const ranked = plan.rankedMode !== "";
+  return plan.playerIds.filter((id) => queueRefusalFor(nk, id, ranked, now) !== null);
+}
+function requeueSolos(nk, plan, refusedIds) {
+  const mode = plan.rankedMode !== "" ? plan.rankedMode : plan.gameMode;
+  const grouped = plan.groups.reduce((ids, g) => ids.concat(g.memberIds), []);
+  for (const id of plan.playerIds) {
+    if (refusedIds.indexOf(id) !== -1 || grouped.indexOf(id) !== -1) continue;
+    notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+      modId: plan.modId,
+      mode,
+      reason: "A matched player can no longer play",
+      requeue: true
+    });
+  }
+}
+
+// src/matchmaking/group/matched.ts
+function sameMembers2(a, b) {
+  return a.length === b.length && a.every((id) => b.indexOf(id) !== -1);
+}
+function groupFits(status, group, plan) {
+  return status !== null && status.phase === "queued" && status.modId === plan.modId && queueKey(status.mode, "casual") === plan.gameMode && sameMembers2(status.memberIds, group.memberIds);
+}
+function resolveGroups(nk, plan) {
+  const resolved = { homes: [], faulty: [] };
+  for (const group of plan.groups) {
+    const found = statusOf(nk, group.partyId);
+    if (found && groupFits(found.status, group, plan))
+      resolved.homes.push({ partyId: group.partyId, homeCode: found.binding.homeCode, memberIds: group.memberIds });
+    else resolved.faulty.push({ partyId: group.partyId, binding: found ? found.binding : null });
+  }
+  return resolved;
+}
+function tell(nk, homeCode, signal2) {
+  signalHome(nk, homeCode, signal2);
+}
+function requeueGroup(nk, home) {
+  tell(nk, home.homeCode, { type: "group_requeue", partyId: home.partyId });
+}
+function cancelGroupFor(nk, homeCode, partyId, reason) {
+  tell(nk, homeCode, { type: "group_cancel", partyId, reason });
+}
+function announceMatched(nk, home, matchId, code) {
+  tell(nk, home.homeCode, { type: "group_matched", partyId: home.partyId, matchId, code });
+}
+function requeuePartiesOf(nk, partyIds) {
+  for (const partyId of partyIds) {
+    const binding = readBinding(nk, partyId);
+    if (!binding) continue;
+    const found = statusOf(nk, partyId);
+    if (!found || found.status.phase !== "queued") continue;
+    clearMatched(nk, binding.modId, queueKey(found.status.mode, "casual"), found.status.memberIds);
+    requeueGroup(nk, { partyId, homeCode: binding.homeCode, memberIds: found.status.memberIds });
+  }
+}
+
+// src/matchmaking/group/teams.ts
+function partitionTeams(groups) {
+  const total = groups.reduce((n, g) => n + g.length, 0);
+  if (total % 2 !== 0) return err("odd_players");
+  const half = total / 2;
+  const order = groups.map((members, index) => ({ members, index })).sort((a, b) => b.members.length - a.members.length || a.index - b.index);
+  const reach = [[]];
+  for (let s = 1; s <= half; s++) reach.push(null);
+  for (let i = 0; i < order.length; i++) {
+    const size = order[i].members.length;
+    for (let s = half; s >= size; s--) {
+      const from = reach[s - size];
+      if (reach[s] === null && from !== null && from.indexOf(i) === -1) reach[s] = from.concat([i]);
+    }
+  }
+  const chosen = reach[half];
+  if (chosen === null) return err("groups_unsplittable");
+  const first = [];
+  const second = [];
+  order.forEach((g, i) => {
+    const team = chosen.indexOf(i) !== -1 ? first : second;
+    for (const id of g.members) team.push(id);
+  });
+  return ok([first, second]);
+}
+
+// src/matchmaking/matched.ts
+function queueKey(mode, kind) {
+  return kind === "ranked" ? "ranked:" + mode : mode;
+}
+var NAME_PATTERN2 = /^[A-Za-z0-9_.-]{1,64}$/;
+function groupsOf(entries) {
+  const party = [];
+  const all = [];
+  for (const entry of entries) {
+    const size = entry.properties[GROUP_SIZE_PROPERTY];
+    if (!entry.partyId) {
+      if (size !== void 0 && size !== 1) return "A solo ticket claims a group";
+      all.push([entry.presence.userId]);
+      continue;
+    }
+    let group = party.filter((g) => g.partyId === entry.partyId)[0];
+    if (!group) {
+      group = { partyId: entry.partyId, memberIds: [] };
+      party.push(group);
+      all.push(group.memberIds);
+    }
+    group.memberIds.push(entry.presence.userId);
+  }
+  for (const group of party) {
+    for (const entry of entries) {
+      if (entry.partyId === group.partyId && entry.properties[GROUP_SIZE_PROPERTY] !== group.memberIds.length)
+        return "A group ticket disagrees with its group size";
+    }
+  }
+  return { party, all };
+}
+function planMatch(entries) {
+  if (entries.length < 2) return "A match needs at least two players";
+  const first = entries[0].properties;
+  const modId = first.modId;
+  const mode = first.mode;
+  const kind = first.kind === "ranked" ? "ranked" : "casual";
+  const teams = first[TEAMS_PROPERTY] === 1;
+  if (typeof modId !== "string" || typeof mode !== "string" || !NAME_PATTERN2.test(modId) || !NAME_PATTERN2.test(mode))
+    return "Ticket has no valid modId and mode";
+  const ids = [];
+  for (const entry of entries) {
+    const p = entry.properties;
+    if (p.modId !== modId || p.mode !== mode || (p.kind === "ranked" ? "ranked" : "casual") !== kind)
+      return "Tickets disagree on what they queued for";
+    if (p[TEAMS_PROPERTY] === 1 !== teams) return "Tickets disagree on Teams";
+    if (ids.indexOf(entry.presence.userId) !== -1)
+      return "A player is in the match twice";
+    ids.push(entry.presence.userId);
+  }
+  const groups = groupsOf(entries);
+  if (typeof groups === "string") return groups;
+  if (groups.party.length > 0 && kind === "ranked") return "A group may not queue ranked";
+  let teamPlan = null;
+  if (teams) {
+    const split = partitionTeams(groups.all);
+    if (!split.ok) return "Teams cannot be split: " + split.error;
+    teamPlan = split.value;
+  }
+  return {
+    modId,
+    rankedMode: kind === "ranked" ? mode : "",
+    gameMode: queueKey(mode, kind),
+    playerIds: ids,
+    groups: groups.party,
+    teamPlan
+  };
+}
+function matchmakerMatched(ctx, logger, nk, matches) {
+  const plan = planMatch(matches);
+  if (typeof plan === "string") {
+    logger.warn("Matchmaker group refused: %s", plan);
+    requeuePartiesOf(nk, partyIdsOf(matches));
+    throw new Error(plan);
+  }
+  const refused = refusedPlayers(nk, plan);
+  const groups = resolveGroups(nk, plan);
+  if (refused.length > 0 || groups.faulty.length > 0) {
+    refuseMatch(nk, plan, refused, groups);
+    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
+    logger.warn(
+      "Matched group refused: %d player(s) may not queue, %d group(s) not queueing",
+      refused.length,
+      groups.faulty.length
+    );
+    throw new Error("A matched player may not queue");
+  }
+  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
+    const code = generateCode(MATCHMADE_CODE_LENGTH);
+    if (!reserveCode(nk, code, plan.modId)) continue;
+    let matchId;
+    try {
+      matchId = nk.matchCreate(LOBBY_MATCH, {
+        code,
+        modId: plan.modId,
+        maxPlayers: plan.playerIds.length,
+        creatorId: plan.playerIds[0],
+        rankedMode: plan.rankedMode,
+        allowedIds: plan.playerIds.join(","),
+        gameMode: plan.gameMode,
+        groups: groups.homes.length > 0 ? JSON.stringify(groups.homes) : "",
+        teamPlan: plan.teamPlan ? JSON.stringify(plan.teamPlan) : ""
+      });
+    } catch (e) {
+      releaseCode(nk, code, "");
+      throw e;
+    }
+    bindCode(nk, code, matchId, plan.modId);
+    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
+    for (const home of groups.homes) announceMatched(nk, home, matchId, code);
+    logger.info(
+      "Matchmaker made lobby %s for %d players (%s%s)",
+      code,
+      plan.playerIds.length,
+      plan.modId,
+      plan.rankedMode ? ", ranked " + plan.rankedMode : ""
+    );
+    return matchId;
+  }
+  throw new Error("Could not allocate a lobby code");
+}
+function partyIdsOf(matches) {
+  const ids = [];
+  for (const m of matches) if (m.partyId && ids.indexOf(m.partyId) === -1) ids.push(m.partyId);
+  return ids;
+}
+function refuseMatch(nk, plan, refused, groups) {
+  requeueSolos(nk, plan, refused);
+  for (const home of groups.homes) {
+    if (home.memberIds.some((id) => refused.indexOf(id) !== -1)) cancelGroupFor(nk, home.homeCode, home.partyId, "member_refused");
+    else requeueGroup(nk, home);
+  }
+  for (const fault of groups.faulty) {
+    if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, "match_refused");
+  }
+}
+
+// src/matchmaking/queue.ts
+var QUEUE_COLLECTION = "queue_presence";
+var QUEUE_STALE_MS = 30 * 6e4;
+var LIST_PAGE = 100;
+var MATCH_LIST_LIMIT = 100;
+var NOTIFICATIONS_STREAM = 0;
+var TOMBSTONE_MS = 6e4;
+var MOD_ID_PATTERN3 = /^[A-Za-z0-9_.-]{1,64}$/;
+function recordKey(modId, gameMode) {
+  return modId + ":" + gameMode;
+}
+function field(obj, camel, snake) {
+  if (!obj || typeof obj !== "object") return void 0;
+  const o = obj;
+  return o[camel] !== void 0 ? o[camel] : o[snake];
+}
+function recordOf2(input, output, sessionId, now) {
+  const add = field(input, "matchmakerAdd", "matchmaker_add");
+  const props = field(add, "stringProperties", "string_properties") || {};
+  const ticket = field(field(output, "matchmakerTicket", "matchmaker_ticket"), "ticket", "ticket");
+  const modId = props.modId;
+  const mode = props.mode;
+  if (typeof ticket !== "string" || typeof modId !== "string" || typeof mode !== "string") return null;
+  if (!MOD_ID_PATTERN3.test(modId) || !MOD_ID_PATTERN3.test(mode)) return null;
+  const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
+  return { modId, gameMode, ticket, sessionId, at: now };
+}
+function countQueues(modId, records, labels, now) {
+  const gameModes = {};
+  const entry = (mode) => gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 };
+  for (const r of records) {
+    if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue;
+    entry(r.gameMode).queued++;
+  }
+  for (const raw of labels) {
+    let label;
+    try {
+      label = JSON.parse(raw);
+    } catch (e) {
+      continue;
+    }
+    if (!label || label.modId !== modId || label.type !== "public" || !label.mode || !(label.size > 0)) continue;
+    entry(label.mode).inMatch += label.size;
+  }
+  return { modId, gameModes };
+}
+function deleteRecords(nk, userId, keys) {
+  if (keys.length === 0) return;
+  nk.storageDelete(keys.map((key) => ({ collection: QUEUE_COLLECTION, key, userId })));
+}
+function ownRecords(nk, userId) {
+  const out = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE, cursor);
+    for (const o of page.objects || []) out.push(o);
+    cursor = page.cursor || "";
+  } while (cursor);
+  return out;
+}
+var REMOVED_PREFIX2 = "removed:";
+function isRecord(o) {
+  return o.key.indexOf(REMOVED_PREFIX2) !== 0;
+}
+function afterMatchmakerAdd(ctx, logger, nk, output, input) {
+  if (!ctx.userId) return;
+  const record = recordOf2(input, output, ctx.sessionId || "", Date.now());
+  if (!record) return;
+  const tombstone = REMOVED_PREFIX2 + record.ticket;
+  const removed = nk.storageRead([{ collection: QUEUE_COLLECTION, key: tombstone, userId: ctx.userId }]);
+  if (removed.length > 0) {
+    deleteRecords(nk, ctx.userId, [tombstone]);
+    return;
+  }
+  nk.storageWrite([
+    {
+      collection: QUEUE_COLLECTION,
+      key: recordKey(record.modId, record.gameMode),
+      userId: ctx.userId,
+      value: __spreadValues({}, record),
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function beforeMatchmakerRemove(ctx, logger, nk, envelope) {
+  const ticket = field(field(envelope, "matchmakerRemove", "matchmaker_remove"), "ticket", "ticket");
+  if (!ctx.userId || typeof ticket !== "string" || !ticket) return envelope;
+  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord(o) && o.value.ticket === ticket).map((o) => o.key);
+  if (keys.length > 0) {
+    deleteRecords(nk, ctx.userId, keys);
+  } else {
+    nk.storageWrite([
+      {
+        collection: QUEUE_COLLECTION,
+        key: REMOVED_PREFIX2 + ticket,
+        userId: ctx.userId,
+        value: { at: Date.now() },
+        permissionRead: 0,
+        permissionWrite: 0
+      }
+    ]);
+  }
+  return envelope;
+}
+function clearMatched(nk, modId, gameMode, userIds) {
+  for (const userId of userIds) deleteRecords(nk, userId, [recordKey(modId, gameMode)]);
+}
+function writeGroupRecords(nk, record, members) {
+  if (members.length === 0) return;
+  nk.storageWrite(
+    members.map((m) => ({
+      collection: QUEUE_COLLECTION,
+      key: recordKey(record.modId, record.gameMode),
+      userId: m.userId,
+      value: __spreadProps(__spreadValues({}, record), { sessionId: m.sessionId }),
+      permissionRead: 0,
+      permissionWrite: 0
+    }))
+  );
+}
+function sessionsOf(nk, userId) {
+  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
+}
+function liveTicketHolders(nk, userIds, exceptTicket, now) {
+  return userIds.filter((userId) => {
+    const records = ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => r.ticket !== exceptTicket && now - r.at <= QUEUE_STALE_MS);
+    if (records.length === 0) return false;
+    const sessions = sessionsOf(nk, userId);
+    return records.some((r) => sessions.indexOf(r.sessionId) !== -1);
+  });
+}
+function liveRecords(nk, modId, now) {
+  const byUser = {};
+  let cursor = "";
+  do {
+    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE, cursor);
+    for (const o of page.objects || []) {
+      if (!isRecord(o)) {
+        if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
+        continue;
+      }
+      if (o.value.modId !== modId) continue;
+      (byUser[o.userId] = byUser[o.userId] || []).push(o);
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  const live = [];
+  for (const userId in byUser) {
+    const sessions = sessionsOf(nk, userId);
+    const dead = [];
+    for (const o of byUser[userId]) {
+      const record = o.value;
+      if (sessions.indexOf(record.sessionId) === -1) dead.push(o.key);
+      else live.push(record);
+    }
+    deleteRecords(nk, userId, dead);
+  }
+  return live;
+}
+function rpcQueueCounts(ctx, logger, nk, payload) {
+  const modId = parsePayload(payload).modId;
+  if (typeof modId !== "string" || !MOD_ID_PATTERN3.test(modId))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
+  const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
+  const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
+  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()));
+}
+
+// src/lobby/group_signals.ts
+var GROUP_SIGNALS = [
+  "group_members",
+  "group_status",
+  "group_open",
+  "group_queued",
+  "group_unqueued",
+  "group_requeue",
+  "group_matched",
+  "group_cancel",
+  "away_over"
+];
+function isGroupSignal(signal2) {
+  return GROUP_SIGNALS.indexOf(signal2.type) !== -1;
+}
+function unchanged(lobby, reply) {
+  return { step: { lobby, out: [] }, reply: JSON.stringify(reply) };
+}
+function answered(lobby, result) {
+  if (!result.ok) return unchanged(lobby, { refused: result.error });
+  return { step: result.value, reply: JSON.stringify({ groupQueue: viewOf2(result.value.lobby) }) };
+}
+function stepped(step) {
+  return { step, reply: JSON.stringify({ groupQueue: viewOf2(step.lobby) }) };
+}
+function answerGroupSignal(lobby, signal2, switches, now) {
+  switch (signal2.type) {
+    case "group_members":
+      return unchanged(lobby, homeFactsOf(lobby));
+    case "group_status": {
+      const view = viewOf2(lobby);
+      return unchanged(lobby, view && view.partyId === signal2.partyId ? view : null);
+    }
+    case "group_open":
+      return answered(
+        lobby,
+        openGroupQueue(lobby, signal2.userId, { partyId: signal2.partyId, mode: signal2.mode, teams: signal2.teams }, switches, now)
+      );
+    case "group_queued":
+      return answered(lobby, groupQueued(lobby, signal2.partyId, signal2.ticket));
+    case "group_unqueued":
+      return stepped(groupUnqueued(lobby, signal2.partyId, false));
+    case "group_requeue":
+      return stepped(groupUnqueued(lobby, signal2.partyId, true));
+    case "group_matched":
+      return answered(lobby, groupMatched(lobby, signal2.partyId, signal2.matchId, signal2.code, now));
+    case "group_cancel":
+      return answered(lobby, cancelGroup(lobby, signal2.partyId, signal2.reason, signal2.userId || null));
+    case "away_over":
+      return stepped(awayOver(lobby, signal2.partyId, signal2.code, now));
+  }
+}
+
 // src/lobby/relay.ts
 var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 var MAX_PARAMS_BYTES = 16 * 1024;
@@ -4335,27 +6240,27 @@ function action(lobby, senderId, data, ctx) {
   const cid = stringField(data, "cid").slice(0, MAX_CID_LENGTH);
   const key = stringField(data, "action");
   const to = stringField(data, "to");
-  const refuse = (reason) => ({
+  const refuse2 = (reason) => ({
     lobby,
     out: [reject(senderId, { cid, action: key, reason })]
   });
   const sender = findPlayer(lobby, senderId);
   if (!sender || sender.awaySince !== null) return { lobby, out: [] };
-  if (!ACTION_KEY_PATTERN.test(key)) return refuse("bad_action");
+  if (!ACTION_KEY_PATTERN.test(key)) return refuse2("bad_action");
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
-    return refuse("too_large");
+    return refuse2("too_large");
   const budgeted = spend(lobby, senderId, key, ctx.now);
-  if (!budgeted) return refuse("rate_limited");
+  if (!budgeted) return refuse2("rate_limited");
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
-    if (!authoritative) return refuse("not_authoritative");
+    if (!authoritative) return refuse2("not_authoritative");
     const result = authoritative.reduce(
       budgeted,
       __spreadProps(__spreadValues({}, ctx), { from: senderId }),
       params
     );
-    if ("reject" in result) return refuse(result.reject);
+    if ("reject" in result) return refuse2(result.reject);
     const next = __spreadProps(__spreadValues({}, budgeted), { game: result.game });
     const out = [];
     const audience = result.to || "all";
@@ -4380,14 +6285,14 @@ function action(lobby, senderId, data, ctx) {
     const settled = settle(next, ctx.now);
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
-  if (authoritative) return refuse("authoritative_only");
+  if (authoritative) return refuse2("authoritative_only");
   let targets;
   if (to === BROADCAST_TARGET) {
     targets = budgeted.players.map((p) => p.id);
   } else if (findPlayer(budgeted, to)) {
     targets = [to];
   } else {
-    return refuse("unknown_target");
+    return refuse2("unknown_target");
   }
   const envelope = {
     cid,
@@ -4466,23 +6371,22 @@ function reportEvidence(lobby, reporterId, reportedId) {
   };
 }
 
-// src/lobby/anticheat.ts
-var MIN_MS_PER_HAND = 3e3;
-var HAND_OPCODE = "hand_result";
-function handCount(log) {
-  if (!log) return 0;
-  let hands = 0;
-  for (const line of log.lines) if (JSON.parse(line)[1] === HAND_OPCODE) hands++;
-  return hands;
-}
-function runFlags(run, logs, checks) {
-  const flags = {};
-  const elapsedMs = run.endedAt - run.startedAt;
-  for (const player of run.players) {
-    if (checks[player.id] === "mismatch") flags[player.id] = "hash_mismatch";
-    else if (handCount(logs[player.id]) * MIN_MS_PER_HAND > elapsedMs) flags[player.id] = "elapsed_time_gate";
+// src/shared/replay/events.ts
+function eventsOf2(log) {
+  var _a;
+  if (!log) return [];
+  const events = [];
+  for (const line of log.lines) {
+    const tuple = JSON.parse(line);
+    if (!Array.isArray(tuple) || typeof tuple[1] !== "string") continue;
+    events.push({ t: typeof tuple[0] === "number" ? tuple[0] : 0, opcode: tuple[1], args: (_a = tuple[2]) != null ? _a : null });
   }
-  return flags;
+  return events;
+}
+function eventsByPlayer(logs) {
+  const events = {};
+  for (const userId in logs) events[userId] = eventsOf2(logs[userId]);
+  return events;
 }
 
 // src/lobby/log_check.ts
@@ -4680,6 +6584,8 @@ function apply(ctx, logger, nk, dispatcher, state, raw) {
     const finished = finishGame(step.lobby, Date.now());
     step = { lobby: finished.lobby, out: step.out.concat(finished.out) };
   }
+  const released = releaseGroups(state.lobby.game.started !== null, step.lobby);
+  step = { lobby: released.lobby, out: step.out.concat(released.out) };
   const presences = __spreadValues({}, state.presences);
   for (const effect of step.out) {
     runEffect(ctx, logger, nk, dispatcher, step.lobby, presences, effect);
@@ -4695,8 +6601,8 @@ function apply(ctx, logger, nk, dispatcher, state, raw) {
   }
   return __spreadProps(__spreadValues({}, state), { lobby: step.lobby, presences, label });
 }
-function judged(nk, logger, run, logs) {
-  const flags = runFlags(run, logs, logChecksOf(run, logs, (input) => nk.sha256Hash(input)));
+function judged(nk, logger, run, logs, events) {
+  const flags = runFlags(run, events, logChecksOf(run, logs, (input) => nk.sha256Hash(input)));
   const flagged = __spreadProps(__spreadValues({}, run), { flags });
   if (!run.rankedMode) return flagged;
   try {
@@ -4734,10 +6640,14 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
         logger.warn("Lobby %s: could not record %s as in it: %v", lobby.code, effect.userId, e);
       }
       return;
-    case "saveRun":
+    case "saveRun": {
+      let stored = null;
+      let events = {};
       try {
-        const run = judged(nk, logger, effect.run, effect.logs);
+        events = eventsByPlayer(effect.logs);
+        const run = judged(nk, logger, effect.run, effect.logs, events);
         saveRun(nk, run, effect.logs);
+        stored = run;
         enqueue(nk, {
           kind: "run",
           at: Date.now(),
@@ -4755,12 +6665,50 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
           e
         );
       }
+      if (stored) {
+        try {
+          recordRun(nk, logger, stored, events);
+        } catch (e) {
+          logger.error("Lobby %s: could not record achievements for run %s: %v", lobby.code, stored.runId, e);
+        }
+      }
       return;
+    }
     case "forfeited":
       try {
         recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at });
       } catch (e) {
         logger.warn("Lobby %s: could not record %s timing out: %v", lobby.code, effect.userId, e);
+      }
+      return;
+    case "groupBind":
+      try {
+        writeBinding(nk, { partyId: effect.partyId, homeCode: lobby.code, modId: lobby.modId, memberIds: effect.memberIds });
+      } catch (e) {
+        logger.warn("Lobby %s: could not bind party %s: %v", lobby.code, effect.partyId, e);
+      }
+      return;
+    case "groupUnbind":
+      try {
+        deleteBinding(nk, effect.partyId, effect.memberIds);
+        clearMatched(nk, lobby.modId, effect.gameMode, effect.memberIds);
+        dissolveParty(nk, effect.partyId);
+      } catch (e) {
+        logger.warn("Lobby %s: could not unbind party %s: %v", lobby.code, effect.partyId, e);
+      }
+      return;
+    case "groupDissolve":
+      try {
+        dissolveParty(nk, effect.partyId);
+      } catch (e) {
+        logger.warn("Lobby %s: could not break up party %s: %v", lobby.code, effect.partyId, e);
+      }
+      return;
+    case "awayOver":
+      try {
+        signalHome(nk, effect.homeCode, { type: "away_over", partyId: effect.partyId, code: lobby.code });
+      } catch (e) {
+        logger.warn("Lobby %s: could not send group %s home to %s: %v", lobby.code, effect.partyId, effect.homeCode, e);
       }
       return;
     case "clearCurrent":
@@ -4781,6 +6729,27 @@ function stringParam(params, key) {
   const value = params[key];
   return typeof value === "string" ? value : "";
 }
+function jsonParam(params, key) {
+  const raw = stringParam(params, key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+function groupsParam(params) {
+  const value = jsonParam(params, "groups");
+  if (!Array.isArray(value) || value.length === 0) return void 0;
+  return value.filter(
+    (g) => g && typeof g.partyId === "string" && typeof g.homeCode === "string" && Array.isArray(g.memberIds)
+  );
+}
+function teamPlanParam(params) {
+  const value = jsonParam(params, "teamPlan");
+  if (!Array.isArray(value) || value.length !== 2 || !value.every((t) => Array.isArray(t))) return null;
+  return [value[0], value[1]];
+}
 function lobbyMatchInit(ctx, logger, nk, params) {
   const resumeCode = stringParam(params, "resumeCode");
   const found = resumeCode ? readCheckpoint(nk, resumeCode) : null;
@@ -4792,6 +6761,8 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     rankedMode: stringParam(params, "rankedMode") || void 0,
     allowedIds: stringParam(params, "allowedIds") ? stringParam(params, "allowedIds").split(",") : void 0,
     gameMode: stringParam(params, "gameMode") || void 0,
+    groups: groupsParam(params),
+    teamPlan: teamPlanParam(params),
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
     resultTimeoutMs: secondsFromEnv(
@@ -4822,16 +6793,17 @@ function parseMods(raw) {
 function joinInfoOf(nk, presence, meta) {
   const sentMods = parseMods(meta.mods);
   const stored = readProfile(nk, presence.userId, presence.username);
+  const joker = stored ? selectableOrDefault(stored.profile.preferredJoker, holdingsOf(nk, presence.userId, stored.profile.privileges)) : DEFAULT_AVATAR;
   if (stored && stored.profile.nakamaLogin) {
     return {
       displayName: displayNameOf(stored.profile),
-      preferredJoker: stored.profile.preferredJoker,
+      preferredJoker: joker,
       mods: sentMods !== null ? sentMods : stored.profile.mods
     };
   }
   return {
     displayName: meta.displayName || presence.username,
-    preferredJoker: meta.preferredJoker || null,
+    preferredJoker: joker,
     mods: sentMods
   };
 }
@@ -4851,8 +6823,8 @@ function otherLobbyOf(nk, ctx, userId) {
   const matchId = objects[0].value.matchId;
   if (typeof matchId !== "string" || matchId === ctx.matchId || !nk.matchGet(matchId))
     return null;
-  const signal = { type: "has_player", userId };
-  return nk.matchSignal(matchId, JSON.stringify(signal)) === "yes" ? String(objects[0].value.code) : null;
+  const signal2 = { type: "has_player", userId, forMatchId: ctx.matchId };
+  return nk.matchSignal(matchId, JSON.stringify(signal2)) === "yes" ? String(objects[0].value.code) : null;
 }
 function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, presence, metadata) {
   const meta = metadata || {};
@@ -5035,21 +7007,25 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
   return settled ? { state: settled } : null;
 }
 function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) {
-  let signal;
+  let signal2;
   try {
-    signal = JSON.parse(data);
+    signal2 = JSON.parse(data);
   } catch (e) {
     return { state, data: "bad_signal" };
   }
-  if (signal.type === "has_player") {
-    const member = state.lobby.players.some((p) => p.id === signal.userId);
-    return { state, data: member ? "yes" : "no" };
+  if (signal2.type === "has_player") {
+    return { state, data: hasPlayerAnswer(state.lobby, signal2.userId, signal2.forMatchId) };
   }
-  if (signal.type === "get_active") {
-    return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) };
+  if (isGroupSignal(signal2)) {
+    const answer = answerGroupSignal(state.lobby, signal2, readConfig(nk), Date.now());
+    const next = apply(ctx, logger, nk, dispatcher, state, answer.step);
+    return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer.reply };
   }
-  if (signal.type === "chat_check") {
-    const check = chatCheck(state.lobby, signal.userId, Date.now());
+  if (signal2.type === "get_active") {
+    return { state, data: JSON.stringify(activeRunOf(state.lobby, signal2.userId)) };
+  }
+  if (signal2.type === "chat_check") {
+    const check = chatCheck(state.lobby, signal2.userId, Date.now());
     if (!check.ok) return { state, data: JSON.stringify({ error: check.reason }) };
     return {
       state: __spreadProps(__spreadValues({}, state), { lobby: check.lobby }),
@@ -5060,63 +7036,63 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
       })
     };
   }
-  if (signal.type === "chat_post") {
+  if (signal2.type === "chat_post") {
     const next = apply(
       ctx,
       logger,
       nk,
       dispatcher,
       state,
-      chatPost(state.lobby, signal.userId, signal.text, Date.now())
+      chatPost(state.lobby, signal2.userId, signal2.text, Date.now())
     );
     return { state: next || state, data: "ok" };
   }
-  if (signal.type === "player_info") {
+  if (signal2.type === "player_info") {
     const next = apply(
       ctx,
       logger,
       nk,
       dispatcher,
       state,
-      setPlayerInfo(state.lobby, signal.userId, signal.info)
+      setPlayerInfo(state.lobby, signal2.userId, signal2.info)
     );
     return { state: next || state, data: "ok" };
   }
-  if (signal.type === "admin_remove") {
-    const member = state.lobby.players.some((p) => p.id === signal.userId);
+  if (signal2.type === "admin_remove") {
+    const member = state.lobby.players.some((p) => p.id === signal2.userId);
     const next = apply(
       ctx,
       logger,
       nk,
       dispatcher,
       state,
-      adminRemove(state.lobby, signal.userId, signal.reason, signal.onlyIfStarted === true)
+      adminRemove(state.lobby, signal2.userId, signal2.reason, signal2.onlyIfStarted === true)
     );
     return {
       state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
       data: member ? "ok" : "not_member"
     };
   }
-  if (signal.type === "report_evidence") {
-    const check = reportEvidence(state.lobby, signal.reporterId, signal.reportedId);
+  if (signal2.type === "report_evidence") {
+    const check = reportEvidence(state.lobby, signal2.reporterId, signal2.reportedId);
     return { state, data: JSON.stringify(check.ok ? check.evidence : { error: check.reason }) };
   }
-  if (signal.type === "admin_view") return { state, data: JSON.stringify(adminView(state.lobby)) };
-  if (signal.type === "admin_close") {
+  if (signal2.type === "admin_view") return { state, data: JSON.stringify(adminView(state.lobby)) };
+  if (signal2.type === "admin_close") {
     const next = apply(ctx, logger, nk, dispatcher, state, close(state.lobby));
     return {
       state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
       data: "ok"
     };
   }
-  if (signal.type === "leave") {
+  if (signal2.type === "leave") {
     const next = apply(
       ctx,
       logger,
       nk,
       dispatcher,
       state,
-      leave(state.lobby, signal.userId)
+      leave(state.lobby, signal2.userId)
     );
     return {
       state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
@@ -5346,258 +7322,171 @@ function logChat(nk, logger, lobbyCode, userId, message, blocked) {
   }
 }
 
-// src/matchmaking/gate.ts
-function queueRefusalFor(nk, userId, ranked, now) {
-  const config = readConfig(nk);
-  const refused = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
-  if (refused || !ranked) return refused;
-  return integrityRefusal(config, readIntegrity(nk, userId), now);
-}
-function stringProperties(envelope) {
-  const add = envelope.matchmakerAdd || envelope.matchmaker_add;
-  return add && (add.stringProperties || add.string_properties) || {};
-}
-function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
-  if (!ctx.userId) return envelope;
-  const ranked = stringProperties(envelope).kind === "ranked";
-  const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
-  if (refused) throw runtimeError(PERMISSION_DENIED, refused);
-  if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
-  return envelope;
-}
-function refuseMatchedGroup(nk, logger, plan) {
-  const now = Date.now();
-  const ranked = plan.rankedMode !== "";
-  const refused = plan.playerIds.filter((id) => queueRefusalFor(nk, id, ranked, now) !== null);
-  if (refused.length === 0) return false;
-  const mode = ranked ? plan.rankedMode : plan.gameMode;
-  for (const id of plan.playerIds) {
-    if (refused.indexOf(id) !== -1) continue;
-    notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
-      modId: plan.modId,
-      mode,
-      reason: "A matched player can no longer play",
-      requeue: true
-    });
-  }
-  logger.warn("Matched group refused: %d player(s) may not queue", refused.length);
-  return true;
-}
-
-// src/matchmaking/queue.ts
-var QUEUE_COLLECTION = "queue_presence";
-var QUEUE_STALE_MS = 30 * 6e4;
-var LIST_PAGE = 100;
-var MATCH_LIST_LIMIT = 100;
-var NOTIFICATIONS_STREAM = 0;
-var TOMBSTONE_MS = 6e4;
-var MOD_ID_PATTERN3 = /^[A-Za-z0-9_.-]{1,64}$/;
-function recordKey(modId, gameMode) {
-  return modId + ":" + gameMode;
-}
-function field(obj, camel, snake) {
+// src/matchmaking/group/hooks.ts
+function field2(obj, camel, snake) {
   if (!obj || typeof obj !== "object") return void 0;
   const o = obj;
   return o[camel] !== void 0 ? o[camel] : o[snake];
 }
-function recordOf2(input, output, sessionId, now) {
-  const add = field(input, "matchmakerAdd", "matchmaker_add");
-  const props = field(add, "stringProperties", "string_properties") || {};
-  const ticket = field(field(output, "matchmakerTicket", "matchmaker_ticket"), "ticket", "ticket");
-  const modId = props.modId;
-  const mode = props.mode;
-  if (typeof ticket !== "string" || typeof modId !== "string" || typeof mode !== "string") return null;
-  if (!MOD_ID_PATTERN3.test(modId) || !MOD_ID_PATTERN3.test(mode)) return null;
-  const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
-  return { modId, gameMode, ticket, sessionId, at: now };
+function partyIdOf(message) {
+  const id = field2(message, "partyId", "party_id");
+  return typeof id === "string" ? id : "";
 }
-function countQueues(modId, records, labels, now) {
-  const gameModes = {};
-  const entry = (mode) => gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 };
-  for (const r of records) {
-    if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue;
-    entry(r.gameMode).queued++;
+function refuse(refusal) {
+  return runtimeError(PERMISSION_DENIED, refusalMessage(refusal));
+}
+function memberFactsOf(nk, memberIds, exceptTicket, now) {
+  const refusals = {};
+  for (const id of memberIds) {
+    const refused = queueRefusalFor(nk, id, false, now);
+    if (refused) refusals[id] = refused;
   }
-  for (const raw of labels) {
-    let label;
-    try {
-      label = JSON.parse(raw);
-    } catch (e) {
-      continue;
-    }
-    if (!label || label.modId !== modId || label.type !== "public" || !label.mode || !(label.size > 0)) continue;
-    entry(label.mode).inMatch += label.size;
-  }
-  return { modId, gameModes };
+  return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) };
 }
-function deleteRecords(nk, userId, keys) {
-  if (keys.length === 0) return;
-  nk.storageDelete(keys.map((key) => ({ collection: QUEUE_COLLECTION, key, userId })));
+function numberOr(value, fallback) {
+  return typeof value === "number" ? value : fallback;
 }
-function ownRecords(nk, userId) {
-  const out = [];
-  let cursor = "";
-  do {
-    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE, cursor);
-    for (const o of page.objects || []) out.push(o);
-    cursor = page.cursor || "";
-  } while (cursor);
-  return out;
+function partyTicketOf(add) {
+  return {
+    minCount: numberOr(field2(add, "minCount", "min_count"), 0),
+    maxCount: numberOr(field2(add, "maxCount", "max_count"), 0),
+    countMultiple: numberOr(field2(add, "countMultiple", "count_multiple"), null),
+    stringProperties: field2(add, "stringProperties", "string_properties") || {},
+    numericProperties: field2(add, "numericProperties", "numeric_properties") || {}
+  };
 }
-var REMOVED_PREFIX = "removed:";
-function isRecord(o) {
-  return o.key.indexOf(REMOVED_PREFIX) !== 0;
+function beforePartyJoin(ctx, logger, nk, envelope) {
+  const partyId = partyIdOf(field2(envelope, "partyJoin", "party_join"));
+  if (!ctx.userId || !partyId || !readBinding(nk, partyId)) return envelope;
+  const found = statusOf(nk, partyId);
+  if (!found) return envelope;
+  const refused = joinRefusal(found.status, ctx.userId);
+  if (refused) throw refuse(refused);
+  return envelope;
 }
-function afterMatchmakerAdd(ctx, logger, nk, output, input) {
-  if (!ctx.userId) return;
-  const record = recordOf2(input, output, ctx.sessionId || "", Date.now());
-  if (!record) return;
-  const tombstone = REMOVED_PREFIX + record.ticket;
-  const removed = nk.storageRead([{ collection: QUEUE_COLLECTION, key: tombstone, userId: ctx.userId }]);
-  if (removed.length > 0) {
-    deleteRecords(nk, ctx.userId, [tombstone]);
-    return;
-  }
-  nk.storageWrite([
-    {
-      collection: QUEUE_COLLECTION,
-      key: recordKey(record.modId, record.gameMode),
-      userId: ctx.userId,
-      value: __spreadValues({}, record),
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-function beforeMatchmakerRemove(ctx, logger, nk, envelope) {
-  const ticket = field(field(envelope, "matchmakerRemove", "matchmaker_remove"), "ticket", "ticket");
-  if (!ctx.userId || typeof ticket !== "string" || !ticket) return envelope;
-  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord(o) && o.value.ticket === ticket).map((o) => o.key);
-  if (keys.length > 0) {
-    deleteRecords(nk, ctx.userId, keys);
-  } else {
-    nk.storageWrite([
-      {
-        collection: QUEUE_COLLECTION,
-        key: REMOVED_PREFIX + ticket,
-        userId: ctx.userId,
-        value: { at: Date.now() },
-        permissionRead: 0,
-        permissionWrite: 0
-      }
-    ]);
+function beforePartyMatchmakerAdd(ctx, logger, nk, envelope) {
+  if (!ctx.userId) return envelope;
+  const add = field2(envelope, "partyMatchmakerAdd", "party_matchmaker_add");
+  const partyId = partyIdOf(add);
+  const found = partyId ? statusOf(nk, partyId) : null;
+  const memberIds = found ? found.status.memberIds : [];
+  const refused = ticketRefusal({
+    switches: readConfig(nk),
+    status: found ? found.status : null,
+    leaderId: ctx.userId,
+    partyUserIds: partyPresences(nk, partyId).map((p) => p.userId),
+    members: memberFactsOf(nk, memberIds, null, Date.now()),
+    ticket: partyTicketOf(add)
+  });
+  if (refused) {
+    logger.info("Group ticket for party %s refused: %s", partyId, refused.code);
+    throw refuse(refused);
   }
   return envelope;
 }
-function clearMatched(nk, modId, gameMode, userIds) {
-  for (const userId of userIds) deleteRecords(nk, userId, [recordKey(modId, gameMode)]);
-}
-function liveRecords(nk, modId, now) {
-  const byUser = {};
-  let cursor = "";
-  do {
-    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE, cursor);
-    for (const o of page.objects || []) {
-      if (!isRecord(o)) {
-        if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
-        continue;
-      }
-      if (o.value.modId !== modId) continue;
-      (byUser[o.userId] = byUser[o.userId] || []).push(o);
-    }
-    cursor = page.cursor || "";
-  } while (cursor);
-  const live = [];
-  for (const userId in byUser) {
-    const sessions = nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
-    const dead = [];
-    for (const o of byUser[userId]) {
-      const record = o.value;
-      if (sessions.indexOf(record.sessionId) === -1) dead.push(o.key);
-      else live.push(record);
-    }
-    deleteRecords(nk, userId, dead);
+function afterPartyMatchmakerAdd(ctx, logger, nk, output, input) {
+  const result = field2(output, "partyMatchmakerTicket", "party_matchmaker_ticket");
+  const partyId = partyIdOf(result);
+  const ticket = field2(result, "ticket", "ticket");
+  if (!partyId || typeof ticket !== "string") return;
+  if (takeTicketRemoved(nk, ticket)) return;
+  const binding = readBinding(nk, partyId);
+  if (!binding) return;
+  const reply = signalHome(nk, binding.homeCode, { type: "group_queued", partyId, ticket });
+  const queued = reply ? JSON.parse(reply) : null;
+  if (!queued || queued.refused) {
+    logger.warn("Party %s ticket %s has no forming group; breaking it up", partyId, ticket);
+    dissolveParty(nk, partyId);
+    return;
   }
-  return live;
+  const props = partyTicketOf(field2(input, "partyMatchmakerAdd", "party_matchmaker_add")).stringProperties;
+  writeGroupRecords(
+    nk,
+    { modId: binding.modId, gameMode: queueKey(String(props.mode), "casual"), ticket, at: Date.now() },
+    partyPresences(nk, partyId).map((p) => ({ userId: p.userId, sessionId: p.sessionId }))
+  );
 }
-function rpcQueueCounts(ctx, logger, nk, payload) {
-  const modId = parsePayload(payload).modId;
-  if (typeof modId !== "string" || !MOD_ID_PATTERN3.test(modId))
-    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
-  const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
-  const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
-  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()));
+function beforePartyMatchmakerRemove(ctx, logger, nk, envelope) {
+  const remove2 = field2(envelope, "partyMatchmakerRemove", "party_matchmaker_remove");
+  const partyId = partyIdOf(remove2);
+  const ticket = field2(remove2, "ticket", "ticket");
+  if (!partyId || typeof ticket !== "string") return envelope;
+  const found = statusOf(nk, partyId);
+  if (!found) return envelope;
+  if (found.status.phase !== "queued" || found.status.ticket !== ticket) {
+    markTicketRemoved(nk, ticket);
+    return envelope;
+  }
+  clearMatched(nk, found.binding.modId, queueKey(found.status.mode, "casual"), found.status.memberIds);
+  signalHome(nk, found.binding.homeCode, { type: "group_unqueued", partyId });
+  return envelope;
+}
+function cancelFor(nk, partyId, userId, reason) {
+  const binding = partyId ? readBinding(nk, partyId) : null;
+  if (!binding) return;
+  const signal2 = { type: "group_cancel", partyId, reason, userId };
+  signalHome(nk, binding.homeCode, signal2);
+}
+function beforePartyLeave(ctx, logger, nk, envelope) {
+  cancelFor(nk, partyIdOf(field2(envelope, "partyLeave", "party_leave")), ctx.userId, "member_left_party");
+  return envelope;
+}
+function beforePartyRemove(ctx, logger, nk, envelope) {
+  cancelFor(nk, partyIdOf(field2(envelope, "partyRemove", "party_remove")), ctx.userId, "member_left_party");
+  return envelope;
+}
+function beforePartyClose(ctx, logger, nk, envelope) {
+  cancelFor(nk, partyIdOf(field2(envelope, "partyClose", "party_close")), ctx.userId, "member_left_party");
+  return envelope;
 }
 
-// src/matchmaking/matched.ts
-function queueKey(mode, kind) {
-  return kind === "ranked" ? "ranked:" + mode : mode;
+// src/matchmaking/group/rpc.ts
+function refusedReply(refusal) {
+  const reply = { refused: __spreadProps(__spreadValues({}, refusal), { message: refusalMessage(refusal) }) };
+  return JSON.stringify(reply);
 }
-var NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
-function planMatch(entries) {
-  if (entries.length < 2) return "A match needs at least two players";
-  const first = entries[0].properties;
-  const modId = first.modId;
-  const mode = first.mode;
-  const kind = first.kind === "ranked" ? "ranked" : "casual";
-  if (!NAME_PATTERN.test(modId || "") || !NAME_PATTERN.test(mode || ""))
-    return "Ticket has no valid modId and mode";
-  const ids = [];
-  for (const entry of entries) {
-    const p = entry.properties;
-    if (p.modId !== modId || p.mode !== mode || (p.kind === "ranked" ? "ranked" : "casual") !== kind)
-      return "Tickets disagree on what they queued for";
-    if (ids.indexOf(entry.presence.userId) !== -1)
-      return "A player is in the match twice";
-    ids.push(entry.presence.userId);
-  }
-  return {
-    modId,
-    rankedMode: kind === "ranked" ? mode : "",
-    gameMode: queueKey(mode, kind),
-    playerIds: ids
+function relayed(reply) {
+  const parsed = JSON.parse(reply);
+  return parsed && parsed.refused ? refusedReply(parsed.refused) : reply;
+}
+function signal(nk, matchId, message) {
+  return nk.matchSignal(matchId, JSON.stringify(message));
+}
+function rpcGroupQueueOpen(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  const request = {
+    partyId: typeof input.partyId === "string" ? input.partyId : "",
+    mode: typeof input.mode === "string" ? input.mode : "",
+    teams: input.teams === true,
+    ranked: input.kind === "ranked" || input.ranked === true
   };
+  const badRequest = requestRefusal(request);
+  if (badRequest) return refusedReply(badRequest);
+  const seat = currentLobby(nk, userId);
+  if (!seat) return refusedReply({ code: "not_in_lobby" });
+  const home = JSON.parse(signal(nk, seat.matchId, { type: "group_members" }));
+  const memberIds = home.members.map((m) => m.id);
+  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, memberIds, null, Date.now()));
+  if (refused) return refusedReply(refused);
+  const reply = signal(nk, seat.matchId, {
+    type: "group_open",
+    userId,
+    partyId: request.partyId,
+    mode: request.mode,
+    teams: request.teams
+  });
+  logger.info("Lobby %s opened a group queue for %s on party %s", seat.code, request.mode, request.partyId);
+  return relayed(reply);
 }
-function matchmakerMatched(ctx, logger, nk, matches) {
-  const plan = planMatch(matches);
-  if (typeof plan === "string") {
-    logger.warn("Matchmaker group refused: %s", plan);
-    throw new Error(plan);
-  }
-  if (refuseMatchedGroup(nk, logger, plan)) {
-    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
-    throw new Error("A matched player may not queue");
-  }
-  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
-    const code = generateCode(MATCHMADE_CODE_LENGTH);
-    if (!reserveCode(nk, code, plan.modId)) continue;
-    let matchId;
-    try {
-      matchId = nk.matchCreate(LOBBY_MATCH, {
-        code,
-        modId: plan.modId,
-        maxPlayers: plan.playerIds.length,
-        creatorId: plan.playerIds[0],
-        rankedMode: plan.rankedMode,
-        allowedIds: plan.playerIds.join(","),
-        gameMode: plan.gameMode
-      });
-    } catch (e) {
-      releaseCode(nk, code, "");
-      throw e;
-    }
-    bindCode(nk, code, matchId, plan.modId);
-    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
-    logger.info(
-      "Matchmaker made lobby %s for %d players (%s%s)",
-      code,
-      plan.playerIds.length,
-      plan.modId,
-      plan.rankedMode ? ", ranked " + plan.rankedMode : ""
-    );
-    return matchId;
-  }
-  throw new Error("Could not allocate a lobby code");
+function rpcGroupQueueCancel(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const seat = currentLobby(nk, userId);
+  if (!seat) return refusedReply({ code: "not_in_lobby" });
+  const home = JSON.parse(signal(nk, seat.matchId, { type: "group_members" }));
+  if (!home.groupQueue) return JSON.stringify({ groupQueue: null });
+  const reason = "cancelled";
+  return relayed(signal(nk, seat.matchId, { type: "group_cancel", partyId: home.groupQueue.partyId, reason, userId }));
 }
 
 // src/rating/rpc.ts
@@ -5719,7 +7608,7 @@ function rpcAdminRunsPurge(ctx, logger, nk, payload) {
 var USER_ID_PATTERN4 = /^[0-9a-f-]{36}$/;
 var MODE_PATTERN2 = /^[A-Za-z0-9_:.-]{1,64}$/;
 var MAX_ENTRIES = 1e3;
-function isCount(value) {
+function isCount2(value) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 function recordOf3(value) {
@@ -5727,7 +7616,7 @@ function recordOf3(value) {
   if (typeof value !== "object" || Array.isArray(value)) return void 0;
   const r = value;
   if (typeof r.rating !== "number" || !Number.isFinite(r.rating)) return void 0;
-  if (!isCount(r.wins) || !isCount(r.losses) || !isCount(r.gamesPlayed) || !isCount(r.lastMatchAt)) return void 0;
+  if (!isCount2(r.wins) || !isCount2(r.losses) || !isCount2(r.gamesPlayed) || !isCount2(r.lastMatchAt)) return void 0;
   if (r.seasonBest !== null && (typeof r.seasonBest !== "number" || !Number.isFinite(r.seasonBest))) return void 0;
   return {
     rating: r.rating,
@@ -5789,7 +7678,7 @@ function rpcAdminRatingsSet(ctx, logger, nk, payload) {
     } else {
       try {
         nk.leaderboardRecordDelete(key, e.userId);
-      } catch (err) {
+      } catch (err2) {
       }
     }
   }
@@ -5797,94 +7686,9 @@ function rpcAdminRatingsSet(ctx, logger, nk, payload) {
   return JSON.stringify({ written: written.length, cleared: cleared.length });
 }
 
-// src/player/rpc.ts
-var MAX_MODS = 300;
-var MAX_MOD_LENGTH = 128;
-var MAX_MUTES = 1e3;
-var USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function pushToLobby(nk, userId, info) {
-  const current = currentLobby(nk, userId);
-  if (!current) return;
-  const signal = { type: "player_info", userId, info };
-  nk.matchSignal(current.matchId, JSON.stringify(signal));
-}
-function accountUpdated(nk, userId, profile) {
-  notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, "account_updated", { player: playerView(userId, profile) });
-}
-function profileChanged(nk, userId, profile) {
-  syncDisplayName(nk, userId, profile);
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
-  accountUpdated(nk, userId, profile);
-}
-function rpcProfileSetDisplay(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const value = parsePayload(payload).useDiscordName;
-  if (typeof value !== "boolean") throw runtimeError(INVALID_ARGUMENT, "Missing or invalid useDiscordName (boolean)");
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      if (value && !current.discordIdHash) throw runtimeError(FAILED_PRECONDITION, "Discord account not linked");
-      return __spreadProps(__spreadValues({}, current), { useDiscordName: value });
-    },
-    ctx.username
-  );
-  syncDisplayName(nk, userId, profile);
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
-  accountUpdated(nk, userId, profile);
-  return JSON.stringify({ player: playerView(userId, profile) });
-}
-function rpcProfileSetJoker(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const joker = parsePayload(payload).preferredJoker;
-  if (typeof joker !== "string" || !joker) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid preferredJoker (string)");
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      if (!isValidJoker(joker, current.privileges)) throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
-      return __spreadProps(__spreadValues({}, current), { preferredJoker: joker });
-    },
-    ctx.username
-  );
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
-  accountUpdated(nk, userId, profile);
-  return JSON.stringify({ player: playerView(userId, profile) });
-}
-function rpcProfileSetMods(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const mods = parsePayload(payload).mods;
-  if (!Array.isArray(mods) || mods.some((m) => typeof m !== "string"))
-    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid mods (array of strings)");
-  const list = mods.slice(0, MAX_MODS).map((m) => m.slice(0, MAX_MOD_LENGTH));
-  updateProfile(nk, userId, (current) => __spreadProps(__spreadValues({}, current), { mods: list }), ctx.username);
-  pushToLobby(nk, userId, { mods: list });
-  return JSON.stringify({ mods: list });
-}
-function rpcMuteSet(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const body = parsePayload(payload);
-  const target = body.userId;
-  if (typeof target !== "string" || !USER_ID.test(target)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
-  if (target === userId) throw runtimeError(INVALID_ARGUMENT, "Cannot mute yourself");
-  if (typeof body.muted !== "boolean") throw runtimeError(INVALID_ARGUMENT, "Missing or invalid muted (boolean)");
-  const muted = body.muted;
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      const rest = current.mutedUserIds.filter((id) => id !== target);
-      if (muted && rest.length >= MAX_MUTES) throw runtimeError(FAILED_PRECONDITION, "Too many muted players");
-      return __spreadProps(__spreadValues({}, current), { mutedUserIds: muted ? rest.concat([target]) : rest });
-    },
-    ctx.username
-  );
-  return JSON.stringify({ mutedPlayerIds: profile.mutedUserIds });
-}
-
 // src/player/discord.ts
 var DISCORD_INDEX_COLLECTION = "discord_index";
-var USER_ID2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var HASH = /^[A-Za-z0-9_-]{8,128}$/;
 var MAX_NAME = 64;
 function indexKey(hash) {
@@ -5940,7 +7744,7 @@ function rpcDiscordUnlink(ctx, logger, nk, payload) {
 function rpcAdminDiscordSet(ctx, logger, nk, payload) {
   requireServer(ctx);
   const { userId, discordIdHash, discordUsername } = parsePayload(payload);
-  if (typeof userId !== "string" || !USER_ID2.test(userId)) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid userId");
+  if (typeof userId !== "string" || !USER_ID3.test(userId)) throw runtimeError(INVALID_ARGUMENT, "Missing or invalid userId");
   if (typeof discordIdHash !== "string" || !HASH.test(discordIdHash))
     throw runtimeError(INVALID_ARGUMENT, "Missing or invalid discordIdHash");
   const name = typeof discordUsername === "string" && discordUsername ? discordUsername.slice(0, MAX_NAME) : null;
@@ -5953,15 +7757,16 @@ function rpcAdminDiscordSet(ctx, logger, nk, payload) {
   });
   if (previous !== discordIdHash) releaseDiscord(nk, userId, previous);
   profileChanged(nk, userId, profile);
+  recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
   logger.info("Linked Discord to %s", userId);
   return JSON.stringify({ player: playerView(userId, profile) });
 }
 
 // src/player/admin.ts
-var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-var PRIVILEGE = /^[a-z0-9_-]{1,64}$/i;
+var USER_ID4 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+var PRIVILEGE2 = /^[a-z0-9_-]{1,64}$/i;
 function requireAccount(nk, userId) {
-  if (typeof userId !== "string" || !USER_ID3.test(userId)) throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  if (typeof userId !== "string" || !USER_ID4.test(userId)) throw runtimeError(INVALID_ARGUMENT, "userId is required");
   try {
     nk.accountGetId(userId);
   } catch (e) {
@@ -5973,7 +7778,7 @@ function parseEdit(input) {
   const edit = {};
   const { privileges, useDiscordName, preferredJoker, discord } = input;
   if (privileges !== void 0) {
-    if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
+    if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE2.test(p)))
       throw runtimeError(INVALID_ARGUMENT, "privileges must be an array of privilege names");
     edit.privileges = privileges;
   }
@@ -5992,16 +7797,20 @@ function parseEdit(input) {
   }
   return edit;
 }
-function applyEdit(profile, edit) {
+function applyEdit(profile, edit, unlocked = []) {
   let next = __spreadValues({}, profile);
-  if (edit.privileges !== void 0) next.privileges = edit.privileges;
+  if (edit.privileges !== void 0) {
+    next.privileges = edit.privileges;
+    if (!isSelectable(next.preferredJoker, { privileges: next.privileges, unlocked })) next.preferredJoker = DEFAULT_AVATAR;
+  }
   if (edit.discord === null) next = withoutDiscord(next);
   if (edit.useDiscordName !== void 0) {
     if (edit.useDiscordName && !next.discordIdHash) throw runtimeError(FAILED_PRECONDITION, "Discord account not linked");
     next.useDiscordName = edit.useDiscordName;
   }
   if (edit.preferredJoker !== void 0) {
-    if (!isValidJoker(edit.preferredJoker, next.privileges)) throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
+    if (!isSelectable(edit.preferredJoker, { privileges: next.privileges, unlocked }))
+      throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
     next.preferredJoker = edit.preferredJoker;
   }
   return next;
@@ -6012,9 +7821,10 @@ function rpcAdminProfileSet(ctx, logger, nk, payload) {
   const userId = requireAccount(nk, input.userId);
   const edit = parseEdit(input);
   let previousDiscord = null;
+  const unlocked = progressFor(nk, userId).unlocked;
   const profile = updateProfile(nk, userId, (current) => {
     previousDiscord = current.discordIdHash;
-    return applyEdit(current, edit);
+    return applyEdit(current, edit, unlocked);
   });
   if (edit.discord === null) releaseDiscord(nk, userId, previousDiscord);
   profileChanged(nk, userId, profile);
@@ -6026,8 +7836,8 @@ function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   const userId = requireAccount(nk, parsePayload(payload).userId);
   const lobby = currentLobby(nk, userId);
   if (lobby) {
-    const signal = { type: "admin_remove", userId, reason: "account_deleted", onlyIfStarted: false };
-    nk.matchSignal(lobby.matchId, JSON.stringify(signal));
+    const signal2 = { type: "admin_remove", userId, reason: "account_deleted", onlyIfStarted: false };
+    nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
   }
   releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash);
   nk.sessionLogout(userId, "", "");
@@ -6087,8 +7897,8 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   if (!times) throw runtimeError(RESOURCE_EXHAUSTED, "Too many reports; try again later");
   const lobby = currentLobby(nk, userId);
   if (!lobby) throw runtimeError(NOT_FOUND, "Not in a lobby");
-  const signal = { type: "report_evidence", reporterId: userId, reportedId: report.reportedUserId };
-  const evidence = JSON.parse(nk.matchSignal(lobby.matchId, JSON.stringify(signal)) || "{}");
+  const signal2 = { type: "report_evidence", reporterId: userId, reportedId: report.reportedUserId };
+  const evidence = JSON.parse(nk.matchSignal(lobby.matchId, JSON.stringify(signal2)) || "{}");
   if ("error" in evidence) throw runtimeError(INVALID_ARGUMENT, EVIDENCE_REFUSALS[evidence.error] || evidence.error);
   const reply = callExpress(nk, logger, ctx.env, "/reports", {
     reporterId: userId,
@@ -6131,12 +7941,22 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRtBefore("MatchmakerAdd", beforeMatchmakerAdd);
   initializer.registerRtAfter("MatchmakerAdd", afterMatchmakerAdd);
   initializer.registerRtBefore("MatchmakerRemove", beforeMatchmakerRemove);
+  initializer.registerRtBefore("PartyJoin", beforePartyJoin);
+  initializer.registerRtBefore("PartyMatchmakerAdd", beforePartyMatchmakerAdd);
+  initializer.registerRtAfter("PartyMatchmakerAdd", afterPartyMatchmakerAdd);
+  initializer.registerRtBefore("PartyMatchmakerRemove", beforePartyMatchmakerRemove);
+  initializer.registerRtBefore("PartyLeave", beforePartyLeave);
+  initializer.registerRtBefore("PartyRemove", beforePartyRemove);
+  initializer.registerRtBefore("PartyClose", beforePartyClose);
+  initializer.registerRpc("group_queue_open", rpcGroupQueueOpen);
+  initializer.registerRpc("group_queue_cancel", rpcGroupQueueCancel);
   initializer.registerRpc("queue_counts", rpcQueueCounts);
   initializer.registerRpc("session_init", rpcSessionInit);
   initializer.registerRpc("tos_accept", rpcTosAccept);
   initializer.registerRpc("profile_set_display", rpcProfileSetDisplay);
   initializer.registerRpc("profile_set_joker", rpcProfileSetJoker);
   initializer.registerRpc("profile_set_mods", rpcProfileSetMods);
+  initializer.registerRpc("avatar_catalog", rpcAvatarCatalog);
   initializer.registerRpc("mute_set", rpcMuteSet);
   initializer.registerRpc("discord_link_start", rpcDiscordLinkStart);
   initializer.registerRpc("discord_unlink", rpcDiscordUnlink);
@@ -6174,6 +7994,9 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_mirror_ack", rpcAdminMirrorAck);
   initializer.registerRpc("admin_profile_set", rpcAdminProfileSet);
   initializer.registerRpc("admin_account_delete", rpcAdminAccountDelete);
+  initializer.registerRpc("admin_avatars_for", rpcAdminAvatarsFor);
+  initializer.registerRpc("admin_progress_set", rpcAdminProgressSet);
+  initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
   initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
   logger.info("BMP lobby module loaded");
