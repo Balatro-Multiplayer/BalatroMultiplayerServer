@@ -245,20 +245,23 @@ function rejectOp(userId: string, message: string): Outbound {
 	}
 }
 
+export const DIFFERENT_MOD = 'Lobby is for a different mod'
+
 // Why userId may not join, or null. A member rejoining (after a disconnect)
-// is always let back in.
+// is let back in, but only from the lobby's own mod: one seat per user spans
+// every mod, so the seat's mod must not be mistaken for another one's.
 export function joinRejection(
 	lobby: Lobby,
 	userId: string,
 	modId: string,
 ): string | null {
 	if (lobby.closed) return 'Lobby is closed'
+	if (modId !== lobby.modId) return DIFFERENT_MOD
 	if (findPlayer(lobby, userId)) return null
 	if ((lobby.spectators || []).indexOf(userId) !== -1)
 		return 'You are spectating this lobby'
 	if (lobby.kickedIds.indexOf(userId) !== -1)
 		return 'You were kicked from this lobby'
-	if (modId !== lobby.modId) return 'Lobby is for a different mod'
 	if (lobby.game.started) return 'The game has already started'
 	if (lobby.groupQueue) return 'This lobby is queueing as a group'
 	if (lobby.allowedIds) {

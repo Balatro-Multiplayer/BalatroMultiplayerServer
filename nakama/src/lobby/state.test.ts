@@ -94,6 +94,21 @@ describe('joinRejection', () => {
 			'You were kicked from this lobby',
 		)
 	})
+
+	it('refuses a member rejoining from another mod', () => {
+		let lobby = newLobby({
+			code: 'ABC123',
+			modId: 'MultiplayerPvP',
+			maxPlayers: 2,
+			creatorId: 'a',
+			now: 0,
+			graceMs: GRACE,
+		})
+		lobby = join(lobby, 'a', 'a-s1', info('a')).lobby
+		expect(joinRejection(lobby, 'a', 'MultiplayerSPDRN')).toBe('Lobby is for a different mod')
+		expect(joinRejection(lobby, 'a', '')).toBe('Lobby is for a different mod')
+		expect(joinRejection(lobby, 'a', 'MultiplayerPvP')).toBeNull()
+	})
 })
 
 describe('matchmade lobbies', () => {
