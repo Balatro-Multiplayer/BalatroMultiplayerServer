@@ -34,6 +34,12 @@ describe('planMatch', () => {
 		expect(typeof planMatch([entry('a', RANKED), entry('b', other)])).toBe('string')
 		expect(typeof planMatch([entry('a', RANKED), entry('b', { ...RANKED, mode: 'x' })])).toBe('string')
 	})
+	it('refuses a group of tickets from different mods on the same mode', () => {
+		const spdrn = { ...RANKED, modId: 'MultiplayerSPDRN' }
+		expect(typeof planMatch([entry('a', RANKED), entry('b', spdrn)])).toBe('string')
+		const casual = { modId: 'MultiplayerSPDRN', mode: 'standard', kind: 'casual' }
+		expect(typeof planMatch([entry('a', casual), entry('b', { ...casual, modId: 'MultiplayerPvP' })])).toBe('string')
+	})
 	it('refuses one player, a repeated player, and bad names', () => {
 		expect(typeof planMatch([entry('a', RANKED)])).toBe('string')
 		expect(typeof planMatch([entry('a', RANKED), entry('a', RANKED)])).toBe('string')

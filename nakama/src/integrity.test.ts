@@ -21,7 +21,7 @@ import { reportVanilla } from './testing/reports'
 const USER = '11111111-1111-1111-1111-111111111111'
 const ENV = { EXPRESS_INTERNAL_URL: 'http://api', EXPRESS_INTERNAL_KEY: 'k' }
 const ENFORCED = { ...DEFAULT_CONFIG, integrityEnforced: true }
-const ADD = (kind: string) => ({ matchmakerAdd: { stringProperties: { modId: 'M', mode: 'standard', kind } } })
+const ADD = (kind: string) => ({ matchmakerAdd: { query: `+properties.modId:M +properties.mode:standard +properties.kind:${kind}`, stringProperties: { modId: 'M', mode: 'standard', kind } } })
 
 describe('integrityRefusal', () => {
 	it('only refuses while enforced, until a verdict that has not expired', () => {

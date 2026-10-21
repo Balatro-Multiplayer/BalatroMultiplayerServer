@@ -71,6 +71,7 @@ export function partyTicketOf(add: unknown): PartyTicket {
 		countMultiple: numberOr(field(add, 'countMultiple', 'count_multiple'), null),
 		stringProperties: field(add, 'stringProperties', 'string_properties') || {},
 		numericProperties: field(add, 'numericProperties', 'numeric_properties') || {},
+		query: field(add, 'query', 'query'),
 	}
 }
 

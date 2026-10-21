@@ -32,6 +32,7 @@ const PARTY = '0b0c4a9e-7f43-4f43-9f6e-1d2c3b4a5f60.bmp-local'
 const HOME_MATCH = 'home-uuid.bmp-local'
 const MOD = 'MultiplayerSPDRN'
 const CASUAL = { modId: MOD, mode: 'standard', kind: 'casual' }
+const CASUAL_QUERY = `+properties.modId:${MOD} +properties.mode:standard +properties.kind:casual`
 const info = (name: string) => ({ displayName: name, preferredJoker: null, mods: null })
 
 interface World {
@@ -109,7 +110,7 @@ const ticketOf = (size: number, props: { [key: string]: unknown } = CASUAL, coun
 		partyId: PARTY,
 		...counts,
 		countMultiple: null,
-		query: '*',
+		query: `+properties.modId:${props.modId} +properties.mode:${props.mode}`,
 		stringProperties: props,
 		numericProperties: { groupSize: size },
 	},
@@ -215,7 +216,7 @@ describe('party hooks', () => {
 	})
 	it("refuses a member's solo ticket while the group queues", () => {
 		const w = queuedWorld()
-		const solo = { matchmakerAdd: { stringProperties: CASUAL } }
+		const solo = { matchmakerAdd: { query: CASUAL_QUERY, stringProperties: CASUAL } }
 		expect(() => beforeMatchmakerAdd(playerCtx('b'), fakeLogger, w.nk as any, solo as any)).toThrow(IN_GROUP_QUEUE)
 		reportVanilla(w.nk, 'z')
 		expect(() => beforeMatchmakerAdd(playerCtx('z'), fakeLogger, w.nk as any, solo as any)).not.toThrow()

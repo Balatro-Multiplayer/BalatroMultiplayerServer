@@ -5,7 +5,7 @@
 // switch can land in between).
 import { readConfig } from '../config'
 import { checkRankedReadiness, integrityRefusal, readIntegrity } from '../integrity'
-import { PERMISSION_DENIED, runtimeError } from '../errors'
+import { INVALID_ARGUMENT, PERMISSION_DENIED, runtimeError } from '../errors'
 import { queueRefusal } from '../moderation/access'
 import { readBans } from '../moderation/bans'
 import { notify, NotifyCode } from '../notify'
@@ -16,6 +16,7 @@ import { blocksSoloQueue } from './group/refusal'
 import type { RefusedMember } from '../lobby/protocol'
 import type { MatchPlan } from './matched'
 import { isStandingRefusal, queueRefusalMessage, refusedMods, standingRefusal, type QueueRefusal } from './queue_refusal'
+import { TICKET_QUERY_MESSAGES, ticketQueryRefusal } from './ticket_query'
 
 // Ranked while integrityEnforced needs a verdict, which also passes any mods
 // (a verified account skips the mod check); otherwise the standing must be
@@ -28,14 +29,19 @@ export function queueRefusalFor(nk: nkruntime.Nakama, userId: string, ranked: bo
 	return standingRefusal(standingFor(nk, userId, now, config))
 }
 
+function matchmakerAdd(envelope: nkruntime.Envelope): { [key: string]: unknown } {
+	return ((envelope.matchmakerAdd || envelope.matchmaker_add) as { [key: string]: unknown } | undefined) || {}
+}
+
 function stringProperties(envelope: nkruntime.Envelope): { [key: string]: unknown } {
-	const add = (envelope.matchmakerAdd || envelope.matchmaker_add) as { [key: string]: unknown } | undefined
-	return ((add && (add.stringProperties || add.string_properties)) as { [key: string]: unknown }) || {}
+	const add = matchmakerAdd(envelope)
+	return ((add.stringProperties || add.string_properties) as { [key: string]: unknown }) || {}
 }
 
 export const IN_GROUP_QUEUE = 'You are queueing with your lobby.'
 
-// registerRtBefore('MatchmakerAdd'): a refused ticket fails with the reason.
+// registerRtBefore('MatchmakerAdd'): a refused ticket fails with the reason,
+// as does one whose query reaches past its own queue (ticket_query.ts).
 // A player whose lobby is queueing as a group (matchmaking/group) is queued
 // through its party's ticket, not one of their own.
 export function beforeMatchmakerAdd(
@@ -45,7 +51,10 @@ export function beforeMatchmakerAdd(
 	envelope: nkruntime.Envelope,
 ): nkruntime.Envelope {
 	if (!ctx.userId) return envelope
-	const ranked = stringProperties(envelope).kind === 'ranked'
+	const props = stringProperties(envelope)
+	const unpinned = ticketQueryRefusal(matchmakerAdd(envelope).query, props)
+	if (unpinned) throw runtimeError(INVALID_ARGUMENT, TICKET_QUERY_MESSAGES[unpinned])
+	const ranked = props.kind === 'ranked'
 	const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now())
 	if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused))
 	const group = groupOf(nk, ctx.userId)

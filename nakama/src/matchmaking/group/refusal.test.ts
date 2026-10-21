@@ -52,6 +52,7 @@ const ticket = (over: Partial<PartyTicket> = {}): PartyTicket => ({
 	countMultiple: null,
 	stringProperties: { modId: 'M', mode: 'std', kind: 'casual' },
 	numericProperties: { groupSize: 2 },
+	query: '+properties.modId:M +properties.mode:std +properties.kind:casual',
 	...over,
 })
 const facts = (over: Partial<TicketFacts> = {}): TicketFacts => ({
@@ -163,6 +164,8 @@ describe('ticketRefusal', () => {
 		expect(props({}, { groupSize: 3 })).toBe('ticket_mismatch')
 		expect(props({}, {})).toBe('ticket_mismatch')
 		expect(props({}, { groupSize: 2, teams: 1 })).toBe('ticket_mismatch')
+		expect(code(ticketRefusal(facts({ ticket: ticket({ query: '*' }) })))).toBe('ticket_mismatch')
+		expect(code(ticketRefusal(facts({ ticket: ticket({ query: '+properties.modId:X +properties.mode:std' }) })))).toBe('ticket_mismatch')
 		expect(code(ticketRefusal(facts({ ticket: ticket({ minCount: 2 }) })))).toBe('bad_counts')
 		expect(code(ticketRefusal(facts({ members: { refusals: { b: { code: 'mods_unreported' } }, queuedIds: [] } })))).toBe('member_refused')
 	})

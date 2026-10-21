@@ -11,7 +11,7 @@ import { beforeMatchmakerAdd, queueRefusalFor, refuseMatchedGroup } from './gate
 const PINNED = { ...DEFAULT_CONFIG, queueAllowedModIds: ['MultiplayerAPI'] }
 const report = (nk: any, userId: string, mods: string[]) => writeModReport(nk, userId, { mods, reportedAt: 0 })
 
-const ADD = (kind: string) => ({ matchmakerAdd: { stringProperties: { modId: 'M', mode: 'standard', kind } } })
+const ADD = (kind: string) => ({ matchmakerAdd: { query: `+properties.modId:M +properties.mode:standard +properties.kind:${kind}`, stringProperties: { modId: 'M', mode: 'standard', kind } } })
 
 describe('beforeMatchmakerAdd', () => {
 	it('lets tickets through, and refuses queue-banned players and switched-off queues', () => {
@@ -24,6 +24,14 @@ describe('beforeMatchmakerAdd', () => {
 		writeConfig(nk as any, { ...DEFAULT_CONFIG, rankedEnabled: false })
 		expect(() => beforeMatchmakerAdd(playerCtx('u2'), fakeLogger, nk as any, ADD('ranked'))).toThrow(/Ranked/)
 		expect(beforeMatchmakerAdd(playerCtx('u2'), fakeLogger, nk as any, ADD('casual'))).toBeTruthy()
+	})
+	it("refuses a ticket whose query reaches past its own mod's queue", () => {
+		const nk = fakeNk()
+		reportVanilla(nk, 'u1')
+		const wide = { matchmakerAdd: { query: '*', stringProperties: { modId: 'M', mode: 'standard', kind: 'casual' } } }
+		expect(() => beforeMatchmakerAdd(playerCtx('u1'), fakeLogger, nk as any, wide)).toThrow('The ticket does not match its queue')
+		const nameless = { matchmakerAdd: { query: '+properties.modId:M', stringProperties: {} } }
+		expect(() => beforeMatchmakerAdd(playerCtx('u1'), fakeLogger, nk as any, nameless)).toThrow('The ticket does not name a queue')
 	})
 })
 

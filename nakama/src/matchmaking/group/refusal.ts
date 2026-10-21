@@ -4,6 +4,7 @@
 // Each check answers the first refusal it finds, or null.
 import type { GroupPhase, GroupQueueView } from '../../lobby/protocol'
 import { queueRefusalMessage, refusedMods, type QueueRefusal, type QueueRefusalCode } from '../queue_refusal'
+import { ticketQueryRefusal } from '../ticket_query'
 
 // The largest group that may queue together. A group needs at least one
 // stranger in its match (min_count = size + 1), and a Teams group a whole
@@ -209,6 +210,7 @@ export interface PartyTicket {
 	countMultiple: number | null
 	stringProperties: { [key: string]: unknown }
 	numericProperties: { [key: string]: unknown }
+	query: unknown
 }
 
 // The ticket property naming a ticket's group size; every ticket of a group
@@ -231,14 +233,16 @@ export function countRefusal(size: number, teams: boolean, ticket: PartyTicket):
 	return null
 }
 
-// Whether the ticket asks for the group's queue: its mod and mode, casual,
-// its size, and Teams exactly when the group queued for Teams.
+// Whether the ticket asks for the group's queue: its mod and mode (in its
+// query too), casual, its size, and Teams exactly when the group queued for
+// Teams.
 export function ticketPropsRefusal(status: GroupQueueView, ticket: PartyTicket): GroupRefusal | null {
 	const s = ticket.stringProperties
 	const n = ticket.numericProperties
 	if (s.kind === 'ranked') return { code: 'ranked' }
 	if (s.modId !== status.modId || s.mode !== status.mode || (s.kind !== undefined && s.kind !== 'casual'))
 		return { code: 'ticket_mismatch' }
+	if (ticketQueryRefusal(ticket.query, s)) return { code: 'ticket_mismatch' }
 	if (n[GROUP_SIZE_PROPERTY] !== status.memberIds.length) return { code: 'ticket_mismatch' }
 	const teams = n[TEAMS_PROPERTY]
 	if (teams !== undefined && teams !== 0 && teams !== 1) return { code: 'ticket_mismatch' }
