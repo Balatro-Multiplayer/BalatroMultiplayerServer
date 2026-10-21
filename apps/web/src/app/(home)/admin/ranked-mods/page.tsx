@@ -44,8 +44,8 @@ import {
 // the launcher (it hashes installed mods against the pinned hash) and
 // attested to the server at queue time. Separately, each pin's SMODS ids
 // (read from its files at pin time, editable here) make up the mod allowlist
-// Nakama checks a player's reported mods against before matchmaking, while
-// the admin config page's "Enforce Allowed Mods" switch is on.
+// Nakama checks a player's reported mods against before every matchmaking
+// queue: an unpinned mod keeps its players out of matchmaking.
 export default function RankedModsPage() {
   const { isAdmin, isModerator, pending } = useAuth()
   const router = useRouter()
