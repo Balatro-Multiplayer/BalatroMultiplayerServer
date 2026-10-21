@@ -372,6 +372,20 @@
       "when": 1792800000000,
       "tag": "0052_drop_queue_mods_enforced",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792900000000,
+      "tag": "0053_service_queue_redesign",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793000000000,
+      "tag": "0054_anti_cheat_source_ids",
+      "breakpoints": true
     }
   ]
 }

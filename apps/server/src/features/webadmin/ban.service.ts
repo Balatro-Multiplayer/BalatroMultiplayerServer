@@ -15,7 +15,7 @@ export interface IssueBanParams {
 
 /**
  * Extracted from the original POST /players/:id/bans handler so the
- * service-queue "Ban" action (service-queue-actions.ts) can reuse the exact
+ * service-queue "Ban" action (features/service-queue/dispatcher.ts) can reuse the exact
  * same side-effect sequence instead of duplicating it.
  *
  * §21.3: account and queue bans take effect immediately. Postgres keeps the

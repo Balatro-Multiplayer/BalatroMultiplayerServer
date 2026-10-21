@@ -1,5 +1,7 @@
 import { eq, max } from 'drizzle-orm'
 import type { ReportType } from '../../shared/types/index.js'
+import type { ItemContext } from '../../features/service-queue/types.js'
+import type { DbExecutor } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { reportedLobbyMessages, reports } from '../db/schema.js'
 import { enqueueServiceQueueItem } from './service-queue.gateway.js'
@@ -34,6 +36,8 @@ export interface NewReport {
 	runId: string | null
 	message: string | undefined
 	chat: ReportedChatLine[]
+	// What kind of lobby it was filed in, for the queue's priority.
+	context?: ItemContext
 }
 
 /**
@@ -87,6 +91,7 @@ async function recordReport(report: NewReport): Promise<number> {
 		sourceId: String(row!.id),
 		subjectPlayerId: report.reportedId,
 		summary: `${report.type} report — lobby ${report.lobbyCode}`,
+		context: report.context ?? {},
 	})
 
 	return row!.id
@@ -124,5 +129,16 @@ export async function resolveReport(id: number): Promise<ReportRecord | null> {
 		.set({ status: 'resolved' })
 		.where(eq(reports.id, id))
 		.returning()
+	return row ?? null
+}
+
+// The service queue's write (inside its transaction): the report follows its
+// queue item (reopen sets it open again).
+export async function setReportStatus(
+	exec: DbExecutor,
+	id: number,
+	status: 'open' | 'resolved',
+): Promise<ReportRecord | null> {
+	const [row] = await exec.update(reports).set({ status }).where(eq(reports.id, id)).returning()
 	return row ?? null
 }

@@ -1,4 +1,6 @@
 import { and, count, desc, eq } from 'drizzle-orm'
+import type { ItemContext } from '../../features/service-queue/types.js'
+import type { DbExecutor } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { forfeitReconciliationFlags } from '../db/schema.js'
 import { voidMatch } from '../db/void-match.js'
@@ -15,7 +17,7 @@ export async function insertForfeitReconciliationFlag(data: {
 	playerId: string
 	forfeitedAt: Date
 	reconnectedAt: Date
-}): Promise<void> {
+}, context: ItemContext = {}): Promise<void> {
 	const [row] = await db
 		.insert(forfeitReconciliationFlags)
 		.values(data)
@@ -26,6 +28,7 @@ export async function insertForfeitReconciliationFlag(data: {
 		sourceId: String(row!.id),
 		subjectPlayerId: data.playerId,
 		summary: `Possible wrongful forfeit — lobby ${data.lobbyCode}`,
+		context,
 	})
 }
 
@@ -82,7 +85,8 @@ export async function voidForfeitReconciliationFlag(
 	const [flag] = await db.select().from(forfeitReconciliationFlags).where(eq(forfeitReconciliationFlags.id, id))
 	if (!flag) return null
 
-	await voidMatch(flag.matchId)
+	const outcome = await voidMatch(flag.matchId)
+	if (outcome.kind === 'failed') throw new Error(outcome.reason)
 
 	const [row] = await db
 		.update(forfeitReconciliationFlags)
@@ -90,4 +94,40 @@ export async function voidForfeitReconciliationFlag(
 		.where(eq(forfeitReconciliationFlags.id, id))
 		.returning()
 	return row ?? null
+}
+
+export type ForfeitFlagStatus = 'open' | 'voided' | 'dismissed'
+
+export async function getForfeitReconciliationFlag(id: number): Promise<ForfeitReconciliationFlag | null> {
+	const [row] = await db.select().from(forfeitReconciliationFlags).where(eq(forfeitReconciliationFlags.id, id)).limit(1)
+	return row ?? null
+}
+
+// The service queue's write (inside its transaction): the flag's status
+// follows its queue item.
+export async function setForfeitFlagStatus(
+	exec: DbExecutor,
+	id: number,
+	status: ForfeitFlagStatus,
+	resolutionNotes: string | null,
+): Promise<ForfeitReconciliationFlag | null> {
+	const [row] = await exec
+		.update(forfeitReconciliationFlags)
+		.set({ status, resolutionNotes })
+		.where(eq(forfeitReconciliationFlags.id, id))
+		.returning()
+	return row ?? null
+}
+
+// Every flag about a player (newest first), for the forfeit evidence.
+export async function listForfeitFlagsForPlayer(
+	playerId: string,
+	limit: number,
+): Promise<ForfeitReconciliationFlag[]> {
+	return db
+		.select()
+		.from(forfeitReconciliationFlags)
+		.where(eq(forfeitReconciliationFlags.playerId, playerId))
+		.orderBy(desc(forfeitReconciliationFlags.createdAt))
+		.limit(limit)
 }

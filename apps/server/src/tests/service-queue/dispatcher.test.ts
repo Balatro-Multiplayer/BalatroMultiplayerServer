@@ -1,0 +1,311 @@
+// The dispatcher over an in-memory queue: a transaction is a snapshot that
+// a thrown error restores, so a rollback leaves nothing behind.
+import { describe, expect, it, vi } from 'vitest'
+import {
+	type BanRow,
+	type DispatcherDeps,
+	type GameRef,
+	type QueueItem,
+	createDispatcher,
+} from '../../features/service-queue/dispatcher.js'
+
+const NOW = new Date('2026-10-21T12:00:00.000Z')
+const MOD = { playerId: 'mod', role: 'moderator' as const }
+const ADMIN = { playerId: 'adm', role: 'admin' as const }
+const BAN_ID = '00000000-0000-4000-8000-0000000000b1'
+
+interface World {
+	items: Map<number, QueueItem & { resolutionAction?: string | null }>
+	sourceStatus: Map<number, string>
+	events: { itemId: number; kind: string; action: string | null; actor: string; detail: unknown }[]
+	bans: BanRow[]
+	warnings: { playerId: string; message: string }[]
+}
+
+function item(over: Partial<QueueItem> = {}): QueueItem {
+	return {
+		id: 1,
+		itemType: 'report',
+		sourceId: '10',
+		subjectPlayerId: 'bad',
+		status: 'open',
+		claimedBy: null,
+		claimedUntil: null,
+		...over,
+	}
+}
+
+function setup(seed: QueueItem, over: Partial<DispatcherDeps<World>> = {}) {
+	const world: World = {
+		items: new Map([[seed.id, { ...seed }]]),
+		sourceStatus: new Map([[seed.id, 'open']]),
+		events: [],
+		bans: [],
+		warnings: [],
+	}
+	const snapshot = () => structuredClone({ ...world, items: [...world.items], sourceStatus: [...world.sourceStatus] })
+	const external = {
+		banInNakama: vi.fn(async () => true),
+		liftBanInNakama: vi.fn(async () => true),
+		notifyWarned: vi.fn(async () => true),
+		rescore: vi.fn(async () => {}),
+		voidGame: vi.fn(async () => ({ kind: 'voided' as const, rerated: true })),
+		overturnGame: vi.fn(async () => ({ kind: 'applied' as const, rerated: true })),
+	}
+	const deps: DispatcherDeps<World> = {
+		now: () => NOW,
+		getItem: async (id) => (world.items.has(id) ? { ...world.items.get(id)! } : null),
+		sourcesOf: async (it) =>
+			it.itemType === 'report'
+				? { subjectPlayerId: it.subjectPlayerId, report: { reporterId: 'rep', reportedId: 'bad' } }
+				: it.itemType === 'match_conflict'
+					? { subjectPlayerId: it.subjectPlayerId, conflict: { firstReporterId: 'a', conflictingReporterId: 'b' } }
+					: { subjectPlayerId: it.subjectPlayerId },
+		playerExists: async (id) => id !== 'ghost',
+		getBan: async (id) => world.bans.find((b) => b.id === id) ?? null,
+		gameOf: async (): Promise<GameRef> => ({ runId: 'run-1', matchmade: true, ranked: true }),
+		conflictOf: async () => ({
+			firstReporterId: 'a',
+			firstPlacements: [
+				{ playerId: 'a', place: 1 },
+				{ playerId: 'b', place: 2 },
+			],
+			conflictingReporterId: 'b',
+			conflictingPlacements: [
+				{ playerId: 'a', place: 2 },
+				{ playerId: 'b', place: 1 },
+			],
+		}),
+		flaggedPlayersOf: async () => new Set(['a']),
+		...external,
+		async transaction(fn) {
+			const before = snapshot()
+			try {
+				return await fn(world)
+			} catch (err) {
+				world.items = new Map(before.items)
+				world.sourceStatus = new Map(before.sourceStatus)
+				world.events = before.events
+				world.bans = before.bans
+				world.warnings = before.warnings
+				throw err
+			}
+		},
+		async markResolved(tx, id, actor, action) {
+			const row = tx.items.get(id)
+			if (!row || row.status !== 'open') return false
+			tx.items.set(id, { ...row, status: 'resolved', claimedBy: null, claimedUntil: null, resolutionAction: action })
+			return true
+		},
+		async markReopened(tx, id) {
+			const row = tx.items.get(id)
+			if (!row || row.status !== 'resolved') return false
+			tx.items.set(id, { ...row, status: 'open', resolutionAction: null })
+			return true
+		},
+		touch: async () => {},
+		async setSourceStatus(tx, it, status) {
+			if (!tx.sourceStatus.has(it.id)) return false
+			tx.sourceStatus.set(it.id, status)
+			return true
+		},
+		async recordEvent(tx, e) {
+			tx.events.push({ itemId: e.itemId, kind: e.kind, action: e.action, actor: e.actor, detail: e.detail })
+		},
+		async insertBan(tx, ban) {
+			const row: BanRow = { id: BAN_ID, issuedAt: NOW, liftedAt: null, liftedBy: null, ...ban }
+			tx.bans.push(row)
+			return row
+		},
+		async liftBan(tx, playerId, banId, liftedBy) {
+			const ban = tx.bans.find((b) => b.id === banId && b.playerId === playerId && !b.liftedAt)
+			if (!ban) return null
+			ban.liftedAt = NOW
+			ban.liftedBy = liftedBy
+			return { ...ban }
+		},
+		async insertWarning(tx, w) {
+			tx.warnings.push({ playerId: w.playerId, message: w.message })
+			return { id: 'w1' }
+		},
+		...over,
+	}
+	return { world, external, dispatcher: createDispatcher(deps) }
+}
+
+describe('the dispatcher', () => {
+	it('resolves the queue row and the source together, with an audit event', async () => {
+		const { world, dispatcher, external } = setup(item())
+		const result = await dispatcher.run(1, 'resolve', MOD, { note: 'handled' })
+		expect(result).toMatchObject({ ok: true, value: { action: 'resolve', item: { status: 'resolved' } } })
+		expect(world.sourceStatus.get(1)).toBe('resolved')
+		expect(world.events).toEqual([{ itemId: 1, kind: 'acted', action: 'resolve', actor: 'moderator:mod', detail: null }])
+		expect(external.rescore).toHaveBeenCalledWith(expect.objectContaining({ id: 1 }), ['bad'])
+	})
+
+	it('refuses unknown items, unknown actions and bad bodies', async () => {
+		const { dispatcher } = setup(item())
+		expect(await dispatcher.run(9, 'resolve', MOD, {})).toEqual({ ok: false, refusal: { code: 'not_found' } })
+		expect(await dispatcher.run(1, 'smite', MOD, {})).toEqual({ ok: false, refusal: { code: 'unknown_action' } })
+		expect(await dispatcher.run(1, 'warn', MOD, {})).toMatchObject({ ok: false, refusal: { code: 'invalid_body', field: 'message' } })
+	})
+
+	it("refuses a moderator an admin's action (403), and an action the type does not take", async () => {
+		const { dispatcher, world } = setup(item())
+		expect(await dispatcher.run(1, 'account_ban', MOD, { duration: '7d' })).toEqual({ ok: false, refusal: { code: 'forbidden' } })
+		expect(await dispatcher.run(1, 'queue_ban', MOD, { duration: '30d' })).toEqual({ ok: false, refusal: { code: 'forbidden' } })
+		expect(await dispatcher.run(1, 'void', ADMIN, {})).toEqual({ ok: false, refusal: { code: 'not_for_type' } })
+		expect(world.events).toEqual([])
+	})
+
+	it("blocks every action but a note while another moderator's claim is live", async () => {
+		const until = new Date(NOW.getTime() + 60_000)
+		const { dispatcher, world } = setup(item({ claimedBy: 'moderator:other', claimedUntil: until }))
+		expect(await dispatcher.run(1, 'resolve', MOD, {})).toEqual({
+			ok: false,
+			refusal: { code: 'claimed', claimedBy: 'moderator:other', claimedUntil: until },
+		})
+		expect((await dispatcher.run(1, 'note', MOD, { note: 'looking too' })).ok).toBe(true)
+		expect(world.events.map((e) => e.kind)).toEqual(['noted'])
+		// The holder itself, and anyone once it expires.
+		expect((await setup(item({ claimedBy: 'moderator:mod', claimedUntil: until })).dispatcher.run(1, 'resolve', MOD, {})).ok).toBe(true)
+		expect((await setup(item({ claimedBy: 'moderator:other', claimedUntil: NOW })).dispatcher.run(1, 'resolve', MOD, {})).ok).toBe(true)
+	})
+
+	it('rolls the whole transaction back when the source row is gone', async () => {
+		const { dispatcher, world, external } = setup(item())
+		world.sourceStatus.clear()
+		expect(await dispatcher.run(1, 'queue_ban', MOD, { duration: '7d', reason: 'x' })).toEqual({
+			ok: false,
+			refusal: { code: 'source_missing' },
+		})
+		expect(world.items.get(1)?.status).toBe('open')
+		expect(world.bans).toEqual([])
+		expect(world.events).toEqual([])
+		expect(external.banInNakama).not.toHaveBeenCalled()
+	})
+
+	it('refuses a second close of the same item (the race loser)', async () => {
+		const { dispatcher } = setup(item())
+		await dispatcher.run(1, 'dismiss', MOD, {})
+		expect(await dispatcher.run(1, 'dismiss', MOD, {})).toEqual({ ok: false, refusal: { code: 'wrong_status', status: 'resolved' } })
+	})
+
+	it('warns the subject, persists it and sends the 109 notification', async () => {
+		const { dispatcher, world, external } = setup(item())
+		const result = await dispatcher.run(1, 'warn', MOD, { message: 'Keep it civil' })
+		expect(result).toMatchObject({ ok: true, value: { effects: { warningId: 'w1', delivered: true } } })
+		expect(world.warnings).toEqual([{ playerId: 'bad', message: 'Keep it civil' }])
+		expect(external.notifyWarned).toHaveBeenCalledWith('bad', {
+			message: 'Keep it civil',
+			itemType: 'report',
+			warnedAt: NOW.getTime(),
+		})
+	})
+
+	it('can sanction the reporter of a false report, but no stranger', async () => {
+		const { dispatcher, world } = setup(item())
+		expect(await dispatcher.run(1, 'warn', MOD, { message: 'x', targetPlayerId: 'stranger' })).toEqual({
+			ok: false,
+			refusal: { code: 'invalid_target' },
+		})
+		const result = await dispatcher.run(1, 'chat_mute', MOD, { duration: '24h', targetPlayerId: 'rep', reason: 'false report' })
+		expect(result.ok).toBe(true)
+		expect(world.bans[0]).toMatchObject({
+			playerId: 'rep',
+			banType: 'chat',
+			expiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
+			issuedBy: 'moderator:mod',
+		})
+	})
+
+	it('bans in Nakama after the commit, and reports a failed delivery without undoing it', async () => {
+		const { dispatcher, world, external } = setup(item({ itemType: 'anti_cheat', sourceId: 'run-1:bad' }))
+		external.banInNakama.mockResolvedValueOnce(false)
+		const result = await dispatcher.run(1, 'account_ban', ADMIN, { duration: 'permanent', reason: 'cheating' })
+		expect(result).toMatchObject({ ok: true, value: { effects: { delivered: false, ban: { expiresAt: null } } } })
+		expect(world.bans).toHaveLength(1)
+		expect(world.items.get(1)?.status).toBe('resolved')
+	})
+
+	it("acts on the one flagged player an anti-cheat item is about", async () => {
+		const { dispatcher, world } = setup(item({ itemType: 'anti_cheat', sourceId: 'run-1:p2', subjectPlayerId: 'p2' }))
+		expect(await dispatcher.run(1, 'queue_ban', MOD, { duration: '7d', targetPlayerId: 'p1' })).toEqual({
+			ok: false,
+			refusal: { code: 'invalid_target' },
+		})
+		expect((await dispatcher.run(1, 'queue_ban', MOD, { duration: '7d' })).ok).toBe(true)
+		expect(world.bans.map((b) => b.playerId)).toEqual(['p2'])
+	})
+
+	it('refuses a sanction against a player that no longer exists', async () => {
+		const { dispatcher } = setup(item({ itemType: 'integrity', sourceId: 'ghost:2026-10-21', subjectPlayerId: 'ghost' }))
+		expect(await dispatcher.run(1, 'warn', MOD, { message: 'x' })).toEqual({ ok: false, refusal: { code: 'invalid_target' } })
+	})
+
+	it('reopens a resolved item and its source', async () => {
+		const { dispatcher, world } = setup(item())
+		await dispatcher.run(1, 'resolve', MOD, {})
+		const result = await dispatcher.run(1, 'reopen', MOD, {})
+		expect(result).toMatchObject({ ok: true, value: { item: { status: 'open' } } })
+		expect(world.sourceStatus.get(1)).toBe('open')
+		expect(world.events.map((e) => e.kind)).toEqual(['acted', 'reopened'])
+	})
+
+	it("lifts a ban the item's players hold, moderators only chat and queue bans", async () => {
+		const { dispatcher, world, external } = setup(item())
+		await dispatcher.run(1, 'account_ban', ADMIN, { duration: '7d' })
+		expect(await dispatcher.run(1, 'unban', MOD, { banId: BAN_ID })).toEqual({ ok: false, refusal: { code: 'forbidden' } })
+		const lifted = await dispatcher.run(1, 'unban', ADMIN, { banId: BAN_ID })
+		expect(lifted).toMatchObject({ ok: true, value: { effects: { liftedBan: { liftedBy: 'admin:adm' }, delivered: true } } })
+		expect(external.liftBanInNakama).toHaveBeenCalledWith('bad', BAN_ID)
+		expect(await dispatcher.run(1, 'unban', ADMIN, { banId: BAN_ID })).toEqual({ ok: false, refusal: { code: 'ban_not_found' } })
+		expect(world.bans[0].liftedAt).toEqual(NOW)
+	})
+
+	it('voids a matchmade game (re-rating it) before closing the item', async () => {
+		const { dispatcher, world, external } = setup(item({ itemType: 'forfeit_reconciliation', sourceId: '5' }))
+		const result = await dispatcher.run(1, 'void', ADMIN, {})
+		expect(result).toMatchObject({ ok: true, value: { effects: { voided: { runId: 'run-1', rerated: true } } } })
+		expect(external.voidGame).toHaveBeenCalledWith({ runId: 'run-1', matchmade: true, ranked: true })
+		expect(world.sourceStatus.get(1)).toBe('voided')
+	})
+
+	it('voids a private game by closing it only, and refuses an unresolved match', async () => {
+		const priv = setup(item({ itemType: 'match_conflict' }), {
+			gameOf: async () => ({ runId: 'run-p', matchmade: false, ranked: false }),
+		})
+		expect(await priv.dispatcher.run(1, 'void', ADMIN, {})).toMatchObject({
+			ok: true,
+			value: { effects: { voided: { runId: 'run-p', rerated: false } } },
+		})
+		expect(priv.external.voidGame).not.toHaveBeenCalled()
+
+		const pending = setup(item({ itemType: 'match_conflict' }))
+		pending.external.voidGame.mockResolvedValueOnce({ kind: 'not_resolved', status: 'pending' } as never)
+		expect(await pending.dispatcher.run(1, 'void', ADMIN, {})).toMatchObject({ ok: false, refusal: { code: 'not_voidable' } })
+		expect(pending.world.items.get(1)?.status).toBe('open')
+	})
+
+	it('overturns to the conflicting report, rating only the unflagged players of a ranked game', async () => {
+		const { dispatcher, external, world } = setup(item({ itemType: 'match_conflict', subjectPlayerId: 'b' }))
+		expect(await dispatcher.run(1, 'overturn', ADMIN, { toReportOf: 'a' })).toEqual({ ok: false, refusal: { code: 'unchanged' } })
+		const result = await dispatcher.run(1, 'overturn', ADMIN, { toReportOf: 'b' })
+		expect(result).toMatchObject({ ok: true, value: { effects: { overturned: { runId: 'run-1', rerated: true } } } })
+		expect(external.overturnGame).toHaveBeenCalledWith({ runId: 'run-1', matchmade: true, ranked: true }, [
+			{ playerId: 'b', place: 1, rated: true },
+			{ playerId: 'a', place: 2, rated: false },
+		])
+		expect(world.sourceStatus.get(1)).toBe('resolved')
+	})
+
+	it('leaves the item open when Nakama refuses the new result', async () => {
+		const { dispatcher, external, world } = setup(item({ itemType: 'match_conflict' }))
+		external.overturnGame.mockResolvedValueOnce({ kind: 'failed', reason: 'admin_run_set_result rejected' } as never)
+		expect(await dispatcher.run(1, 'overturn', ADMIN, { toReportOf: 'b' })).toEqual({
+			ok: false,
+			refusal: { code: 'nakama_failed', reason: 'admin_run_set_result rejected' },
+		})
+		expect(world.items.get(1)?.status).toBe('open')
+	})
+})

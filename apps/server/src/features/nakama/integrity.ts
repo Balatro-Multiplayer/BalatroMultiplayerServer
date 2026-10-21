@@ -3,6 +3,8 @@ import * as launcherIntegrityGateway from '../../infrastructure/gateways/launche
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import { setNakamaIntegrity } from '../../infrastructure/nakama/integrity-sync.js'
+import { enqueueServiceQueueItem } from '../../infrastructure/gateways/service-queue.gateway.js'
+import { type IntegrityIntake, createIntegrityIntake } from '../service-queue/integrity-intake.js'
 import {
 	type ChallengeSender,
 	type IntegrityVerdict,
@@ -21,6 +23,8 @@ interface NakamaIntegrityDeps {
 	) => Promise<void>
 	players: Pick<typeof playerGateway, 'findPlayerByNakamaUserId'>
 	events: ILauncherIntegrityRepository
+	// Raises an integrity queue item for a failure that warrants one.
+	intake?: Pick<IntegrityIntake, 'noteFailure'>
 }
 
 // Launcher-integrity challenges, keyed by Nakama user id, with Nakama as
@@ -52,11 +56,16 @@ export function createNakamaIntegrityService(
 	}
 
 	// The audit trail is keyed by Postgres player; a Nakama-only account with
-	// no player row (its first sync failed) goes unrecorded.
+	// no player row (its first sync failed) goes unrecorded. Each recorded
+	// failure is offered to the service queue's integrity intake.
 	const repository: ILauncherIntegrityRepository = {
 		async insertEvent(userId, kind, reason) {
 			const player = await deps.players.findPlayerByNakamaUserId(userId)
-			if (player) await deps.events.insertEvent(player.id, kind, reason)
+			if (!player) return
+			await deps.events.insertEvent(player.id, kind, reason)
+			await deps.intake
+				?.noteFailure(player.id, userId, reason)
+				.catch((err) => console.error('[nakama] Integrity queue item failed:', err))
 		},
 	}
 
@@ -83,4 +92,15 @@ export const nakamaIntegrityService = createNakamaIntegrityService({
 	setIntegrity: setNakamaIntegrity,
 	players: playerGateway,
 	events: launcherIntegrityGateway,
+	intake: createIntegrityIntake({
+		async rankedContext(nakamaUserId) {
+			const result = await callNakamaRpc<{ ranked?: { queued: boolean; inGame: boolean } }>('admin_player_get', {
+				userId: nakamaUserId,
+			})
+			return result.ok && result.value.ranked ? result.value.ranked : null
+		},
+		countFailuresSince: launcherIntegrityGateway.countEventsSince,
+		enqueue: enqueueServiceQueueItem,
+		now: () => new Date(),
+	}),
 })

@@ -104,7 +104,14 @@ export const chatLogs = pgTable('chat_logs', {
 	sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
 	// The Nakama outbox entry a mirrored line came from (unique when set).
 	mirrorKey: varchar('mirror_key', { length: 64 }),
-})
+	// The lobby instance (reports.lobbyId's id); codes are reused. Null for
+	// lines mirrored before it was sent (migration 0053).
+	lobbyId: uuid('lobby_id'),
+}, (t) => [
+	index('chat_logs_lobby_id_sent_idx')
+		.on(t.lobbyId, t.sentAt)
+		.where(sql`lobby_id IS NOT NULL`),
+])
 
 export const actionLogs = pgTable('action_logs', {
 	id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
@@ -194,7 +201,11 @@ export const reports = pgTable('reports', {
 	createdAt: timestamp('created_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),
-})
+}, (t) => [
+	// The service queue's subject card: reports against and by a player.
+	index('reports_reported_idx').on(t.reportedId),
+	index('reports_reporter_idx').on(t.reporterId),
+])
 
 // Chat messages saved when a lobby receives a report.
 // Contains the buffered history at report time plus all subsequent messages.
@@ -328,7 +339,9 @@ export const serviceQueueItems = pgTable(
 		// mapping itemType -> table/query-fn is a fixed 1:1 the action/detail
 		// dispatch registries already encode, so a redundant column would only
 		// invite drift.
-		sourceId: varchar('source_id', { length: 64 }).notNull(),
+		// anti_cheat is the exception: 'runId:playerId' (migration 0054), and
+		// integrity is 'playerId:YYYY-MM-DD' (one item per player per UTC day).
+		sourceId: varchar('source_id', { length: 80 }).notNull(),
 		// The player this item is "about", for a future cross-type "all open
 		// items about this player" query. text, not uuid -- matches this
 		// schema's existing precedent of playerId columns being `text` where a
@@ -339,8 +352,8 @@ export const serviceQueueItems = pgTable(
 		// (two reporters disagree; neither is "the subject").
 		subjectPlayerId: text('subject_player_id'),
 		status: varchar('status', { length: 16 }).notNull().default('open'), // open | resolved
-		// Nullable, unpopulated by every v1 creation site -- schema-ready for a
-		// future priority-scoring pass without another migration.
+		// Higher first; set at enqueue and on every change by
+		// features/service-queue/priority.ts.
 		priority: integer('priority'),
 		// Pre-rendered one-line list-row description, computed at insert time by
 		// the type-specific caller -- this is what makes the list page joinless.
@@ -353,6 +366,18 @@ export const serviceQueueItems = pgTable(
 		// playerBans.issuedBy / playerBans.liftedBy.
 		resolvedBy: text('resolved_by'),
 		resolutionAction: varchar('resolution_action', { length: 32 }),
+		resolutionNotes: text('resolution_notes'),
+		// A moderator working the item: 'moderator:<id>' | 'admin:<id>' until
+		// claimedUntil (features/service-queue/claim.ts).
+		claimedBy: text('claimed_by'),
+		claimedUntil: timestamp('claimed_until', { withTimezone: true }),
+		// What the item was raised with that scoring reads later
+		// (features/service-queue/types.ts ItemContext): the lobby kind, the
+		// integrity trigger.
+		context: jsonb('context').notNull().default(sql`'{}'::jsonb`),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow(),
 	},
 	(t) => [
 		// Defensive dedupe: the same source row should never enqueue twice.
@@ -372,7 +397,53 @@ export const serviceQueueItems = pgTable(
 		index('service_queue_items_subject_player_idx')
 			.on(t.subjectPlayerId)
 			.where(sql`subject_player_id IS NOT NULL`),
+		index('service_queue_items_status_priority_idx').on(
+			t.status,
+			t.priority,
+			t.createdAt,
+		),
 	],
+)
+
+// The audit trail of a queue item: who viewed, claimed, released, acted on,
+// noted or reopened it (features/service-queue/types.ts ItemEventKind).
+export const serviceQueueItemEvents = pgTable(
+	'service_queue_item_events',
+	{
+		id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+		itemId: integer('item_id')
+			.notNull()
+			.references(() => serviceQueueItems.id, { onDelete: 'cascade' }),
+		kind: varchar('kind', { length: 16 }).notNull(),
+		// 'moderator:<id>' | 'admin:<id>' | 'system'
+		actor: text('actor').notNull(),
+		action: varchar('action', { length: 32 }),
+		note: text('note'),
+		detail: jsonb('detail'),
+		at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [index('service_queue_item_events_item_idx').on(t.itemId, t.at)],
+)
+
+// A moderator's warning (the service queue's warn action): never expires,
+// shown on the player's subject card, and sent to them as NotifyCode.WARNED.
+export const playerWarnings = pgTable(
+	'player_warnings',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		playerId: uuid('player_id')
+			.notNull()
+			.references(() => players.id),
+		itemId: integer('item_id').references(() => serviceQueueItems.id, {
+			onDelete: 'set null',
+		}),
+		message: text('message').notNull(),
+		issuedBy: text('issued_by').notNull(),
+		issuedAt: timestamp('issued_at', { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+	},
+	(t) => [index('player_warnings_player_idx').on(t.playerId)],
 )
 
 // Unused since the move to Nakama (which holds disconnect grace itself); kept

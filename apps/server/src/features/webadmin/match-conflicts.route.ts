@@ -1,5 +1,10 @@
 import { Router } from 'express'
-import { listMatchConflicts, resolveMatchConflict } from '../../infrastructure/gateways/match-conflict.gateway.js'
+import {
+	getMatchConflict,
+	listMatchConflicts,
+	resolveMatchConflict,
+} from '../../infrastructure/gateways/match-conflict.gateway.js'
+import { dispatchLegacy } from '../service-queue/legacy.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 const router = Router()
@@ -29,7 +34,13 @@ router.patch('/match-conflicts/:id/resolve', async (req, res, next) => {
 			return
 		}
 
-		const updated = await resolveMatchConflict(id, resolutionNotes)
+		const dispatched = await dispatchLegacy(req, 'match_conflict', id, 'resolve')
+		if (dispatched.kind === 'refused') {
+			res.status(dispatched.status).json(dispatched.body)
+			return
+		}
+		const updated =
+			dispatched.kind === 'done' ? await getMatchConflict(id) : await resolveMatchConflict(id, resolutionNotes)
 		if (!updated) {
 			res.status(404).json({ error: 'Conflict not found' })
 			return

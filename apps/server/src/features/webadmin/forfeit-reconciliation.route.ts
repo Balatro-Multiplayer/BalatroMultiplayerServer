@@ -1,10 +1,13 @@
 import { Router } from 'express'
 import {
 	dismissForfeitReconciliationFlag,
+	getForfeitReconciliationFlag,
 	listForfeitReconciliationFlags,
 	voidForfeitReconciliationFlag,
 } from '../../infrastructure/gateways/forfeit-reconciliation.gateway.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
+import { requireAdmin } from '../../shared/utils/require-admin.js'
+import { dispatchLegacy } from '../service-queue/legacy.js'
 
 const router = Router()
 
@@ -33,7 +36,17 @@ router.patch('/forfeit-reconciliation/:id/void', async (req, res, next) => {
 			return
 		}
 
-		const updated = await voidForfeitReconciliationFlag(id, resolutionNotes)
+		const dispatched = await dispatchLegacy(req, 'forfeit_reconciliation', id, 'void')
+		if (dispatched.kind === 'refused') {
+			res.status(dispatched.status).json(dispatched.body)
+			return
+		}
+		// Voiding re-rates a ranked match: admin-only, as in the queue.
+		if (dispatched.kind === 'no_item') await requireAdmin(req)
+		const updated =
+			dispatched.kind === 'done'
+				? await getForfeitReconciliationFlag(id)
+				: await voidForfeitReconciliationFlag(id, resolutionNotes)
 		if (!updated) {
 			res.status(404).json({ error: 'Flag not found' })
 			return
@@ -58,7 +71,15 @@ router.patch('/forfeit-reconciliation/:id/dismiss', async (req, res, next) => {
 			return
 		}
 
-		const updated = await dismissForfeitReconciliationFlag(id, resolutionNotes)
+		const dispatched = await dispatchLegacy(req, 'forfeit_reconciliation', id, 'dismiss')
+		if (dispatched.kind === 'refused') {
+			res.status(dispatched.status).json(dispatched.body)
+			return
+		}
+		const updated =
+			dispatched.kind === 'done'
+				? await getForfeitReconciliationFlag(id)
+				: await dismissForfeitReconciliationFlag(id, resolutionNotes)
 		if (!updated) {
 			res.status(404).json({ error: 'Flag not found' })
 			return

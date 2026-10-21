@@ -1,4 +1,5 @@
-import { count, desc, eq } from 'drizzle-orm'
+import { count, desc, eq, or } from 'drizzle-orm'
+import type { DbExecutor } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { matchResultConflicts } from '../db/schema.js'
 import type { PlacementEntry } from '../../shared/types/index.js'
@@ -51,4 +52,39 @@ export async function resolveMatchConflict(
 		.where(eq(matchResultConflicts.id, id))
 		.returning()
 	return row ?? null
+}
+
+export async function getMatchConflict(id: number): Promise<MatchResultConflictRecord | null> {
+	const [row] = await db.select().from(matchResultConflicts).where(eq(matchResultConflicts.id, id)).limit(1)
+	return row ?? null
+}
+
+export async function listConflictsForMatch(matchId: string): Promise<MatchResultConflictRecord[]> {
+	return db.select().from(matchResultConflicts).where(eq(matchResultConflicts.matchId, matchId))
+}
+
+// The service queue's write (inside its transaction).
+export async function setMatchConflictStatus(
+	exec: DbExecutor,
+	id: number,
+	status: 'open' | 'resolved',
+	resolutionNotes: string | null,
+): Promise<MatchResultConflictRecord | null> {
+	const [row] = await exec
+		.update(matchResultConflicts)
+		.set({ status, resolutionNotes })
+		.where(eq(matchResultConflicts.id, id))
+		.returning()
+	return row ?? null
+}
+
+// How often a player was on either side of a conflict, for the evidence.
+export async function countConflictsInvolving(playerId: string): Promise<number> {
+	const [row] = await db
+		.select({ n: count() })
+		.from(matchResultConflicts)
+		.where(
+			or(eq(matchResultConflicts.firstReporterId, playerId), eq(matchResultConflicts.conflictingReporterId, playerId)),
+		)
+	return Number(row?.n ?? 0)
 }
