@@ -85,7 +85,7 @@ describe('chat_send moderation', () => {
 		const nk = seated({ verdict: 'allow', publishText: 'h*llo' })
 		expect(say(nk, 'hello')).toEqual({ text: 'h*llo' })
 		expect(nk.posted).toEqual(['h*llo'])
-		expect(logged(nk)).toEqual([{ lobbyCode: 'ABCDEF', userId: USER, message: 'hello', flagged: false, verdict: null }])
+		expect(logged(nk)).toEqual([{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'hello', flagged: false, verdict: null }])
 	})
 
 	it('logs a blocked message with its band, and posts nothing', () => {
@@ -93,7 +93,7 @@ describe('chat_send moderation', () => {
 		expect(() => say(nk, 'bad words')).toThrow(/blocked/)
 		expect(nk.posted).toEqual([])
 		expect(logged(nk)).toEqual([
-			{ lobbyCode: 'ABCDEF', userId: USER, message: 'bad words', flagged: true, verdict: { source: 'remote', band: 'high' } },
+			{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'bad words', flagged: true, verdict: { source: 'remote', band: 'high' } },
 		])
 	})
 

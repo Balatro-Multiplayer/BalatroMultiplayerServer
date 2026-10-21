@@ -110,7 +110,7 @@ export function saveRun(
 	return writes[0].value as { logChecks: { [userId: string]: LogCheck } }
 }
 
-function readRun(nk: nkruntime.Nakama, runId: unknown): RunRecord {
+export function readRun(nk: nkruntime.Nakama, runId: unknown): RunRecord {
 	if (typeof runId !== 'string' || runId === '')
 		throw runtimeError(INVALID_ARGUMENT, 'runId is required')
 	const objects = nk.storageRead([

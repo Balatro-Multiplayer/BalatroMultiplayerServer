@@ -15,6 +15,7 @@ import { callExpress } from './express'
 import { isNotifyCode, notify } from './notify'
 import { parsePayload, requireServer } from './rpc'
 import { ackEntries, pullEntries } from './mirror/outbox'
+import { moderationContextOf } from './review/rpc'
 
 const USER_ID_PATTERN = /^[0-9a-f-]{36}$/
 
@@ -236,7 +237,8 @@ export function rpcAdminLobbyClose(
 	return JSON.stringify({ ok: true })
 }
 
-// {userId} -> {player, bans, lobby, online}: what webadmin shows of a
+// {userId} -> {player, bans, lobby, online, mods, standing, integrity,
+// ranked: {queued, inGame}}: what webadmin and the service queue show of a
 // Nakama account.
 export function rpcAdminPlayerGet(
 	ctx: nkruntime.Context,
@@ -254,6 +256,7 @@ export function rpcAdminPlayerGet(
 		bans: readBans(nk, userId),
 		lobby: currentLobby(nk, userId),
 		online,
+		...moderationContextOf(nk, userId, Date.now()),
 	})
 }
 

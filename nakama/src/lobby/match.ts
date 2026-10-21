@@ -272,7 +272,7 @@ function runEffect(
 		}
 		case 'forfeited':
 			try {
-				recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at })
+				recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at, lobbyKind: effect.lobbyKind })
 			} catch (e) {
 				logger.warn('Lobby %s: could not record %s timing out: %v', lobby.code, effect.userId, e)
 			}

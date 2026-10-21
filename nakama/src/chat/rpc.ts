@@ -14,14 +14,15 @@ import { readBans } from '../moderation/bans'
 import { currentLobby } from '../lobby/rpc'
 import { playerView, profileFor, updateProfile, type Profile } from '../player/profile'
 import { parsePayload, requireUser } from '../rpc'
-import type { LobbySignal } from '../lobby/protocol'
+import { type LobbySignal, lobbyIdOf } from '../lobby/protocol'
 import {
 	MAX_MESSAGE_LENGTH,
 	callModeration,
 	decideModerationOutcome,
 } from './moderation'
 import { isAllowlisted, obscenityMatches, remoteModerationEnabled } from './filter'
-import { type ChatVerdict, enqueue } from '../mirror/outbox'
+import { type ChatLogLine, type ChatVerdict, enqueue } from '../mirror/outbox'
+import { lobbyKindOfLabel } from '../review/ranked'
 
 function tosAccepted(profile: Profile, config: ServerConfig): boolean {
 	return profile.tosAcceptedVersion >= config.tosVersion
@@ -85,6 +86,12 @@ export function rpcChatSend(
 	)
 	if (check.error === 'rate_limited') throw runtimeError(UNAVAILABLE, 'You are sending messages too fast')
 	if (check.error) throw runtimeError(INVALID_ARGUMENT, 'Not in a lobby')
+	const match = nk.matchGet(current.matchId)
+	const lobby = {
+		lobbyCode: check.code as string,
+		lobbyId: lobbyIdOf(current.matchId),
+		lobbyKind: lobbyKindOfLabel(match ? match.label : null),
+	}
 
 	let text = message
 	if (!isAllowlisted(message, config.chatAllowlist)) {
@@ -101,7 +108,7 @@ export function rpcChatSend(
 				if (outcome.reason === 'moderated') {
 					// The service keeps no message content, so this is the only
 					// record of what was blocked.
-					logChat(nk, logger, check.code, userId, message, { source: 'remote', band: outcome.band || 'unknown' })
+					logChat(nk, logger, lobby, userId, message, { source: 'remote', band: outcome.band || 'unknown' })
 					throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
 				}
 				throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
@@ -110,7 +117,7 @@ export function rpcChatSend(
 		} else {
 			const matches = obscenityMatches(message)
 			if (matches.length > 0) {
-				logChat(nk, logger, check.code, userId, message, { source: 'local', matches })
+				logChat(nk, logger, lobby, userId, message, { source: 'local', matches })
 				throw runtimeError(PERMISSION_DENIED, 'Message blocked by moderation')
 			}
 		}
@@ -121,7 +128,7 @@ export function rpcChatSend(
 		JSON.stringify({ type: 'chat_post', userId, text } as LobbySignal),
 	)
 	// What the player typed, never the rewrite: a rewrite must not launder it.
-	logChat(nk, logger, check.code, userId, message, null)
+	logChat(nk, logger, lobby, userId, message, null)
 	return JSON.stringify({ text })
 }
 
@@ -130,7 +137,7 @@ export function rpcChatSend(
 function logChat(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
-	lobbyCode: string,
+	lobby: Pick<ChatLogLine, 'lobbyCode' | 'lobbyId' | 'lobbyKind'>,
 	userId: string,
 	message: string,
 	blocked: ChatVerdict | null,
@@ -139,7 +146,7 @@ function logChat(
 		enqueue(nk, {
 			kind: 'chat',
 			at: Date.now(),
-			line: { lobbyCode, userId, message, flagged: blocked !== null, verdict: blocked },
+			line: { ...lobby, userId, message, flagged: blocked !== null, verdict: blocked },
 		})
 	} catch (e) {
 		logger.error('Could not queue a chat line for the API: %v', e)

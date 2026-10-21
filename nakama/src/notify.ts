@@ -15,6 +15,9 @@ export const NotifyCode = {
 	// {standing, disallowed, reason} (standing/rpc.ts): the mod allowlist
 	// changed, so the player's standing may have.
 	STANDING_CHANGED: 108,
+	// {message, itemType, warnedAt}: a moderator's warning (service queue).
+	// Persistent, so an offline player sees it at their next login.
+	WARNED: 109,
 }
 
 const CODES: number[] = Object.keys(NotifyCode).map((k) => (NotifyCode as { [k: string]: number })[k])

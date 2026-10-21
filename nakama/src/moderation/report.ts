@@ -11,8 +11,9 @@ import {
 } from '../errors'
 import { callExpress } from '../express'
 import type { ReportEvidence } from '../lobby/chat'
-import type { LobbySignal } from '../lobby/protocol'
+import { type LobbySignal, lobbyIdOf } from '../lobby/protocol'
 import { currentLobby } from '../lobby/rpc'
+import { lobbyKindOfLabel } from '../review/ranked'
 import { parsePayload, requireUser } from '../rpc'
 
 // The API's REPORT_TYPES (report.gateway.ts).
@@ -95,12 +96,14 @@ export function rpcReportSubmit(
 		| { error: string }
 	if ('error' in evidence) throw runtimeError(INVALID_ARGUMENT, EVIDENCE_REFUSALS[evidence.error] || evidence.error)
 
+	const match = nk.matchGet(lobby.matchId)
 	const reply = callExpress(nk, logger, ctx.env, '/reports', {
 		reporterId: userId,
 		reportedId: report.reportedUserId,
 		type: report.type,
 		message: report.message,
-		lobbyId: lobby.matchId.split('.')[0],
+		lobbyId: lobbyIdOf(lobby.matchId),
+		lobbyKind: lobbyKindOfLabel(match ? match.label : null),
 		lobbyCode: evidence.code,
 		runId: evidence.runId,
 		chat: evidence.chat,

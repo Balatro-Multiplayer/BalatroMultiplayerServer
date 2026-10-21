@@ -5,6 +5,7 @@
 // silently not stick, so the state holds only plain objects and arrays.
 import type { TeamPlan } from '../matchmaking/group/teams'
 import type { RequiredStanding } from '../standing/standing'
+import { type LobbyKind, lobbyKindOf } from '../review/ranked'
 import { replayTailOf } from './active'
 import {
 	endGroup,
@@ -112,7 +113,7 @@ export type Outbound =
 	| { kind: 'setCurrent'; userId: string }
 	| { kind: 'clearCurrent'; userId: string }
 	// A matchmade game's participant timed out (lobby/forfeits.ts).
-	| { kind: 'forfeited'; userId: string; runId: string; code: string; at: number }
+	| { kind: 'forfeited'; userId: string; runId: string; code: string; at: number; lobbyKind: LobbyKind }
 	| {
 			kind: 'saveRun'
 			run: RunRecord
@@ -670,8 +671,8 @@ export function tick(lobby: Lobby, now: number): Step {
 		if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
 			const started = step.lobby.game.started
 			const forfeited: Outbound[] =
-				started && lobby.gameMode && started.players.some((q) => q.id === p.id)
-					? [{ kind: 'forfeited', userId: p.id, runId: started.runId, code: lobby.code, at: now }]
+				started && started.players.some((q) => q.id === p.id)
+					? [{ kind: 'forfeited', userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }]
 					: []
 			const removed = remove(step.lobby, p.id, 'player_left', 'member_disconnected')
 			step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) }

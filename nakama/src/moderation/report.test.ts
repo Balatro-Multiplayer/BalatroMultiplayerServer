@@ -68,6 +68,7 @@ describe('report_submit', () => {
 			type: 'chat_abuse',
 			message: 'mean',
 			lobbyId: '33333333-3333-4333-8333-333333333333',
+			lobbyKind: null,
 			lobbyCode: 'ABC123',
 			runId: null,
 			chat: EVIDENCE.chat,
