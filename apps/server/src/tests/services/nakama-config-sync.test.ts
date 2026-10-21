@@ -14,7 +14,6 @@ const config: AppConfig = {
 	groupQueueEnabled: false,
 	lobbyCreationEnabled: true,
 	achievementsEnabled: true,
-	queueModsEnforced: true,
 	queueAllowedModIds: ['MultiplayerAPI', 'MultiplayerSPDRN'],
 }
 
@@ -39,7 +38,6 @@ describe('pushing config to Nakama', () => {
 			groupQueueEnabled: false,
 			lobbyCreationEnabled: true,
 			achievementsEnabled: true,
-			queueModsEnforced: true,
 			queueAllowedModIds: ['MultiplayerAPI', 'MultiplayerSPDRN'],
 			testingMode: false,
 			integrityEnforced: false,

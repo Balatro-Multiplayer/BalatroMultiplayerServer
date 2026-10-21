@@ -139,12 +139,6 @@ export const serverConfig = pgTable('server_config', {
 	achievementsEnabled: boolean('achievements_enabled')
 		.notNull()
 		.default(false),
-	// Nakama refuses matchmaking to a player whose reported SMODS mods aren't
-	// all allowed (modRegistry.smodsIds of pinned mods, plus Nakama's own
-	// baseline and extras). Off: everyone is valid (migration 0051).
-	queueModsEnforced: boolean('queue_mods_enforced')
-		.notNull()
-		.default(false),
 	updatedAt: timestamp('updated_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),

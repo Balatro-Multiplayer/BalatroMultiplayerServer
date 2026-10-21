@@ -21,7 +21,6 @@ export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 		groupQueueEnabled: config.groupQueueEnabled,
 		lobbyCreationEnabled: config.lobbyCreationEnabled,
 		achievementsEnabled: config.achievementsEnabled,
-		queueModsEnforced: config.queueModsEnforced,
 		queueAllowedModIds: config.queueAllowedModIds,
 		testingMode: config.testingMode === true,
 		integrityEnforced,
