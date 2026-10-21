@@ -12,8 +12,8 @@ export const NotifyCode = {
 	// {avatarIds, runId}: avatars just earned (runId null for one earned
 	// outside a game). Persistent, so an offline player sees it at login.
 	AVATAR_UNLOCKED: 107,
-	// {standing, disallowed, reason, enforced} (standing/rpc.ts): the mod
-	// allowlist or its enforcement changed, so the player's standing may have.
+	// {standing, disallowed, reason} (standing/rpc.ts): the mod allowlist
+	// changed, so the player's standing may have.
 	STANDING_CHANGED: 108,
 }
 

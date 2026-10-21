@@ -7,21 +7,16 @@ const ALL_ALLOWED = report(['MultiplayerAPI-0.1.2'])
 const DISALLOWED = report(['MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'])
 
 describe('standingOf', () => {
-	it('verified passes any mods, enforced or not', () => {
-		for (const enforced of [true, false])
-			for (const r of [ALL_ALLOWED, DISALLOWED, null])
-				expect(standingOf({ verified: true, report: r, allowedIds: ALLOWED, enforced })).toEqual({
-					standing: 'verified',
-					disallowed: [],
-					reason: null,
-				})
-	})
-	it('unverified is valid for anything while not enforced', () => {
+	it('verified passes any mods', () => {
 		for (const r of [ALL_ALLOWED, DISALLOWED, null])
-			expect(standingOf({ verified: false, report: r, allowedIds: ALLOWED, enforced: false }).standing).toBe('valid')
+			expect(standingOf({ verified: true, report: r, allowedIds: ALLOWED })).toEqual({
+				standing: 'verified',
+				disallowed: [],
+				reason: null,
+			})
 	})
-	it('unverified and enforced: valid only with an all-allowed report', () => {
-		const of = (r: any) => standingOf({ verified: false, report: r, allowedIds: ALLOWED, enforced: true })
+	it('unverified: valid only with an all-allowed report', () => {
+		const of = (r: any) => standingOf({ verified: false, report: r, allowedIds: ALLOWED })
 		expect(of(ALL_ALLOWED)).toEqual({ standing: 'valid', disallowed: [], reason: null })
 		expect(of(DISALLOWED)).toEqual({ standing: 'none', disallowed: ['Cryptid'], reason: 'mods_not_allowed' })
 		expect(of(null)).toEqual({ standing: 'none', disallowed: [], reason: 'unreported' })

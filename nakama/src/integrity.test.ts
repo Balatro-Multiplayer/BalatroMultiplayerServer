@@ -16,6 +16,7 @@ import {
 import { beforeMatchmakerAdd, refuseMatchedGroup } from './matchmaking/gate'
 import { NotifyCode } from './notify'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from './testing/fake_nk'
+import { reportVanilla } from './testing/reports'
 
 const USER = '11111111-1111-1111-1111-111111111111'
 const ENV = { EXPRESS_INTERNAL_URL: 'http://api', EXPRESS_INTERNAL_KEY: 'k' }
@@ -38,6 +39,7 @@ describe('integrityRefusal', () => {
 describe('the ranked queue gate', () => {
 	it('lets casual through, and ranked once verified', () => {
 		const nk = fakeNk()
+		reportVanilla(nk, USER)
 		writeConfig(nk as any, ENFORCED)
 		expect(beforeMatchmakerAdd(playerCtx(USER), fakeLogger, nk as any, ADD('casual'))).toBeTruthy()
 		expect(() => beforeMatchmakerAdd(playerCtx(USER), fakeLogger, nk as any, ADD('ranked'))).toThrow(INTEGRITY_REQUIRED)
@@ -49,12 +51,14 @@ describe('the ranked queue gate', () => {
 
 	it('changes nothing while not enforced', () => {
 		const nk = fakeNk()
+		reportVanilla(nk, USER)
 		expect(beforeMatchmakerAdd(playerCtx(USER, ENV), fakeLogger, nk as any, ADD('ranked'))).toBeTruthy()
 		expect(nk.http).toHaveLength(0)
 	})
 
 	it('refuses a matched ranked group with an unverified player', () => {
 		const nk = fakeNk()
+		reportVanilla(nk, 'a', 'b')
 		writeConfig(nk as any, ENFORCED)
 		writeIntegrity(nk as any, 'a', verdictRecord(true, true, 0))
 		const plan = { modId: 'M', rankedMode: 'std', gameMode: 'ranked:std', playerIds: ['a', 'b'], groups: [], teamPlan: null, requiredStanding: 'verified' as const }

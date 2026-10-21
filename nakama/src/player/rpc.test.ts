@@ -94,7 +94,7 @@ describe('profile_set_mods', () => {
 		const { nk } = nkWith()
 		expect(call(rpcProfileSetMods, nk, { mods: ['A-1', 'B-2'] })).toEqual({
 			mods: ['A-1', 'B-2'],
-			standing: { standing: 'valid', disallowed: [], reason: null, enforced: false },
+			standing: { standing: 'none', disallowed: ['A', 'B'], reason: 'mods_not_allowed' },
 		})
 		expect(readProfile(nk as any, USER)!.profile.mods).toEqual(['A-1', 'B-2'])
 		const many = call(rpcProfileSetMods, nk, { mods: Array.from({ length: 400 }, (_, i) => 'M' + i) })
@@ -104,9 +104,9 @@ describe('profile_set_mods', () => {
 
 	it("stores this session's report and answers with the standing it gives", () => {
 		const { nk } = nkWith()
-		writeConfig(nk as any, { ...DEFAULT_CONFIG, queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'] })
+		writeConfig(nk as any, { ...DEFAULT_CONFIG, queueAllowedModIds: ['MultiplayerAPI'] })
 		const reply = call(rpcProfileSetMods, nk, { mods: ['Steamodded-1.0.0~BETA-1814a', 'MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'] })
-		expect(reply.standing).toEqual({ standing: 'none', disallowed: ['Cryptid'], reason: 'mods_not_allowed', enforced: true })
+		expect(reply.standing).toEqual({ standing: 'none', disallowed: ['Cryptid'], reason: 'mods_not_allowed' })
 		expect(readModReport(nk as any, USER)!.mods).toEqual(['Steamodded-1.0.0~BETA-1814a', 'MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'])
 		expect(call(rpcProfileSetMods, nk, { mods: ['MultiplayerAPI-0.1.2'] }).standing.standing).toBe('valid')
 	})

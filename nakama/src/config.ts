@@ -29,11 +29,10 @@ export interface ServerConfig {
 	chatAllowlist: string[]
 	// The API's active rating season (rating/season.ts); 0 until pushed.
 	season: number
-	// Queueing needs a valid standing (standing/): every reported mod allowed.
-	queueModsEnforced: boolean
 	// The SMODS ids of the ranked-pinned mods, as the API pushes them.
 	queueAllowedModIds: string[]
-	// More allowed ids, set here only (test harnesses' dev mods); the API
+	// More allowed ids, set here only (test harnesses' dev mods, seeded at
+	// boot from QUEUE_ALLOWED_MOD_IDS_EXTRA -- standing/seed.ts); the API
 	// never sends it, so its pushes leave it be.
 	queueAllowedModIdsExtra: string[]
 }
@@ -52,8 +51,6 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	achievementsEnabled: false,
 	chatAllowlist: [],
 	season: 0,
-	// Off until the API's pinned mods carry their ids.
-	queueModsEnforced: false,
 	queueAllowedModIds: [],
 	queueAllowedModIdsExtra: [],
 }
@@ -61,7 +58,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
 const MAX_MOD_IDS = 500
 const MOD_ID_PATTERN = /^[^\s]{1,128}$/
 
-function modIdsOf(value: unknown): string[] | null {
+export function modIdsOf(value: unknown): string[] | null {
 	if (!Array.isArray(value) || value.length > MAX_MOD_IDS) return null
 	if (!value.every((id) => typeof id === 'string' && MOD_ID_PATTERN.test(id))) return null
 	return value as string[]
@@ -84,7 +81,6 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 		'testingMode',
 		'integrityEnforced',
 		'achievementsEnabled',
-		'queueModsEnforced',
 	]
 	for (const flag of flags) {
 		const value = update[flag]

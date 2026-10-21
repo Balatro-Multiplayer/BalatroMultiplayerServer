@@ -3,7 +3,6 @@
 //    queue anything, whatever its mods.
 //  - valid: this session's mod report lists only allowed mods; casual only.
 //  - none: no report this session, or a mod that isn't allowed.
-// With queueModsEnforced off nothing is checked and everyone is at least valid.
 import { disallowedMods, type ModReport } from './mod_report'
 
 export type AccountStanding = 'verified' | 'valid' | 'none'
@@ -16,7 +15,6 @@ export interface StandingInput {
 	verified: boolean
 	report: ModReport | null
 	allowedIds: string[]
-	enforced: boolean
 }
 
 export interface StandingResult {
@@ -31,7 +29,6 @@ const VALID: StandingResult = { standing: 'valid', disallowed: [], reason: null 
 
 export function standingOf(input: StandingInput): StandingResult {
 	if (input.verified) return VERIFIED
-	if (!input.enforced) return VALID
 	if (!input.report) return { standing: 'none', disallowed: [], reason: 'unreported' }
 	const disallowed = disallowedMods(input.report.mods, input.allowedIds)
 	if (disallowed.length > 0) return { standing: 'none', disallowed, reason: 'mods_not_allowed' }

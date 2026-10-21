@@ -65,6 +65,7 @@ import { rpcAdminRatingsSet } from './rating/admin'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
+import { seedAllowedModIdsExtra } from './standing/seed'
 import { rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
@@ -84,6 +85,7 @@ function InitModule(
 	initializer: nkruntime.Initializer,
 ) {
 	configureSeason(ctx.env['RATING_SEASON'])
+	seedAllowedModIdsExtra(nk, logger, ctx.env)
 	initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom)
 	initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom)
 	initializer.registerBeforeLinkCustom(refuseCustomIdChange)

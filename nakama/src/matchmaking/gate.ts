@@ -19,7 +19,7 @@ import { isStandingRefusal, queueRefusalMessage, refusedMods, standingRefusal, t
 
 // Ranked while integrityEnforced needs a verdict, which also passes any mods
 // (a verified account skips the mod check); otherwise the standing must be
-// valid -- with queueModsEnforced off everyone's is.
+// valid.
 export function queueRefusalFor(nk: nkruntime.Nakama, userId: string, ranked: boolean, now: number): QueueRefusal | null {
 	const config = readConfig(nk)
 	const access = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now)

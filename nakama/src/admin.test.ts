@@ -34,16 +34,16 @@ describe('server config', () => {
 	})
 
 	it('takes the mod allowlists as id arrays, and keeps the extra ids across an API push', () => {
-		expect(DEFAULT_CONFIG.queueModsEnforced).toBe(false)
-		const pushed = mergeConfig(DEFAULT_CONFIG, { queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'] })
-		expect(pushed).toMatchObject({ queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'], queueAllowedModIdsExtra: [] })
+		const pushed = mergeConfig(DEFAULT_CONFIG, { queueAllowedModIds: ['MultiplayerAPI'] })
+		expect(pushed).toMatchObject({ queueAllowedModIds: ['MultiplayerAPI'], queueAllowedModIdsExtra: [] })
+		// The retired switch is no longer a config field (an old API's push of it is dropped).
+		expect('queueModsEnforced' in mergeConfig(DEFAULT_CONFIG, { queueModsEnforced: true })).toBe(false)
 		const local = mergeConfig(pushed, { queueAllowedModIdsExtra: ['ClaudeControl'] })
 		// The API never sends the extra ids, so its next push leaves them.
 		expect(mergeConfig(local, { queueAllowedModIds: [] }).queueAllowedModIdsExtra).toEqual(['ClaudeControl'])
 		expect(mergeConfig(local, { queueAllowedModIds: ['ok', 3] }).queueAllowedModIds).toEqual(['MultiplayerAPI'])
 		expect(mergeConfig(local, { queueAllowedModIds: ['has space'] }).queueAllowedModIds).toEqual(['MultiplayerAPI'])
 		const shown = clientConfig(local) as { [key: string]: unknown }
-		expect(shown.queueModsEnforced).toBe(true)
 		expect('queueAllowedModIds' in shown || 'queueAllowedModIdsExtra' in shown || 'chatAllowlist' in shown).toBe(false)
 	})
 

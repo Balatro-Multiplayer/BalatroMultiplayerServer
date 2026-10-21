@@ -13,7 +13,7 @@ function lobbyNk() {
 		accountGetId: (id: string) => ({ user: { userId: id, username: id } }),
 		matchGet: () => null,
 	}) as any
-	writeConfig(nk, { ...DEFAULT_CONFIG, queueModsEnforced: true, queueAllowedModIds: ['MultiplayerAPI'] })
+	writeConfig(nk, { ...DEFAULT_CONFIG, queueAllowedModIds: ['MultiplayerAPI'] })
 	return nk as nkruntime.Nakama
 }
 

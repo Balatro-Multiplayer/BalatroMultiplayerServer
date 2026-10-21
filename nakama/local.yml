@@ -42,6 +42,13 @@ runtime:
   # before-hook on custom auth, plus the bmp_lobby match and lobby RPCs.
   path: /nakama/data/modules
   js_entrypoint: index.js
+  # Merged with docker-compose.local.yml's --runtime.env flags. Matchmaking
+  # needs every reported mod allowed (standing/); the stock dev client also
+  # runs MultiplayerPvP and ClaudeControl, which no ranked pin covers, so
+  # they are added to queueAllowedModIdsExtra at every boot (standing/seed.ts).
+  # A real server never sets it.
+  env:
+    - "QUEUE_ALLOWED_MOD_IDS_EXTRA=MultiplayerPvP,ClaudeControl"
 
 console:
   username: admin

@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { allowedModIds, standingInputsChanged } from './allowed'
+import { allowedModIds, parseExtraSeed, seededExtra, standingInputsChanged } from './allowed'
 
-const config = (ids: string[], extra: string[] = [], enforced = false) => ({
+const config = (ids: string[], extra: string[] = []) => ({
 	queueAllowedModIds: ids,
 	queueAllowedModIdsExtra: extra,
-	queueModsEnforced: enforced,
 })
 
 describe('allowedModIds', () => {
@@ -20,12 +19,35 @@ describe('allowedModIds', () => {
 })
 
 describe('standingInputsChanged', () => {
-	it('notices enforcement and allowlist changes, not reorderings', () => {
+	it('notices allowlist changes, not reorderings', () => {
 		expect(standingInputsChanged(config(['A', 'B']), config(['B', 'A']))).toBe(false)
 		expect(standingInputsChanged(config(['A']), config(['A'], ['X']))).toBe(true)
 		expect(standingInputsChanged(config(['A']), config([]))).toBe(true)
-		expect(standingInputsChanged(config(['A']), config(['A'], [], true))).toBe(true)
 		// A baseline id pinned too changes nothing.
 		expect(standingInputsChanged(config([]), config(['Steamodded']))).toBe(false)
+	})
+})
+
+describe('the extra-id seed (QUEUE_ALLOWED_MOD_IDS_EXTRA)', () => {
+	it('reads comma or space separated ids, and nothing from an unset, empty or bad value', () => {
+		expect(parseExtraSeed('MultiplayerPvP,ClaudeControl')).toEqual(['MultiplayerPvP', 'ClaudeControl'])
+		expect(parseExtraSeed(' MultiplayerPvP , ClaudeControl  Talisman ')).toEqual([
+			'MultiplayerPvP',
+			'ClaudeControl',
+			'Talisman',
+		])
+		expect(parseExtraSeed(undefined)).toBeNull()
+		expect(parseExtraSeed('')).toBeNull()
+		expect(parseExtraSeed(' , ')).toBeNull()
+		expect(parseExtraSeed('ok,' + 'x'.repeat(129))).toBeNull()
+	})
+	it('only adds: keeps what is there, adds each missing seeded id once', () => {
+		expect(seededExtra([], ['MultiplayerPvP', 'ClaudeControl'])).toEqual(['MultiplayerPvP', 'ClaudeControl'])
+		expect(seededExtra(['Talisman', 'ClaudeControl'], ['MultiplayerPvP', 'ClaudeControl', 'MultiplayerPvP'])).toEqual([
+			'Talisman',
+			'ClaudeControl',
+			'MultiplayerPvP',
+		])
+		expect(seededExtra(['ClaudeControl', 'MultiplayerPvP'], ['MultiplayerPvP'])).toBeNull()
 	})
 })

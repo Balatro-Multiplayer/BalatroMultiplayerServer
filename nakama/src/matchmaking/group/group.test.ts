@@ -11,8 +11,9 @@ import { join, newLobby, type Lobby } from '../../lobby/state'
 import { writeBans } from '../../moderation/bans'
 import { NotifyCode } from '../../notify'
 import { standingInputsUpdated } from '../../standing/changed'
-import { writeModReport } from '../../standing/storage'
+import { clearModReport, writeModReport } from '../../standing/storage'
 import { fakeLogger, fakeNk, playerCtx, type FakeNk } from '../../testing/fake_nk'
+import { reportVanilla } from '../../testing/reports'
 import { beforeMatchmakerAdd, IN_GROUP_QUEUE } from '../gate'
 import { matchmakerMatched, type MatchedEntry } from '../matched'
 import { QUEUE_COLLECTION, clearMatched, recordKey } from '../queue'
@@ -44,7 +45,9 @@ interface World {
 }
 
 // A private lobby HOME12 with ids seated (the first hosting), and an empty
-// party PARTY the RPCs and hooks look at through its stream.
+// party PARTY the RPCs and hooks look at through its stream. Every seated
+// player, and the solo player s the matched tests seat with them, has a
+// vanilla mod report, so their standing lets them queue.
 function world(...ids: string[]): World {
 	let lobby = newLobby({ code: 'HOME12', modId: MOD, maxPlayers: 4, creatorId: ids[0], now: 0, graceMs: 10_000 })
 	for (const id of ids) lobby = join(lobby, id, `${id}-s`, info(id)).lobby
@@ -91,6 +94,7 @@ function world(...ids: string[]): World {
 			value: { matchId: HOME_MATCH, code: 'HOME12', modId: MOD },
 		})),
 	)
+	reportVanilla(nk, ...ids, 's')
 	return { nk, lobby: () => lobby, party, created, signals, sent }
 }
 
@@ -213,6 +217,7 @@ describe('party hooks', () => {
 		const w = queuedWorld()
 		const solo = { matchmakerAdd: { stringProperties: CASUAL } }
 		expect(() => beforeMatchmakerAdd(playerCtx('b'), fakeLogger, w.nk as any, solo as any)).toThrow(IN_GROUP_QUEUE)
+		reportVanilla(w.nk, 'z')
 		expect(() => beforeMatchmakerAdd(playerCtx('z'), fakeLogger, w.nk as any, solo as any)).not.toThrow()
 	})
 	it('takes the ticket back to forming, and drops the records', () => {
@@ -357,13 +362,13 @@ describe('signalHome', () => {
 	})
 })
 
-const ENFORCED = { ...DEFAULT_CONFIG, queueModsEnforced: true, queueAllowedModIds: ['MultiplayerSPDRN'] }
+const PINNED = { ...DEFAULT_CONFIG, queueAllowedModIds: ['MultiplayerSPDRN'] }
 const reportFor = (w: World, userId: string, mods: string[]) => writeModReport(w.nk as any, userId, { mods, reportedAt: 0 })
 
 describe('the group queue and standings', () => {
 	it("refuses to open while a member's mods aren't allowed, naming them and the mods", () => {
 		const w = world('a', 'b')
-		writeConfig(w.nk as any, ENFORCED)
+		writeConfig(w.nk as any, PINNED)
 		reportFor(w, 'a', ['MultiplayerSPDRN-0.1.1'])
 		reportFor(w, 'b', ['MultiplayerSPDRN-0.1.1', 'Cryptid-0.5.3'])
 		w.party.add('a')
@@ -380,19 +385,19 @@ describe('the group queue and standings', () => {
 	})
 	it('says so for a member who never reported, and refuses them the party', () => {
 		const w = world('a', 'b')
-		writeConfig(w.nk as any, ENFORCED)
-		reportFor(w, 'a', [])
+		writeConfig(w.nk as any, PINNED)
+		clearModReport(w.nk as any, 'b')
 		w.party.add('a')
 		expect(openFor(w).refused).toMatchObject({ code: 'member_refused', userId: 'b', reason: 'mods_unreported', mods: [] })
-		writeConfig(w.nk as any, DEFAULT_CONFIG)
+		reportFor(w, 'b', [])
 		openFor(w)
-		writeConfig(w.nk as any, ENFORCED)
+		clearModReport(w.nk as any, 'b')
 		const join = () => beforePartyJoin(playerCtx('b'), fakeLogger, w.nk as any, { partyJoin: { partyId: PARTY } } as any)
 		expect(join).toThrow(/reported its mods/)
 	})
 	it('cancels the whole group when a member is refused at matched time, saying who and why', () => {
 		const w = queuedWorld()
-		writeConfig(w.nk as any, ENFORCED)
+		writeConfig(w.nk as any, PINNED)
 		reportFor(w, 'a', [])
 		reportFor(w, 's', [])
 		reportFor(w, 'b', ['Cryptid-0.5.3'])
@@ -410,6 +415,8 @@ describe('the group queue and standings', () => {
 	it('re-gates queued tickets when the allowlist changes: a group goes, a solo is told why', () => {
 		const w = queuedWorld()
 		w.party.add('s')
+		// Cryptid and Talisman were allowed while b and s queued; the change drops them.
+		writeConfig(w.nk as any, { ...PINNED, queueAllowedModIdsExtra: ['Cryptid', 'Talisman'] })
 		reportFor(w, 'a', [])
 		reportFor(w, 'b', ['Cryptid-0.5.3'])
 		reportFor(w, 's', ['Talisman-2.0'])
@@ -421,7 +428,7 @@ describe('the group queue and standings', () => {
 				value: { modId: MOD, gameMode: 'standard', ticket: 'TS', sessionId: 's-s', at: Date.now() },
 			},
 		])
-		writeConfig(w.nk as any, ENFORCED)
+		writeConfig(w.nk as any, PINNED)
 		standingInputsUpdated(w.nk as any, fakeLogger, Date.now())
 		expect(w.lobby().groupQueue).toBeNull()
 		expect(w.sent[w.sent.length - 1]).toMatchObject({ phase: 'idle', refused: { userId: 'b', mods: ['Cryptid'] } })

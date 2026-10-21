@@ -1,4 +1,4 @@
-// The allowlist or its enforcement changed (admin_config_set), so standings
+// The allowlist changed (admin_config_set), so standings
 // may have: every online player who reported this session hears their new
 // one (STANDING_CHANGED), their lobby's snapshot follows, and a queued ticket
 // whose player may no longer queue is cancelled -- a solo's by telling them
@@ -11,7 +11,7 @@ import { clearMatched, liveQueuedPlayers } from '../matchmaking/queue'
 import { isStandingRefusal } from '../matchmaking/queue_refusal'
 import { notify, NotifyCode } from '../notify'
 import { pushToLobby } from '../player/rpc'
-import { standingViewFor } from './current'
+import { standingFor } from './current'
 import { reporterIds } from './storage'
 
 const NOTIFICATIONS_STREAM = 0
@@ -26,7 +26,7 @@ export function announceStandings(nk: nkruntime.Nakama, now: number): number {
 	let told = 0
 	for (const userId of reporterIds(nk)) {
 		if (!isOnline(nk, userId)) continue
-		const view = standingViewFor(nk, userId, now, config)
+		const view = standingFor(nk, userId, now, config)
 		notify(nk, userId, NotifyCode.STANDING_CHANGED, 'standing_changed', { ...view })
 		pushToLobby(nk, userId, { standing: view.standing })
 		told++
