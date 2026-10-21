@@ -16,6 +16,7 @@ import {
 	RATING_FLOOR,
 } from '../ratings/elo.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
+import { stakePopularity } from './stake-popularity.js'
 
 const router = Router()
 
@@ -370,34 +371,19 @@ router.get('/history', async (req, res, next) => {
 // tracking -- no schema anywhere records which stake an individual match was
 // actually played on (confirmed: matchmakingMatches/lobbyRuns/matchRunLogs
 // have no stake column; deck/stake drafting is client-side Lua only, see
-// §16.4). This buckets by gameMode string instead, which happens to carry a
-// real stake for SPDRN's two fixed-stake formats (spdrn_white_stake_triple =
-// White Stake, spdrn_gold_stake_single = Gold Stake) -- every other format
-// (variable-stake, or PvP with no stake concept at all) falls into "other".
+// §16.4). This buckets by (modId, gameMode) instead; see stake-popularity.ts.
 router.get('/stake-popularity', async (_req, res, next) => {
 	try {
 		const rows = await db
 			.select({
+				modId: matchmakingMatches.modId,
 				gameMode: matchmakingMatches.gameMode,
 				count: sql<number>`count(*)::int`,
 			})
 			.from(matchmakingMatches)
-			.groupBy(matchmakingMatches.gameMode)
+			.groupBy(matchmakingMatches.modId, matchmakingMatches.gameMode)
 
-		const buckets: Record<string, number> = {
-			'White Stake': 0,
-			'Gold Stake': 0,
-			Other: 0,
-		}
-		for (const row of rows) {
-			if (row.gameMode.includes('white_stake_triple'))
-				buckets['White Stake'] += row.count
-			else if (row.gameMode.includes('gold_stake_single'))
-				buckets['Gold Stake'] += row.count
-			else buckets.Other += row.count
-		}
-
-		res.json({ buckets, coarse: true })
+		res.json(stakePopularity(rows))
 	} catch (err) {
 		next(err)
 	}
