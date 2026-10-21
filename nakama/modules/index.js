@@ -1591,8 +1591,6 @@ var DEFAULT_CONFIG = {
   achievementsEnabled: false,
   chatAllowlist: [],
   season: 0,
-  // Off until the API's pinned mods carry their ids.
-  queueModsEnforced: false,
   queueAllowedModIds: [],
   queueAllowedModIdsExtra: []
 };
@@ -1617,8 +1615,7 @@ function mergeConfig(current, update) {
     "lobbyCreationEnabled",
     "testingMode",
     "integrityEnforced",
-    "achievementsEnabled",
-    "queueModsEnforced"
+    "achievementsEnabled"
   ];
   for (const flag of flags) {
     const value = update[flag];
@@ -2315,8 +2312,8 @@ var NotifyCode = {
   // {avatarIds, runId}: avatars just earned (runId null for one earned
   // outside a game). Persistent, so an offline player sees it at login.
   AVATAR_UNLOCKED: 107,
-  // {standing, disallowed, reason, enforced} (standing/rpc.ts): the mod
-  // allowlist or its enforcement changed, so the player's standing may have.
+  // {standing, disallowed, reason} (standing/rpc.ts): the mod allowlist
+  // changed, so the player's standing may have.
   STANDING_CHANGED: 108
 };
 var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
@@ -4323,7 +4320,7 @@ function rpcRunActive(ctx, logger, nk, payload) {
   if (!current) return JSON.stringify({});
   const signal2 = { type: "get_active", userId };
   const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal2)));
-  return JSON.stringify(active ? { active, standing: standingViewFor(nk, userId, Date.now()) } : {});
+  return JSON.stringify(active ? { active, standing: standingFor(nk, userId, Date.now()) } : {});
 }
 function rpcLobbyLeave(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -4400,7 +4397,7 @@ function rpcProfileSetMods(ctx, logger, nk, payload) {
   updateProfile(nk, userId, (current) => __spreadProps(__spreadValues({}, current), { mods: list }), ctx.username);
   const now = Date.now();
   writeModReport(nk, userId, { mods: list, reportedAt: now });
-  const standing = standingViewFor(nk, userId, now);
+  const standing = standingFor(nk, userId, now);
   pushToLobby(nk, userId, { mods: list, standing: standing.standing });
   return JSON.stringify({ mods: list, standing });
 }
@@ -4536,10 +4533,19 @@ function allowedModIds(config) {
   return out;
 }
 function standingInputsChanged(before, after) {
-  if (before.queueModsEnforced !== after.queueModsEnforced) return true;
   const a = allowedModIds(before);
   const b = allowedModIds(after);
   return a.length !== b.length || a.some((id) => b.indexOf(id) === -1);
+}
+function parseExtraSeed(value) {
+  if (value === void 0) return null;
+  const ids = value.split(/[\s,]+/).filter((id) => id !== "");
+  if (ids.length === 0) return null;
+  return modIdsOf(ids);
+}
+function seededExtra(current, seed) {
+  const missing = seed.filter((id, i) => current.indexOf(id) === -1 && seed.indexOf(id) === i);
+  return missing.length > 0 ? current.concat(missing) : null;
 }
 
 // src/standing/mod_report.ts
@@ -4568,7 +4574,6 @@ var VERIFIED = { standing: "verified", disallowed: [], reason: null };
 var VALID = { standing: "valid", disallowed: [], reason: null };
 function standingOf(input) {
   if (input.verified) return VERIFIED;
-  if (!input.enforced) return VALID;
   if (!input.report) return { standing: "none", disallowed: [], reason: "unreported" };
   const disallowed = disallowedMods(input.report.mods, input.allowedIds);
   if (disallowed.length > 0) return { standing: "none", disallowed, reason: "mods_not_allowed" };
@@ -4587,18 +4592,14 @@ function standingFor(nk, userId, now, config = readConfig(nk)) {
   return standingOf({
     verified: isVerified(readIntegrity(nk, userId), now),
     report: readModReport(nk, userId),
-    allowedIds: allowedModIds(config),
-    enforced: config.queueModsEnforced
+    allowedIds: allowedModIds(config)
   });
-}
-function standingViewFor(nk, userId, now, config = readConfig(nk)) {
-  return __spreadProps(__spreadValues({}, standingFor(nk, userId, now, config)), { enforced: config.queueModsEnforced });
 }
 
 // src/standing/rpc.ts
 function rpcAccountStanding(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  return JSON.stringify(standingViewFor(nk, userId, Date.now()));
+  return JSON.stringify(standingFor(nk, userId, Date.now()));
 }
 
 // src/achievements/rpc.ts
@@ -5307,7 +5308,7 @@ function announceStandings(nk, now) {
   let told = 0;
   for (const userId of reporterIds(nk)) {
     if (!isOnline(nk, userId)) continue;
-    const view = standingViewFor(nk, userId, now, config);
+    const view = standingFor(nk, userId, now, config);
     notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view));
     pushToLobby(nk, userId, { standing: view.standing });
     told++;
@@ -6082,7 +6083,7 @@ function parsePlacements(value, participants) {
     if (metric !== void 0 && metric !== null) {
       if (typeof metric !== "number" || !Number.isFinite(metric) || metric < 0)
         return null;
-      placement.metric = metric;
+      placement.metric = Math.round(metric);
     }
     seen[playerId] = true;
     placements.push(placement);
@@ -7987,6 +7988,22 @@ function rpcAdminRatingsSet(ctx, logger, nk, payload) {
   return JSON.stringify({ written: written.length, cleared: cleared.length });
 }
 
+// src/standing/seed.ts
+var EXTRA_SEED_ENV = "QUEUE_ALLOWED_MOD_IDS_EXTRA";
+function seedAllowedModIdsExtra(nk, logger, env) {
+  const raw = env[EXTRA_SEED_ENV];
+  const seed = parseExtraSeed(raw);
+  if (!seed) {
+    if (raw !== void 0 && raw.trim() !== "") logger.warn("%s ignored: not a list of mod ids", EXTRA_SEED_ENV);
+    return;
+  }
+  const config = readConfig(nk);
+  const extra = seededExtra(config.queueAllowedModIdsExtra, seed);
+  if (!extra) return;
+  writeConfig(nk, __spreadProps(__spreadValues({}, config), { queueAllowedModIdsExtra: extra }));
+  logger.info("Seeded queueAllowedModIdsExtra from %s: %v", EXTRA_SEED_ENV, JSON.stringify(extra));
+}
+
 // src/player/discord.ts
 var DISCORD_INDEX_COLLECTION = "discord_index";
 var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -8223,6 +8240,7 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
   configureSeason(ctx.env["RATING_SEASON"]);
+  seedAllowedModIdsExtra(nk, logger, ctx.env);
   initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom);
   initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom);
   initializer.registerBeforeLinkCustom(refuseCustomIdChange);
