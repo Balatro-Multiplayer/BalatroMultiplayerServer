@@ -21,6 +21,7 @@ import {
 	rpc,
 	sleep,
 	startGame,
+	startSession,
 	summary,
 } from './lib.mjs'
 
@@ -43,7 +44,7 @@ const stamp = Date.now().toString(36)
 async function player(name) {
 	const p = await deviceAuth(`ab_${stamp}_${name}`)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	await rpc(p.token, 'session_init', { steamName: p.username })
+	await startSession(p)
 	return p
 }
 

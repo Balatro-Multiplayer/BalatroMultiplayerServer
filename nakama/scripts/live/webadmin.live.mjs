@@ -20,6 +20,7 @@ import {
 	q,
 	rpc,
 	sleep,
+	startSession,
 	summary,
 	webJwt,
 } from './lib.mjs'
@@ -42,7 +43,7 @@ function pgId(nakamaUserId) {
 async function player(name) {
 	const p = await deviceAuth(name)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	await rpc(p.token, 'session_init', { steamName: p.username })
+	await startSession(p)
 	return p
 }
 

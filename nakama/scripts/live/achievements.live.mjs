@@ -16,7 +16,7 @@
 // Nakama: set AVATARS_LIVE_THROWAWAY=1 with BMP_NAKAMA_URL pointing at it.
 // Against the shared local stack only the read and per-player checks run.
 // Run: AVATARS_LIVE_THROWAWAY=1 BMP_NAKAMA_URL=http://127.0.0.1:27350 node nakama/scripts/live/achievements.live.mjs
-import { NAKAMA, admin, check, connect, deviceAuth, lobbyWith, rpc, sendLog, sleep, startGame, summary } from './lib.mjs'
+import { NAKAMA, admin, check, connect, deviceAuth, lobbyWith, rpc, sendLog, sleep, startGame, startSession, summary } from './lib.mjs'
 
 const THROWAWAY = process.env.AVATARS_LIVE_THROWAWAY === '1'
 const SHARED_STACK = /:7350\/?$/.test(NAKAMA)
@@ -27,7 +27,7 @@ const GAME_MS = 125_000
 async function player(name) {
 	const p = await deviceAuth(name)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	const init = await rpc(p.token, 'session_init', { steamName: p.username })
+	const init = await startSession(p)
 	if (!init.ok) throw new Error(`session_init ${name}: ${init.text}`)
 	p.init = init.body
 	return p

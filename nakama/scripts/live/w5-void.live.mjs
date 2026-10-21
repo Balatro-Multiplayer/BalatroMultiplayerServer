@@ -9,7 +9,7 @@
 //   3. PATCH /api/webadmin/forfeit-reconciliation/:id/void as a w5test admin:
 //      Express replays the scope with its own Elo and calls admin_ratings_set.
 // Run: BMP_TEST_PREFIX=w5test_ [W5_SEASON=2] node nakama/scripts/live/w5-void.live.mjs
-import { PREFIX, check, express, poll, psql, q, rpc, sleep, startGame, summary, webJwt } from './lib.mjs'
+import { PREFIX, check, express, poll, psql, q, rpc, sleep, startGame, startSession, summary, webJwt } from './lib.mjs'
 import { hostFirst, matchmake } from './mirror.live.mjs'
 import { MOD, MODE, nakamaBoard, pgBoard, player } from './w5-seed.live.mjs'
 
@@ -45,7 +45,7 @@ async function main() {
 	check('grace: dropped ranked player removed after ~120s', !!left, `${((Date.now() - t0) / 1000).toFixed(1)}s`)
 	const forfeitRow = psql('nakama', `select key, value::text from storage where collection='forfeits' and user_id=${q(other.userId)}`)
 	check('matchmade ranked: forfeits storage row written', forfeitRow.some((r) => r[0] === runId), JSON.stringify(forfeitRow))
-	await rpc(other.token, 'session_init', { steamName: other.username })
+	await startSession(other)
 	const since = host.socket.mark()
 	const r = await host.socket.ask('mpapi_report_result', {
 		placements: [

@@ -42,7 +42,7 @@ async function forfeitScenario() {
 	check('forfeit: stored for the dropped player', stored.some((r) => r[0] === runId), JSON.stringify(stored))
 
 	// Back within the window: session_init files the reconciliation entry.
-	await rpc(other.token, 'session_init', { steamName: other.username })
+	await startSession(other)
 	const gone = psql('nakama', `select count(*) from storage where collection='forfeits' and user_id=${q(other.userId)}`)[0][0]
 	check('forfeit: forgotten after the return', gone === '0', gone)
 

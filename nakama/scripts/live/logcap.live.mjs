@@ -8,7 +8,7 @@
 //  - the lobby still answers quickly near the cap (the log is copied per event)
 // Set LOGCAP_EVENTS to try a smaller number (no cap reached; the run then only
 // checks pacing and counts). Run: node nakama/scripts/live/logcap.live.mjs
-import { PREFIX, ServerOp, check, connect, deviceAuth, lobbyWith, rpc, sleep, startGame, summary } from './lib.mjs'
+import { PREFIX, ServerOp, check, connect, deviceAuth, lobbyWith, rpc, sleep, startGame, startSession, summary } from './lib.mjs'
 
 const CAP = 20_000
 const TOTAL = Number(process.env.LOGCAP_EVENTS || CAP + 60)
@@ -17,7 +17,7 @@ const PER_SECOND = 19 // the log budget refills 20/s (burst 200)
 async function player(name) {
 	const p = await deviceAuth(name)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	await rpc(p.token, 'session_init', { steamName: p.username })
+	await startSession(p)
 	p.socket = await connect(p)
 	return p
 }
