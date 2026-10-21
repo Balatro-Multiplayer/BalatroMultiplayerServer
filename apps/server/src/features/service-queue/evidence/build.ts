@@ -160,9 +160,16 @@ export type FlagExplanation =
 	| { reason: 'elapsed_time_gate'; text: string; hands: number; elapsedMs: number; minimumMs: number }
 	| { reason: 'unknown'; text: string }
 
+// A stored log event is the tuple [t, opcode, args] (Nakama match_logs); an
+// {opcode} object is accepted too.
+function opcodeOf(event: unknown): unknown {
+	if (Array.isArray(event)) return event[1]
+	return event && typeof event === 'object' ? (event as { opcode?: unknown }).opcode : undefined
+}
+
 export function handCount(events: readonly unknown[] | undefined): number {
 	if (!events) return 0
-	return events.filter((e) => !!e && typeof e === 'object' && (e as { opcode?: unknown }).opcode === HAND_OPCODE).length
+	return events.filter((e) => opcodeOf(e) === HAND_OPCODE).length
 }
 
 export function explainFlag(reason: string | null, hands: number, elapsedMs: number): FlagExplanation {

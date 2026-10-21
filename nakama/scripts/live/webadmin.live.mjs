@@ -174,7 +174,7 @@ async function main() {
 
 	// --- service queue ---
 	const sq = await express('GET', `${W}/service-queue?itemType=anti_cheat&limit=100`, { token: mod.token })
-	const ac = sq.ok ? sq.body.items.find((i) => i.sourceId === out.runA) : null
+	const ac = sq.ok ? sq.body.items.find((i) => i.sourceId.startsWith(`${out.runA}:`)) : null
 	check('service queue has the anti_cheat item for runA', !!ac, `${sq.status} ${sq.body && sq.body.total}`)
 	if (ac) {
 		const d = await express('GET', `${W}/service-queue/${ac.id}`, { token: mod.token })
@@ -182,7 +182,8 @@ async function main() {
 	}
 	const mc = await express('GET', `${W}/service-queue?itemType=match_conflict&limit=100`, { token: mod.token })
 	check('service queue has the match_conflict item', mc.ok && mc.body.items.some((i) => String(i.sourceId) === String(out.conflictId)))
-	check('service-queue/:id bad id: 400', (await express('GET', `${W}/service-queue/abc`, { token: mod.token })).status === 400)
+	// A malformed id names no item: 404 not_found, like an unknown one.
+	check('service-queue/:id bad id: 404', (await express('GET', `${W}/service-queue/abc`, { token: mod.token })).status === 404)
 
 	// --- match conflicts ---
 	const cl = await express('GET', `${W}/match-conflicts?limit=100`, { token: mod.token })

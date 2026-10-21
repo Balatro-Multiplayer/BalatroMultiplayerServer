@@ -473,12 +473,14 @@ async function antiCheatEvidence(item: ServiceQueueItemRecord) {
 	const nakamaLog = nakamaId && run ? run.logs[nakamaId] : undefined
 	const elapsedMs = run ? run.run.endedAt - run.run.startedAt : 0
 	const reason = log?.flagReason ?? (nakamaId && run ? (run.run.flags?.[nakamaId] ?? null) : null)
-	// The events are for counting hands only; the page reads the replay.
+	// The events are for counting hands only (counted before they're stripped,
+	// nakamaLog being one of run.logs); the page reads the replay.
+	const hands = handCount(nakamaLog?.events)
 	if (run) for (const userId in run.logs) delete run.logs[userId].events
 	return {
 		runId,
 		playerId,
-		flag: explainFlag(reason, handCount(nakamaLog?.events), elapsedMs),
+		flag: explainFlag(reason, hands, elapsedMs),
 		log: log ?? (nakamaLog ? { eventCount: nakamaLog.eventCount, carbonHash: nakamaLog.carbonHash, status: null, flagReason: reason } : null),
 		check: nakamaId && run ? (run.run.logChecks?.[nakamaId] ?? nakamaLog?.check ?? null) : null,
 		otherFlaggedPlayers: replay ? replay.logs.filter((l) => l.flagReason && l.playerId !== playerId).map((l) => l.playerId) : [],

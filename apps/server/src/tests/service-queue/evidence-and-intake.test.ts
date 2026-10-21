@@ -115,8 +115,9 @@ describe('results', () => {
 })
 
 describe('anti-cheat explanations', () => {
-	it('counts the scored hands in a log', () => {
+	it('counts the scored hands in a log, stored tuples or objects', () => {
 		expect(handCount([{ opcode: 'hand_result' }, { opcode: 'shop' }, { opcode: 'hand_result' }, null])).toBe(2)
+		expect(handCount([[1, 'start', {}], [2, 'hand_result', [100]], [3, 'hand_result', [200]]])).toBe(2)
 		expect(handCount(undefined)).toBe(0)
 	})
 
