@@ -12,6 +12,7 @@ describe('allowedModIds', () => {
 			'Balatro',
 			'Steamodded',
 			'Lovely',
+			'lovely-compat-BMM-Compat',
 			'MultiplayerAPI',
 			'ClaudeControl',
 		])

@@ -4524,7 +4524,7 @@ function rpcAdminQueueCancel(ctx, logger, nk, payload) {
 }
 
 // src/standing/allowed.ts
-var BASELINE_MOD_IDS = ["Balatro", "Steamodded", "Lovely"];
+var BASELINE_MOD_IDS = ["Balatro", "Steamodded", "Lovely", "lovely-compat-BMM-Compat"];
 function allowedModIds(config) {
   const out = [];
   for (const id of BASELINE_MOD_IDS.concat(config.queueAllowedModIds, config.queueAllowedModIdsExtra)) {

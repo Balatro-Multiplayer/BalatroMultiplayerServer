@@ -48,7 +48,7 @@ runtime:
   # they are added to queueAllowedModIdsExtra at every boot (standing/seed.ts).
   # A real server never sets it.
   env:
-    - "QUEUE_ALLOWED_MOD_IDS_EXTRA=MultiplayerPvP,ClaudeControl,lovely-compat-BMM-Compat"
+    - "QUEUE_ALLOWED_MOD_IDS_EXTRA=MultiplayerPvP,ClaudeControl"
 
 console:
   username: admin

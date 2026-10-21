@@ -2,8 +2,9 @@
 import { modIdsOf, type ServerConfig } from '../config'
 
 // The platform itself, allowed whatever is pinned: Steamodded's own pseudo
-// mods (SMODS.Mods.Balatro / .Lovely) and Steamodded.
-export const BASELINE_MOD_IDS: readonly string[] = ['Balatro', 'Steamodded', 'Lovely']
+// mods (SMODS.Mods.Balatro / .Lovely), Steamodded, and the Balatro Mod
+// Manager's lovely-only compatibility shim.
+export const BASELINE_MOD_IDS: readonly string[] = ['Balatro', 'Steamodded', 'Lovely', 'lovely-compat-BMM-Compat']
 
 // The baseline, the pinned mods' ids the API pushes, and the local-only
 // extra ids (test clients' dev mods), each once.
