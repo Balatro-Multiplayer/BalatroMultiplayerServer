@@ -98,6 +98,17 @@ export async function rpc(token, id, payload = {}) {
 	return { status: res.status, body: res.json, text: res.text, ok: res.status === 200 }
 }
 
+// A client's session start: session_init, then its mod report, as MPAPI does
+// on every CONNECTED. Matchmaking always needs a report of allowed mods
+// (standing/), so a test player that queues reports the platform baseline
+// only -- allowed whatever is pinned.
+export const BASELINE_REPORT = ['Steamodded-1.0.0~BETA-1814a', 'Lovely-0.9.0']
+export async function startSession(p, mods = BASELINE_REPORT) {
+	const init = await rpc(p.token, 'session_init', { steamName: p.username })
+	await rpc(p.token, 'profile_set_mods', { mods })
+	return init
+}
+
 // A server-only admin RPC with the http key (or another key, for refusal tests).
 export async function admin(id, payload = {}, key = HTTP_KEY) {
 	const body = typeof payload === 'string' ? payload : JSON.stringify(payload)

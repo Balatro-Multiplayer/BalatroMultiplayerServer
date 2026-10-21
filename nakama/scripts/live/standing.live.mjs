@@ -1,6 +1,9 @@
 // Live (valid standing): the mod report, the standing it gives, and where
-// matchmaking checks it (standing/, matchmaking/gate.ts, lobby/match.ts),
-// with queueModsEnforced switched ON for the run and restored after.
+// matchmaking checks it (standing/, matchmaking/gate.ts, lobby/match.ts).
+// The check is always on (there is no switch). The run empties
+// queueAllowedModIdsExtra and puts back the boot-seeded value after
+// (QUEUE_ALLOWED_MOD_IDS_EXTRA in nakama/local.yml: MultiplayerPvP and
+// ClaudeControl).
 //   1. Unreported -> none; a report of allowed mods -> valid; one with mods
 //      outside the allowlist -> none, naming them.
 //   2. Casual: valid may queue, none may not (the refusal names the mods).
@@ -16,6 +19,8 @@
 //   7. An allowlist change: STANDING_CHANGED (108) to online reporters, a
 //      queued group cancelled naming the refused member (op 112 idle), a
 //      queued solo told why (103 with code and mods).
+//   8. With the seeded Extra back, the stock dev client (PvP + ClaudeControl
+//      included) is valid and may queue casual.
 // The allowlist's pinned ids come from Express (mod_registry.smods_ids); the
 // run expects MultiplayerAPI and MultiplayerSPDRN among them, and uses Extra
 // for ClaudeControl.
@@ -33,6 +38,8 @@ const MATCH_MS = 12000
 const STOCK = ['Steamodded-1.0.0~BETA-1814a', 'Lovely-0.9.0', 'MultiplayerAPI-1.0.0', 'MultiplayerSPDRN-0.1.1']
 const CRYPTID = [...STOCK, 'Cryptid-0.5.3~dev']
 const WITH_CC = [...STOCK, 'ClaudeControl-1.0.0']
+const DEV_CLIENT = [...STOCK, 'MultiplayerPvP-0.1.0', 'ClaudeControl-1.0.0']
+const SEEDED_EXTRA = ['MultiplayerPvP', 'ClaudeControl']
 
 async function player(name) {
 	const p = await deviceAuth(name)
@@ -66,7 +73,8 @@ const partyJoin = (p, partyId) => p.socket.request({ party_join: { party_id: par
 async function standings(u) {
 	await rpc(u.token, 'session_init', { steamName: u.username })
 	const fresh = await standing(u)
-	check('unreported -> none (reason unreported)', fresh.standing === 'none' && fresh.reason === 'unreported' && fresh.enforced === true, JSON.stringify(fresh))
+	check('unreported -> none (reason unreported)', fresh.standing === 'none' && fresh.reason === 'unreported', JSON.stringify(fresh))
+	check('the standing reply has no enforced field (always on)', !('enforced' in fresh), JSON.stringify(fresh))
 	const allowed = await report(u, STOCK)
 	check(
 		'a report of allowed mods -> valid, in the profile_set_mods reply',
@@ -254,7 +262,7 @@ async function allowlistChange(h1, h2, s, o) {
 	const told = await Promise.all([h1, h2, s, o].map((p, i) => p.socket.waitFor(notification(108), 5000, marks[i])))
 	check(
 		'every online reporter hears STANDING_CHANGED (108) with the new standing',
-		told.every((n) => n && n.content.standing === 'none' && JSON.stringify(n.content.disallowed) === '["ClaudeControl"]' && n.content.enforced === true),
+		told.every((n) => n && n.content.standing === 'none' && JSON.stringify(n.content.disallowed) === '["ClaudeControl"]' && !('enforced' in n.content)),
 		JSON.stringify(told.map((n) => n && n.content)),
 	)
 	const idle = await h1.socket.waitFor(groupOp((d) => d.phase === 'idle'), 5000, marks[0])
@@ -276,18 +284,34 @@ async function allowlistChange(h1, h2, s, o) {
 	for (const p of [h1, h2]) p.socket.sendOp(ClientOp.LEAVE, {}, lobby.matchId)
 }
 
+async function devClient(d) {
+	const reply = await report(d, DEV_CLIENT)
+	check('the stock dev client is valid under the seeded Extra', reply.ok && reply.body.standing.standing === 'valid', reply.text)
+	const t = await soloAdd(d, 4, MODE + 'd')
+	check('the stock dev client may queue casual', !!ticketOf(t), JSON.stringify(t))
+	if (ticketOf(t)) await removeTicket(d, t)
+}
+
 async function main() {
 	const before = serverConfig()
+	const baselineExtra = before.queueAllowedModIdsExtra || []
+	check(
+		'Extra holds the boot seed (MultiplayerPvP, ClaudeControl)',
+		SEEDED_EXTRA.every((id) => baselineExtra.includes(id)),
+		JSON.stringify(baselineExtra),
+	)
+	check('the config has no queueModsEnforced switch', !('queueModsEnforced' in before), JSON.stringify(Object.keys(before)))
 	const pinned = before.queueAllowedModIds || []
 	check(
 		'Express pushed the pinned SMODS ids (MultiplayerAPI, MultiplayerSPDRN)',
 		pinned.includes('MultiplayerAPI') && pinned.includes('MultiplayerSPDRN'),
 		JSON.stringify(pinned),
 	)
-	const names = ['u', 'v', 'n', 'x', 'y', 'g1', 'g2', 'g3', 'r1', 'r2', 'h1', 'h2', 's', 'o']
+	const names = ['u', 'v', 'n', 'x', 'y', 'g1', 'g2', 'g3', 'r1', 'r2', 'h1', 'h2', 's', 'o', 'd']
 	const players = await Promise.all(names.map((n) => player('st_' + n)))
-	const [u, v, n, x, y, g1, g2, g3, r1, r2, h1, h2, s, o] = players
-	await config({ queueModsEnforced: true, queueAllowedModIdsExtra: [] })
+	const [u, v, n, x, y, g1, g2, g3, r1, r2, h1, h2, s, o, d] = players
+	restoreExtra = baselineExtra
+	await config({ queueAllowedModIdsExtra: [] })
 	try {
 		await standings(u)
 		await casual(v, n, u)
@@ -297,16 +321,27 @@ async function main() {
 		await rejoin(r1, r2)
 		await allowlistChange(h1, h2, s, o)
 	} finally {
-		await config({ queueModsEnforced: false, queueAllowedModIdsExtra: [], integrityEnforced: false })
+		await config({ queueAllowedModIdsExtra: baselineExtra, integrityEnforced: false })
+	}
+	try {
+		await devClient(d)
+	} finally {
 		for (const p of players) p.socket.close()
 	}
 	const after = serverConfig()
-	check('config restored (enforcement off, Extra empty)', after.queueModsEnforced === false && after.queueAllowedModIdsExtra.length === 0)
+	check(
+		'config restored (Extra back to the seed, integrity off)',
+		JSON.stringify(after.queueAllowedModIdsExtra) === JSON.stringify(baselineExtra) && after.integrityEnforced === false,
+		JSON.stringify(after.queueAllowedModIdsExtra),
+	)
 	process.exit(summary('standing') === 0 ? 0 : 1)
 }
 
+// The Extra to put back if the run dies part-way (set once it is known).
+let restoreExtra = null
+
 main().catch(async (e) => {
 	console.error(e)
-	await config({ queueModsEnforced: false, queueAllowedModIdsExtra: [], integrityEnforced: false })
+	await config({ integrityEnforced: false, ...(restoreExtra ? { queueAllowedModIdsExtra: restoreExtra } : {}) })
 	process.exit(2)
 })

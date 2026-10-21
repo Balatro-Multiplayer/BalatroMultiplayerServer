@@ -6,7 +6,7 @@
 // so a, b, c, d are all past their 5 placement games. Prints the Nakama and
 // Postgres view of the board at the end.
 // Run: BMP_TEST_PREFIX=w5test_ node nakama/scripts/live/w5-seed.live.mjs
-import { PREFIX, check, connect, deviceAuth, poll, psql, q, rpc, sendLog, sleep, startGame, summary } from './lib.mjs'
+import { PREFIX, check, connect, deviceAuth, poll, psql, q, rpc, sendLog, sleep, startGame, startSession, summary } from './lib.mjs'
 import { hostFirst, matchmake } from './mirror.live.mjs'
 
 export const MOD = PREFIX + 'mod'
@@ -15,7 +15,7 @@ export const MODE = PREFIX + 'rk'
 export async function player(name) {
 	const p = await deviceAuth(name)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	await rpc(p.token, 'session_init', { steamName: p.username })
+	await startSession(p)
 	p.socket = await connect(p)
 	return p
 }

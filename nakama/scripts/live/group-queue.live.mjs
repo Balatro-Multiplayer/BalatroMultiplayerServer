@@ -11,7 +11,7 @@
 // Casual tickets on the test mod: no rating board, no ranked gate.
 // Run: BMP_TEST_PREFIX=gqtest_ node nakama/scripts/live/group-queue.live.mjs
 // Clean up: BMP_TEST_PREFIX=gqtest_ node nakama/scripts/live/cleanup.live.mjs
-import { ClientOp, PREFIX, ServerOp, check, connect, deviceAuth, lobbyWith, rpc, sleep, summary } from './lib.mjs'
+import { ClientOp, PREFIX, ServerOp, check, connect, deviceAuth, lobbyWith, rpc, sleep, startSession, summary } from './lib.mjs'
 
 const MOD = PREFIX + 'mod'
 // A fresh mode per run, so leftovers of an aborted run can't match.
@@ -22,7 +22,7 @@ const MATCH_MS = 12000
 async function player(name) {
 	const p = await deviceAuth(name)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	await rpc(p.token, 'session_init', { steamName: p.username })
+	await startSession(p)
 	p.socket = await connect(p)
 	return p
 }

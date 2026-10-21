@@ -6,7 +6,7 @@
 //  - Partial: in a private game one player reports and the other never does;
 //    the 60s result clock ends it as partial.
 // Run: node nakama/scripts/live/lobby-edge.live.mjs
-import { PREFIX, ServerOp, check, connect, deviceAuth, lobbyWith, poll, psql, q, rpc, sleep, startGame, summary } from './lib.mjs'
+import { PREFIX, ServerOp, check, connect, deviceAuth, lobbyWith, poll, psql, q, rpc, sleep, startGame, startSession, summary } from './lib.mjs'
 import { hostFirst, matchmake } from './mirror.live.mjs'
 
 const stamp = Date.now().toString(36)
@@ -14,7 +14,7 @@ const stamp = Date.now().toString(36)
 async function player(name) {
 	const p = await deviceAuth(`le_${stamp}_${name}`)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
-	await rpc(p.token, 'session_init', { steamName: p.username })
+	await startSession(p)
 	p.socket = await connect(p)
 	return p
 }
