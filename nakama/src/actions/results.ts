@@ -42,7 +42,8 @@ export function parsePlacements(
 		if (metric !== undefined && metric !== null) {
 			if (typeof metric !== 'number' || !Number.isFinite(metric) || metric < 0)
 				return null
-			placement.metric = metric
+			// Whole units: the season-best mirror stores it as a bigint.
+			placement.metric = Math.round(metric)
 		}
 		seen[playerId] = true
 		placements.push(placement)

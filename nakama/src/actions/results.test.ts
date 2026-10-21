@@ -139,6 +139,16 @@ describe('reporting results', () => {
 		expect(rejection(report(joined, 'a', places('a')))).toBe('not_in_game')
 	})
 
+	it('rounds a fractional metric to whole units', () => {
+		const lobby = started('a', 'b')
+		const fractional = [
+			{ playerId: 'a', place: 1, metric: 95281.663 },
+			{ playerId: 'b', place: 2, metric: 0.4 },
+		]
+		const run = saved(report(report(lobby, 'a', fractional).lobby, 'b', fractional, 2500))?.run as RunRecord
+		expect(run.placements.map((p) => p.metric)).toEqual([95282, 0])
+	})
+
 	it('refuses a report from a player who sat the game out', () => {
 		// c was away when the game started, so isn't a participant.
 		let lobby = newLobby({
