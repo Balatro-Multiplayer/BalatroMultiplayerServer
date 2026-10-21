@@ -48,27 +48,34 @@ const sends = (step: Step, op: number) => step.out.filter((o): o is Send => o.ki
 
 describe('spectateRejection', () => {
 	it('lets anyone watch a public (matchmade) lobby, playing or not', () => {
-		expect(spectateRejection(lobbyWith(['a', 'b'], true), 'z')).toBeNull()
-		expect(spectateRejection(started(lobbyWith(['a', 'b'], true)), 'z')).toBeNull()
+		expect(spectateRejection(lobbyWith(['a', 'b'], true), 'z', '')).toBeNull()
+		expect(spectateRejection(started(lobbyWith(['a', 'b'], true)), 'z', '')).toBeNull()
 	})
 
 	it('only lets a private lobby be watched once its host made it spectatable', () => {
 		const lobby = lobbyWith(['a', 'b'])
-		expect(spectateRejection(lobby, 'z')).toBe('This lobby is not spectatable')
+		expect(spectateRejection(lobby, 'z', '')).toBe('This lobby is not spectatable')
 		const open = { ...lobby, metadata: { spectatable: true } }
-		expect(spectateRejection(open, 'z')).toBeNull()
+		expect(spectateRejection(open, 'z', '')).toBeNull()
 	})
 
 	it('refuses kicked players, seated players, a closed lobby and a full gallery', () => {
 		let lobby = lobbyWith(['a', 'b', 'c'], true)
 		lobby = kick(lobby, 'a', 'c').lobby
-		expect(spectateRejection(lobby, 'c')).toBe('You have been kicked from this lobby')
-		expect(spectateRejection(lobby, 'b')).toBe('You are playing in this lobby')
-		expect(spectateRejection(close(lobby).lobby, 'z')).toBe('Lobby is closed')
+		expect(spectateRejection(lobby, 'c', '')).toBe('You have been kicked from this lobby')
+		expect(spectateRejection(lobby, 'b', '')).toBe('You are playing in this lobby')
+		expect(spectateRejection(close(lobby).lobby, 'z', '')).toBe('Lobby is closed')
 		const full = { ...lobby, spectators: Array.from({ length: MAX_SPECTATORS }, (_, i) => `s${i}`) }
-		expect(spectateRejection(full, 'z')).toBe('This lobby has too many spectators')
+		expect(spectateRejection(full, 'z', '')).toBe('This lobby has too many spectators')
 		// Someone already watching (reconnecting) is let back in.
-		expect(spectateRejection(full, 's3')).toBeNull()
+		expect(spectateRejection(full, 's3', '')).toBeNull()
+	})
+
+	it('refuses a spectator from another mod, but not one that names no mod', () => {
+		const lobby = started(lobbyWith(['a', 'b'], true))
+		expect(spectateRejection(lobby, 'z', 'MultiplayerSPDRN')).toBe('Lobby is for a different mod')
+		expect(spectateRejection(lobby, 'z', 'MultiplayerPvP')).toBeNull()
+		expect(spectateRejection(lobby, 'z', '')).toBeNull()
 	})
 
 	it('keeps a spectator out of a seat', () => {

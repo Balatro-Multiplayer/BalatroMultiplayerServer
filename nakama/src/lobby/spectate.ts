@@ -10,7 +10,7 @@ import {
 	type SpectatorManifest,
 	type SpectatorSnapshotEntry,
 } from './protocol'
-import { type Lobby, type Outbound, type Step, findPlayer, isSpectatable } from './state'
+import { DIFFERENT_MOD, type Lobby, type Outbound, type Step, findPlayer, isSpectatable } from './state'
 
 export const MAX_SPECTATORS = 16
 export const SPECTATOR_ROLE = 'spectator'
@@ -24,9 +24,11 @@ export function isSpectator(lobby: Lobby, userId: string): boolean {
 }
 
 // Why userId may not watch, or null. Watching again (after a reconnect) is
-// always let back in while the lobby lasts.
-export function spectateRejection(lobby: Lobby, userId: string): string | null {
+// always let back in while the lobby lasts. modId is the watching mod's, ''
+// when the client doesn't say (clients before the mod check).
+export function spectateRejection(lobby: Lobby, userId: string, modId: string): string | null {
 	if (lobby.closed) return 'Lobby is closed'
+	if (modId !== '' && modId !== lobby.modId) return DIFFERENT_MOD
 	if (isSpectator(lobby, userId)) return null
 	if (lobby.kickedIds.indexOf(userId) !== -1) return 'You have been kicked from this lobby'
 	if (!isSpectatable(lobby)) return 'This lobby is not spectatable'

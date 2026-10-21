@@ -495,7 +495,7 @@ export function lobbyMatchJoinAttempt(
 		return { state, accept: false, rejectMessage: 'No such account' }
 	}
 	if (meta.role === SPECTATOR_ROLE) {
-		const refused = spectateRejection(state.lobby, presence.userId)
+		const refused = spectateRejection(state.lobby, presence.userId, meta.modId || '')
 		if (refused) return { state, accept: false, rejectMessage: refused }
 		const pending = (state.pendingSpectators || []).filter((id) => id !== presence.userId)
 		return {

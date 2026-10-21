@@ -3,6 +3,7 @@
 import { standingFor } from '../standing/current'
 import {
 	ALREADY_EXISTS,
+	FAILED_PRECONDITION,
 	INVALID_ARGUMENT,
 	NOT_FOUND,
 	PERMISSION_DENIED,
@@ -25,7 +26,7 @@ import {
 import { resumeLobby } from './checkpoint'
 import { spendLobbyCreate } from './create_limit'
 import { noteReturn } from './forfeits'
-import { MAX_PLAYERS, MIN_PLAYERS } from './state'
+import { DIFFERENT_MOD, MAX_PLAYERS, MIN_PLAYERS } from './state'
 import { spectatableLobbies } from './spectate'
 
 // Same alphabet as the API's generateLobbyCode (no I or O), and the same
@@ -185,14 +186,35 @@ export function rpcLobbyFind(
 	if (!CODE_PATTERN.test(code))
 		throw runtimeError(INVALID_ARGUMENT, 'Invalid lobby code')
 
+	const askedModId = optionalModId(input.modId)
+	const found = findByCode(nk, logger, code)
+	if (askedModId !== null && askedModId !== found.modId)
+		throw runtimeError(FAILED_PRECONDITION, DIFFERENT_MOD)
+	return JSON.stringify({ matchId: found.matchId, code, modId: found.modId })
+}
+
+// lobby_find's {modId}: null when the caller doesn't say (clients before the
+// mod check), else the mod the lobby must be for.
+function optionalModId(modId: unknown): string | null {
+	if (modId === undefined || modId === null || modId === '') return null
+	if (typeof modId !== 'string' || !MOD_ID_PATTERN.test(modId))
+		throw runtimeError(INVALID_ARGUMENT, 'Invalid modId')
+	return modId
+}
+
+function findByCode(
+	nk: nkruntime.Nakama,
+	logger: nkruntime.Logger,
+	code: string,
+): { matchId: string; modId: string } {
 	const entry = lookupCode(nk, code)
-	if (entry) return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId })
+	if (entry) return { matchId: entry.matchId, modId: entry.modId }
 	// A lobby stopped by a server restart comes back under its code.
 	const resumed = resumeLobby(nk, logger, code, Date.now())
 	if (resumed.kind === 'resuming')
 		throw runtimeError(UNAVAILABLE, 'The lobby is resuming, try again')
 	if (resumed.kind === 'none') throw runtimeError(NOT_FOUND, 'Lobby not found')
-	return JSON.stringify({ matchId: resumed.matchId, code, modId: resumed.modId })
+	return { matchId: resumed.matchId, modId: resumed.modId }
 }
 
 const SPECTATE_LIST_LIMIT = 100
