@@ -22,7 +22,7 @@ import { deleteBinding, dissolveParty, signalHome, writeBinding } from '../match
 import { clearMatched } from '../matchmaking/queue'
 import { hasPlayerAnswer, releaseGroups } from './group_queue'
 import { answerGroupSignal, isGroupSignal } from './group_signals'
-import { action } from './relay'
+import { type RelayStep, action } from './relay'
 import {
 	DEFAULT_GRACE_MS,
 	DEFAULT_RESULT_TIMEOUT_MS,
@@ -641,7 +641,7 @@ function stepForMessage(
 	senderId: string,
 	opCode: number,
 	data: { [key: string]: unknown },
-): Step | null {
+): RelayStep | null {
 	switch (opCode) {
 		case ClientOp.ACTION:
 			return action(lobby, senderId, data, {
@@ -710,6 +710,18 @@ export function lobbyMatchLoop(
 				message.sender.userId,
 			)
 			continue
+		}
+		if (step.dropped) {
+			const d = step.dropped
+			logger.warn(
+				'Lobby %s: dropped %s from %s (%s; host %s%s)',
+				current.lobby.code,
+				d.key,
+				d.from,
+				d.kind,
+				d.hostId,
+				d.kind === 'not_self' ? `; claimed ${d.claimed}` : '',
+			)
 		}
 		current = apply(ctx, logger, nk, dispatcher, current, step)
 	}
