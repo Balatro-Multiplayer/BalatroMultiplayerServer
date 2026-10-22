@@ -320,7 +320,7 @@ export function detectContactExchange(normalizedText: string): SafetyMatch[] {
 	const matches: SafetyMatch[] = []
 
 	// Contact exchange (sharing a Discord/handle/number) is `orange` = route to
-	// review, not `red` = hard-block (policy 2026-07-09): in a co-op game this is
+	// review, not `red` = hard-block (policy 2026-07-09): in a multiplayer game this is
 	// mostly players finding teammates, and the corpus showed it was the single
 	// biggest source of false-positive friction (0.45% of all traffic). Orange
 	// still publishes + flags for human audit, and the guard downstream can still

@@ -65,7 +65,7 @@ export type SpdrnMode = (typeof SPDRN_MODES)[number]
 // Sets a player completes by playing at least one game of each member.
 export type Collection = 'vanillaDecks' | 'spdrnModes'
 
-export type ReservedFor = 'coop' | 'practice'
+export type ReservedFor = 'future' | 'practice'
 
 export type UnlockRule =
 	| { kind: 'default' }

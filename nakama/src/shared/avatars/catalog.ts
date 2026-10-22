@@ -80,10 +80,10 @@ const SHEET: Sheet = {
 	j_golden: { rule: { kind: 'deckGames', deck: 'b_yellow', threshold: 3 } },
 	j_smeared: counter('suitChangers', 100),
 
-	j_troubadour: { rule: { kind: 'reserved', reservedFor: 'coop' } },
-	j_blueprint: { rule: { kind: 'reserved', reservedFor: 'coop' } },
-	j_merry_andy: { rule: { kind: 'reserved', reservedFor: 'coop' } },
-	j_brainstorm: { rule: { kind: 'reserved', reservedFor: 'coop' } },
+	j_troubadour: { rule: { kind: 'reserved', reservedFor: 'future' } },
+	j_blueprint: { rule: { kind: 'reserved', reservedFor: 'future' } },
+	j_merry_andy: { rule: { kind: 'reserved', reservedFor: 'future' } },
+	j_brainstorm: { rule: { kind: 'reserved', reservedFor: 'future' } },
 	j_abstract: { rule: { kind: 'reserved', reservedFor: 'practice' } },
 
 	j_turtle_bean: privilege('bean'),
