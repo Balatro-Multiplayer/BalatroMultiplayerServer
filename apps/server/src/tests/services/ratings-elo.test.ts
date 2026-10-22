@@ -3,7 +3,7 @@ import {
 	INITIAL_HIDDEN_RATING,
 	K_ESTABLISHED,
 	PLACEMENT_GAMES,
-	RATING_FLOOR,
+	DECAY_FLOOR,
 	compute1v1,
 	computeFFA,
 	computeRatingDeltas,
@@ -600,16 +600,20 @@ describe('season carry-over and decay (Nakama parity)', () => {
 		expect(applySoftReset(3000)).toBe(1200)
 	})
 
-	it('decays past 7 idle days by 5 per further whole day, to the floor', () => {
+	it('decays past 7 idle days by 5 per further whole day, down to 1200', () => {
 		expect(
 			decayedRating(
-				{ rating: 845, gamesPlayed: 6, lastMatchAt: ago(20.5) },
+				{ rating: 1645, gamesPlayed: 6, lastMatchAt: ago(20.5) },
 				at,
 			),
-		).toBe(780)
+		).toBe(1580)
 		expect(
-			decayedRating({ rating: 355, gamesPlayed: 6, lastMatchAt: ago(200) }, at),
-		).toBe(RATING_FLOOR)
+			decayedRating({ rating: 1300, gamesPlayed: 6, lastMatchAt: ago(200) }, at),
+		).toBe(DECAY_FLOOR)
+		// At or below 1200 a rating never decays.
+		expect(
+			decayedRating({ rating: 845, gamesPlayed: 6, lastMatchAt: ago(200) }, at),
+		).toBe(845)
 		expect(
 			decayedRating({ rating: 845, gamesPlayed: 6, lastMatchAt: ago(7) }, at),
 		).toBe(845)
@@ -631,10 +635,10 @@ describe('season carry-over and decay (Nakama parity)', () => {
 		).toBe(679)
 		expect(
 			seasonStartRating(
-				{ rating: 845, gamesPlayed: 6, lastMatchAt: ago(20.5) },
+				{ rating: 1645, gamesPlayed: 6, lastMatchAt: ago(20.5) },
 				at,
 			),
-		).toBe(applySoftReset(780))
+		).toBe(applySoftReset(1580))
 		// Never finished placement, or never played: the initial rating.
 		expect(
 			seasonStartRating(

@@ -13,6 +13,8 @@ export const RATING_FLOOR = 100
 export const ELO_SCALE = 1000
 export const DECAY_INACTIVE_THRESHOLD_DAYS = 7
 export const DECAY_RATE_PER_DAY = 5
+// Ratings at or below this never decay, and decay stops here.
+export const DECAY_FLOOR = 1200
 
 // A season's soft reset pulls a rating halfway back to the initial one, capped
 // (nakama/src/rating/elo.ts applySoftReset).
@@ -27,7 +29,7 @@ export function applySoftReset(rating: number): number {
 }
 
 // A rating as Nakama reads it at `at`: past the inactivity threshold it loses
-// DECAY_RATE_PER_DAY per further whole day, down to the floor. Players still in
+// DECAY_RATE_PER_DAY per further whole day, down to DECAY_FLOOR. Players still in
 // placement don't decay (nakama/src/rating/season.ts decayedRating).
 export function decayedRating(
 	record: { rating: number; gamesPlayed: number; lastMatchAt: Date | null },
@@ -35,12 +37,13 @@ export function decayedRating(
 ): number {
 	if (record.gamesPlayed < PLACEMENT_GAMES || !record.lastMatchAt)
 		return record.rating
+	if (record.rating <= DECAY_FLOOR) return record.rating
 	const inactiveDays = (at.getTime() - record.lastMatchAt.getTime()) / DAY_MS
 	if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating
 	const loss =
 		Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) *
 		DECAY_RATE_PER_DAY
-	return Math.max(RATING_FLOOR, record.rating - loss)
+	return Math.max(DECAY_FLOOR, record.rating - loss)
 }
 
 // A player's first rating in a season: the previous season's rating, decayed

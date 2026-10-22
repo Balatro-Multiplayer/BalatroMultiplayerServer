@@ -1935,10 +1935,10 @@ var SHEET = {
   j_green_joker: { rule: { kind: "deckGames", deck: "b_green", threshold: 3 } },
   j_golden: { rule: { kind: "deckGames", deck: "b_yellow", threshold: 3 } },
   j_smeared: counter("suitChangers", 100),
-  j_troubadour: { rule: { kind: "reserved", reservedFor: "coop" } },
-  j_blueprint: { rule: { kind: "reserved", reservedFor: "coop" } },
-  j_merry_andy: { rule: { kind: "reserved", reservedFor: "coop" } },
-  j_brainstorm: { rule: { kind: "reserved", reservedFor: "coop" } },
+  j_troubadour: { rule: { kind: "reserved", reservedFor: "future" } },
+  j_blueprint: { rule: { kind: "reserved", reservedFor: "future" } },
+  j_merry_andy: { rule: { kind: "reserved", reservedFor: "future" } },
+  j_brainstorm: { rule: { kind: "reserved", reservedFor: "future" } },
   j_abstract: { rule: { kind: "reserved", reservedFor: "practice" } },
   j_turtle_bean: privilege("bean"),
   j_vagabond: privilege("vagabond"),
@@ -6070,6 +6070,7 @@ function nextSeasonBest(modId, reported, current) {
 // src/rating/season.ts
 var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
 var DECAY_RATE_PER_DAY = 5;
+var DECAY_FLOOR = 1200;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 var bootSeason = 1;
 function currentSeason(nk) {
@@ -6082,10 +6083,11 @@ function configureSeason(value) {
 }
 function decayedRating(record, now) {
   if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
+  if (record.rating <= DECAY_FLOOR) return record.rating;
   const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
   if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
   const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
-  return Math.max(RATING_FLOOR, record.rating - loss);
+  return Math.max(DECAY_FLOOR, record.rating - loss);
 }
 function carriedOver(previous, now) {
   if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;

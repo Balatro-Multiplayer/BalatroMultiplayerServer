@@ -10,33 +10,35 @@ const rec = (ownerId: string, score: number, wins: number, rank: number) =>
 describe('boardEntries', () => {
 	it('shows each rating decayed, as rating_get and the website do', () => {
 		const entries = boardEntries(
-			[rec('c', 845, 6, 1), rec('d', 355, 0, 2)],
+			[rec('c', 1645, 6, 1), rec('d', 1300, 0, 2), rec('e', 900, 0, 3)],
 			{
-				c: { rating: 845, gamesPlayed: 6, lastMatchAt: NOW - 20.5 * DAY },
-				d: { rating: 355, gamesPlayed: 6, lastMatchAt: NOW - 200 * DAY },
+				c: { rating: 1645, gamesPlayed: 6, lastMatchAt: NOW - 20.5 * DAY },
+				d: { rating: 1300, gamesPlayed: 6, lastMatchAt: NOW - 200 * DAY },
+				e: { rating: 900, gamesPlayed: 6, lastMatchAt: NOW - 200 * DAY },
 			},
 			NOW,
 		)
 		expect(entries.map((e) => [e.playerId, e.rating, e.rank])).toEqual([
-			['c', 780, 1],
-			['d', 100, 2],
+			['c', 1580, 1],
+			['d', 1200, 2],
+			['e', 900, 3],
 		])
 	})
 
 	it('re-ranks the page by the decayed rating, then wins', () => {
 		const entries = boardEntries(
-			[rec('idle', 900, 9, 11), rec('active', 850, 3, 12), rec('tied', 850, 5, 13)],
+			[rec('idle', 1700, 9, 11), rec('active', 1650, 3, 12), rec('tied', 1650, 5, 13)],
 			{
-				idle: { rating: 900, gamesPlayed: 9, lastMatchAt: NOW - 30 * DAY },
-				active: { rating: 850, gamesPlayed: 6, lastMatchAt: NOW - DAY },
-				tied: { rating: 850, gamesPlayed: 6, lastMatchAt: NOW - DAY },
+				idle: { rating: 1700, gamesPlayed: 9, lastMatchAt: NOW - 30 * DAY },
+				active: { rating: 1650, gamesPlayed: 6, lastMatchAt: NOW - DAY },
+				tied: { rating: 1650, gamesPlayed: 6, lastMatchAt: NOW - DAY },
 			},
 			NOW,
 		)
 		expect(entries.map((e) => [e.rank, e.playerId, e.rating])).toEqual([
-			[11, 'tied', 850],
-			[12, 'active', 850],
-			[13, 'idle', 785],
+			[11, 'tied', 1650],
+			[12, 'active', 1650],
+			[13, 'idle', 1585],
 		])
 	})
 

@@ -10,10 +10,10 @@ import {
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import {
+	DECAY_FLOOR,
 	DECAY_INACTIVE_THRESHOLD_DAYS,
 	DECAY_RATE_PER_DAY,
 	PLACEMENT_GAMES,
-	RATING_FLOOR,
 } from '../ratings/elo.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 import { stakePopularity } from './stake-popularity.js'
@@ -26,8 +26,9 @@ const router = Router()
 // Every query below reads matchmaking_ratings as `r`.
 const effectiveRating = sql.raw(`CASE
 	WHEN r.games_played >= ${PLACEMENT_GAMES}
+	 AND r.rating > ${DECAY_FLOOR}
 	 AND r.last_match_at < now() - interval '${DECAY_INACTIVE_THRESHOLD_DAYS} days'
-	THEN GREATEST(${RATING_FLOOR}, r.rating - floor(extract(epoch FROM now() - r.last_match_at) / 86400 - ${DECAY_INACTIVE_THRESHOLD_DAYS})::int * ${DECAY_RATE_PER_DAY})
+	THEN GREATEST(${DECAY_FLOOR}, r.rating - floor(extract(epoch FROM now() - r.last_match_at) / 86400 - ${DECAY_INACTIVE_THRESHOLD_DAYS})::int * ${DECAY_RATE_PER_DAY})
 	ELSE r.rating END`)
 
 // Legacy match total from the old www system (Seasons 1–6).

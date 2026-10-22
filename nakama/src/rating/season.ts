@@ -3,10 +3,12 @@
 // previous one the first time it is read, and decay is computed from
 // lastMatchAt whenever a rating is read (and stored with the player's next game).
 import { readConfig } from '../config'
-import { applySoftReset, PLACEMENT_GAMES, RATING_FLOOR } from './elo'
+import { applySoftReset, PLACEMENT_GAMES } from './elo'
 
 export const DECAY_INACTIVE_THRESHOLD_DAYS = 7
 export const DECAY_RATE_PER_DAY = 5
+// Ratings at or below this never decay, and decay stops here.
+export const DECAY_FLOOR = 1200
 const DAY_MS = 24 * 60 * 60 * 1000
 
 let bootSeason = 1
@@ -32,13 +34,14 @@ export interface Rated {
 }
 
 // Inactive for more than a week costs 5 points per further whole day, down to
-// the floor. Still-placing players and players who never played don't decay.
+// DECAY_FLOOR. Still-placing players and players who never played don't decay.
 export function decayedRating(record: Rated, now: number): number {
 	if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating
+	if (record.rating <= DECAY_FLOOR) return record.rating
 	const inactiveDays = (now - record.lastMatchAt) / DAY_MS
 	if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating
 	const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY
-	return Math.max(RATING_FLOOR, record.rating - loss)
+	return Math.max(DECAY_FLOOR, record.rating - loss)
 }
 
 // A player's first record in a new season: their old rating soft-reset, with

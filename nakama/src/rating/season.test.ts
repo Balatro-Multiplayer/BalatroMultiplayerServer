@@ -16,11 +16,15 @@ describe('decayedRating', () => {
 		expect(decayedRating(played(1000, 7), NOW)).toBe(1000)
 	})
 	it('takes 5 per whole day past the week', () => {
-		expect(decayedRating(played(1000, 10), NOW)).toBe(985)
-		expect(decayedRating(played(1000, 10.9), NOW)).toBe(985)
+		expect(decayedRating(played(1500, 10), NOW)).toBe(1485)
+		expect(decayedRating(played(1500, 10.9), NOW)).toBe(1485)
 	})
-	it('stops at the floor', () => {
-		expect(decayedRating(played(150, 100), NOW)).toBe(100)
+	it('stops at 1200', () => {
+		expect(decayedRating(played(1250, 100), NOW)).toBe(1200)
+	})
+	it('never decays a rating at or below 1200', () => {
+		expect(decayedRating(played(1200, 100), NOW)).toBe(1200)
+		expect(decayedRating(played(150, 100), NOW)).toBe(150)
 	})
 	it('spares players still placing or who never played', () => {
 		expect(decayedRating(played(1000, 30, 3), NOW)).toBe(1000)
@@ -34,7 +38,7 @@ describe('carriedOver', () => {
 		expect(carriedOver(played(2600, 0), NOW)).toBe(1200)
 	})
 	it('applies decay before the reset', () => {
-		expect(carriedOver(played(1000, 17), NOW)).toBe(775)
+		expect(carriedOver(played(1500, 17), NOW)).toBe(1025)
 	})
 	it('carries nothing from a placement-only or missing record', () => {
 		expect(carriedOver(played(900, 0, 4), NOW)).toBeUndefined()
