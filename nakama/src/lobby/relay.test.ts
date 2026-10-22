@@ -88,7 +88,8 @@ describe('relayed actions', () => {
 			action: 'spdrn_player_won',
 			from: 'a',
 			to: '*',
-			params: {},
+			// Its own win: spdrn_player_won is self-or-host (sender_guard.ts).
+			params: { player_id: 'b' },
 		})
 		expect((delivered(step)[0].payload as { from: string }).from).toBe('b')
 	})

@@ -3,7 +3,8 @@
 //
 // The server stamps `from` with the sender rather than trusting the payload's,
 // so a player can't pose as another, and only the server can send an
-// authoritative action's result.
+// authoritative action's result. A match-deciding action from a sender its
+// rule doesn't allow (sender_guard.ts) is dropped, and the step says so.
 import {
 	type ActionContext,
 	LOG_EVENT_KEY,
@@ -18,6 +19,7 @@ import {
 	ServerOp,
 	type SpectateEvent,
 } from './protocol'
+import { type SenderRefusal, senderRefusal } from './sender_guard'
 import { spectateEvent } from './spectate'
 import {
 	type Lobby,
@@ -79,12 +81,18 @@ function stringField(data: { [key: string]: unknown }, key: string): string {
 	return typeof value === 'string' ? value : ''
 }
 
+// A relay step; `dropped` when the action was refused by its sender rule, so
+// the caller can log (and later record) it.
+export interface RelayStep extends Step {
+	dropped?: SenderRefusal
+}
+
 export function action(
 	lobby: Lobby,
 	senderId: string,
 	data: { [key: string]: unknown },
 	ctx: Omit<ActionContext, 'from'>,
-): Step {
+): RelayStep {
 	const cid = stringField(data, 'cid').slice(0, MAX_CID_LENGTH)
 	const key = stringField(data, 'action')
 	const to = stringField(data, 'to')
@@ -142,6 +150,15 @@ export function action(
 	}
 	// Only the server may send an authoritative action's result.
 	if (authoritative) return refuse('authoritative_only')
+
+	// Not relayed to anyone; only the sender hears why.
+	const dropped = senderRefusal(budgeted, senderId, key, params)
+	if (dropped)
+		return {
+			lobby: budgeted,
+			out: [reject(senderId, { cid, action: key, reason: dropped.kind })],
+			dropped,
+		}
 
 	let targets: string[]
 	if (to === BROADCAST_TARGET) {
