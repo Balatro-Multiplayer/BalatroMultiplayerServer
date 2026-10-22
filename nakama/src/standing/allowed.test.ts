@@ -8,14 +8,21 @@ const config = (ids: string[], extra: string[] = []) => ({
 
 describe('allowedModIds', () => {
 	it('is the baseline, the pinned ids and the extra ids, each once', () => {
-		expect(allowedModIds(config(['MultiplayerAPI', 'Steamodded'], ['ClaudeControl']))).toEqual([
+		expect(allowedModIds(config(['MultiplayerAPI', 'Steamodded', 'Talisman'], ['ClaudeControl']))).toEqual([
 			'Balatro',
 			'Steamodded',
 			'Lovely',
 			'lovely-compat-BMM-Compat',
 			'MultiplayerAPI',
+			'MultiplayerSPDRN',
+			'MultiplayerPvP',
+			'Talisman',
 			'ClaudeControl',
 		])
+	})
+	it('always allows the BMP mods, even with nothing pinned', () => {
+		const ids = allowedModIds(config([]))
+		for (const id of ['MultiplayerAPI', 'MultiplayerSPDRN', 'MultiplayerPvP']) expect(ids).toContain(id)
 	})
 })
 
