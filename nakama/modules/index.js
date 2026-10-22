@@ -3387,6 +3387,31 @@ function isStandingRefusal(refusal) {
   return refusal.code === "mods_not_allowed" || refusal.code === "mods_unreported";
 }
 
+// src/matchmaking/ticket_query.ts
+var QUEUE_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
+var KINDS = ["casual", "ranked"];
+var TICKET_QUERY_MESSAGES = {
+  bad_properties: "The ticket does not name a queue",
+  query_not_pinned: "The ticket does not match its queue"
+};
+function isKind(value) {
+  return KINDS.some((k) => k === value);
+}
+function requiredClauses(query) {
+  return query.split(/\s+/).filter((term) => term.charAt(0) === "+");
+}
+function ticketQueryRefusal(query, props) {
+  const { modId, mode, kind } = props;
+  if (typeof modId !== "string" || !QUEUE_NAME_PATTERN.test(modId)) return "bad_properties";
+  if (typeof mode !== "string" || !QUEUE_NAME_PATTERN.test(mode)) return "bad_properties";
+  if (kind !== void 0 && !isKind(kind)) return "bad_properties";
+  if (typeof query !== "string") return "query_not_pinned";
+  const clauses = requiredClauses(query);
+  if (clauses.indexOf("+properties.modId:" + modId) === -1) return "query_not_pinned";
+  if (clauses.indexOf("+properties.mode:" + mode) === -1) return "query_not_pinned";
+  return null;
+}
+
 // src/matchmaking/group/refusal.ts
 var MAX_GROUP_SIZE = 8;
 var MIN_GROUP_SIZE = 2;
@@ -3494,6 +3519,7 @@ function ticketPropsRefusal(status, ticket) {
   if (s.kind === "ranked") return { code: "ranked" };
   if (s.modId !== status.modId || s.mode !== status.mode || s.kind !== void 0 && s.kind !== "casual")
     return { code: "ticket_mismatch" };
+  if (ticketQueryRefusal(ticket.query, s)) return { code: "ticket_mismatch" };
   if (n[GROUP_SIZE_PROPERTY] !== status.memberIds.length) return { code: "ticket_mismatch" };
   const teams = n[TEAMS_PROPERTY];
   if (teams !== void 0 && teams !== 0 && teams !== 1) return { code: "ticket_mismatch" };
@@ -3771,14 +3797,15 @@ function rejectOp(userId, message) {
     to: [userId]
   };
 }
+var DIFFERENT_MOD = "Lobby is for a different mod";
 function joinRejection(lobby, userId, modId) {
   if (lobby.closed) return "Lobby is closed";
+  if (modId !== lobby.modId) return DIFFERENT_MOD;
   if (findPlayer(lobby, userId)) return null;
   if ((lobby.spectators || []).indexOf(userId) !== -1)
     return "You are spectating this lobby";
   if (lobby.kickedIds.indexOf(userId) !== -1)
     return "You were kicked from this lobby";
-  if (modId !== lobby.modId) return "Lobby is for a different mod";
   if (lobby.game.started) return "The game has already started";
   if (lobby.groupQueue) return "This lobby is queueing as a group";
   if (lobby.allowedIds) {
@@ -4116,8 +4143,9 @@ function spectatorsOf(lobby) {
 function isSpectator(lobby, userId) {
   return spectatorsOf(lobby).indexOf(userId) !== -1;
 }
-function spectateRejection(lobby, userId) {
+function spectateRejection(lobby, userId, modId) {
   if (lobby.closed) return "Lobby is closed";
+  if (modId !== "" && modId !== lobby.modId) return DIFFERENT_MOD;
   if (isSpectator(lobby, userId)) return null;
   if (lobby.kickedIds.indexOf(userId) !== -1) return "You have been kicked from this lobby";
   if (!isSpectatable(lobby)) return "This lobby is not spectatable";
@@ -4332,13 +4360,26 @@ function rpcLobbyFind(ctx, logger, nk, payload) {
   const code = typeof input.code === "string" ? input.code.toUpperCase() : "";
   if (!CODE_PATTERN.test(code))
     throw runtimeError(INVALID_ARGUMENT, "Invalid lobby code");
+  const askedModId = optionalModId(input.modId);
+  const found = findByCode(nk, logger, code);
+  if (askedModId !== null && askedModId !== found.modId)
+    throw runtimeError(FAILED_PRECONDITION, DIFFERENT_MOD);
+  return JSON.stringify({ matchId: found.matchId, code, modId: found.modId });
+}
+function optionalModId(modId) {
+  if (modId === void 0 || modId === null || modId === "") return null;
+  if (typeof modId !== "string" || !MOD_ID_PATTERN2.test(modId))
+    throw runtimeError(INVALID_ARGUMENT, "Invalid modId");
+  return modId;
+}
+function findByCode(nk, logger, code) {
   const entry = lookupCode(nk, code);
-  if (entry) return JSON.stringify({ matchId: entry.matchId, code, modId: entry.modId });
+  if (entry) return { matchId: entry.matchId, modId: entry.modId };
   const resumed = resumeLobby(nk, logger, code, Date.now());
   if (resumed.kind === "resuming")
     throw runtimeError(UNAVAILABLE, "The lobby is resuming, try again");
   if (resumed.kind === "none") throw runtimeError(NOT_FOUND, "Lobby not found");
-  return JSON.stringify({ matchId: resumed.matchId, code, modId: resumed.modId });
+  return { matchId: resumed.matchId, modId: resumed.modId };
 }
 var SPECTATE_LIST_LIMIT = 100;
 function rpcSpectateList(ctx, logger, nk, payload) {
@@ -4908,14 +4949,20 @@ function queueRefusalFor(nk, userId, ranked, now) {
   if (ranked && integrityRefusal(config, readIntegrity(nk, userId), now)) return { code: "integrity_required" };
   return standingRefusal(standingFor(nk, userId, now, config));
 }
+function matchmakerAdd(envelope) {
+  return envelope.matchmakerAdd || envelope.matchmaker_add || {};
+}
 function stringProperties(envelope) {
-  const add = envelope.matchmakerAdd || envelope.matchmaker_add;
-  return add && (add.stringProperties || add.string_properties) || {};
+  const add = matchmakerAdd(envelope);
+  return add.stringProperties || add.string_properties || {};
 }
 var IN_GROUP_QUEUE = "You are queueing with your lobby.";
 function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
   if (!ctx.userId) return envelope;
-  const ranked = stringProperties(envelope).kind === "ranked";
+  const props = stringProperties(envelope);
+  const unpinned = ticketQueryRefusal(matchmakerAdd(envelope).query, props);
+  if (unpinned) throw runtimeError(INVALID_ARGUMENT, TICKET_QUERY_MESSAGES[unpinned]);
+  const ranked = props.kind === "ranked";
   const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
   if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused));
   const group = groupOf(nk, ctx.userId);
@@ -6783,6 +6830,60 @@ function answerGroupSignal(lobby, signal2, switches, now) {
   }
 }
 
+// src/lobby/sender_guard.ts
+var SENDER_RULES = {
+  // PvP referee (pvp_api/referee.lua: every broadcast is under is_host()).
+  pvp_win: "host",
+  pvp_player_won: "host",
+  // check_single_survivor: host only
+  pvp_end_pvp: "host",
+  pvp_player_lives: "host",
+  pvp_eliminated: "host",
+  pvp_start_blind: "host",
+  pvp_timer_hand_lost: "host",
+  pvp_nemesis_pairing: "host",
+  pvp_royale_target: "host",
+  pvp_manhunt_target: "host",
+  pvp_team_card_target: "host",
+  pvp_team_score_board: "host",
+  pvp_team_lives: "host",
+  pvp_team_roster: "host",
+  pvp_reseed: "host",
+  // run_actions.lua: host on a unanimous seed vote
+  // SPDRN host decisions.
+  spdrn_match_timeout: "host",
+  // matchmaking/duration.lua: host clock
+  spdrn_match_draw: "host",
+  // ui/lobby/draw_vote.lua: host on unanimity
+  spdrn_seed_change_apply: "host",
+  // ui/lobby/seed_vote.lua: host on unanimity
+  // SPDRN results keyed on a param id.
+  spdrn_player_won: "self_or_host",
+  spdrn_player_result: "self"
+  // matchmaking/result.lua: player_id = own id
+};
+function senderRuleOf(key) {
+  return Object.prototype.hasOwnProperty.call(SENDER_RULES, key) ? SENDER_RULES[key] : null;
+}
+function claimedPlayer(params) {
+  if (typeof params !== "object" || params === null || Array.isArray(params))
+    return null;
+  const id = params.player_id;
+  return typeof id === "string" ? id : null;
+}
+function senderRefusal(lobby, from, key, params) {
+  const rule = senderRuleOf(key);
+  if (rule === null) return null;
+  const ruled = key;
+  const hostId = lobby.hostId;
+  const isHost = from === hostId;
+  if (rule === "host")
+    return isHost ? null : { kind: "not_host", key: ruled, from, hostId };
+  if (rule === "self_or_host" && isHost) return null;
+  const claimed = claimedPlayer(params);
+  return claimed === from ? null : { kind: "not_self", key: ruled, from, hostId, claimed };
+}
+
 // src/lobby/relay.ts
 var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 var MAX_PARAMS_BYTES = 16 * 1024;
@@ -6870,6 +6971,13 @@ function action(lobby, senderId, data, ctx) {
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
   if (authoritative) return refuse2("authoritative_only");
+  const dropped = senderRefusal(budgeted, senderId, key, params);
+  if (dropped)
+    return {
+      lobby: budgeted,
+      out: [reject(senderId, { cid, action: key, reason: dropped.kind })],
+      dropped
+    };
   let targets;
   if (to === BROADCAST_TARGET) {
     targets = budgeted.players.map((p) => p.id);
@@ -7292,7 +7400,7 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
     return { state, accept: false, rejectMessage: "No such account" };
   }
   if (meta.role === SPECTATOR_ROLE) {
-    const refused = spectateRejection(state.lobby, presence.userId);
+    const refused = spectateRejection(state.lobby, presence.userId, meta.modId || "");
     if (refused) return { state, accept: false, rejectMessage: refused };
     const pending = (state.pendingSpectators || []).filter((id) => id !== presence.userId);
     return {
@@ -7454,6 +7562,18 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
         message.sender.userId
       );
       continue;
+    }
+    if (step.dropped) {
+      const d = step.dropped;
+      logger.warn(
+        "Lobby %s: dropped %s from %s (%s; host %s%s)",
+        current.lobby.code,
+        d.key,
+        d.from,
+        d.kind,
+        d.hostId,
+        d.kind === "not_self" ? `; claimed ${d.claimed}` : ""
+      );
     }
     current = apply(ctx, logger, nk, dispatcher, current, step);
   }
@@ -7823,7 +7943,8 @@ function partyTicketOf(add) {
     maxCount: numberOr(field2(add, "maxCount", "max_count"), 0),
     countMultiple: numberOr(field2(add, "countMultiple", "count_multiple"), null),
     stringProperties: field2(add, "stringProperties", "string_properties") || {},
-    numericProperties: field2(add, "numericProperties", "numeric_properties") || {}
+    numericProperties: field2(add, "numericProperties", "numeric_properties") || {},
+    query: field2(add, "query", "query")
   };
 }
 function beforePartyJoin(ctx, logger, nk, envelope) {
