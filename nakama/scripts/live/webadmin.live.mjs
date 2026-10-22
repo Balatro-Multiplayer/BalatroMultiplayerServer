@@ -133,11 +133,12 @@ async function main() {
 		check('reports/:id', det.ok, det.text.slice(0, 160))
 	}
 
-	// Ban through webadmin: queue ban on b, then lift.
+	// Ban through webadmin: a 7-day queue ban on b (the longest a moderator
+	// may issue), then lift.
 	// Bans need a players row: use a mirrored device player (has one).
 	const pb = out.honestPlayer
 	const nkB = psql('bmp', `select nakama_user_id from players where id = ${q(pb)}`)[0][0]
-	const ban = await express('POST', `${W}/players/${pb}/bans`, { token: mod.token, body: { type: 'queue', reason: 'h1test' } })
+	const ban = await express('POST', `${W}/players/${pb}/bans`, { token: mod.token, body: { type: 'queue', reason: 'h1test', expiresAt: new Date(Date.now() + 7 * 86400e3).toISOString() } })
 	check('webadmin queue ban issued', ban.status === 201 && ban.body.ban, ban.text.slice(0, 160))
 	const nkBans = await poll(async () => {
 		const g = await admin('admin_player_get', { userId: nkB })

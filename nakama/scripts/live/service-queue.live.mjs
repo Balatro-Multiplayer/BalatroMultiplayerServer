@@ -636,7 +636,14 @@ async function integrityRun(mod, adm) {
 		matchmaker_add: { min_count: 2, max_count: 2, query: `+properties.modId:${MOD} +properties.mode:${PREFIX}sqi_${stamp} +properties.kind:ranked`, string_properties: { modId: MOD, mode: `${PREFIX}sqi_${stamp}`, kind: 'ranked' } },
 	})
 	check('integrity: i2 queued for ranked', !!t.matchmaker_ticket, JSON.stringify(t).slice(0, 160))
-	const ctx = await admin('admin_player_get', { userId: i2.userId })
+	// The queue record is written by the MatchmakerAdd after-hook, which Nakama
+	// runs after the ticket reply: give it a moment.
+	let ctx
+	for (let tries = 0; tries < 20; tries++) {
+		ctx = await admin('admin_player_get', { userId: i2.userId })
+		if (ctx.ok && ctx.body.ranked && ctx.body.ranked.queued === true) break
+		await sleep(150)
+	}
 	check('admin_player_get: ranked.queued', ctx.ok && ctx.body.ranked && ctx.body.ranked.queued === true, ctx.text.slice(0, 200))
 	await refuseChallenge(i2)
 	const ranked = await itemFor('integrity', `${p2}:${day}`, 15000)
