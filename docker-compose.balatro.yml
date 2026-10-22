@@ -1,0 +1,26 @@
+# Deploy overlay for `ssh balatro` (<prod-host-ip>), which shares the host
+# with the legacy TCP relay, the Discord bot and the launcher/mod APIs.
+#
+# - The host's own nginx already owns 80/443 (<api-host>), so
+#   this stack's nginx listens on loopback only; the host nginx terminates
+#   TLS for new.balatromp.com / nakama.balatromp.com and forwards here
+#   (/etc/nginx/sites-available/bmp-nakama).
+# - The 5 moderation replicas are capped so that, together, they can never
+#   take more than 8 of the 12 vCPUs away from the relay.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.balatro.yml ...
+services:
+  nginx:
+    ports: !override
+      - "127.0.0.1:8480:80"
+      - "127.0.0.1:8443:443"
+  moderation-1:
+    cpus: 1.6
+  moderation-2:
+    cpus: 1.6
+  moderation-3:
+    cpus: 1.6
+  moderation-4:
+    cpus: 1.6
+  moderation-5:
+    cpus: 1.6

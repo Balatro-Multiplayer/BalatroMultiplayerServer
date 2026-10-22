@@ -14,11 +14,14 @@
 # Usage (from repo root):
 #   ./scripts/deploy-color-swap.sh                        # local dev (default: base + local overlay)
 #   BASE_ONLY=1 ./scripts/deploy-color-swap.sh             # prod: base file only, no local overlay
+#   COMPOSE_OVERLAY=docker-compose.balatro.yml ./scripts/deploy-color-swap.sh   # prod on a shared host: base + that overlay
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-if [ -n "${BASE_ONLY:-}" ]; then
+if [ -n "${COMPOSE_OVERLAY:-}" ]; then
+	COMPOSE="docker compose -f docker-compose.yml -f $COMPOSE_OVERLAY"
+elif [ -n "${BASE_ONLY:-}" ]; then
 	COMPOSE="docker compose -f docker-compose.yml"
 else
 	COMPOSE="docker compose -f docker-compose.yml -f docker-compose.local.yml"
