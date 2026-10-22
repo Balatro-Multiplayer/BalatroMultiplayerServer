@@ -192,6 +192,9 @@ export interface RunRecord {
 	ratings?: { [userId: string]: RatingResult }
 	// Players whose result is suspect (lobby/anticheat.ts); never rated.
 	flags?: { [userId: string]: FlagReason }
+	// Set when a moderator replaced the recorded result (review/result.ts):
+	// the placements it had before, and when.
+	overturned?: { at: number; previous: Placement[] }
 }
 
 export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
@@ -429,6 +432,12 @@ export const CURRENT_LOBBY_KEY = 'current'
 // only succeeds if the code is free, which makes reserving one atomic.
 export const LOBBY_CODE_COLLECTION = 'lobby_codes'
 export const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
+
+// A lobby instance's id: its match id without the node suffix. Codes are
+// reused across lobbies; this is what reports and chat lines are keyed by.
+export function lobbyIdOf(matchId: string): string {
+	return matchId.split('.')[0]
+}
 
 // code -> Checkpoint (lobby/checkpoint.ts), owned by the system user: a lobby
 // stopped by a server restart, until a player's return resumes it.

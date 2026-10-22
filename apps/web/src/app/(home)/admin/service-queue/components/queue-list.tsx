@@ -1,0 +1,331 @@
+'use client'
+
+import {
+  AlertTriangleIcon,
+  FlagIcon,
+  type LucideIcon,
+  MessageSquareWarningIcon,
+  ScaleIcon,
+  ShieldAlertIcon,
+  TimerOffIcon,
+} from 'lucide-react'
+import { useEffect, useRef } from 'react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+import type { ListFilters } from '../lib/api'
+import {
+  ageText,
+  minutesLeft,
+  type PriorityBand,
+  priorityBand,
+  TYPE_LABELS,
+  TYPE_TABS,
+} from '../lib/format'
+import type {
+  ItemType,
+  QueueList as List,
+  ListedItem,
+  QueueSort,
+  StatusFilter,
+} from '../lib/types'
+
+const TYPE_ICONS: Record<ItemType, LucideIcon> = {
+  report: FlagIcon,
+  flagged_chat: MessageSquareWarningIcon,
+  match_conflict: ScaleIcon,
+  forfeit_reconciliation: TimerOffIcon,
+  anti_cheat: ShieldAlertIcon,
+  integrity: AlertTriangleIcon,
+}
+
+const PRIORITY_DOT: Record<PriorityBand, string> = {
+  high: 'bg-red-500',
+  medium: 'bg-amber-400',
+  low: 'bg-slate-500',
+}
+
+const AGE_FILTERS: { hours: number; label: string }[] = [
+  { hours: 0, label: 'Any age' },
+  { hours: 1, label: 'Older than 1h' },
+  { hours: 24, label: 'Older than 1 day' },
+  { hours: 24 * 7, label: 'Older than 7 days' },
+]
+
+const isTyping = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable ||
+    ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+
+// j/k move the cursor through the rows, Enter opens the row under it.
+function useRowKeys(
+  items: ListedItem[],
+  cursor: number,
+  setCursor: (i: number) => void,
+  onOpen: (id: number) => void
+) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return
+      if (document.querySelector('[role="dialog"]')) return
+      if (e.key === 'j') setCursor(Math.min(items.length - 1, cursor + 1))
+      else if (e.key === 'k') setCursor(Math.max(0, cursor - 1))
+      else if (e.key === 'Enter' && items[cursor]) onOpen(items[cursor].id)
+      else return
+      e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [items, cursor, setCursor, onOpen])
+}
+
+function Row({
+  item,
+  selected,
+  cursor,
+  now,
+  onOpen,
+}: {
+  item: ListedItem
+  selected: boolean
+  cursor: boolean
+  now: number
+  onOpen: () => void
+}) {
+  const ref = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (cursor) ref.current?.scrollIntoView({ block: 'nearest' })
+  }, [cursor])
+  const Icon = TYPE_ICONS[item.itemType]
+  return (
+    <button
+      ref={ref}
+      type='button'
+      onClick={onOpen}
+      data-item-id={item.id}
+      data-cursor={cursor || undefined}
+      className={cn(
+        'flex w-full items-start gap-2 border-border border-b px-3 py-2 text-left text-sm hover:bg-accent/50',
+        selected && 'bg-accent',
+        cursor && 'ring-1 ring-ring ring-inset'
+      )}
+    >
+      <span
+        className={cn(
+          'mt-1.5 size-2 shrink-0 rounded-full',
+          PRIORITY_DOT[priorityBand(item.priority)]
+        )}
+        title={`priority ${item.priority ?? '—'}`}
+      />
+      <Icon
+        className='mt-0.5 size-4 shrink-0 text-muted-foreground'
+        aria-label={TYPE_LABELS[item.itemType]}
+      />
+      <span className='min-w-0 flex-1'>
+        <span className='flex items-center gap-1'>
+          <span className='truncate font-medium'>
+            {item.subjectName ?? 'No subject'}
+          </span>
+          {item.subjectOpenItems > 1 && (
+            <Badge variant='secondary' title='Open items about this player'>
+              {item.subjectOpenItems}
+            </Badge>
+          )}
+          {item.status === 'resolved' && (
+            <Badge variant='outline'>resolved</Badge>
+          )}
+        </span>
+        <span className='block truncate text-muted-foreground'>
+          {item.summary}
+        </span>
+        {item.claim && (
+          <span className='block text-amber-400 text-xs'>
+            {item.claim.claimedByName ?? 'Someone'} ·{' '}
+            {minutesLeft(item.claim.claimedUntil, now)}m
+          </span>
+        )}
+      </span>
+      <span className='shrink-0 text-muted-foreground text-xs'>
+        {ageText(item.createdAt, now)}
+      </span>
+    </button>
+  )
+}
+
+export function QueueList({
+  filters,
+  setFilters,
+  list,
+  isLoading,
+  selectedId,
+  cursor,
+  setCursor,
+  now,
+  onOpen,
+}: {
+  filters: ListFilters
+  setFilters: (patch: Partial<ListFilters>) => void
+  list: List | undefined
+  isLoading: boolean
+  selectedId: number | null
+  cursor: number
+  setCursor: (i: number) => void
+  now: number
+  onOpen: (id: number) => void
+}) {
+  const items = list?.items ?? []
+  useRowKeys(items, cursor, setCursor, onOpen)
+  const totalOpen = list
+    ? Object.values(list.counts).reduce((a, b) => a + b, 0)
+    : 0
+
+  return (
+    <div className='flex min-h-0 flex-col'>
+      <div
+        className='flex flex-wrap gap-1 border-border border-b p-2'
+        role='tablist'
+      >
+        {TYPE_TABS.map((tab) => {
+          const count = tab.type ? list?.counts[tab.type] : totalOpen
+          const active = filters.itemType === tab.type
+          return (
+            <Button
+              key={tab.label}
+              role='tab'
+              aria-selected={active}
+              data-tab={tab.type ?? 'all'}
+              size='sm'
+              variant={active ? 'default' : 'ghost'}
+              onClick={() => setFilters({ itemType: tab.type, page: 1 })}
+            >
+              {tab.label}
+              {count !== undefined && (
+                <Badge variant={active ? 'secondary' : 'outline'}>
+                  {count}
+                </Badge>
+              )}
+            </Button>
+          )
+        })}
+      </div>
+
+      <div className='flex flex-wrap items-center gap-2 border-border border-b p-2'>
+        <Select
+          value={filters.status}
+          onValueChange={(v) =>
+            setFilters({ status: v as StatusFilter, page: 1 })
+          }
+        >
+          <SelectTrigger className='w-28' size='sm' aria-label='Status'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value='open'>Open</SelectItem>
+            <SelectItem value='resolved'>Resolved</SelectItem>
+            <SelectItem value='all'>All</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={filters.sort}
+          onValueChange={(v) => setFilters({ sort: v as QueueSort, page: 1 })}
+        >
+          <SelectTrigger className='w-28' size='sm' aria-label='Sort'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value='priority'>Priority</SelectItem>
+            <SelectItem value='age'>Newest</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select
+          value={String(filters.olderThanHours)}
+          onValueChange={(v) =>
+            setFilters({ olderThanHours: Number(v), page: 1 })
+          }
+        >
+          <SelectTrigger className='w-36' size='sm' aria-label='Age'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AGE_FILTERS.map((a) => (
+              <SelectItem key={a.hours} value={String(a.hours)}>
+                {a.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Input
+          className='h-8 w-40 flex-1'
+          placeholder='Subject name or id'
+          value={filters.subject}
+          onChange={(e) => setFilters({ subject: e.target.value, page: 1 })}
+        />
+        <Label className='flex items-center gap-1 text-xs'>
+          <Checkbox
+            checked={filters.claimedByMe}
+            onCheckedChange={(c) =>
+              setFilters({ claimedByMe: c === true, page: 1 })
+            }
+          />
+          Claimed by me
+        </Label>
+      </div>
+
+      <div className='min-h-0 flex-1 overflow-y-auto' data-testid='queue-rows'>
+        {isLoading ? (
+          <p className='p-3 text-muted-foreground text-sm'>Loading…</p>
+        ) : items.length === 0 ? (
+          <p className='p-3 text-muted-foreground text-sm'>Nothing here.</p>
+        ) : (
+          items.map((item, i) => (
+            <Row
+              key={item.id}
+              item={item}
+              selected={item.id === selectedId}
+              cursor={i === cursor}
+              now={now}
+              onOpen={() => {
+                setCursor(i)
+                onOpen(item.id)
+              }}
+            />
+          ))
+        )}
+      </div>
+
+      {list && list.pages > 1 && (
+        <div className='flex items-center justify-between gap-2 border-border border-t p-2 text-sm'>
+          <Button
+            size='sm'
+            variant='outline'
+            disabled={filters.page <= 1}
+            onClick={() => setFilters({ page: filters.page - 1 })}
+          >
+            Previous
+          </Button>
+          <span className='text-muted-foreground'>
+            Page {list.page} of {list.pages} · {list.total} items
+          </span>
+          <Button
+            size='sm'
+            variant='outline'
+            disabled={filters.page >= list.pages}
+            onClick={() => setFilters({ page: filters.page + 1 })}
+          >
+            Next
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}

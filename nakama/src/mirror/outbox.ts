@@ -7,6 +7,7 @@
 // it (admin_mirror_pull) and deletes what it has stored (admin_mirror_ack).
 // An entry stays until it is acked, so nothing is lost while the API is away.
 import { readProfile } from '../player/profile'
+import type { LobbyKind } from '../review/ranked'
 import { steamIdOf } from '../player/session'
 import { LOGS_COLLECTION, RATINGS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from '../lobby/protocol'
 
@@ -18,7 +19,15 @@ export type MirrorEntry =
 	| { kind: 'run'; at: number; runId: string; rating: RatingBoard | null }
 	| { kind: 'chat'; at: number; line: ChatLogLine }
 	// A player back right after timing out of a matchmade game (lobby/forfeits.ts).
-	| { kind: 'forfeit'; at: number; userId: string; runId: string; code: string; forfeitedAt: number }
+	| {
+			kind: 'forfeit'
+			at: number
+			userId: string
+			runId: string
+			code: string
+			forfeitedAt: number
+			lobbyKind?: LobbyKind
+	  }
 
 // The rating board a ranked run counted on.
 export interface RatingBoard {
@@ -29,6 +38,11 @@ export interface RatingBoard {
 
 export interface ChatLogLine {
 	lobbyCode: string
+	// The lobby instance (its match id without the node), as reports carry it:
+	// lobby codes are reused, this is not.
+	lobbyId: string
+	// Null when the lobby's label could not be read.
+	lobbyKind: LobbyKind | null
 	userId: string
 	message: string
 	flagged: boolean

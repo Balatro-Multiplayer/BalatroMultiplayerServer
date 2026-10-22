@@ -18,14 +18,13 @@ function startedLobby(gameMode?: string): Lobby {
 }
 
 describe('timing out of a game', () => {
-	it('is recorded for a matchmade game only', () => {
-		for (const [gameMode, expected] of [
-			['duel', [{ kind: 'forfeited', userId: 'b', runId: 'r1', code: 'ABCDE', at: 10_000 }]],
-			[undefined, []],
-		] as const) {
+	it('is recorded for matchmade and private games alike', () => {
+		for (const gameMode of ['duel', undefined]) {
 			const away = disconnect(startedLobby(gameMode), 'b', 'b-s', 0).lobby
 			const out = tick(away, 10_000).out.filter((o) => o.kind === 'forfeited')
-			expect(out).toEqual(expected)
+			expect(out).toEqual([
+				{ kind: 'forfeited', userId: 'b', runId: 'r1', code: 'ABCDE', at: 10_000, lobbyKind: gameMode ? 'casual' : 'private' },
+			])
 		}
 	})
 

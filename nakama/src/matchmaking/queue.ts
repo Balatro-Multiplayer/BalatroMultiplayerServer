@@ -236,6 +236,15 @@ export function liveTicketHolders(
 	})
 }
 
+// The user's own fresh records whose session is still connected.
+export function liveRecordsOf(nk: nkruntime.Nakama, userId: string, now: number): QueueRecord[] {
+	const sessions = sessionsOf(nk, userId)
+	return ownRecords(nk, userId)
+		.filter(isRecord)
+		.map((o) => o.value as unknown as QueueRecord)
+		.filter((r) => now - r.at <= QUEUE_STALE_MS && sessions.indexOf(r.sessionId) !== -1)
+}
+
 export interface QueuedPlayer {
 	userId: string
 	record: QueueRecord

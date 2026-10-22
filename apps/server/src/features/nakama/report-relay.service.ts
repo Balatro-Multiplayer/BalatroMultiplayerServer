@@ -13,8 +13,14 @@ export interface NakamaReport {
 	lobbyId: string
 	lobbyCode: string
 	runId: string | null
+	// The kind of lobby it was filed in; null when Nakama could not tell.
+	lobbyKind: 'ranked' | 'casual' | 'private' | null
 	chat: { playerId: string; displayName: string; message: string; sentAt: number }[]
 }
+
+const LOBBY_KINDS = ['ranked', 'casual', 'private'] as const
+const isLobbyKind = (value: unknown): value is (typeof LOBBY_KINDS)[number] =>
+	typeof value === 'string' && (LOBBY_KINDS as readonly string[]).includes(value)
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const LOBBY_CODE = /^[A-Z0-9]{1,6}$/i
@@ -56,6 +62,7 @@ export function parseNakamaReport(body: unknown): NakamaReport | string {
 		lobbyId: b.lobbyId,
 		lobbyCode: b.lobbyCode,
 		runId: typeof b.runId === 'string' ? b.runId : null,
+		lobbyKind: isLobbyKind(b.lobbyKind) ? b.lobbyKind : null,
 		chat,
 	}
 }
@@ -79,6 +86,7 @@ export function createReportRelayService(deps: ReportRelayDeps) {
 				type: report.type,
 				runId: report.runId,
 				message: report.message,
+				context: report.lobbyKind ? { lobbyKind: report.lobbyKind } : {},
 				chat: report.chat.map((line) => ({
 					playerId: playerOf(line.playerId),
 					displayName: line.displayName.slice(0, 64),

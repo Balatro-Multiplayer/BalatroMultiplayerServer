@@ -141,8 +141,10 @@ async function main() {
 			mrl.some((r) => r[0] === pg2 && r[2] === 'hash_mismatch' && r[4] === 't'),
 		JSON.stringify(mrl),
 	)
-	const sq = await poll(() => psql('bmp', `select item_type, subject_player_id from service_queue_items where source_id=${q(runA)}`).length > 0, 10000)
-	const sqRows = psql('bmp', `select item_type, subject_player_id from service_queue_items where source_id=${q(runA)}`)
+	// An anti_cheat item's source is the flagged log, runId:playerId.
+	const acSource = q(`${runA}:${pg2}`)
+	const sq = await poll(() => psql('bmp', `select item_type, subject_player_id from service_queue_items where source_id=${acSource}`).length > 0, 10000)
+	const sqRows = psql('bmp', `select item_type, subject_player_id from service_queue_items where source_id=${acSource}`)
 	check('A: anti_cheat service-queue item for p2', sq && sqRows.length === 1 && sqRows[0][0] === 'anti_cheat' && sqRows[0][1] === pg2, JSON.stringify(sqRows))
 	outputs.runA = runA
 	outputs.flaggedPlayer = pg2
@@ -256,7 +258,7 @@ async function main() {
 		        (select count(*) from match_run_logs where run_id in (${q(runA)},${q(runB)},${q(runC)})),
 		        (select count(*) from matchmaking_matches where match_id in (${q(runB)},${q(runC)},${q(runD)})),
 		        (select count(*) from match_result_conflicts where match_id=${q(runB)}),
-		        (select count(*) from service_queue_items where source_id=${q(runA)})`,
+		        (select count(*) from service_queue_items where item_type = 'anti_cheat' and split_part(source_id, ':', 1)=${q(runA)})`,
 	)[0]
 	check('mirror rows exactly once (4 runs, 7 logs, 3 matches, 1 conflict, 1 AC item)', counts.join(',') === '4,7,3,1,1', counts.join(','))
 	const outbox = await admin('admin_mirror_pull', { limit: 50 })

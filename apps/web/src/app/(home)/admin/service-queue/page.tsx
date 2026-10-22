@@ -1,189 +1,208 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
-import { apiFetch } from '@/lib/api'
-import { useAuth } from '@/lib/auth'
-import { Badge } from '@/components/ui/badge'
+import {
+  parseAsBoolean,
+  parseAsInteger,
+  parseAsString,
+  parseAsStringLiteral,
+  useQueryStates,
+} from 'nuqs'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { useAuth } from '@/lib/auth'
+import { cn } from '@/lib/utils'
+import { InvestigationPanel } from './components/investigation-panel'
+import { QueueList } from './components/queue-list'
+import { type ListFilters, listQueue, queueKeys } from './lib/api'
+import { ITEM_TYPES } from './lib/types'
 
-type ItemType = 'report' | 'flagged_chat' | 'match_conflict' | 'forfeit_reconciliation' | 'anti_cheat'
-
-interface QueueItem {
-  id: number
-  itemType: ItemType
-  subjectPlayerId: string | null
-  status: 'open' | 'resolved'
-  summary: string
-  createdAt: string
+// The queue's state lives in the URL, so a link opens the same view.
+const urlState = {
+  type: parseAsStringLiteral(ITEM_TYPES),
+  status: parseAsStringLiteral([
+    'open',
+    'resolved',
+    'all',
+  ] as const).withDefault('open'),
+  sort: parseAsStringLiteral(['priority', 'age'] as const).withDefault(
+    'priority'
+  ),
+  subject: parseAsString.withDefault(''),
+  mine: parseAsBoolean.withDefault(false),
+  age: parseAsInteger.withDefault(0),
+  page: parseAsInteger.withDefault(1),
+  item: parseAsInteger,
 }
 
-interface QueueResponse {
-  items: QueueItem[]
-  total: number
-  page: number
-  limit: number
-  pages: number
+const LIST_REFRESH_MS = 30_000
+const SUBJECT_DEBOUNCE_MS = 300
+
+// Re-renders once a minute so ages and claim countdowns stay current.
+function useMinuteClock(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  return now
 }
 
-const TYPE_LABELS: Record<ItemType, string> = {
-  report: 'Report',
-  flagged_chat: 'Flagged Chat',
-  match_conflict: 'Match Conflict',
-  forfeit_reconciliation: 'Forfeit Reconciliation',
-  anti_cheat: 'Anti-Cheat',
+export default function ServiceQueuePage() {
+  // useQueryStates reads search params; Suspense keeps static prerender from
+  // bailing out of CSR.
+  return (
+    <Suspense
+      fallback={
+        <div className='container py-8 text-muted-foreground'>Loading…</div>
+      }
+    >
+      <ServiceQueue />
+    </Suspense>
+  )
 }
 
-const TYPE_FILTERS: { value: ItemType | 'all'; label: string }[] = [
-  { value: 'all', label: 'All Types' },
-  { value: 'report', label: 'Reports' },
-  { value: 'flagged_chat', label: 'Flagged Chat' },
-  { value: 'match_conflict', label: 'Match Conflicts' },
-  { value: 'forfeit_reconciliation', label: 'Forfeit Reconciliation' },
-  { value: 'anti_cheat', label: 'Anti-Cheat' },
-]
-
-const STATUS_FILTERS: { value: 'all' | 'open' | 'resolved'; label: string }[] = [
-  { value: 'open', label: 'Open' },
-  { value: 'resolved', label: 'Resolved' },
-  { value: 'all', label: 'All Statuses' },
-]
-
-export default function AdminServiceQueuePage() {
-  const { isAdmin, isModerator, pending } = useAuth()
+function ServiceQueue() {
+  const { isModerator, pending } = useAuth()
   const router = useRouter()
-  const canAccess = isAdmin || isModerator
-  const [itemType, setItemType] = useState<ItemType | 'all'>('all')
-  const [status, setStatus] = useState<'all' | 'open' | 'resolved'>('open')
-  const [page, setPage] = useState(1)
+  const [url, setUrl] = useQueryStates(urlState, { history: 'replace' })
+  const [subjectDraft, setSubjectDraft] = useState(url.subject)
+  const [cursor, setCursor] = useState(0)
+  const now = useMinuteClock()
 
   useEffect(() => {
-    if (!pending && !canAccess) router.replace('/')
-  }, [pending, canAccess, router])
+    if (!pending && !isModerator) router.replace('/')
+  }, [pending, isModerator, router])
 
-  const { data } = useQuery<QueueResponse>({
-    queryKey: ['admin-service-queue', itemType, status, page],
-    queryFn: () => {
-      const params = new URLSearchParams({ page: String(page), limit: '50' })
-      if (itemType !== 'all') params.set('itemType', itemType)
-      if (status !== 'all') params.set('status', status)
-      return apiFetch(`/webadmin/service-queue?${params}`)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (subjectDraft !== url.subject)
+        void setUrl({ subject: subjectDraft, page: 1 })
+    }, SUBJECT_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [subjectDraft, url.subject, setUrl])
+
+  const filters: ListFilters = useMemo(
+    () => ({
+      itemType: url.type,
+      status: url.status,
+      sort: url.sort,
+      subject: url.subject,
+      claimedByMe: url.mine,
+      olderThanHours: url.age,
+      page: url.page,
+    }),
+    [url]
+  )
+
+  const setFilters = useCallback(
+    (patch: Partial<ListFilters>) => {
+      if (patch.subject !== undefined) {
+        setSubjectDraft(patch.subject)
+        return
+      }
+      setCursor(0)
+      void setUrl({
+        ...('itemType' in patch ? { type: patch.itemType } : {}),
+        ...(patch.status ? { status: patch.status } : {}),
+        ...(patch.sort ? { sort: patch.sort } : {}),
+        ...(patch.claimedByMe !== undefined ? { mine: patch.claimedByMe } : {}),
+        ...(patch.olderThanHours !== undefined
+          ? { age: patch.olderThanHours }
+          : {}),
+        ...(patch.page !== undefined ? { page: patch.page } : {}),
+      })
     },
-    enabled: canAccess,
+    [setUrl]
+  )
+
+  const { data: list, isLoading } = useQuery({
+    queryKey: queueKeys.list(filters),
+    queryFn: () => listQueue(filters),
+    enabled: isModerator,
+    placeholderData: keepPreviousData,
+    refetchInterval: LIST_REFRESH_MS,
   })
 
-  const items = data?.items ?? []
+  const openItem = useCallback(
+    (id: number) => void setUrl({ item: id }),
+    [setUrl]
+  )
+  const showAllItems = useCallback(
+    (playerId: string) => {
+      setSubjectDraft(playerId)
+      setCursor(0)
+      void setUrl({ subject: playerId, type: null, status: 'all', page: 1 })
+    },
+    [setUrl]
+  )
 
   if (pending) return <div className='container py-8'>Loading…</div>
-  if (!canAccess) return null
+  if (!isModerator) return null
 
+  const selected = url.item
   return (
-    <div className='container max-w-5xl py-8 space-y-6'>
-      <div>
-        <h1 className='text-2xl font-bold tracking-tight'>Service Queue</h1>
-        <p className='text-sm text-muted-foreground'>
-          Reports, flagged chat, match conflicts, forfeit reconciliation, and anti-cheat signals needing review.
-        </p>
-      </div>
-
-      <div className='flex flex-wrap gap-3'>
-        <Select
-          value={itemType}
-          onValueChange={(v) => {
-            setItemType(v as ItemType | 'all')
-            setPage(1)
-          }}
+    <div className='container max-w-none px-0 md:px-4 md:py-4'>
+      <div className='grid h-[calc(100dvh-4rem)] grid-cols-1 overflow-hidden border-border md:grid-cols-[minmax(320px,420px)_1fr] md:rounded-lg md:border'>
+        <div
+          className={cn(
+            'flex min-h-0 flex-col border-border md:border-r',
+            selected !== null && 'hidden md:flex'
+          )}
+          data-testid='queue-pane'
         >
-          <SelectTrigger className='w-56'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {TYPE_FILTERS.map((f) => (
-              <SelectItem key={f.value} value={f.value}>
-                {f.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={status}
-          onValueChange={(v) => {
-            setStatus(v as 'all' | 'open' | 'resolved')
-            setPage(1)
-          }}
+          <div className='border-border border-b px-3 py-2'>
+            <h1 className='font-bold text-xl tracking-tight'>Service Queue</h1>
+            <p className='text-muted-foreground text-xs'>
+              j / k to move, Enter to open. Opening an item claims it for 15
+              minutes.
+            </p>
+          </div>
+          <QueueList
+            filters={{ ...filters, subject: subjectDraft }}
+            setFilters={setFilters}
+            list={list}
+            isLoading={isLoading}
+            selectedId={selected}
+            cursor={cursor}
+            setCursor={setCursor}
+            now={now}
+            onOpen={openItem}
+          />
+        </div>
+        <div
+          className={cn(
+            'min-h-0 overflow-y-auto',
+            selected === null && 'hidden md:block'
+          )}
+          data-testid='panel-pane'
         >
-          <SelectTrigger className='w-44'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_FILTERS.map((f) => (
-              <SelectItem key={f.value} value={f.value}>
-                {f.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className='overflow-x-auto rounded-lg border border-border'>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Summary</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className='text-muted-foreground'>No queue items found.</TableCell>
-              </TableRow>
-            ) : (
-              items.map((it) => (
-                <TableRow key={it.id}>
-                  <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>
-                    {new Date(it.createdAt).toLocaleString()}
-                  </TableCell>
-                  <TableCell>{TYPE_LABELS[it.itemType]}</TableCell>
-                  <TableCell className='max-w-[420px] truncate'>{it.summary}</TableCell>
-                  <TableCell>
-                    <Badge variant={it.status === 'open' ? 'destructive' : 'secondary'}>
-                      {it.status === 'open' ? 'Open' : 'Resolved'}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <a href={`/admin/service-queue/${it.id}`} className='text-bal-blue hover:underline'>
-                      View
-                    </a>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className='flex items-center justify-end gap-2'>
-        <Button variant='outline' size='sm' onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
-          Previous
-        </Button>
-        <span className='text-sm text-muted-foreground'>
-          Page {page} of {data?.pages ?? 1}
-        </span>
-        <Button
-          variant='outline'
-          size='sm'
-          onClick={() => setPage((p) => p + 1)}
-          disabled={page >= (data?.pages ?? 1)}
-        >
-          Next
-        </Button>
+          {selected === null ? (
+            <p className='p-6 text-muted-foreground text-sm'>
+              Pick an item from the queue.
+            </p>
+          ) : (
+            <>
+              <div className='border-border border-b p-2 md:hidden'>
+                <Button
+                  size='sm'
+                  variant='ghost'
+                  onClick={() => void setUrl({ item: null })}
+                >
+                  ← Back to the queue
+                </Button>
+              </div>
+              <InvestigationPanel
+                key={selected}
+                itemId={selected}
+                now={now}
+                onOpenItem={openItem}
+                onShowAllItems={showAllItems}
+              />
+            </>
+          )}
+        </div>
       </div>
     </div>
   )

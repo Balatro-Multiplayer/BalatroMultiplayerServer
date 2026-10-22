@@ -2,7 +2,8 @@ import { Router } from 'express'
 import { asc, count, desc, eq } from 'drizzle-orm'
 import { db } from '../../infrastructure/db/index.js'
 import { players, reportedLobbyMessages, reports } from '../../infrastructure/db/schema.js'
-import { resolveReport } from '../../infrastructure/gateways/report.gateway.js'
+import { getReportById, resolveReport } from '../../infrastructure/gateways/report.gateway.js'
+import { dispatchLegacy } from '../service-queue/legacy.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 const router = Router()
@@ -94,7 +95,12 @@ router.patch('/reports/:id/resolve', async (req, res, next) => {
 			return
 		}
 
-		const updated = await resolveReport(id)
+		const dispatched = await dispatchLegacy(req, 'report', id, 'resolve')
+		if (dispatched.kind === 'refused') {
+			res.status(dispatched.status).json(dispatched.body)
+			return
+		}
+		const updated = dispatched.kind === 'done' ? await getReportById(id) : await resolveReport(id)
 		if (!updated) {
 			res.status(404).json({ error: 'Report not found' })
 			return

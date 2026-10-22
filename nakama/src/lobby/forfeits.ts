@@ -1,11 +1,12 @@
-// A player whose grace period ran out mid-game in a matchmade lobby is out
-// of it: the others' reports place them. If they come back moments later,
+// A player whose grace period ran out mid-game (any lobby, private ones too)
+// is out of it: the others' reports place them. If they come back moments later,
 // the timeout may have been wrongful (their reconnect lost a race), so a
 // moderator gets to look (the API's forfeit_reconciliation_flags, through
 // the mirror). The timeout
 // is kept on the player; noteReturn, on their next session_init or
 // lobby_current, files it through the mirror if they're back in time.
 import { enqueue } from '../mirror/outbox'
+import type { LobbyKind } from '../review/ranked'
 
 export const FORFEITS_COLLECTION = 'forfeits'
 
@@ -16,6 +17,8 @@ export interface Forfeit {
 	runId: string
 	code: string
 	at: number
+	// Absent in records from before it was kept.
+	lobbyKind?: LobbyKind
 }
 
 export function recordForfeit(nk: nkruntime.Nakama, userId: string, forfeit: Forfeit) {
@@ -39,7 +42,15 @@ export function noteReturn(nk: nkruntime.Nakama, logger: nkruntime.Logger, userI
 		for (const object of objects) {
 			const forfeit = object.value as unknown as Forfeit
 			if (now - forfeit.at <= RECONCILIATION_WINDOW_MS)
-				enqueue(nk, { kind: 'forfeit', at: now, userId, runId: forfeit.runId, code: forfeit.code, forfeitedAt: forfeit.at })
+				enqueue(nk, {
+					kind: 'forfeit',
+					at: now,
+					userId,
+					runId: forfeit.runId,
+					code: forfeit.code,
+					forfeitedAt: forfeit.at,
+					lobbyKind: forfeit.lobbyKind,
+				})
 		}
 		nk.storageDelete(objects.map((o) => ({ collection: FORFEITS_COLLECTION, key: o.key, userId })))
 	} catch (e) {

@@ -18,21 +18,24 @@ async function main() {
 	// Postgres first (needs the Nakama ids to find report rows).
 	const runs = `select id from lobby_runs where mod_id = ${q(MOD)}`
 	const matches = `select match_id from matchmaking_matches where mod_id = ${q(MOD)}`
-	const conflicts = `select id::text from match_result_conflicts where match_id in (${matches})`
+	// A private lobby's conflict has no matchmaking match: its match_id is the run id.
+	const conflictMatches = `${matches} union select id::text from lobby_runs where mod_id = ${q(MOD)}`
+	const conflicts = `select id::text from match_result_conflicts where match_id in (${conflictMatches})`
 	const reports = `select id::text from reports where reporter_id::text in (${idList}) or reported_id::text in (${idList})`
 	const sql = [
-		`delete from service_queue_items where (item_type = 'anti_cheat' and source_id in (${runs.replace('select id', 'select id::text')}))
+		`delete from service_queue_items where (item_type = 'anti_cheat' and split_part(source_id, ':', 1) in (${runs.replace('select id', 'select id::text')}))
 		   or (item_type = 'match_conflict' and source_id in (${conflicts}))
 		   or (item_type = 'report' and source_id in (${reports}))
 		   or subject_player_id::text in (${idList})`,
 		`delete from reported_lobby_messages where player_id in (${idList})`,
 		`delete from reports where id::text in (${reports})`,
-		`delete from match_result_conflicts where match_id in (${matches})`,
+		`delete from match_result_conflicts where match_id in (${conflictMatches})`,
 		`delete from forfeit_reconciliation_flags where player_id::text in (${idList})`,
 		`delete from match_run_logs where run_id in (${runs})`,
 		`delete from lobby_runs where mod_id = ${q(MOD)}`,
 		`delete from matchmaking_matches where mod_id = ${q(MOD)}`,
 		`delete from matchmaking_ratings where player_id::text in (${idList})`,
+		`delete from player_warnings where player_id::text in (${idList})`,
 		`delete from player_bans where player_id::text in (${idList})`,
 		`delete from launcher_integrity_events where player_id::text in (${idList})`,
 		`delete from chat_logs where player_id in (${idList})`,

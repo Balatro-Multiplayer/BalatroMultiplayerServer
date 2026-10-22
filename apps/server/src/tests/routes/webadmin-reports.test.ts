@@ -5,12 +5,15 @@ import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import * as reportGateway from '../../infrastructure/gateways/report.gateway.js'
 import { db } from '../../infrastructure/db/index.js'
 import { createSession } from '../../state/index.js'
+import * as legacy from '../../features/service-queue/legacy.js'
 import { createTestApp } from './app.js'
 
 vi.mock('../../infrastructure/gateways/report.gateway.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('../../infrastructure/gateways/report.gateway.js')>()
-	return { ...actual, resolveReport: vi.fn() }
+	return { ...actual, resolveReport: vi.fn(), getReportById: vi.fn() }
 })
+
+vi.mock('../../features/service-queue/legacy.js', () => ({ dispatchLegacy: vi.fn() }))
 
 const app = createTestApp()
 
@@ -43,6 +46,7 @@ const REPORT_ROW = {
 }
 
 beforeEach(() => {
+	vi.mocked(legacy.dispatchLegacy).mockResolvedValue({ kind: 'no_item' })
 	;(db as any).select = vi.fn().mockReturnValue({
 		from: vi.fn().mockReturnValue({
 			where: vi.fn().mockReturnValue({
@@ -81,5 +85,28 @@ describe('PATCH /api/webadmin/reports/:id/resolve', () => {
 		const res = await request(app).patch('/api/webadmin/reports/1/resolve').set('Authorization', token)
 		expect(res.status).toBe(200)
 		expect(res.body.report.status).toBe('resolved')
+	})
+
+	it('runs through the queue when the report has an item, answering with the fresh row', async () => {
+		vi.mocked(legacy.dispatchLegacy).mockResolvedValue({ kind: 'done' })
+		vi.mocked(reportGateway.getReportById).mockResolvedValue({ ...REPORT_ROW, status: 'resolved' } as any)
+		const token = authAsModerator('mod1', 'Mod')
+		const res = await request(app).patch('/api/webadmin/reports/1/resolve').set('Authorization', token)
+		expect(res.status).toBe(200)
+		expect(res.body.report.status).toBe('resolved')
+		expect(legacy.dispatchLegacy).toHaveBeenCalledWith(expect.anything(), 'report', 1, 'resolve')
+		expect(reportGateway.resolveReport).not.toHaveBeenCalled()
+	})
+
+	it("passes the queue's refusal through", async () => {
+		vi.mocked(legacy.dispatchLegacy).mockResolvedValue({
+			kind: 'refused',
+			status: 409,
+			body: { error: 'The item is resolved', code: 'wrong_status', status: 'resolved' },
+		})
+		const token = authAsModerator('mod1', 'Mod')
+		const res = await request(app).patch('/api/webadmin/reports/1/resolve').set('Authorization', token)
+		expect(res.status).toBe(409)
+		expect(res.body.code).toBe('wrong_status')
 	})
 })

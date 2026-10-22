@@ -10,8 +10,12 @@ import { startMirrorJob } from './features/nakama/mirror.job.js'
 import { startRetentionJob } from './features/nakama/retention.job.js'
 import { startSeasonJob } from './features/ratings/season.job.js'
 import { db, pool } from './infrastructure/db/index.js'
-import { chatLogs, flaggedMessages } from './infrastructure/db/schema.js'
+import { chatLogs } from './infrastructure/db/schema.js'
 import { loadConfigFromDb } from './infrastructure/gateways/config.gateway.js'
+import {
+	purgeExpiredFlaggedMessages,
+	purgeReportedLobbyMessages,
+} from './infrastructure/gateways/moderation-retention.gateway.js'
 import { purgeExpiredDeletedPlayerHashes } from './infrastructure/gateways/player.gateway.js'
 import { purgeExpiredRunLogs } from './infrastructure/gateways/replay-log.gateway.js'
 import {
@@ -80,13 +84,16 @@ async function shutdown() {
 	process.exit(0)
 }
 
-async function purgeExpiredFlaggedMessages() {
+async function purgeModerationEvidenceJob() {
 	try {
-		await db
-			.delete(flaggedMessages)
-			.where(lt(flaggedMessages.expiresAt, new Date()))
+		await purgeExpiredFlaggedMessages()
 	} catch (err) {
 		console.error('[cleanup] Failed to purge expired flagged messages:', err)
+	}
+	try {
+		await purgeReportedLobbyMessages()
+	} catch (err) {
+		console.error('[cleanup] Failed to purge reported lobby messages:', err)
 	}
 }
 
@@ -162,8 +169,8 @@ async function start() {
 
 		startSessionCleanup()
 
-		void purgeExpiredFlaggedMessages()
-		setInterval(() => void purgeExpiredFlaggedMessages(), 60 * 60 * 1000)
+		void purgeModerationEvidenceJob()
+		setInterval(() => void purgeModerationEvidenceJob(), 60 * 60 * 1000)
 
 		void purgeExpiredRunLogsJob()
 		setInterval(() => void purgeExpiredRunLogsJob(), 60 * 60 * 1000).unref()

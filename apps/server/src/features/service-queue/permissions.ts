@@ -1,0 +1,186 @@
+// The one role table: which actions each item type takes, in which status,
+// and the least role (per preset, where an action has presets) that may run
+// them. The dispatcher checks it and the detail route sends its answer as
+// allowedActions, so the buttons and the server check cannot drift.
+import { expiresAtOf } from './durations.js'
+import {
+	type ActionKey,
+	BAN_DURATIONS,
+	CHAT_MUTE_DURATIONS,
+	type Duration,
+	type ItemStatus,
+	type ItemType,
+	type StaffRole,
+} from './types.js'
+
+type StatusRule = 'open' | 'resolved' | 'any'
+
+interface ActionRule {
+	itemTypes: readonly ItemType[]
+	status: StatusRule
+	minRole: StaffRole
+	// Per-preset least role; an action with presets is allowed when any one is.
+	presets?: Readonly<Partial<Record<Duration, StaffRole>>>
+	// Takes a target player (warn, mute, ban).
+	targeted?: true
+	// The web confirms before running it.
+	destructive?: true
+}
+
+const ALL: readonly ItemType[] = [
+	'report',
+	'flagged_chat',
+	'match_conflict',
+	'forfeit_reconciliation',
+	'anti_cheat',
+	'integrity',
+]
+
+export const ACTION_RULES: Readonly<Record<ActionKey, ActionRule>> = {
+	dismiss: { itemTypes: ALL, status: 'open', minRole: 'moderator' },
+	resolve: { itemTypes: ALL, status: 'open', minRole: 'moderator' },
+	warn: {
+		itemTypes: ['report', 'flagged_chat', 'match_conflict', 'anti_cheat', 'integrity'],
+		status: 'open',
+		minRole: 'moderator',
+		targeted: true,
+	},
+	chat_mute: {
+		itemTypes: ['report', 'flagged_chat'],
+		status: 'open',
+		minRole: 'moderator',
+		presets: { '24h': 'moderator', '7d': 'moderator', '30d': 'moderator', permanent: 'admin' },
+		targeted: true,
+		destructive: true,
+	},
+	queue_ban: {
+		itemTypes: ['report', 'match_conflict', 'anti_cheat', 'integrity'],
+		status: 'open',
+		minRole: 'moderator',
+		presets: { '7d': 'moderator', '30d': 'admin', permanent: 'admin' },
+		targeted: true,
+		destructive: true,
+	},
+	account_ban: {
+		itemTypes: ['report', 'anti_cheat', 'integrity'],
+		status: 'open',
+		minRole: 'admin',
+		presets: { '7d': 'admin', '30d': 'admin', permanent: 'admin' },
+		targeted: true,
+		destructive: true,
+	},
+	void: {
+		itemTypes: ['match_conflict', 'forfeit_reconciliation', 'anti_cheat'],
+		status: 'open',
+		minRole: 'admin',
+		destructive: true,
+	},
+	overturn: { itemTypes: ['match_conflict'], status: 'open', minRole: 'admin', destructive: true },
+	reopen: { itemTypes: ALL, status: 'resolved', minRole: 'moderator' },
+	unban: { itemTypes: ALL, status: 'any', minRole: 'moderator', destructive: true },
+	note: { itemTypes: ALL, status: 'any', minRole: 'moderator' },
+}
+
+const ORDER: Readonly<Record<StaffRole, number>> = { moderator: 0, admin: 1 }
+
+export function roleMeets(role: StaffRole, least: StaffRole): boolean {
+	return ORDER[role] >= ORDER[least]
+}
+
+function statusMatches(rule: StatusRule, status: ItemStatus): boolean {
+	return rule === 'any' || rule === status
+}
+
+export type PermissionRefusal = 'not_for_type' | 'wrong_status' | 'forbidden'
+
+// Whether role may run action (with preset, for one that has presets) on an
+// item of this type and status; the refusal says which rule failed.
+export function permissionFor(
+	action: ActionKey,
+	item: { itemType: ItemType; status: ItemStatus },
+	role: StaffRole,
+	preset?: Duration,
+): { ok: true } | { ok: false; refusal: PermissionRefusal } {
+	const rule = ACTION_RULES[action]
+	if (!rule.itemTypes.includes(item.itemType)) return { ok: false, refusal: 'not_for_type' }
+	if (!statusMatches(rule.status, item.status)) return { ok: false, refusal: 'wrong_status' }
+	if (!roleMeets(role, rule.minRole)) return { ok: false, refusal: 'forbidden' }
+	if (rule.presets && preset !== undefined) {
+		const least = rule.presets[preset]
+		if (!least) return { ok: false, refusal: 'not_for_type' }
+		if (!roleMeets(role, least)) return { ok: false, refusal: 'forbidden' }
+	}
+	return { ok: true }
+}
+
+export interface AllowedAction {
+	action: ActionKey
+	// The presets this role may pick, for an action that has them.
+	presets?: Duration[]
+	targeted: boolean
+	destructive: boolean
+}
+
+function presetOrder(action: ActionKey): readonly Duration[] {
+	return action === 'chat_mute' ? CHAT_MUTE_DURATIONS : BAN_DURATIONS
+}
+
+// The actions role may run on the item right now, presets narrowed to its role.
+export function allowedActionsFor(
+	item: { itemType: ItemType; status: ItemStatus },
+	role: StaffRole,
+): AllowedAction[] {
+	const allowed: AllowedAction[] = []
+	for (const action of Object.keys(ACTION_RULES) as ActionKey[]) {
+		const rule = ACTION_RULES[action]
+		if (!permissionFor(action, item, role).ok) continue
+		const entry: AllowedAction = { action, targeted: rule.targeted === true, destructive: rule.destructive === true }
+		if (rule.presets) {
+			const presets = presetOrder(action).filter((p) => {
+				const least = rule.presets?.[p]
+				return least !== undefined && roleMeets(role, least)
+			})
+			if (presets.length === 0) continue
+			entry.presets = presets
+		}
+		allowed.push(entry)
+	}
+	return allowed
+}
+
+export type BanKind = 'chat' | 'queue' | 'account'
+
+// Lifting a ban: moderators lift chat and queue bans, admins any.
+export function mayLiftBan(role: StaffRole, banType: BanKind): boolean {
+	return banType === 'account' ? role === 'admin' : true
+}
+
+// The queue action whose presets govern a ban of each kind.
+const BAN_ACTION: Readonly<Record<BanKind, ActionKey>> = {
+	chat: 'chat_mute',
+	queue: 'queue_ban',
+	account: 'account_ban',
+}
+
+// A client computes expiresAt a moment before the request lands.
+const DIRECT_BAN_SLACK_MS = 60 * 1000
+
+// A ban issued outside the queue (the players page: any expiry) held to the
+// same table: the role must meet the ban's action, and the expiry may run no
+// longer than the longest preset that role may pick (permanent only when the
+// role may pick 'permanent'). Moderators: chat bans up to 30 days, queue bans
+// up to 7; admins: everything.
+export function mayIssueBan(role: StaffRole, banType: BanKind, expiresAt: Date | null, now: Date): boolean {
+	const rule = ACTION_RULES[BAN_ACTION[banType]]
+	if (!roleMeets(role, rule.minRole)) return false
+	const presets = (Object.keys(rule.presets ?? {}) as Duration[]).filter((p) => {
+		const least = rule.presets?.[p]
+		return least !== undefined && roleMeets(role, least)
+	})
+	if (expiresAt === null) return presets.includes('permanent')
+	const longest = Math.max(
+		...presets.map((p) => expiresAtOf(p, now)?.getTime() ?? Number.POSITIVE_INFINITY),
+		Number.NEGATIVE_INFINITY,
+	)
+	return expiresAt.getTime() <= longest + DIRECT_BAN_SLACK_MS
+}

@@ -2,7 +2,7 @@ import request from 'supertest'
 import { describe, expect, it, vi } from 'vitest'
 import { signJwt } from '../../features/auth/jwt.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
-import { insertBan } from '../../infrastructure/gateways/ban.gateway.js'
+import { insertBan, liftBan, listBans } from '../../infrastructure/gateways/ban.gateway.js'
 import { db } from '../../infrastructure/db/index.js'
 import { banInNakama } from '../../infrastructure/nakama/moderation-sync.js'
 import { createSession } from '../../state/index.js'
@@ -91,6 +91,64 @@ describe('POST /api/webadmin/players/:id/bans (§21.3)', () => {
 
 		expect(res.status).toBe(201)
 		expect(vi.mocked(banInNakama)).toHaveBeenCalledWith(ban)
+	})
+})
+
+describe('POST /api/webadmin/players/:id/bans: the queue role table', () => {
+	const inDays = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
+	const issue = (token: string, body: Record<string, unknown>) =>
+		request(app).post('/api/webadmin/players/target-3/bans').set('Authorization', token).send(body)
+
+	it('lets a moderator issue a 7-day queue ban and a 24-hour chat ban', async () => {
+		const token = authAsModerator('mod-2', 'Mod2')
+		vi.mocked(insertBan).mockResolvedValue({ id: 'ban-3' } as any)
+		expect((await issue(token, { type: 'queue', expiresAt: inDays(7) })).status).toBe(201)
+		expect((await issue(token, { type: 'chat', expiresAt: inDays(1) })).status).toBe(201)
+		expect(vi.mocked(insertBan)).toHaveBeenCalledWith(expect.objectContaining({ issuedBy: 'moderator:mod-2' }))
+	})
+
+	it('refuses a moderator an account ban, a permanent ban and a queue ban past 7 days', async () => {
+		const token = authAsModerator('mod-3', 'Mod3')
+		for (const body of [
+			{ type: 'account', expiresAt: inDays(1) },
+			{ type: 'account' },
+			{ type: 'queue' },
+			{ type: 'queue', expiresAt: inDays(30) },
+			{ type: 'chat' },
+		]) {
+			const res = await issue(token, body)
+			expect(res.status, JSON.stringify(body)).toBe(403)
+		}
+		expect(vi.mocked(insertBan)).not.toHaveBeenCalled()
+		expect(vi.mocked(banInNakama)).not.toHaveBeenCalled()
+	})
+
+	it('lets an admin issue a permanent account ban', async () => {
+		const token = authAsAdmin('admin-5', 'Admin5')
+		vi.mocked(insertBan).mockResolvedValue({ id: 'ban-4' } as any)
+		expect((await issue(token, { type: 'account' })).status).toBe(201)
+		expect(vi.mocked(insertBan)).toHaveBeenCalledWith(expect.objectContaining({ issuedBy: 'admin:admin-5' }))
+	})
+})
+
+describe('DELETE /api/webadmin/players/:id/bans/:banId: the queue role table', () => {
+	const ban = (banType: 'chat' | 'queue' | 'account') => ({ id: 'ban-9', playerId: 'target-4', banType }) as any
+
+	it('refuses a moderator lifting an account ban', async () => {
+		const token = authAsModerator('mod-4', 'Mod4')
+		vi.mocked(listBans).mockResolvedValue([ban('account')])
+		const res = await request(app).delete('/api/webadmin/players/target-4/bans/ban-9').set('Authorization', token)
+		expect(res.status).toBe(403)
+		expect(vi.mocked(liftBan)).not.toHaveBeenCalled()
+	})
+
+	it('lets a moderator lift a queue ban', async () => {
+		const token = authAsModerator('mod-5', 'Mod5')
+		vi.mocked(listBans).mockResolvedValue([ban('queue')])
+		vi.mocked(liftBan).mockResolvedValue(ban('queue'))
+		const res = await request(app).delete('/api/webadmin/players/target-4/bans/ban-9').set('Authorization', token)
+		expect(res.status).toBe(200)
+		expect(vi.mocked(liftBan)).toHaveBeenCalledWith('target-4', 'ban-9', 'moderator:mod-5')
 	})
 })
 

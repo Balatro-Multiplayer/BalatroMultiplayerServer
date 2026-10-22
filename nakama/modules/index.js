@@ -1564,6 +1564,9 @@ var CURRENT_LOBBY_COLLECTION = "lobby";
 var CURRENT_LOBBY_KEY = "current";
 var LOBBY_CODE_COLLECTION = "lobby_codes";
 var SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
+function lobbyIdOf(matchId) {
+  return matchId.split(".")[0];
+}
 var LOBBY_CHECKPOINT_COLLECTION = "lobby_checkpoints";
 var CHECKPOINT_TTL_MS = 10 * 60 * 1e3;
 function checkpointExpiry(stored) {
@@ -2314,7 +2317,10 @@ var NotifyCode = {
   AVATAR_UNLOCKED: 107,
   // {standing, disallowed, reason} (standing/rpc.ts): the mod allowlist
   // changed, so the player's standing may have.
-  STANDING_CHANGED: 108
+  STANDING_CHANGED: 108,
+  // {message, itemType, warnedAt}: a moderator's warning (service queue).
+  // Persistent, so an offline player sees it at their next login.
+  WARNED: 109
 };
 var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
 function isNotifyCode(code) {
@@ -3281,11 +3287,51 @@ function noteReturn(nk, logger, userId, now) {
     for (const object of objects) {
       const forfeit = object.value;
       if (now - forfeit.at <= RECONCILIATION_WINDOW_MS)
-        enqueue(nk, { kind: "forfeit", at: now, userId, runId: forfeit.runId, code: forfeit.code, forfeitedAt: forfeit.at });
+        enqueue(nk, {
+          kind: "forfeit",
+          at: now,
+          userId,
+          runId: forfeit.runId,
+          code: forfeit.code,
+          forfeitedAt: forfeit.at,
+          lobbyKind: forfeit.lobbyKind
+        });
     }
     nk.storageDelete(objects.map((o) => ({ collection: FORFEITS_COLLECTION, key: o.key, userId })));
   } catch (e) {
     logger.warn("Could not check %s for a wrongful forfeit: %v", userId, e);
+  }
+}
+
+// src/review/ranked.ts
+function isRankedGameMode(gameMode) {
+  return gameMode.indexOf("ranked:") === 0;
+}
+function rankedContextOf(records, label) {
+  let inGame = false;
+  if (label) {
+    try {
+      const parsed = JSON.parse(label);
+      inGame = typeof parsed.mode === "string" && isRankedGameMode(parsed.mode) && parsed.started === true;
+    } catch (e) {
+      inGame = false;
+    }
+  }
+  return { queued: records.some((r) => isRankedGameMode(r.gameMode)), inGame };
+}
+function lobbyKindOf(lobby) {
+  if (lobby.rankedMode || lobby.gameMode && isRankedGameMode(lobby.gameMode)) return "ranked";
+  return lobby.allowedIds || lobby.gameMode ? "casual" : "private";
+}
+function lobbyKindOfLabel(label) {
+  if (!label) return null;
+  try {
+    const parsed = JSON.parse(label);
+    const mode = typeof parsed.mode === "string" ? parsed.mode : "";
+    if (isRankedGameMode(mode)) return "ranked";
+    return parsed.type === "public" || mode ? "casual" : "private";
+  } catch (e) {
+    return null;
   }
 }
 
@@ -4053,7 +4099,7 @@ function tick(lobby, now) {
     const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince;
     if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
       const started = step.lobby.game.started;
-      const forfeited = started && lobby.gameMode && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now }] : [];
+      const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
       const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
       step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) };
     }
@@ -5077,6 +5123,10 @@ function liveTicketHolders(nk, userIds, exceptTicket, now) {
     return records.some((r) => sessions.indexOf(r.sessionId) !== -1);
   });
 }
+function liveRecordsOf(nk, userId, now) {
+  const sessions = sessionsOf(nk, userId);
+  return ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => now - r.at <= QUEUE_STALE_MS && sessions.indexOf(r.sessionId) !== -1);
+}
 function liveQueuedPlayers(nk, modId, now) {
   const byUser = {};
   let cursor = "";
@@ -5350,6 +5400,279 @@ function standingInputsUpdated(nk, logger, now) {
   );
 }
 
+// src/lobby/log_check.ts
+var FRAMING_OPCODES = { end: true, chk: true };
+function opcodeOf(line) {
+  return JSON.parse(line)[1];
+}
+function hashInput(lines) {
+  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
+}
+function claimedHash(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event2 = JSON.parse(lines[i]);
+    if (event2[1] !== "chk") continue;
+    const args = event2[2];
+    return args && typeof args.carbon === "string" ? args.carbon : null;
+  }
+  return null;
+}
+function checkLog(log, sha256) {
+  if (!log) return { carbonHash: null, check: "unavailable" };
+  const carbonHash = claimedHash(log.lines);
+  if (carbonHash === null || log.truncated)
+    return { carbonHash, check: "unavailable" };
+  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
+  return {
+    carbonHash,
+    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
+  };
+}
+
+// src/lobby/storage.ts
+function myRunKey(run) {
+  const reversed = String(9999999999999 - run.endedAt).padStart(13, "0");
+  return `${reversed}:${run.runId}`;
+}
+function logKey(runId, playerId) {
+  return `${runId}:${playerId}`;
+}
+function logChecksOf(run, logs, sha256) {
+  const checks = {};
+  for (const player of run.players)
+    checks[player.id] = checkLog(logs[player.id], sha256).check;
+  return checks;
+}
+function runWrites(run, logs, sha256) {
+  const checks = {};
+  const logChecks = {};
+  for (const player of run.players) {
+    checks[player.id] = checkLog(logs[player.id], sha256);
+    logChecks[player.id] = checks[player.id].check;
+  }
+  const writes = [
+    {
+      collection: RUNS_COLLECTION,
+      key: run.runId,
+      userId: SYSTEM_USER_ID,
+      value: __spreadProps(__spreadValues({}, run), { logChecks }),
+      permissionRead: 2,
+      permissionWrite: 0
+    }
+  ];
+  for (const player of run.players) {
+    const log = logs[player.id];
+    writes.push({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, player.id),
+      userId: SYSTEM_USER_ID,
+      value: {
+        events: log ? log.lines.map((line) => JSON.parse(line)) : [],
+        eventCount: log ? log.lines.length : 0,
+        truncated: log ? log.truncated : false,
+        carbonHash: checks[player.id].carbonHash,
+        check: checks[player.id].check
+      },
+      permissionRead: 0,
+      permissionWrite: 0
+    });
+    const placement = run.placements.filter((p) => p.playerId === player.id)[0];
+    writes.push({
+      collection: MY_RUNS_COLLECTION,
+      key: myRunKey(run),
+      userId: player.id,
+      value: {
+        runId: run.runId,
+        code: run.code,
+        modId: run.modId,
+        startedAt: run.startedAt,
+        endedAt: run.endedAt,
+        status: run.status,
+        place: placement ? placement.place : null,
+        rating: run.ratings && run.ratings[player.id] || null
+      },
+      permissionRead: 1,
+      permissionWrite: 0
+    });
+  }
+  return writes;
+}
+function saveRun(nk, run, logs) {
+  const writes = runWrites(run, logs, (input) => nk.sha256Hash(input));
+  nk.storageWrite(writes);
+  return writes[0].value;
+}
+function readRun(nk, runId) {
+  if (typeof runId !== "string" || runId === "")
+    throw runtimeError(INVALID_ARGUMENT, "runId is required");
+  const objects = nk.storageRead([
+    { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
+  ]);
+  if (objects.length === 0) throw runtimeError(NOT_FOUND, "Run not found");
+  return objects[0].value;
+}
+function rpcRunGet(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const run = readRun(nk, parsePayload(payload).runId);
+  if (!run.players.some((p) => p.id === userId))
+    throw runtimeError(NOT_FOUND, "Run not found");
+  return JSON.stringify(run);
+}
+function rpcRunLogs(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  const run = readRun(nk, input.runId);
+  if (!run.players.some((p) => p.id === userId))
+    throw runtimeError(NOT_FOUND, "Run not found");
+  const wanted = run.players.filter(
+    (p) => typeof input.playerId !== "string" || p.id === input.playerId
+  );
+  const objects = nk.storageRead(
+    wanted.map((p) => ({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, p.id),
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  const logs = {};
+  for (const object of objects) {
+    logs[object.key.slice(run.runId.length + 1)] = object.value;
+  }
+  return JSON.stringify({ logs });
+}
+var RUNS_PAGE = 20;
+function rpcRunsMine(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  const cursor = typeof input.cursor === "string" ? input.cursor : "";
+  let page;
+  try {
+    page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+  return JSON.stringify({
+    runs: (page.objects || []).map((o) => o.value),
+    cursor: page.cursor || ""
+  });
+}
+
+// src/review/result.ts
+function parseResultPlacements(value) {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const out = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) return null;
+    const { playerId, place } = entry;
+    if (typeof playerId !== "string" || typeof place !== "number" || !Number.isInteger(place) || place < 1)
+      return null;
+    out.push({ playerId, place });
+  }
+  return out;
+}
+function sameIds(a, b) {
+  if (a.length !== b.length) return false;
+  const sorted = (ids) => ids.slice().sort().join(",");
+  return sorted(a) === sorted(b);
+}
+function placesKey(placements) {
+  return placements.map((p) => `${p.playerId}=${p.place}`).sort().join(",");
+}
+function overturnRun(run, placements, now) {
+  if (!sameIds(run.placements.map((p) => p.playerId), placements.map((p) => p.playerId)))
+    return { ok: false, refusal: { kind: "players_differ" } };
+  if (placesKey(run.placements) === placesKey(placements)) return { ok: false, refusal: { kind: "unchanged" } };
+  const previousBy = {};
+  for (const p of run.placements) previousBy[p.playerId] = p;
+  const next = placements.slice().sort((a, b) => a.place - b.place).map((p) => __spreadProps(__spreadValues({}, previousBy[p.playerId]), { playerId: p.playerId, place: p.place }));
+  const places = {};
+  for (const p of next) places[p.playerId] = p.place;
+  return {
+    ok: true,
+    run: __spreadProps(__spreadValues({}, run), {
+      placements: next,
+      overturned: { at: now, previous: run.overturned ? run.overturned.previous : run.placements }
+    }),
+    places
+  };
+}
+
+// src/review/rpc.ts
+function logsOf(nk, run, withEvents) {
+  var _a;
+  const objects = nk.storageRead(
+    run.players.map((p) => ({ collection: LOGS_COLLECTION, key: logKey(run.runId, p.id), userId: SYSTEM_USER_ID }))
+  );
+  const logs = {};
+  for (const object of objects) {
+    const log = object.value;
+    const userId = object.key.slice(run.runId.length + 1);
+    logs[userId] = __spreadValues({
+      eventCount: log.eventCount || 0,
+      truncated: log.truncated === true,
+      carbonHash: (_a = log.carbonHash) != null ? _a : null,
+      check: log.check || "unavailable"
+    }, withEvents ? { events: log.events || [] } : {});
+  }
+  return logs;
+}
+function rpcAdminRunGet(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const run = readRun(nk, input.runId);
+  return JSON.stringify({ run, logs: logsOf(nk, run, input.events === true) });
+}
+function rpcAdminRunSetResult(ctx, logger, nk, payload) {
+  var _a;
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const run = readRun(nk, input.runId);
+  const placements = parseResultPlacements(input.placements);
+  if (!placements) throw runtimeError(INVALID_ARGUMENT, "placements must be a list of {playerId, place}");
+  const overturn = overturnRun(run, placements, Date.now());
+  if (!overturn.ok) {
+    const message = overturn.refusal.kind === "players_differ" ? "placements must place exactly the run's players" : overturn.refusal.kind === "unchanged" ? "That is already the recorded result" : "placements must be a list of {playerId, place}";
+    throw runtimeError(INVALID_ARGUMENT, message);
+  }
+  const next = overturn.run;
+  const key = myRunKey(next);
+  const pointers = nk.storageRead(run.players.map((p) => ({ collection: MY_RUNS_COLLECTION, key, userId: p.id })));
+  const writes = [
+    {
+      collection: RUNS_COLLECTION,
+      key: next.runId,
+      userId: SYSTEM_USER_ID,
+      value: next,
+      permissionRead: 2,
+      permissionWrite: 0
+    }
+  ];
+  for (const pointer of pointers) {
+    writes.push({
+      collection: MY_RUNS_COLLECTION,
+      key,
+      userId: pointer.userId,
+      value: __spreadProps(__spreadValues({}, pointer.value), { place: (_a = overturn.places[pointer.userId]) != null ? _a : null }),
+      permissionRead: 1,
+      permissionWrite: 0
+    });
+  }
+  nk.storageWrite(writes);
+  logger.info("Run %s result overturned by the service queue", next.runId);
+  return JSON.stringify({ run: next });
+}
+function moderationContextOf(nk, userId, now) {
+  const seat = currentLobby(nk, userId);
+  const match = seat ? nk.matchGet(seat.matchId) : null;
+  return {
+    mods: readModReport(nk, userId),
+    standing: standingFor(nk, userId, now),
+    integrity: readIntegrity(nk, userId),
+    ranked: rankedContextOf(liveRecordsOf(nk, userId, now), match ? match.label : null)
+  };
+}
+
 // src/admin.ts
 var USER_ID_PATTERN2 = /^[0-9a-f-]{36}$/;
 function rpcAdminPing(ctx, logger, nk, payload) {
@@ -5490,12 +5813,12 @@ function rpcAdminPlayerGet(ctx, logger, nk, payload) {
   const userId = requireUserId2(nk, input);
   const profile = profileFor(nk, userId);
   const online = nk.streamUserList({ mode: 0, subject: userId }, true, true).length;
-  return JSON.stringify({
+  return JSON.stringify(__spreadValues({
     player: playerView(userId, profile),
     bans: readBans(nk, userId),
     lobby: currentLobby(nk, userId),
     online
-  });
+  }, moderationContextOf(nk, userId, Date.now())));
 }
 var MIRROR_PULL_DEFAULT = 10;
 var MIRROR_PULL_MAX = 50;
@@ -6093,7 +6416,7 @@ function parsePlacements(value, participants) {
 function sortedById(placements) {
   return placements.slice().sort((a, b) => a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0);
 }
-function placesKey(placements) {
+function placesKey2(placements) {
   return JSON.stringify(sortedById(placements).map((p) => [p.playerId, p.place]));
 }
 function reconcile(reports, reportOrder, participants, hostId) {
@@ -6102,7 +6425,7 @@ function reconcile(reports, reportOrder, participants, hostId) {
   const groups = {};
   const keys = [];
   for (const id of reporters) {
-    const key = placesKey(reports[id]);
+    const key = placesKey2(reports[id]);
     if (!groups[key]) {
       groups[key] = [];
       keys.push(key);
@@ -6650,164 +6973,6 @@ function eventsByPlayer(logs) {
   return events;
 }
 
-// src/lobby/log_check.ts
-var FRAMING_OPCODES = { end: true, chk: true };
-function opcodeOf(line) {
-  return JSON.parse(line)[1];
-}
-function hashInput(lines) {
-  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
-}
-function claimedHash(lines) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const event2 = JSON.parse(lines[i]);
-    if (event2[1] !== "chk") continue;
-    const args = event2[2];
-    return args && typeof args.carbon === "string" ? args.carbon : null;
-  }
-  return null;
-}
-function checkLog(log, sha256) {
-  if (!log) return { carbonHash: null, check: "unavailable" };
-  const carbonHash = claimedHash(log.lines);
-  if (carbonHash === null || log.truncated)
-    return { carbonHash, check: "unavailable" };
-  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
-  return {
-    carbonHash,
-    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
-  };
-}
-
-// src/lobby/storage.ts
-function myRunKey(run) {
-  const reversed = String(9999999999999 - run.endedAt).padStart(13, "0");
-  return `${reversed}:${run.runId}`;
-}
-function logKey(runId, playerId) {
-  return `${runId}:${playerId}`;
-}
-function logChecksOf(run, logs, sha256) {
-  const checks = {};
-  for (const player of run.players)
-    checks[player.id] = checkLog(logs[player.id], sha256).check;
-  return checks;
-}
-function runWrites(run, logs, sha256) {
-  const checks = {};
-  const logChecks = {};
-  for (const player of run.players) {
-    checks[player.id] = checkLog(logs[player.id], sha256);
-    logChecks[player.id] = checks[player.id].check;
-  }
-  const writes = [
-    {
-      collection: RUNS_COLLECTION,
-      key: run.runId,
-      userId: SYSTEM_USER_ID,
-      value: __spreadProps(__spreadValues({}, run), { logChecks }),
-      permissionRead: 2,
-      permissionWrite: 0
-    }
-  ];
-  for (const player of run.players) {
-    const log = logs[player.id];
-    writes.push({
-      collection: LOGS_COLLECTION,
-      key: logKey(run.runId, player.id),
-      userId: SYSTEM_USER_ID,
-      value: {
-        events: log ? log.lines.map((line) => JSON.parse(line)) : [],
-        eventCount: log ? log.lines.length : 0,
-        truncated: log ? log.truncated : false,
-        carbonHash: checks[player.id].carbonHash,
-        check: checks[player.id].check
-      },
-      permissionRead: 0,
-      permissionWrite: 0
-    });
-    const placement = run.placements.filter((p) => p.playerId === player.id)[0];
-    writes.push({
-      collection: MY_RUNS_COLLECTION,
-      key: myRunKey(run),
-      userId: player.id,
-      value: {
-        runId: run.runId,
-        code: run.code,
-        modId: run.modId,
-        startedAt: run.startedAt,
-        endedAt: run.endedAt,
-        status: run.status,
-        place: placement ? placement.place : null,
-        rating: run.ratings && run.ratings[player.id] || null
-      },
-      permissionRead: 1,
-      permissionWrite: 0
-    });
-  }
-  return writes;
-}
-function saveRun(nk, run, logs) {
-  const writes = runWrites(run, logs, (input) => nk.sha256Hash(input));
-  nk.storageWrite(writes);
-  return writes[0].value;
-}
-function readRun(nk, runId) {
-  if (typeof runId !== "string" || runId === "")
-    throw runtimeError(INVALID_ARGUMENT, "runId is required");
-  const objects = nk.storageRead([
-    { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
-  ]);
-  if (objects.length === 0) throw runtimeError(NOT_FOUND, "Run not found");
-  return objects[0].value;
-}
-function rpcRunGet(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const run = readRun(nk, parsePayload(payload).runId);
-  if (!run.players.some((p) => p.id === userId))
-    throw runtimeError(NOT_FOUND, "Run not found");
-  return JSON.stringify(run);
-}
-function rpcRunLogs(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const input = parsePayload(payload);
-  const run = readRun(nk, input.runId);
-  if (!run.players.some((p) => p.id === userId))
-    throw runtimeError(NOT_FOUND, "Run not found");
-  const wanted = run.players.filter(
-    (p) => typeof input.playerId !== "string" || p.id === input.playerId
-  );
-  const objects = nk.storageRead(
-    wanted.map((p) => ({
-      collection: LOGS_COLLECTION,
-      key: logKey(run.runId, p.id),
-      userId: SYSTEM_USER_ID
-    }))
-  );
-  const logs = {};
-  for (const object of objects) {
-    logs[object.key.slice(run.runId.length + 1)] = object.value;
-  }
-  return JSON.stringify({ logs });
-}
-var RUNS_PAGE = 20;
-function rpcRunsMine(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const input = parsePayload(payload);
-  const cursor = typeof input.cursor === "string" ? input.cursor : "";
-  let page;
-  try {
-    page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
-  } catch (e) {
-    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-    throw e;
-  }
-  return JSON.stringify({
-    runs: (page.objects || []).map((o) => o.value),
-    cursor: page.cursor || ""
-  });
-}
-
 // src/standing/rejoin.ts
 var REJOIN_REFUSED_PREFIX = "standing_refused:";
 function rejoinRefusal(required, result) {
@@ -6963,7 +7128,7 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
     }
     case "forfeited":
       try {
-        recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at });
+        recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at, lobbyKind: effect.lobbyKind });
       } catch (e) {
         logger.warn("Lobby %s: could not record %s timing out: %v", lobby.code, effect.userId, e);
       }
@@ -7576,6 +7741,12 @@ function rpcChatSend(ctx, logger, nk, payload) {
   );
   if (check.error === "rate_limited") throw runtimeError(UNAVAILABLE, "You are sending messages too fast");
   if (check.error) throw runtimeError(INVALID_ARGUMENT, "Not in a lobby");
+  const match = nk.matchGet(current.matchId);
+  const lobby = {
+    lobbyCode: check.code,
+    lobbyId: lobbyIdOf(current.matchId),
+    lobbyKind: lobbyKindOfLabel(match ? match.label : null)
+  };
   let text = message;
   if (!isAllowlisted(message, config.chatAllowlist)) {
     if (remoteModerationEnabled(ctx.env)) {
@@ -7589,7 +7760,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
       );
       if (!outcome.allowed) {
         if (outcome.reason === "moderated") {
-          logChat(nk, logger, check.code, userId, message, { source: "remote", band: outcome.band || "unknown" });
+          logChat(nk, logger, lobby, userId, message, { source: "remote", band: outcome.band || "unknown" });
           throw runtimeError(PERMISSION_DENIED, "Message blocked by moderation");
         }
         throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
@@ -7598,7 +7769,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
     } else {
       const matches = obscenityMatches(message);
       if (matches.length > 0) {
-        logChat(nk, logger, check.code, userId, message, { source: "local", matches });
+        logChat(nk, logger, lobby, userId, message, { source: "local", matches });
         throw runtimeError(PERMISSION_DENIED, "Message blocked by moderation");
       }
     }
@@ -7607,15 +7778,15 @@ function rpcChatSend(ctx, logger, nk, payload) {
     current.matchId,
     JSON.stringify({ type: "chat_post", userId, text })
   );
-  logChat(nk, logger, check.code, userId, message, null);
+  logChat(nk, logger, lobby, userId, message, null);
   return JSON.stringify({ text });
 }
-function logChat(nk, logger, lobbyCode, userId, message, blocked) {
+function logChat(nk, logger, lobby, userId, message, blocked) {
   try {
     enqueue(nk, {
       kind: "chat",
       at: Date.now(),
-      line: { lobbyCode, userId, message, flagged: blocked !== null, verdict: blocked }
+      line: __spreadProps(__spreadValues({}, lobby), { userId, message, flagged: blocked !== null, verdict: blocked })
     });
   } catch (e) {
     logger.error("Could not queue a chat line for the API: %v", e);
@@ -8218,12 +8389,14 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   const signal2 = { type: "report_evidence", reporterId: userId, reportedId: report.reportedUserId };
   const evidence = JSON.parse(nk.matchSignal(lobby.matchId, JSON.stringify(signal2)) || "{}");
   if ("error" in evidence) throw runtimeError(INVALID_ARGUMENT, EVIDENCE_REFUSALS[evidence.error] || evidence.error);
+  const match = nk.matchGet(lobby.matchId);
   const reply = callExpress(nk, logger, ctx.env, "/reports", {
     reporterId: userId,
     reportedId: report.reportedUserId,
     type: report.type,
     message: report.message,
-    lobbyId: lobby.matchId.split(".")[0],
+    lobbyId: lobbyIdOf(lobby.matchId),
+    lobbyKind: lobbyKindOfLabel(match ? match.label : null),
     lobbyCode: evidence.code,
     runId: evidence.runId,
     chat: evidence.chat
@@ -8319,6 +8492,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
   initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
+  initializer.registerRpc("admin_run_get", rpcAdminRunGet);
+  initializer.registerRpc("admin_run_set_result", rpcAdminRunSetResult);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

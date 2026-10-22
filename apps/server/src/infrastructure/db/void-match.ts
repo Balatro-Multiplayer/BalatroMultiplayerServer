@@ -112,76 +112,116 @@ export function resolvedInSeason(
 	)
 }
 
-export async function voidMatch(matchId: string): Promise<void> {
+type MatchRow = typeof matchmakingMatches.$inferSelect
+
+export type VoidOutcome =
+	| { kind: 'voided'; ranked: boolean; alreadyVoided: boolean }
+	| { kind: 'not_found' }
+	| { kind: 'not_resolved'; status: string }
+	| { kind: 'failed'; reason: string }
+
+// Voids a resolved match: marks it voided and, for a ranked one, rebuilds its
+// rating scope without it. A match already voided rebuilds again (cheap, and
+// it heals a void whose Nakama push failed), so a retried void is safe.
+export async function voidMatch(matchId: string): Promise<VoidOutcome> {
 	const [match] = await db
 		.select()
 		.from(matchmakingMatches)
 		.where(eq(matchmakingMatches.matchId, matchId))
 
-	if (!match) throw new Error(`match ${matchId} not found`)
-
-	if (match.status === 'voided') {
-		console.log(`[void-match] ${matchId} is already voided -- nothing to do`)
-		return
-	}
-	if (match.status !== 'resolved') {
+	if (!match) return { kind: 'not_found' }
+	const alreadyVoided = match.status === 'voided'
+	if (!alreadyVoided && match.status !== 'resolved') {
 		console.log(
 			`[void-match] ${matchId} has status='${match.status}', not 'resolved' -- refusing to void`,
 		)
-		return
-	}
-	if (!match.resultReportedAt) {
-		throw new Error(
-			`match ${matchId} has no resultReportedAt -- cannot resolve its season`,
-		)
+		return { kind: 'not_resolved', status: match.status }
 	}
 
-	// The season *active when this match resolved*, not necessarily today's
-	// current season -- a void of an old match must not touch the live board.
+	await db
+		.update(matchmakingMatches)
+		.set({ status: 'voided', updatedAt: new Date() })
+		.where(eq(matchmakingMatches.matchId, matchId))
+
+	// Only ranked games move ratings. A casual match is just marked voided:
+	// replaying its scope would invent a rating board for a casual mode.
+	const ranked = match.gameMode.startsWith('ranked:')
+	if (!ranked) {
+		console.log(
+			`[void-match] ${matchId} is a casual match (${match.gameMode}) -- voided, no ratings to rebuild`,
+		)
+		return { kind: 'voided', ranked, alreadyVoided }
+	}
+	const rebuilt = await rebuildScope(match)
+	if (!rebuilt.ok) return { kind: 'failed', reason: rebuilt.reason }
+	return { kind: 'voided', ranked, alreadyVoided }
+}
+
+export type SetResultOutcome =
+	| { kind: 'set'; rerated: boolean }
+	| { kind: 'not_found' }
+	| { kind: 'failed'; reason: string }
+
+// Replaces a match's recorded result (an overturned dispute) and, for a
+// resolved ranked match, rebuilds its rating scope with the new result.
+export async function setMatchResult(
+	matchId: string,
+	placements: { playerId: string; place: number; rated?: boolean }[],
+): Promise<SetResultOutcome> {
+	const [match] = await db
+		.update(matchmakingMatches)
+		.set({ resultPlacements: placements, updatedAt: new Date() })
+		.where(eq(matchmakingMatches.matchId, matchId))
+		.returning()
+	if (!match) return { kind: 'not_found' }
+	if (match.status !== 'resolved' || !match.gameMode.startsWith('ranked:'))
+		return { kind: 'set', rerated: false }
+	const rebuilt = await rebuildScope(match)
+	if (!rebuilt.ok) return { kind: 'failed', reason: rebuilt.reason }
+	return { kind: 'set', rerated: true }
+}
+
+// The season *active when this match resolved*, not necessarily today's
+// current season -- a void of an old match must not touch the live board.
+async function seasonOf(at: Date) {
 	const [season] = await db
 		.select()
 		.from(seasons)
 		.where(
 			and(
-				lte(seasons.startedAt, match.resultReportedAt),
-				or(
-					isNull(seasons.endedAt),
-					gt(seasons.endedAt, match.resultReportedAt),
-				),
+				lte(seasons.startedAt, at),
+				or(isNull(seasons.endedAt), gt(seasons.endedAt, at)),
 			),
 		)
 		.orderBy(asc(seasons.startedAt))
 		.limit(1)
+	return season ?? null
+}
 
+// Rebuilds a ranked match's (modId, gameMode, season) scope from scratch:
+// wipe its ratings and leaderboard, replay every resolved match in it in
+// order, and push the result over Nakama's board.
+export async function rebuildScope(
+	match: MatchRow,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+	if (!match.resultReportedAt)
+		return {
+			ok: false,
+			reason: `match ${match.matchId} has no resultReportedAt -- cannot resolve its season`,
+		}
+	const season = await seasonOf(match.resultReportedAt)
 	if (!season)
-		throw new Error(
-			`could not resolve the season active at ${match.resultReportedAt.toISOString()}`,
-		)
+		return {
+			ok: false,
+			reason: `no season was active at ${match.resultReportedAt.toISOString()}`,
+		}
 
 	const { modId, gameMode } = match
-
-	// Only ranked games move ratings. A casual match is just marked voided:
-	// replaying its scope would invent a rating board for a casual mode.
-	if (!gameMode.startsWith('ranked:')) {
-		await db
-			.update(matchmakingMatches)
-			.set({ status: 'voided' })
-			.where(eq(matchmakingMatches.matchId, matchId))
-		console.log(
-			`[void-match] ${matchId} is a casual match (${gameMode}) -- voided, no ratings to rebuild`,
-		)
-		return
-	}
 	console.log(
-		`[void-match] voiding ${matchId} (${modId}:${gameMode}, season ${season.id} "${season.name}")`,
+		`[void-match] rebuilding ${modId}:${gameMode}, season ${season.id} "${season.name}" (for ${match.matchId})`,
 	)
 
 	const before = await listScopeRatings(modId, gameMode, season.id)
-
-	await db
-		.update(matchmakingMatches)
-		.set({ status: 'voided' })
-		.where(eq(matchmakingMatches.matchId, matchId))
 
 	const delRatings = await db
 		.delete(matchmakingRatings)
@@ -220,23 +260,15 @@ export async function voidMatch(matchId: string): Promise<void> {
 			.orderBy(asc(matchmakingMatches.resultReportedAt))
 	).filter((row) => resolvedInSeason(row.resultReportedAt, season))
 
-	console.log(
-		`[void-match] replaying ${scopedMatches.length} remaining resolved matches in scope`,
-	)
-
 	let n = 0
 	for (const row of scopedMatches) {
 		const placements = replayPlacements(row.resultPlacements)
 		if (!placements) continue
 		const at = row.resultReportedAt ?? row.updatedAt
-		const results = await applyRatingTransaction(row, season.id, placements, at)
-		console.log(
-			`[void-match]   ${row.matchId}: ${results.map((r) => `${r.playerId}=${r.newRating ?? '(placement)'}`).join(', ')}`,
-		)
+		await applyRatingTransaction(row, season.id, placements, at)
 		n++
 	}
-
-	console.log(`[void-match] done -- replayed ${n} matches, ${matchId} excluded`)
+	console.log(`[void-match] replayed ${n} of ${scopedMatches.length} resolved matches in scope`)
 
 	const entries = nakamaRatingEntries(
 		before,
@@ -250,18 +282,22 @@ export async function voidMatch(matchId: string): Promise<void> {
 			entries: entries.slice(i, i + RATINGS_SET_BATCH),
 		})
 		if (!result.ok)
-			throw new Error(
-				`[void-match] pushing the rebuilt ratings to Nakama failed: ${result.error}`,
-			)
+			return {
+				ok: false,
+				reason: `pushing the rebuilt ratings to Nakama failed: ${result.error}`,
+			}
 	}
 	console.log(`[void-match] pushed ${entries.length} ratings to Nakama`)
+	return { ok: true }
 }
 
 async function main() {
 	const matchId = process.argv[2]
 	if (!matchId) throw new Error('usage: void-match.ts <matchId>')
-	await voidMatch(matchId)
+	const outcome = await voidMatch(matchId)
+	console.log('[void-match]', outcome)
 	await pool.end()
+	if (outcome.kind !== 'voided') process.exit(1)
 	process.exit(0)
 }
 

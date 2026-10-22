@@ -1,5 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
-import type { ChatRows, ForfeitRow, RunRows } from '../../features/nakama/mirror.service.js'
+import type { ChatRows, ForfeitRow, GameKind, RunRows } from '../../features/nakama/mirror.service.js'
+import { antiCheatSourceId } from '../../features/service-queue/source-ids.js'
 import { db } from '../db/index.js'
 import {
 	chatLogs,
@@ -81,13 +82,14 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 		}
 	})
 	// After the commit: the queue item points at rows that now exist. One
-	// item per run, as replay-log.service.ts files it (sourceId = run id).
+	// item per flagged player (sourceId = 'runId:playerId', the run log's key).
 	for (const flag of rows.flagged) {
 		await enqueueServiceQueueItem({
 			itemType: 'anti_cheat',
-			sourceId: rows.lobbyRun.id,
+			sourceId: antiCheatSourceId(rows.lobbyRun.id, flag.playerId),
 			subjectPlayerId: flag.playerId,
 			summary: `Anti-cheat flag (${flag.reason})`,
+			context: { lobbyKind: rows.lobbyKind },
 		})
 	}
 	if (rows.conflicts.length > 0) {
@@ -100,15 +102,16 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 				itemType: 'match_conflict',
 				sourceId: String(conflict.id),
 				subjectPlayerId: null,
-				summary: `Match result conflict — lobby ${rows.lobbyRun.lobbyCode}`,
+				summary: `${rows.lobbyKind === 'private' ? 'Private game' : 'Match'} result conflict — lobby ${rows.lobbyRun.lobbyCode}`,
+				context: { lobbyKind: rows.lobbyKind },
 			})
 		}
 	}
 }
 
-export async function storeMirroredForfeit(row: ForfeitRow): Promise<void> {
+export async function storeMirroredForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void> {
 	if (await hasOpenForfeitReconciliationFlag(row.matchId, row.playerId)) return
-	await insertForfeitReconciliationFlag(row)
+	await insertForfeitReconciliationFlag(row, lobbyKind ? { lobbyKind } : {})
 }
 
 export async function storeMirroredChat(rows: ChatRows): Promise<void> {
@@ -129,5 +132,6 @@ export async function storeMirroredChat(rows: ChatRows): Promise<void> {
 		summary: Array.isArray(matches)
 			? `Flagged chat — ${matches.length} match${matches.length === 1 ? '' : 'es'}`
 			: `Flagged chat — remote moderation (band: ${(matches as { band?: string }).band ?? 'unknown'})`,
+		context: rows.lobbyKind ? { lobbyKind: rows.lobbyKind } : {},
 	})
 }

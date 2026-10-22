@@ -57,7 +57,19 @@ describe('/internal/nakama/reports', () => {
 			runId: null,
 			message: 'mean',
 			chat: [{ playerId: 'player-them', displayName: 'Them', message: 'rude', sentAt: new Date(1000) }],
+			context: {},
 		})
+	})
+
+	it("carries the lobby's kind into the queue item's context", async () => {
+		const res = await request(app)
+			.post('/internal/nakama/reports')
+			.set('X-BMP-Internal-Key', KEY)
+			.send(body({ lobbyKind: 'private' }))
+		expect(res.status).toBe(200)
+		expect(reportGateway.submitNakamaReport).toHaveBeenCalledWith(
+			expect.objectContaining({ context: { lobbyKind: 'private' } }),
+		)
 	})
 
 	it('keeps the Nakama id of a player with no player row', async () => {

@@ -37,7 +37,7 @@ describe('the mirror outbox', () => {
 	it('hands the API a run with its logs, ratings and players, oldest first', () => {
 		const nk = nakama()
 		storeRun(nk, 'r1')
-		enqueue(nk, { kind: 'chat', at: 20, line: { lobbyCode: 'ABC', userId: 'a', message: 'hi', flagged: false, verdict: null } })
+		enqueue(nk, { kind: 'chat', at: 20, line: { lobbyCode: 'ABC', lobbyId: 'l1', lobbyKind: 'private', userId: 'a', message: 'hi', flagged: false, verdict: null } })
 		enqueue(nk, { kind: 'run', at: 10, runId: 'r1', rating: { modId: 'M', mode: 'duel', season: 2 } })
 
 		const { entries, players } = pull(nk)

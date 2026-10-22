@@ -133,11 +133,12 @@ async function main() {
 		check('reports/:id', det.ok, det.text.slice(0, 160))
 	}
 
-	// Ban through webadmin: queue ban on b, then lift.
+	// Ban through webadmin: a 7-day queue ban on b (the longest a moderator
+	// may issue), then lift.
 	// Bans need a players row: use a mirrored device player (has one).
 	const pb = out.honestPlayer
 	const nkB = psql('bmp', `select nakama_user_id from players where id = ${q(pb)}`)[0][0]
-	const ban = await express('POST', `${W}/players/${pb}/bans`, { token: mod.token, body: { type: 'queue', reason: 'h1test' } })
+	const ban = await express('POST', `${W}/players/${pb}/bans`, { token: mod.token, body: { type: 'queue', reason: 'h1test', expiresAt: new Date(Date.now() + 7 * 86400e3).toISOString() } })
 	check('webadmin queue ban issued', ban.status === 201 && ban.body.ban, ban.text.slice(0, 160))
 	const nkBans = await poll(async () => {
 		const g = await admin('admin_player_get', { userId: nkB })
@@ -174,7 +175,7 @@ async function main() {
 
 	// --- service queue ---
 	const sq = await express('GET', `${W}/service-queue?itemType=anti_cheat&limit=100`, { token: mod.token })
-	const ac = sq.ok ? sq.body.items.find((i) => i.sourceId === out.runA) : null
+	const ac = sq.ok ? sq.body.items.find((i) => i.sourceId.startsWith(`${out.runA}:`)) : null
 	check('service queue has the anti_cheat item for runA', !!ac, `${sq.status} ${sq.body && sq.body.total}`)
 	if (ac) {
 		const d = await express('GET', `${W}/service-queue/${ac.id}`, { token: mod.token })
@@ -182,7 +183,8 @@ async function main() {
 	}
 	const mc = await express('GET', `${W}/service-queue?itemType=match_conflict&limit=100`, { token: mod.token })
 	check('service queue has the match_conflict item', mc.ok && mc.body.items.some((i) => String(i.sourceId) === String(out.conflictId)))
-	check('service-queue/:id bad id: 400', (await express('GET', `${W}/service-queue/abc`, { token: mod.token })).status === 400)
+	// A malformed id names no item: 404 not_found, like an unknown one.
+	check('service-queue/:id bad id: 404', (await express('GET', `${W}/service-queue/abc`, { token: mod.token })).status === 404)
 
 	// --- match conflicts ---
 	const cl = await express('GET', `${W}/match-conflicts?limit=100`, { token: mod.token })

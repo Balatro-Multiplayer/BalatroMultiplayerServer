@@ -1,4 +1,5 @@
 import { and, desc, eq, gt, isNull, or, sql } from 'drizzle-orm'
+import type { DbExecutor } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { playerBans } from '../db/schema.js'
 import type { BanType } from '../../shared/types/index.js'
@@ -78,8 +79,8 @@ export async function insertBan(data: {
 	expiresAt: Date | null
 	issuedBy: string
 	reason: string
-}): Promise<BanRecord> {
-	const [row] = await db
+}, exec: DbExecutor = db): Promise<BanRecord> {
+	const [row] = await exec
 		.insert(playerBans)
 		.values({
 			playerId: data.playerId,
@@ -100,8 +101,9 @@ export async function liftBan(
 	playerId: string,
 	banId: string,
 	liftedBy: string,
+	exec: DbExecutor = db,
 ): Promise<BanRecord | null> {
-	const [row] = await db
+	const [row] = await exec
 		.update(playerBans)
 		.set({ liftedAt: new Date(), liftedBy })
 		.where(
@@ -112,5 +114,10 @@ export async function liftBan(
 			),
 		)
 		.returning()
+	return row ? toRecord(row) : null
+}
+
+export async function getBanById(banId: string): Promise<BanRecord | null> {
+	const [row] = await db.select().from(playerBans).where(eq(playerBans.id, banId)).limit(1)
 	return row ? toRecord(row) : null
 }

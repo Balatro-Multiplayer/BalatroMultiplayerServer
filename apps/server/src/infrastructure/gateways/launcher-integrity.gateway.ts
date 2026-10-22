@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, count, desc, eq, gte } from 'drizzle-orm'
 import type {
 	ChallengeKind,
 	LauncherIntegrityFailureReason,
@@ -30,4 +30,14 @@ export async function getIntegrityEventsForPlayer(
 		.where(eq(launcherIntegrityEvents.playerId, playerId))
 		.orderBy(desc(launcherIntegrityEvents.occurredAt))
 		.limit(limit)
+}
+
+// Failures recorded for a player since a moment (the integrity intake's
+// daily count).
+export async function countEventsSince(playerId: string, since: Date): Promise<number> {
+	const [row] = await db
+		.select({ n: count() })
+		.from(launcherIntegrityEvents)
+		.where(and(eq(launcherIntegrityEvents.playerId, playerId), gte(launcherIntegrityEvents.occurredAt, since)))
+	return Number(row?.n ?? 0)
 }

@@ -152,9 +152,25 @@ describe('runRowsOf: flags and disputes', () => {
 				],
 			},
 		])
-		// Not for an agreed game, nor a private one.
+		// Not for an agreed game.
 		expect(runRowsOf(run({ reports: { na: ab, nb: ba } }), ids).conflicts).toEqual([])
-		expect(runRowsOf(run({ status: 'disputed', gameMode: undefined, reports: { na: ab, nb: ba } }), ids).conflicts).toEqual([])
+	})
+
+	it('files a private disputed game too, marked private', () => {
+		const ab = [
+			{ playerId: 'na', place: 1 },
+			{ playerId: 'nb', place: 2 },
+		]
+		const ba = [
+			{ playerId: 'na', place: 2 },
+			{ playerId: 'nb', place: 1 },
+		]
+		const rows = runRowsOf(
+			run({ status: 'disputed', gameMode: undefined, rankedMode: undefined, placements: ab, reports: { na: ab, nb: ba }, reportOrder: ['na', 'nb'] }),
+			ids,
+		)
+		expect(rows.conflicts).toHaveLength(1)
+		expect(rows.lobbyKind).toBe('private')
 	})
 })
 
@@ -253,7 +269,7 @@ describe('a forfeit entry', () => {
 			playerId: 'pg-a',
 			forfeitedAt: new Date(T0),
 			reconnectedAt: new Date(T0 + 30_000),
-		})
+		}, null)
 	})
 })
 

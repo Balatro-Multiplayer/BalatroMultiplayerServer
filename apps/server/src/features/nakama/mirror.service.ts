@@ -12,6 +12,8 @@ import { compressToBase64 } from '../../shared/utils/compression.js'
 // ---------------------------------------------------------------------------
 
 export type LogCheck = 'match' | 'mismatch' | 'unavailable'
+// What kind of game an entry came from (nakama review/ranked.ts LobbyKind).
+export type GameKind = 'ranked' | 'casual' | 'private'
 export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
 
 export interface NakamaRun {
@@ -73,6 +75,10 @@ export interface PulledChat {
 	at: number
 	line: {
 		lobbyCode: string
+		// The lobby instance (codes are reused) and its kind; absent on lines
+		// logged before the service queue redesign.
+		lobbyId?: string
+		lobbyKind?: GameKind | null
 		userId: string
 		message: string
 		flagged: boolean
@@ -89,6 +95,7 @@ export interface PulledForfeit {
 	runId: string
 	code: string
 	forfeitedAt: number
+	lobbyKind?: GameKind
 }
 
 export type PulledEntry = PulledRun | PulledChat | PulledForfeit
@@ -116,6 +123,7 @@ export const CHAT_LOG_TTL_MS = 90 * 24 * 60 * 60 * 1000
 export const FLAGGED_TTL_MS = 90 * 24 * 60 * 60 * 1000
 
 export interface RunRows {
+	lobbyKind: GameKind
 	lobbyRun: {
 		id: string
 		lobbyCode: string
@@ -168,7 +176,7 @@ export interface RunRows {
 	}[]
 	// Flagged players: an anti_cheat service-queue item.
 	flagged: { playerId: string; reason: FlagReason }[]
-	// A disputed matchmade game: each report that differs from the result,
+	// A disputed game (matchmade or private): each report that differs from the result,
 	// against the first report that agrees with it (match_result_conflicts).
 	conflicts: {
 		matchId: string
@@ -192,11 +200,18 @@ function placesKey(placements: { playerId: string; place: number }[]): string {
 	)
 }
 
+export function gameKindOfRun(run: Pick<NakamaRun, 'rankedMode' | 'gameMode'>): GameKind {
+	if (run.rankedMode || (run.gameMode && run.gameMode.startsWith('ranked:'))) return 'ranked'
+	return run.gameMode ? 'casual' : 'private'
+}
+
+// A disputed game, matchmade or private: each report that differs from the
+// result, against the first report that agrees with it.
 function conflictsOf(
 	run: NakamaRun,
 	ids: Map<string, string>,
 ): RunRows['conflicts'] {
-	if (run.status !== 'disputed' || !run.gameMode) return []
+	if (run.status !== 'disputed') return []
 	const order = (run.reportOrder ?? Object.keys(run.reports)).filter(
 		(id) => run.reports[id] && ids.has(id),
 	)
@@ -341,6 +356,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	}
 
 	return {
+		lobbyKind: gameKindOfRun(run),
 		conflicts: conflictsOf(run, ids),
 		lobbyRun: {
 			id: run.runId,
@@ -372,7 +388,9 @@ export interface ChatRows {
 		sentAt: Date
 		expiresAt: Date | null
 		mirrorKey: string
+		lobbyId: string | null
 	}
+	lobbyKind: GameKind | null
 	// For a flagged line: the flagged_messages row (and a service-queue item).
 	flaggedMessage: {
 		playerId: string
@@ -400,6 +418,8 @@ function flagMatchesOf(verdict: unknown): unknown {
 	}
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export function chatRowsOf(
 	entry: PulledChat,
 	playerId: string,
@@ -418,7 +438,9 @@ export function chatRowsOf(
 			sentAt,
 			expiresAt: line.flagged ? null : new Date(entry.at + CHAT_LOG_TTL_MS),
 			mirrorKey: entry.key,
+			lobbyId: line.lobbyId && UUID.test(line.lobbyId) ? line.lobbyId : null,
 		},
+		lobbyKind: line.lobbyKind ?? null,
 		flaggedMessage: line.flagged
 			? {
 					playerId,
@@ -453,7 +475,7 @@ export interface MirrorDeps {
 	store: {
 		storeRun(rows: RunRows): Promise<void>
 		storeChat(rows: ChatRows): Promise<void>
-		storeForfeit(row: ForfeitRow): Promise<void>
+		storeForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void>
 	}
 	hashSteamId(steamId: string): string
 }
@@ -513,7 +535,7 @@ export function createMirrorService(deps: MirrorDeps) {
 					await store.storeRun(runRowsOf(entry, ids))
 				} else if (entry.kind === 'forfeit') {
 					const playerId = ids.get(entry.userId)
-					if (playerId) await store.storeForfeit(forfeitRowOf(entry, playerId))
+					if (playerId) await store.storeForfeit(forfeitRowOf(entry, playerId), entry.lobbyKind ?? null)
 				} else {
 					const playerId = ids.get(entry.line.userId)
 					if (playerId) {
