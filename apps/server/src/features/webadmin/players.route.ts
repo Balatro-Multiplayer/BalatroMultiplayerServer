@@ -9,6 +9,8 @@ import { parseExpiresAt } from '../../shared/utils/parse-expires-at.js'
 import { liftBanInNakama } from '../../infrastructure/nakama/moderation-sync.js'
 import { editNakamaProfile } from '../../infrastructure/nakama/profile-sync.js'
 import { issueBan } from './ban.service.js'
+import { mayIssueBan, mayLiftBan } from '../service-queue/permissions.js'
+import { staffOf } from '../service-queue/staff.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 
 // Privilege names are free-form identifiers (a lowercase letter followed by
@@ -116,14 +118,22 @@ router.post('/players/:id/bans', async (req, res, next) => {
 		if (!isBanType(type)) throw new AppError("type must be 'chat', 'queue', or 'account'", 400)
 		if (reason !== undefined && typeof reason !== 'string') throw new AppError('reason must be a string', 400)
 
+		const expires = parseExpiresAt(expiresAt)
+		// The service queue's role table holds here too (permissions.ts): a
+		// moderator's chat bans run at most 30 days and queue bans 7; longer,
+		// permanent and account bans are an admin's.
+		const staff = await staffOf(req)
+		if (!staff || !mayIssueBan(staff.role, type, expires, new Date()))
+			throw new AppError('Your role may not issue this ban', 403)
+
 		const player = await findPlayerById(playerId)
 		if (!player) throw new AppError('Player not found', 404)
 
 		const ban = await issueBan({
 			playerId,
 			banType: type,
-			expiresAt: parseExpiresAt(expiresAt),
-			issuedBy: `admin:${req.player!.playerId}`,
+			expiresAt: expires,
+			issuedBy: `${staff.role}:${req.player!.playerId}`,
 			reason: typeof reason === 'string' ? reason : '',
 		})
 
@@ -136,7 +146,11 @@ router.post('/players/:id/bans', async (req, res, next) => {
 
 router.delete('/players/:id/bans/:banId', async (req, res, next) => {
 	try {
-		const lifted = await liftBan(req.params.id, req.params.banId, `admin:${req.player!.playerId}`)
+		const staff = await staffOf(req)
+		const target = (await listBans(req.params.id)).find((b) => b.id === req.params.banId)
+		if (!staff || (target && !mayLiftBan(staff.role, target.banType)))
+			throw new AppError('Your role may not lift this ban', 403)
+		const lifted = await liftBan(req.params.id, req.params.banId, `${staff.role}:${req.player!.playerId}`)
 		if (!lifted) throw new AppError('No matching active ban found', 404)
 		await liftBanInNakama(req.params.id, req.params.banId).catch((e) =>
 			console.error('[webadmin] Nakama ban lift failed:', e),

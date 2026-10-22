@@ -220,6 +220,25 @@ async function openItemCounts(subjects: string[]): Promise<Map<string, number>> 
 	return new Map(rows.map((r) => [r.subject as string, Number(r.n)]))
 }
 
+// The names behind 'role:playerId' actor strings (claims, audit events), by
+// actor; an actor whose player is gone is left out.
+export async function actorNames(actors: readonly (string | null)[]): Promise<Record<string, string>> {
+	const byActor = new Map<string, string>()
+	for (const actor of actors) {
+		const id = actor ? actor.slice(actor.indexOf(':') + 1) : ''
+		if (actor && UUID.test(id)) byActor.set(actor, id)
+	}
+	if (byActor.size === 0) return {}
+	const rows = await db
+		.select({ id: players.id, name: players.steamName })
+		.from(players)
+		.where(inArray(players.id, [...new Set(byActor.values())]))
+	const names = new Map(rows.map((r) => [r.id, r.name]))
+	return Object.fromEntries(
+		[...byActor].flatMap(([actor, id]) => (names.has(id) ? [[actor, names.get(id) as string]] : [])),
+	)
+}
+
 // Open items per type, for the tab counts.
 export async function openCountsByType(): Promise<Record<ServiceQueueItemType, number>> {
 	const rows = await db

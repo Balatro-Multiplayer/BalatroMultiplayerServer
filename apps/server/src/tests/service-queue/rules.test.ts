@@ -12,7 +12,7 @@ import {
 	utcDayStart,
 } from '../../features/service-queue/integrity-flag.js'
 import { planOverturn, ratedPlacements, samePlaces } from '../../features/service-queue/overturn.js'
-import { allowedActionsFor, mayLiftBan, permissionFor } from '../../features/service-queue/permissions.js'
+import { allowedActionsFor, mayIssueBan, mayLiftBan, permissionFor } from '../../features/service-queue/permissions.js'
 import { BASE_PRIORITY, priorityOf } from '../../features/service-queue/priority.js'
 import {
 	REPORTED_CHAT_KEEP_MS,
@@ -420,5 +420,28 @@ describe('vocabulary', () => {
 			body: { code: 'claimed', claimedBy: 'moderator:m' },
 		})
 		expect(httpOf({ code: 'nakama_failed', reason: 'down' }).status).toBe(502)
+	})
+})
+
+describe('bans issued outside the queue (players page)', () => {
+	const inDays = (days: number) => new Date(NOW.getTime() + days * DAY)
+
+	it('lets moderators issue chat bans up to 30 days and queue bans up to 7', () => {
+		expect(mayIssueBan('moderator', 'chat', inDays(1), NOW)).toBe(true)
+		expect(mayIssueBan('moderator', 'chat', inDays(30), NOW)).toBe(true)
+		expect(mayIssueBan('moderator', 'queue', inDays(7), NOW)).toBe(true)
+		// A client's expiry computed a moment before the request still passes.
+		expect(mayIssueBan('moderator', 'queue', new Date(inDays(7).getTime() + 30 * 1000), NOW)).toBe(true)
+	})
+
+	it('keeps longer, permanent and account bans for admins', () => {
+		expect(mayIssueBan('moderator', 'queue', inDays(8), NOW)).toBe(false)
+		expect(mayIssueBan('moderator', 'queue', null, NOW)).toBe(false)
+		expect(mayIssueBan('moderator', 'chat', inDays(31), NOW)).toBe(false)
+		expect(mayIssueBan('moderator', 'chat', null, NOW)).toBe(false)
+		expect(mayIssueBan('moderator', 'account', inDays(1), NOW)).toBe(false)
+		expect(mayIssueBan('admin', 'account', null, NOW)).toBe(true)
+		expect(mayIssueBan('admin', 'queue', inDays(365), NOW)).toBe(true)
+		expect(mayIssueBan('admin', 'chat', null, NOW)).toBe(true)
 	})
 })

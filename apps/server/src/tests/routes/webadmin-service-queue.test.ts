@@ -17,6 +17,7 @@ vi.mock('../../infrastructure/gateways/service-queue.gateway.js', async (importO
 		openCountsByType: vi.fn(),
 		listItemEvents: vi.fn(),
 		recordItemEvent: vi.fn(),
+		actorNames: vi.fn(),
 		viewedSince: vi.fn(),
 	}
 })
@@ -69,6 +70,7 @@ beforeEach(() => {
 		integrity: 0,
 	})
 	vi.mocked(serviceQueueGateway.viewedSince).mockResolvedValue(false)
+	vi.mocked(serviceQueueGateway.actorNames).mockResolvedValue({})
 	vi.mocked(serviceQueueGateway.recordItemEvent).mockResolvedValue(undefined as any)
 })
 
@@ -149,6 +151,27 @@ describe('GET /api/webadmin/service-queue/:id', () => {
 		})
 	})
 
+	it("lists a report's targets (the reported player and the reporter) and names the claim holder", async () => {
+		const token = authAs('moderator', 'mod-3')
+		const until = new Date(Date.now() + 60_000)
+		vi.mocked(serviceQueueGateway.getServiceQueueItemById).mockResolvedValue({
+			...ITEM,
+			claimedBy: 'admin:adm-1',
+			claimedUntil: until,
+		})
+		vi.mocked(evidence.subjectCard).mockResolvedValue(null as any)
+		vi.mocked(evidence.evidenceOf).mockResolvedValue({ report: { id: 42, reporterId: 'rep-1', reportedId: 'target-1' } } as any)
+		vi.mocked(serviceQueueGateway.actorNames).mockResolvedValue({ 'admin:adm-1': 'Alice' })
+
+		const res = await request(app).get('/api/webadmin/service-queue/1').set('Authorization', token)
+
+		expect(res.body.targets).toEqual([
+			{ role: 'subject', playerId: 'target-1' },
+			{ role: 'reporter', playerId: 'rep-1' },
+		])
+		expect(res.body.claim).toEqual({ claimedBy: 'admin:adm-1', claimedByName: 'Alice', claimedUntil: until.toISOString() })
+	})
+
 	it('records a view once per window', async () => {
 		const token = authAs('admin', 'admin-1')
 		vi.mocked(serviceQueueGateway.getServiceQueueItemById).mockResolvedValue(ITEM)
@@ -177,9 +200,10 @@ describe('claims', () => {
 			ok: false,
 			refusal: { code: 'claimed', claimedBy: 'moderator:mod-2', claimedUntil: null },
 		})
+		vi.mocked(serviceQueueGateway.actorNames).mockResolvedValue({ 'moderator:mod-2': 'Bob' })
 		const res = await request(app).post('/api/webadmin/service-queue/1/claim').set('Authorization', token)
 		expect(res.status).toBe(409)
-		expect(res.body).toMatchObject({ code: 'claimed', claimedBy: 'moderator:mod-2' })
+		expect(res.body).toMatchObject({ code: 'claimed', claimedBy: 'moderator:mod-2', claimedByName: 'Bob' })
 	})
 
 	it('passes force through on release', async () => {

@@ -2,6 +2,7 @@
 // and the least role (per preset, where an action has presets) that may run
 // them. The dispatcher checks it and the detail route sends its answer as
 // allowedActions, so the buttons and the server check cannot drift.
+import { expiresAtOf } from './durations.js'
 import {
 	type ActionKey,
 	BAN_DURATIONS,
@@ -147,7 +148,39 @@ export function allowedActionsFor(
 	return allowed
 }
 
+export type BanKind = 'chat' | 'queue' | 'account'
+
 // Lifting a ban: moderators lift chat and queue bans, admins any.
-export function mayLiftBan(role: StaffRole, banType: 'chat' | 'queue' | 'account'): boolean {
+export function mayLiftBan(role: StaffRole, banType: BanKind): boolean {
 	return banType === 'account' ? role === 'admin' : true
+}
+
+// The queue action whose presets govern a ban of each kind.
+const BAN_ACTION: Readonly<Record<BanKind, ActionKey>> = {
+	chat: 'chat_mute',
+	queue: 'queue_ban',
+	account: 'account_ban',
+}
+
+// A client computes expiresAt a moment before the request lands.
+const DIRECT_BAN_SLACK_MS = 60 * 1000
+
+// A ban issued outside the queue (the players page: any expiry) held to the
+// same table: the role must meet the ban's action, and the expiry may run no
+// longer than the longest preset that role may pick (permanent only when the
+// role may pick 'permanent'). Moderators: chat bans up to 30 days, queue bans
+// up to 7; admins: everything.
+export function mayIssueBan(role: StaffRole, banType: BanKind, expiresAt: Date | null, now: Date): boolean {
+	const rule = ACTION_RULES[BAN_ACTION[banType]]
+	if (!roleMeets(role, rule.minRole)) return false
+	const presets = (Object.keys(rule.presets ?? {}) as Duration[]).filter((p) => {
+		const least = rule.presets?.[p]
+		return least !== undefined && roleMeets(role, least)
+	})
+	if (expiresAt === null) return presets.includes('permanent')
+	const longest = Math.max(
+		...presets.map((p) => expiresAtOf(p, now)?.getTime() ?? Number.POSITIVE_INFINITY),
+		Number.NEGATIVE_INFINITY,
+	)
+	return expiresAt.getTime() <= longest + DIRECT_BAN_SLACK_MS
 }

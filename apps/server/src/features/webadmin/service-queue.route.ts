@@ -4,6 +4,7 @@ import { db } from '../../infrastructure/db/index.js'
 import {
 	type QueueSort,
 	type QueueStatusFilter,
+	actorNames,
 	getServiceQueueItemById,
 	isServiceQueueItemType,
 	listItemEvents,
@@ -19,6 +20,7 @@ import { allowedActionsFor } from '../service-queue/permissions.js'
 import { claim, release, serviceQueueDispatcher } from '../service-queue/queue.service.js'
 import { type QueueRefusal, httpOf } from '../service-queue/refusals.js'
 import { staffOf } from '../service-queue/staff.js'
+import { targetsOf } from '../service-queue/targets.js'
 import { type ItemStatus, type ItemType, actorOf, isItemType } from '../service-queue/types.js'
 
 // The moderator service queue (Q-api.md documents every route and shape).
@@ -37,9 +39,32 @@ function itemIdOf(raw: string): number | null {
 	return Number.isInteger(id) && id > 0 ? id : null
 }
 
-function claimOf(item: { claimedBy: string | null; claimedUntil: Date | null }, now: Date) {
+function claimOf(item: { claimedBy: string | null; claimedUntil: Date | null }, now: Date, names: Record<string, string> = {}) {
 	const holder = activeClaimant(item, now)
-	return holder ? { claimedBy: holder, claimedUntil: item.claimedUntil } : null
+	return holder ? { claimedBy: holder, claimedByName: names[holder] ?? null, claimedUntil: item.claimedUntil } : null
+}
+
+// A claim with its holder's name, for "Being handled by X".
+async function namedClaimOf(item: { claimedBy: string | null; claimedUntil: Date | null }, now: Date) {
+	return claimOf(item, now, await actorNames([item.claimedBy]))
+}
+
+// A refusal; a 'claimed' one also names who holds the claim.
+async function sendNamedRefusal(res: Response, refusal: QueueRefusal) {
+	if (refusal.code !== 'claimed') return sendRefusal(res, refusal)
+	const { status, body } = httpOf(refusal)
+	const names = await actorNames([refusal.claimedBy])
+	res.status(status).json({ ...body, claimedByName: names[refusal.claimedBy] ?? null })
+}
+
+// Who a target-taking action may be aimed at, from the item's evidence (a
+// report's two players, a conflict's two reporters, otherwise the subject).
+function targetsFor(item: { itemType: string; subjectPlayerId: string | null }, evidence: unknown) {
+	const ev = (evidence ?? {}) as {
+		report?: { reporterId: string; reportedId: string }
+		conflict?: { firstReporterId: string; conflictingReporterId: string }
+	}
+	return targetsOf({ itemType: item.itemType, subjectPlayerId: item.subjectPlayerId, report: ev.report ?? null, conflict: ev.conflict ?? null })
 }
 
 const STATUS_FILTERS: readonly QueueStatusFilter[] = ['open', 'resolved', 'all']
@@ -72,8 +97,9 @@ router.get('/service-queue', async (req, res, next) => {
 			}),
 			openCountsByType(),
 		])
+		const names = await actorNames(items.map((item) => activeClaimant(item, now)))
 		res.json({
-			items: items.map((item) => ({ ...item, claim: claimOf(item, now) })),
+			items: items.map((item) => ({ ...item, claim: claimOf(item, now, names) })),
 			total,
 			page,
 			limit,
@@ -109,7 +135,8 @@ router.get('/service-queue/:id', async (req, res, next) => {
 				staff.role,
 			),
 			role: staff.role,
-			claim: claimOf(item, now),
+			claim: await namedClaimOf(item, now),
+			targets: targetsFor(item, evidence),
 		})
 	} catch (err) {
 		next(err)
@@ -122,7 +149,8 @@ router.get('/service-queue/:id/events', async (req, res, next) => {
 		if (id === null) return sendRefusal(res, { code: 'not_found' })
 		const item = await getServiceQueueItemById(id)
 		if (!item) return sendRefusal(res, { code: 'not_found' })
-		res.json({ events: await listItemEvents(id) })
+		const events = await listItemEvents(id)
+		res.json({ events, actorNames: await actorNames(events.map((e) => e.actor)) })
 	} catch (err) {
 		next(err)
 	}
@@ -135,8 +163,8 @@ router.post('/service-queue/:id/claim', async (req, res, next) => {
 		const staff = await staffOf(req)
 		if (!staff) return sendRefusal(res, { code: 'forbidden' })
 		const result = await claim(id, staff)
-		if (!result.ok) return sendRefusal(res, result.refusal)
-		res.json({ item: result.value, claim: claimOf(result.value, new Date()) })
+		if (!result.ok) return sendNamedRefusal(res, result.refusal)
+		res.json({ item: result.value, claim: await namedClaimOf(result.value, new Date()) })
 	} catch (err) {
 		next(err)
 	}
@@ -171,7 +199,7 @@ for (const method of ['post', 'patch'] as const) {
 				staff,
 				(req.body ?? {}) as Record<string, unknown>,
 			)
-			if (!result.ok) return sendRefusal(res, result.refusal)
+			if (!result.ok) return sendNamedRefusal(res, result.refusal)
 			const { item, action, effects } = result.value
 			console.log(`[webadmin] ${staff.role}:${staff.playerId} ran service-queue action '${action}' on item ${id}`)
 			res.json({

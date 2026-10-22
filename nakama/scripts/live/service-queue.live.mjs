@@ -15,6 +15,8 @@
 // (HOWTO.md); it patches integrityEnforced off for its ranked queue. Both
 // turn chat on only for their run and put the server config back as found.
 // Staff logins are throwaway players rows (as webadmin.live.mjs makes them).
+// service-queue-seed.live.mjs reuses the scenarios to leave open items behind.
+import { pathToFileURL } from 'node:url'
 import {
 	PREFIX,
 	admin,
@@ -48,7 +50,7 @@ const NOTIFY_WARNED = 109
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function staffRow(name, privileges) {
+export function staffRow(name, privileges) {
 	psql(
 		'bmp',
 		`insert into players (steam_name, privileges) select ${q(name)}, ${q(`{${privileges.join(',')}}`)}::text[]
@@ -58,12 +60,12 @@ function staffRow(name, privileges) {
 	return { id, token: webJwt(id, name) }
 }
 
-function pgId(nakamaUserId) {
+export function pgId(nakamaUserId) {
 	const r = psql('bmp', `select id from players where nakama_user_id = ${q(nakamaUserId)}`)
 	return r.length ? r[0][0] : null
 }
 
-async function player(name) {
+export async function player(name) {
 	const p = await deviceAuth(`sq_${stamp}_${name}`)
 	if (p.error) throw new Error(`auth ${name}: ${JSON.stringify(p.error)}`)
 	await startSession(p)
@@ -73,13 +75,13 @@ async function player(name) {
 	return p
 }
 
-const placementsOf = (order) => order.map((p, i) => ({ playerId: p.userId, place: i + 1 }))
+export const placementsOf = (order) => order.map((p, i) => ({ playerId: p.userId, place: i + 1 }))
 
 const gameEnded = (p, since, timeoutMs = 15000) =>
 	p.socket.waitFor((x) => x.kind === 'data' && x.op === 101 && x.data.type === 'game_ended', timeoutMs, since)
 
 // The queue item for a source, once the mirror/relay has raised it.
-async function itemFor(itemType, sourceId, timeoutMs = 40000) {
+export async function itemFor(itemType, sourceId, timeoutMs = 40000) {
 	const row = await poll(() => {
 		const r = psql('bmp', `select id from service_queue_items where item_type = ${q(itemType)} and source_id = ${q(sourceId)}`)
 		return r.length ? Number(r[0][0]) : null
@@ -161,12 +163,12 @@ const BASELINE_KEYS = [
 	'queueAllowedModIdsExtra',
 ]
 
-function configSnapshot() {
+export function configSnapshot() {
 	const config = serverConfig()
 	return Object.fromEntries(BASELINE_KEYS.filter((k) => k in config).map((k) => [k, config[k]]))
 }
 
-async function restoreConfig(snapshot) {
+export async function restoreConfig(snapshot) {
 	const r = await admin('admin_config_set', snapshot)
 	const now = configSnapshot()
 	check('config restored as found', r.ok && JSON.stringify(now) === JSON.stringify(snapshot), JSON.stringify(now))
@@ -178,7 +180,7 @@ async function restoreConfig(snapshot) {
 
 // A matchmade RANKED game where one player drops past the 120s grace and
 // comes back: a forfeit_reconciliation item, the game rated as partial.
-async function forfeitGame() {
+export async function forfeitGame() {
 	const [f1, f2] = [await player('f1'), await player('f2')]
 	const mode = `${PREFIX}sqf_${stamp}`
 	const { code } = await matchmake([f1, f2], mode, 'ranked')
@@ -227,7 +229,7 @@ const ABUSE = [
 // is tampered (2 flagged players, 2 anti_cheat items), with the result
 // disputed (a private match_conflict); then lobby chat (b's abusive line is
 // blocked and flagged) and a's report against b.
-async function privateLobby(a, b) {
+export async function privateLobby(a, b) {
 	const lobby = await lobbyWith([a, b], { modId: MOD })
 	const runId = (await startGame([a, b], { stake: 1 })).runId
 	const hands = Array.from({ length: 20 }, (_, i) => [10 + i, 'hand_result', [100 * (i + 1)]])
@@ -291,7 +293,7 @@ async function privateLobby(a, b) {
 
 // A matchmade RANKED game, disputed 1-vs-1 (the host's result recorded), and
 // c's report against d from that lobby.
-async function rankedDispute(c, d) {
+export async function rankedDispute(c, d) {
 	const mode = `${PREFIX}sqr_${stamp}`
 	const { code } = await matchmake([c, d], mode, 'ranked')
 	const [host, other] = await hostFirst(code, [c, d])
@@ -593,7 +595,7 @@ async function listChecks(mod, P) {
 
 // Starts a launcher session and refuses its login challenge; false when no
 // challenge came (no strategy registered).
-async function refuseChallenge(p) {
+export async function refuseChallenge(p) {
 	const mark = p.socket.mark()
 	const started = await rpc(p.token, 'launcher_session_start', {})
 	if (!started.ok || !started.body.started) return false
@@ -709,12 +711,14 @@ async function main() {
 	await sleep(300)
 }
 
-main()
-	.catch((e) => {
-		console.error(e)
-		process.exitCode = 2
-	})
-	.finally(() => {
-		if (process.exitCode !== 2) process.exitCode = summary('service-queue.live') ? 1 : 0
-		setTimeout(() => process.exit(process.exitCode), 500)
-	})
+// Only when run directly: service-queue-seed.live.mjs imports the scenarios.
+if (import.meta.url === pathToFileURL(process.argv[1]).href)
+	main()
+		.catch((e) => {
+			console.error(e)
+			process.exitCode = 2
+		})
+		.finally(() => {
+			if (process.exitCode !== 2) process.exitCode = summary('service-queue.live') ? 1 : 0
+			setTimeout(() => process.exit(process.exitCode), 500)
+		})
