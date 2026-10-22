@@ -3,9 +3,12 @@ import { getToken } from './auth/token'
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api/proxy'
 
 export class ApiError extends Error {
+  // body: the refusal as the server sent it (e.g. {error, code, claimedBy}),
+  // for callers that act on more than the message.
   constructor(
     public readonly status: number,
-    message: string
+    message: string,
+    public readonly body: Record<string, unknown> = {}
   ) {
     super(message)
     this.name = 'ApiError'
@@ -31,7 +34,11 @@ export async function apiFetch<T>(
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    throw new ApiError(res.status, body?.error ?? `API error ${res.status}`)
+    throw new ApiError(
+      res.status,
+      body?.error ?? `API error ${res.status}`,
+      typeof body === 'object' && body !== null ? body : {}
+    )
   }
   return res.json() as Promise<T>
 }
@@ -40,7 +47,7 @@ export async function apiFetch<T>(
 // can't attach one, so authenticated binary content (e.g. archived channel
 // attachments) has to be fetched as a Blob and turned into an object URL
 // instead, the same pattern already used for replay downloads
-// (admin/moderation/[reportId]/page.tsx's downloadReplay).
+// (admin/service-queue/lib/api.ts's downloadReplay).
 export async function apiFetchBlob(path: string): Promise<Blob> {
   const token = getToken()
   const res = await fetch(`${API_BASE}${path}`, {
