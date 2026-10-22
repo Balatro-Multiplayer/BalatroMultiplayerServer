@@ -16,7 +16,7 @@ services:
   # an inherited entry, only to override one at the same target). Same
   # reason the two TLS cert mounts below point at a placeholder file
   # instead of being omitted: their host source paths only exist on
-  # bmpserver, and local/server.conf never actually reads them (no
+  # the prod host, and local/server.conf never actually reads them (no
   # ssl_certificate directives), so the placeholder's content is irrelevant
   # -- the mount just needs a real file to point at.
   nginx:

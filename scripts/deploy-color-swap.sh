@@ -8,7 +8,7 @@
 #
 # Same script, same behavior, in both environments now that nginx itself is
 # part of docker-compose.yml rather than a separately hand-maintained host
-# install on bmpserver -- the only difference between local and prod is
+# install on the prod host -- the only difference between local and prod is
 # which compose files this picks up, not the swap logic itself.
 #
 # Usage (from repo root):

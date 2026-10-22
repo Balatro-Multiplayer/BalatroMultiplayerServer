@@ -8,7 +8,7 @@ a map to a vanilla cell (the object's own, or a fixed source Joker) to lift the
 real coloured border, then composites it onto the card the user is editing.
 
 The reference PNGs are NOT committed; only the derived maps are. Point BORDER_DIR
-at the folder holding them (default ~/Downloads via /mnt/e/Downloads). Reuses the
+at the folder holding them (default ~/Downloads). Reuses the
 PNG codec in build-catalog.py.
 
 Output: src/app/(home)/reskin/data/border-masks.ts
@@ -21,7 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(
     os.path.dirname(HERE), "src", "app", "(home)", "reskin", "data", "border-masks.ts"
 )
-BORDER_DIR = os.environ.get("BORDER_DIR", "/mnt/e/Downloads")
+BORDER_DIR = os.environ.get("BORDER_DIR", os.path.expanduser("~/Downloads"))
 THRESHOLD = 128  # alpha >= this (50%) counts as an opaque border pixel — drops
 # the faint anti-aliased stray pixels around the frames.
 

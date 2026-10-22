@@ -1,5 +1,5 @@
 // Canonical CustomReskin loader, shipped verbatim inside every generated pack.
-// Keep in sync with /home/virtualized/Projects/BMP/CustomReskin/core.lua.
+// Keep in sync with CustomReskin's core.lua.
 
 export const CORE_LUA = `--- CustomReskin loader (per-object).
 --

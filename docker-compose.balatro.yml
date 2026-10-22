@@ -1,10 +1,9 @@
-# Deploy overlay for `ssh balatro` (<prod-host-ip>), which shares the host
+# Deploy overlay for a prod host that shares the machine
 # with the legacy TCP relay, the Discord bot and the launcher/mod APIs.
 #
-# - The host's own nginx already owns 80/443 (<api-host>), so
-#   this stack's nginx listens on loopback only; the host nginx terminates
-#   TLS for new.balatromp.com / nakama.balatromp.com and forwards here
-#   (/etc/nginx/sites-available/bmp-nakama).
+# - The host's own nginx already owns 80/443, so this stack's nginx listens
+#   on loopback only; the host nginx terminates TLS for new.balatromp.com /
+#   nakama.balatromp.com and forwards here.
 # - The 5 moderation replicas are capped so that, together, they can never
 #   take more than 8 of the 12 vCPUs away from the relay.
 #

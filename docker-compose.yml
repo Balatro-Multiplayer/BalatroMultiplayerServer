@@ -214,7 +214,7 @@ services:
       - bmp
 
   # The ONLY reverse proxy for this whole stack -- replaces what used to be
-  # a separately hand-maintained host-level nginx install on bmpserver
+  # a separately hand-maintained host-level nginx install on the prod host
   # (/etc/nginx/sites-available/bmp), so all server config, TLS included,
   # lives in this repo/compose file instead of split across two places.
   # nginx/prod/server.conf is the prod-realistic default (TLS, Cloudflare,

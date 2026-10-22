@@ -3,14 +3,14 @@
 # legacy_ratings collection (see src/rating/legacy.ts). Read-only on the
 # source database; players claim their ratings at their next login.
 #
-#   LEGACY_SSH=bmpserver NAKAMA_URL=http://127.0.0.1:7350 NAKAMA_HTTP_KEY=... \
+#   LEGACY_SSH=<legacy-host> NAKAMA_URL=http://127.0.0.1:7350 NAKAMA_HTTP_KEY=... \
 #     scripts/import-legacy-ratings.sh
 #
 # Safe to re-run: unclaimed players are overwritten, claimed ones are kept.
 set -eu
 : "${NAKAMA_HTTP_KEY:?set NAKAMA_HTTP_KEY (runtime.http_key)}"
 NAKAMA_URL=${NAKAMA_URL:-http://127.0.0.1:7350}
-LEGACY_SSH=${LEGACY_SSH:-bmpserver}
+: "${LEGACY_SSH:?set LEGACY_SSH (ssh host of the legacy server database)}"
 export NAKAMA_URL NAKAMA_HTTP_KEY
 
 QUERY="select coalesce(json_object_agg(h, boards), '{}'::json) from (
