@@ -47,6 +47,10 @@ IPs, personal paths and player data out of commits, comments and fixtures.
 - `nakama/modules/index.js` is generated and committed: it is what the
   container runs. Rebuild it (`pnpm --filter bmp-nakama-modules build`) in the
   same change as any `nakama/src` edit, then restart the `nakama` container.
+- The lobby metadata key `drafted_stake` (`DRAFTED_STAKE_KEY` in
+  `actions/registry.ts`) is a contract with the PvP mod: the host writes the
+  stake it drafted, and `mpapi_restart_game` restarts on it. The host writes the
+  empty string when a new game starts, so a stale draft is ignored.
 - The Nakama bundle must stay a plain script (ESM, no exports, unminified):
   Nakama finds `InitModule` and every handler by global name.
 - Match state round-trips through Go between calls. Keep it to plain objects

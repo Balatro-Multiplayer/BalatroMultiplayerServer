@@ -145,11 +145,17 @@ const startGame: AuthoritativeAction = {
 	},
 }
 
+// The lobby metadata key a mod writes the drafted stake to. Mirrored by hand
+// in PvP (`PVP.LOBBY_METADATA.DRAFTED_STAKE`); change both together.
+export const DRAFTED_STAKE_KEY = 'drafted_stake'
+
 // The stake the host drafted after the game started (a mod writes it to the
-// lobby metadata as `drafted_stake`, a whole number or its decimal string).
-// Null when absent or not a whole number from 1 up.
+// lobby metadata under DRAFTED_STAKE_KEY, a whole number or its decimal
+// string). Null when absent, cleared (the empty string a mod writes when a new
+// game starts, so an old draft cannot leak into it) or not a whole number
+// from 1 up.
 function draftedStake(lobby: Lobby): number | null {
-	const raw = lobby.metadata.drafted_stake
+	const raw = lobby.metadata[DRAFTED_STAKE_KEY]
 	const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw
 	return typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : null
 }
