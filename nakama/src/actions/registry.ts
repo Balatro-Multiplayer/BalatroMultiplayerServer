@@ -145,7 +145,17 @@ const startGame: AuthoritativeAction = {
 	},
 }
 
-// {} -- host only: a new game on a new seed, same stake and options. The
+// The stake the host drafted after the game started (a mod writes it to the
+// lobby metadata as `drafted_stake`, a whole number or its decimal string).
+// Null when absent or not a whole number from 1 up.
+function draftedStake(lobby: Lobby): number | null {
+	const raw = lobby.metadata.drafted_stake
+	const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw
+	return typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : null
+}
+
+// {} -- host only: a new game on a new seed, same options. The stake is the
+// drafted one when the host wrote it to the metadata, else the game's own. The
 // current one is stored as 'restarted' (no GAME_ENDED: clients go straight
 // into the new game, through the same path as a start).
 const restartGame: AuthoritativeAction = {
@@ -161,7 +171,7 @@ const restartGame: AuthoritativeAction = {
 		const started = newGame(
 			finished.lobby,
 			ctx,
-			current.stake,
+			draftedStake(lobby) ?? current.stake,
 			current.options,
 		)
 		return {
