@@ -14,6 +14,7 @@ import {
 	labelOf,
 	leave,
 	newLobby,
+	setMetadata,
 	snapshotFor,
 	tick,
 } from '../lobby/state'
@@ -339,6 +340,18 @@ describe('abandon and restart', () => {
 		expect(after?.seed).not.toBe(before?.seed)
 		expect(after?.stake).toBe(2)
 		expect(after?.players.map((p) => p.id)).toEqual(['a', 'b'])
+	})
+
+	it('restarts on the stake the host drafted, written to the lobby metadata', () => {
+		const lobby = setMetadata(started('a', 'b'), 'a', { drafted_stake: '6' }).lobby
+		const step = send(lobby, 'a', 'mpapi_restart_game')
+		expect(step.lobby.game.started?.stake).toBe(6)
+	})
+
+	it('ignores a drafted stake that is not a whole number', () => {
+		const lobby = setMetadata(started('a', 'b'), 'a', { drafted_stake: 'gold' }).lobby
+		const step = send(lobby, 'a', 'mpapi_restart_game')
+		expect(step.lobby.game.started?.stake).toBe(2)
 	})
 
 	it('needs a game to restart or abandon', () => {
