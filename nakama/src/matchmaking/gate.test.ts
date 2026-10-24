@@ -80,10 +80,26 @@ describe('the standing gate', () => {
 		report(nk, 'u', ['Steamodded-1.0.0~BETA-1814a', 'Lovely-0.9.0', 'MultiplayerAPI-0.1.2', 'Talisman-2.0'])
 		expect(queueRefusalFor(nk as any, 'u', false, 0)).toEqual({ code: 'mods_not_allowed', mods: ['Talisman'] })
 		expect(() => beforeMatchmakerAdd(playerCtx('u'), fakeLogger, nk as any, ADD('casual'))).toThrow(
-			"These mods aren't allowed in matchmaking: Talisman",
+			"These mods aren't allowed in matchmaking: Talisman. Private lobbies allow any mods.",
 		)
 		writeConfig(nk as any, { ...PINNED, queueAllowedModIdsExtra: ['Talisman'] })
 		expect(queueRefusalFor(nk as any, 'u', false, 0)).toBeNull()
+	})
+	it('names the one blocked mod by SMODS id, and says private lobbies allow any mods', () => {
+		const nk = fakeNk()
+		writeConfig(nk as any, PINNED)
+		report(nk, 'u', ['MultiplayerAPI-0.1.2', 'Talisman-2.0'])
+		expect(() => beforeMatchmakerAdd(playerCtx('u'), fakeLogger, nk as any, ADD('casual'))).toThrow(
+			"These mods aren't allowed in matchmaking: Talisman. Private lobbies allow any mods.",
+		)
+	})
+	it('names every blocked mod by SMODS id, however many', () => {
+		const nk = fakeNk()
+		writeConfig(nk as any, PINNED)
+		report(nk, 'u', ['MultiplayerAPI-0.1.2', 'Talisman-2.0', 'Cryptid-0.5.3', 'Jen-1.0', 'Ortalab-1.0', 'Bunco-5.0'])
+		expect(() => beforeMatchmakerAdd(playerCtx('u'), fakeLogger, nk as any, ADD('casual'))).toThrow(
+			"These mods aren't allowed in matchmaking: Talisman, Cryptid, Jen, Ortalab, Bunco. Private lobbies allow any mods.",
+		)
 	})
 	it('keeps ranked behind the launcher, and a verdict skips the mod check', () => {
 		const nk = fakeNk()
@@ -115,7 +131,7 @@ describe('the standing gate', () => {
 		expect(nk.notifications[1].content).toMatchObject({
 			mode: 'casual-mode',
 			mods: ['Talisman'],
-			reason: "These mods aren't allowed in matchmaking: Talisman",
+			reason: "These mods aren't allowed in matchmaking: Talisman. Private lobbies allow any mods.",
 		})
 	})
 })

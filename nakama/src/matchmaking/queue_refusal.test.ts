@@ -7,7 +7,7 @@ describe('queue refusals', () => {
 		expect(queueRefusalMessage({ code: 'access_denied', message: 'Banned.' })).toBe('Banned.')
 		expect(queueRefusalMessage({ code: 'integrity_required' })).toBe(INTEGRITY_REQUIRED)
 		expect(queueRefusalMessage({ code: 'mods_not_allowed', mods: ['X', 'Y'] })).toBe(
-			"These mods aren't allowed in matchmaking: X, Y",
+			"These mods aren't allowed in matchmaking: X, Y. Private lobbies allow any mods.",
 		)
 		expect(queueRefusalMessage({ code: 'mods_unreported' })).toMatch(/reported its mods/)
 	})

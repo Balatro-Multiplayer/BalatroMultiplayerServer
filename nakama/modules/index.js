@@ -3364,6 +3364,7 @@ function eventsOf(log) {
 }
 
 // src/matchmaking/queue_refusal.ts
+var PRIVATE_LOBBIES_ALLOW_ANY_MODS = "Private lobbies allow any mods.";
 function queueRefusalMessage(refusal) {
   switch (refusal.code) {
     case "access_denied":
@@ -3371,7 +3372,7 @@ function queueRefusalMessage(refusal) {
     case "integrity_required":
       return INTEGRITY_REQUIRED;
     case "mods_not_allowed":
-      return "These mods aren't allowed in matchmaking: " + refusal.mods.join(", ");
+      return "These mods aren't allowed in matchmaking: " + refusal.mods.join(", ") + ". " + PRIVATE_LOBBIES_ALLOW_ANY_MODS;
     case "mods_unreported":
       return "Your game hasn't reported its mods yet. Reconnect and try again.";
   }

@@ -378,8 +378,8 @@ describe('the group queue and standings', () => {
 			userId: 'b',
 			reason: 'mods_not_allowed',
 			mods: ['Cryptid'],
-			detail: "These mods aren't allowed in matchmaking: Cryptid",
-			message: "A player in the lobby may not queue. These mods aren't allowed in matchmaking: Cryptid",
+			detail: "These mods aren't allowed in matchmaking: Cryptid. Private lobbies allow any mods.",
+			message: "A player in the lobby may not queue. These mods aren't allowed in matchmaking: Cryptid. Private lobbies allow any mods.",
 		})
 		writeModReport(w.nk as any, 'b', { mods: [], reportedAt: 0 })
 		expect(openFor(w).groupQueue).toMatchObject({ phase: 'forming' })

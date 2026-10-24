@@ -15,6 +15,9 @@ export type QueueRefusal =
 
 export type QueueRefusalCode = QueueRefusal['code']
 
+// Matchmaking stays strict, but a private lobby takes any mods.
+export const PRIVATE_LOBBIES_ALLOW_ANY_MODS = 'Private lobbies allow any mods.'
+
 export function queueRefusalMessage(refusal: QueueRefusal): string {
 	switch (refusal.code) {
 		case 'access_denied':
@@ -22,7 +25,7 @@ export function queueRefusalMessage(refusal: QueueRefusal): string {
 		case 'integrity_required':
 			return INTEGRITY_REQUIRED
 		case 'mods_not_allowed':
-			return "These mods aren't allowed in matchmaking: " + refusal.mods.join(', ')
+			return "These mods aren't allowed in matchmaking: " + refusal.mods.join(', ') + '. ' + PRIVATE_LOBBIES_ALLOW_ANY_MODS
 		case 'mods_unreported':
 			return "Your game hasn't reported its mods yet. Reconnect and try again."
 	}

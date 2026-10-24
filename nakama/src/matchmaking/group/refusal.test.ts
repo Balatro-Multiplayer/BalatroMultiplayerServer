@@ -112,7 +112,7 @@ describe('memberRefusal / partyRefusal / joinRefusal', () => {
 		expect(memberRefusal(['a'], { refusals: { a: mods }, queuedIds: [] })).toEqual({
 			code: 'member_refused',
 			userId: 'a',
-			detail: "These mods aren't allowed in matchmaking: ClaudeControl, Talisman",
+			detail: "These mods aren't allowed in matchmaking: ClaudeControl, Talisman. Private lobbies allow any mods.",
 			reason: 'mods_not_allowed',
 			mods: ['ClaudeControl', 'Talisman'],
 		})
