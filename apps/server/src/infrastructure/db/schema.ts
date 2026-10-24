@@ -836,6 +836,12 @@ export const modRegistry = pgTable('mod_registry', {
 	// as. A pinned mod's ids are allowed in matchmaking (queueAllowedModIds).
 	// Empty for an unpinned mod, or a pin no id could be read from.
 	smodsIds: text('smods_ids').array().notNull().default(sql`'{}'::text[]`),
+	// The pin version smodsIds was last read from (or set by an admin for).
+	// Null, or a version other than rankedVersion, means the ids still need
+	// reading: the API boot fills them (smods-ids-backfill.service.ts). A pin
+	// whose files declare no id (Steamodded, Lovely) keeps empty smodsIds but
+	// a matching version here, so it is read once, not at every boot.
+	smodsIdsReadVersion: varchar('smods_ids_read_version', { length: 64 }),
 	// The pin's permanent download: resolved once when an admin pins
 	// (a Thunderstore version URL, a GitHub release asset on a fixed tag, or a
 	// codeload tag/commit archive), hashed with rankedSource's layout, and

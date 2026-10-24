@@ -469,6 +469,7 @@ export async function listRankedPins() {
 			rankedSource: modRegistry.rankedSource,
 			rankedDownloadStatus: modRegistry.rankedDownloadStatus,
 			smodsIds: modRegistry.smodsIds,
+			smodsIdsReadVersion: modRegistry.smodsIdsReadVersion,
 		})
 		.from(modRegistry)
 		.where(isNotNull(modRegistry.rankedVersion))
@@ -524,6 +525,7 @@ export async function storeRankedPin(
 			rankedVersion: pin.version,
 			rankedVersionSha256: pin.hash,
 			smodsIds: pin.smodsIds,
+			smodsIdsReadVersion: pin.version,
 			rankedDownloadUrl: pin.downloadUrl,
 			rankedSource: pin.source,
 			rankedDownloadStatus: 'ok',
@@ -549,7 +551,7 @@ export async function storePinSmodsIds(
 ): Promise<void> {
 	await db
 		.update(modRegistry)
-		.set({ smodsIds, updatedAt: new Date() })
+		.set({ smodsIds, smodsIdsReadVersion: version, updatedAt: new Date() })
 		.where(
 			and(eq(modRegistry.id, modId), eq(modRegistry.rankedVersion, version)),
 		)
@@ -574,7 +576,11 @@ export async function setSmodsIds(
 	if (existing.rankedVersion === null) return { ok: false, reason: 'not-pinned' }
 	await db
 		.update(modRegistry)
-		.set({ smodsIds, updatedAt: new Date() })
+		.set({
+			smodsIds,
+			smodsIdsReadVersion: existing.rankedVersion,
+			updatedAt: new Date(),
+		})
 		.where(eq(modRegistry.id, existing.id))
 	return { ok: true }
 }
@@ -623,6 +629,7 @@ export async function setRankedVersion(
 				rankedVersion: null,
 				rankedVersionSha256: null,
 				smodsIds: [],
+				smodsIdsReadVersion: null,
 				rankedDownloadUrl: null,
 				rankedSource: null,
 				rankedDownloadStatus: null,

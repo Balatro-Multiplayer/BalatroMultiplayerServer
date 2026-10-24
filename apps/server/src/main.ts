@@ -5,6 +5,7 @@ import type { Express, Request, Response } from 'express'
 import { env } from './env.js'
 import { createDevChallengeStrategy } from './features/launcher-integrity/dev-strategy.js'
 import { syncModRegistry } from './features/mods/mods-sync.service.js'
+import { fillMissingSmodsIds } from './features/mods/smods-ids-backfill.service.js'
 import { nakamaIntegrityService } from './features/nakama/integrity.js'
 import { startMirrorJob } from './features/nakama/mirror.job.js'
 import { startRetentionJob } from './features/nakama/retention.job.js'
@@ -208,6 +209,10 @@ async function start() {
 		// health-check timeout has no way to distinguish from an actually
 		// broken boot. syncModRegistryJob() already swallows its own errors,
 		// so this can't crash startup either way.
+		// Same reasoning: pins with no SMODS ids get them read from their
+		// downloads, so the allowed-mod set can never be empty unnoticed. It
+		// never throws and pushes the config to Nakama itself.
+		void fillMissingSmodsIds()
 		void syncModRegistryJob()
 		setInterval(() => void syncModRegistryJob(), 60 * 60 * 1000).unref()
 	} catch (err) {
