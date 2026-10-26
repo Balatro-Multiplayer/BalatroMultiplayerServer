@@ -101,7 +101,7 @@ with plain `docker compose` commands. It does not use `docker-compose.yml`
 (the Official server's file). You need Docker with Compose and a clone of this
 repo; the server uses the committed Nakama bundle, so you need no Node or pnpm.
 
-There are two kinds of local server (`BMP_SERVER_KIND`):
+You can run two kinds of server (`BMP_SERVER_KIND`):
 
 - A **Community server** (the default): Postgres and Nakama. Players log in
   with Device login, so the server needs no Steam Web API key. Casual, Ranked
@@ -109,33 +109,130 @@ There are two kinds of local server (`BMP_SERVER_KIND`):
 - A **Dev server**: the same, plus the API, the website, a Nakama bundle that
   rebuilds on save, and every dev flag allowed. For contributors.
 
-### Community server
+### Run a Community server
+
+You need Docker with Compose (Docker Desktop, or Docker Engine with the
+Compose plugin) and `git`.
+
+1. Get this repo:
+
+   ```sh
+   git clone https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer.git
+   cd BalatroMultiplayerServer
+   ```
+
+2. Start the server:
+
+   ```sh
+   docker compose -f compose.local.yml up -d
+   ```
+
+3. Wait until `bmp-nakama` shows `(healthy)`:
+
+   ```sh
+   docker compose -f compose.local.yml ps
+   ```
+
+4. Join it from a game. Each player follows "Join a Community server" in the
+   [MPAPI README](https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI#join-a-community-server).
+   On the machine that runs the server, the address is `127.0.0.1`, port
+   `7350`.
+
+Nakama now listens on `127.0.0.1:7350` for game clients. Its console is on
+`http://127.0.0.1:7351` (user `admin`, password `localdevpassword` unless you
+set `NAKAMA_CONSOLE_PASSWORD`).
+
+Other commands:
 
 ```sh
-docker compose -f compose.local.yml up -d
-docker compose -f compose.local.yml logs -f nakama
-docker compose -f compose.local.yml down        # add -v to delete all data
+docker compose -f compose.local.yml logs -f nakama   # follow the server log
+docker compose -f compose.local.yml down             # stop; add -v to delete all data
+git pull && docker compose -f compose.local.yml up -d   # update
 ```
 
-Nakama listens on `127.0.0.1:7350` (console on `127.0.0.1:7351`). Players set
-`use_custom_server` and the `server_*` keys in MPAPI's config to join.
+#### Let other machines join
 
-Profiles add services:
+By default only the machine that runs the server can join. To let other
+machines join:
+
+1. Copy [`.env.example`](.env.example) to `.env` in the repo folder.
+2. In `.env`, set `NAKAMA_BIND_ADDRESS=0.0.0.0`.
+3. In `.env`, give every key in the "Community server" block a long random
+   value of your own (`NAKAMA_HTTP_KEY`, `NAKAMA_SESSION_KEY`,
+   `NAKAMA_REFRESH_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
+   `NAKAMA_CONSOLE_SIGNING_KEY`, `INTERNAL_API_KEY`, `JWT_SECRET`,
+   `ADMIN_SECRET`, `PLAYER_ID_SALT`). The defaults are public. Set
+   `PLAYER_ID_SALT` once and never change it. Do not change
+   `NAKAMA_SERVER_KEY`: the game sends `defaultkey`.
+4. Run `docker compose -f compose.local.yml up -d` again.
+5. Let TCP port `7350` through your firewall (and your router, for players
+   outside your network).
+
+Players then use your machine's address as `server_host`. The connection is
+plain, not TLS, so set `server_secure = false`. The console (port `7351`)
+stays on your machine.
+
+#### Allowed mods
+
+Matchmaking takes only players whose mods are all Allowed mods. On a
+Community server these are the BMP mods (and Steamodded, Lovely and the
+BMM compatibility shim) plus the SMODS ids in `QUEUE_ALLOWED_MOD_IDS_EXTRA`.
+That setting is in [`nakama/local.yml`](nakama/local.yml), under
+`runtime.env`. Add the ids your players run, comma-separated:
+
+```yaml
+  env:
+    - "QUEUE_ALLOWED_MOD_IDS_EXTRA=MultiplayerPvP,ClaudeControl,SomeModId"
+```
+
+Then run `docker compose -f compose.local.yml restart nakama`. The server adds
+these ids to its stored list at each start. It never removes one: to remove an
+id, edit `queueAllowedModIdsExtra` in the Nakama console (Storage, collection
+`server_config`, key `global`), or delete all data with `down -v`.
+
+#### Player names are not proven
+
+Players log in with Device login: the game sends a Steam id and name, and the
+server cannot check them. Someone can pretend to be another player. Accounts
+and ratings exist only on your server. Play with people you trust.
+
+#### What works without the API
+
+Without the API: login, Casual, Ranked, private lobbies, chat (with the local
+word filter) and ratings work. Ranked does not need the launcher. These do
+not work:
+
+- Reports: the game says reports are unavailable.
+- Discord linking.
+- Bans from the web admin panel. To keep a player out, ban the account in the
+  Nakama console (Accounts).
+- Match logs and player pages on a website. Links in the game open the
+  `web_url` that each player set (the Official website by default).
+
+#### Add the API and the website
+
+The API stores reports. The website has the web admin panel, where you read
+them. Turn them on with `COMPOSE_PROFILES` in `.env`, then run `up -d` again:
 
 ```sh
-docker compose -f compose.local.yml --profile api up -d          # the API on 127.0.0.1:8788 (bans, reports)
-docker compose -f compose.local.yml --profile web up -d          # the website on 127.0.0.1:3000 (starts the API too)
-docker compose -f compose.local.yml --profile moderation up -d   # the chat model
+COMPOSE_PROFILES=api        # the API on 127.0.0.1:8788
+COMPOSE_PROFILES=api,web    # the API, and the website on 127.0.0.1:3000
 ```
 
 A one-shot `migrate` service applies the API's migrations before the API
-starts. Chat uses the local word filter unless you start the `moderation`
-profile and set `MODERATION_REMOTE=on`; the model is not in the image (see
-[`apps/moderation/README.md`](apps/moderation/README.md)).
+starts. To log in to the web admin panel, run
+`docker compose -f compose.local.yml run --rm seed` and open the link it
+prints (see [Test data](#test-data); it also makes four test accounts). The
+API and the website listen only on your machine.
 
-Every key has a public placeholder default. To let other machines in, copy
-[`.env.example`](.env.example) to `.env`, set `NAKAMA_BIND_ADDRESS=0.0.0.0` and
-replace every placeholder key with your own value.
+The API cannot ban a Device login player yet: those accounts have no player
+record in the API. Use the Nakama console for bans.
+
+#### Chat moderation
+
+Chat uses the local word filter. For the chat model instead, put the model in
+place (see [`apps/moderation/README.md`](apps/moderation/README.md)), add
+`moderation` to `COMPOSE_PROFILES` and set `MODERATION_REMOTE=on` in `.env`.
 
 ### Dev server
 
@@ -173,18 +270,27 @@ docker compose -f compose.local.yml restart          # after a reset
 link that logs the website in as the admin `LocalAdmin`. Run it again for a new
 link. Both refuse to run on the Official server.
 
-### Running several local game clients
+### Dev mod
 
-The local Nakama accepts device login, so a game client can sign in as any
-test account without a Steam ticket. The client mod's dev overrides (in
-BalatroMultiplayerAPI's `dev/init.lua`) read two environment variables at
-launch:
+The Dev mod is a client mod for contributors, in [`dev/client/`](dev/client).
+It points the game at a Dev server and lets one game log in as a chosen test
+account. Players never install it.
 
-- `BMP_IMPERSONATE_NAME=<name>`: any name; the same name is the same account
-- `BMP_IMPERSONATE_ID=<id>`: exact id (takes precedence)
+Install it next to MPAPI: copy or symlink `dev/client` into Balatro's `Mods/`
+folder (any folder name, for example `Mods/MultiplayerDev`). It needs an MPAPI
+with `MPAPI.dev`. It reads these environment variables when the game starts:
 
-Start one game instance per player, each with a different value. Leave both
-unset on an instance that should sign in through real Steam.
+| Variable | Effect |
+|---|---|
+| none | Use the Dev server at `127.0.0.1:7350` (plain, not TLS) and Device login with your Steam id |
+| `BMP_SERVER_HOST`, `BMP_SERVER_PORT` | Use this host and port instead |
+| `BMP_IMPERSONATE_NAME=<name>` | Log in as that test account (the same name is the same account) |
+| `BMP_IMPERSONATE_ID=<id>` | Log in as that exact account (wins over the name) |
+| `BMP_DEV_STEAM_LOGIN=1` | Log in with Steam instead (wins over the two above). The server needs `STEAM_WEB_API_KEY` in `.env`. |
+
+To run several game clients on one Steam account, start each one with a
+different `BMP_IMPERSONATE_NAME`. The `seed` accounts are `TestPlayer1` to
+`TestPlayer4`.
 
 ## Tests, typecheck and lint
 
