@@ -60,6 +60,7 @@ import {
 	rpcQueueCounts,
 } from './matchmaking/queue'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
+import { rpcAdminCheckpointsSweep } from './lobby/checkpoint_sweep'
 import { rpcAdminRunsPurge } from './lobby/retention'
 import { rpcAdminRatingsSet } from './rating/admin'
 import { rpcAdminRunGet, rpcAdminRunSetResult } from './review/rpc'
@@ -168,6 +169,7 @@ function InitModule(
 	initializer.registerRpc('admin_progress_set', rpcAdminProgressSet)
 	initializer.registerRpc('admin_avatars_reset', rpcAdminAvatarsReset)
 	initializer.registerRpc('admin_runs_purge', rpcAdminRunsPurge)
+	initializer.registerRpc('admin_checkpoints_sweep', rpcAdminCheckpointsSweep)
 	initializer.registerRpc('admin_ratings_set', rpcAdminRatingsSet)
 	initializer.registerRpc('admin_run_get', rpcAdminRunGet)
 	initializer.registerRpc('admin_run_set_result', rpcAdminRunSetResult)

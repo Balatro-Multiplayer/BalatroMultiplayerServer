@@ -8198,10 +8198,78 @@ function boardEntries(records, stored, now) {
   }).sort((a, b) => b.rating - a.rating || b.wins - a.wins).map((e, i) => __spreadValues({ rank: firstRank + i }, e));
 }
 
+// src/lobby/checkpoint_sweep.ts
+var LIST_PAGE3 = 100;
+var SWEEP_MAX = 200;
+function isSweepable(checkpoint, now, ttlMs) {
+  const expired = ttlMs === void 0 ? isExpired(checkpoint, now) : now >= checkpoint.at + ttlMs;
+  if (!expired) return false;
+  return checkpoint.claimedAt === null || now - checkpoint.claimedAt >= CLAIM_TIMEOUT_MS;
+}
+function recordNoContest(nk, logger, checkpoint, now) {
+  const lobby = checkpoint.lobby;
+  const finished = finishGame(lobby, now, { status: "abandoned", announce: false });
+  for (const effect of finished.out) {
+    if (effect.kind !== "saveRun") continue;
+    saveRun(nk, effect.run, effect.logs);
+    try {
+      enqueue(nk, { kind: "run", at: now, runId: effect.run.runId, rating: null });
+    } catch (e) {
+      logger.warn("Checkpoint %s: could not queue run %s for the mirror: %v", lobby.code, effect.run.runId, e);
+    }
+    logger.warn(
+      "Lobby %s: run %s ended as no contest: every player stayed away past the checkpoint time limit (%d players, no Elo change)",
+      lobby.code,
+      effect.run.runId,
+      effect.run.players.length
+    );
+  }
+}
+function sweepCheckpoints(nk, logger, now, max, ttlMs) {
+  const result = { deleted: 0, noContest: 0, more: false };
+  let cursor = "";
+  do {
+    const page = nk.storageList(SYSTEM_USER_ID, LOBBY_CHECKPOINT_COLLECTION, LIST_PAGE3, cursor);
+    for (const o of page.objects || []) {
+      const checkpoint = o.value;
+      if (!isSweepable(checkpoint, now, ttlMs)) continue;
+      if (result.deleted >= max) {
+        result.more = true;
+        return result;
+      }
+      try {
+        if (checkpoint.lobby.game.started) {
+          recordNoContest(nk, logger, checkpoint, now);
+          result.noContest++;
+        }
+        nk.storageDelete([{ collection: LOBBY_CHECKPOINT_COLLECTION, key: o.key, userId: SYSTEM_USER_ID }]);
+        result.deleted++;
+      } catch (e) {
+        logger.error("Checkpoint %s: could not sweep: %v", o.key, e);
+      }
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  return result;
+}
+function rpcAdminCheckpointsSweep(ctx, logger, nk, payload) {
+  var _a;
+  requireServer(ctx);
+  const max = (_a = parsePayload(payload).max) != null ? _a : SWEEP_MAX;
+  if (typeof max !== "number" || !Number.isInteger(max) || max < 1)
+    throw runtimeError(INVALID_ARGUMENT, "max must be a positive whole number");
+  const ttlMs = parsePayload(payload).ttlMs;
+  if (ttlMs !== void 0 && (typeof ttlMs !== "number" || !Number.isInteger(ttlMs) || ttlMs < 0))
+    throw runtimeError(INVALID_ARGUMENT, "ttlMs must be a whole number of 0 or more");
+  const result = sweepCheckpoints(nk, logger, Date.now(), max, ttlMs);
+  if (result.deleted > 0) logger.info("Swept %d expired checkpoints (%d no contest)", result.deleted, result.noContest);
+  return JSON.stringify(result);
+}
+
 // src/lobby/retention.ts
 var RUN_RETENTION_DAYS = 180;
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
-var LIST_PAGE3 = 100;
+var LIST_PAGE4 = 100;
 var PURGE_MAX = 500;
 function isKept(run) {
   return Object.keys(run.flags || {}).length > 0 || run.status === "disputed";
@@ -8223,7 +8291,7 @@ function purgeRuns(nk, cutoff, max) {
   let deleted = 0;
   let cursor = "";
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE3, cursor);
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE4, cursor);
     for (const o of page.objects || []) {
       const run = o.value;
       if (!isPurgeable(run, cutoff)) continue;
@@ -8660,6 +8728,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_progress_set", rpcAdminProgressSet);
   initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
   initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
+  initializer.registerRpc("admin_checkpoints_sweep", rpcAdminCheckpointsSweep);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
   initializer.registerRpc("admin_run_get", rpcAdminRunGet);
   initializer.registerRpc("admin_run_set_result", rpcAdminRunSetResult);

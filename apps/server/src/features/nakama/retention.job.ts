@@ -3,6 +3,7 @@ import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js
 import type { Result } from '../../shared/utils/result.js'
 import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
+// (The same hourly job also sweeps expired lobby checkpoints: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
 // match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, ask it to
 // delete the older ones. It keeps flagged and disputed runs itself. Hourly
@@ -34,6 +35,23 @@ export async function purgeNakamaRuns(rpc: Rpc): Promise<number> {
 	return total
 }
 
+// One sweep of Nakama's expired lobby checkpoints: a game nobody came back to
+// is stored there as "no contest". Same repeat rule as the run purge.
+export async function sweepNakamaCheckpoints(rpc: Rpc): Promise<{ deleted: number; noContest: number }> {
+	const total = { deleted: 0, noContest: 0 }
+	for (let call = 0; call < MAX_CALLS; call++) {
+		const result = await rpc<{ deleted: number; noContest: number; more: boolean }>('admin_checkpoints_sweep', {})
+		if (!result.ok) {
+			if (result.error !== 'disabled') console.warn(`[retention] checkpoint sweep failed: ${result.error}`)
+			return total
+		}
+		total.deleted += result.value.deleted
+		total.noContest += result.value.noContest
+		if (!result.value.more) return total
+	}
+	return total
+}
+
 export function startRetentionJob(): () => void {
 	const sweep = () =>
 		void purgeNakamaRuns(callNakamaRpc)
@@ -41,8 +59,18 @@ export function startRetentionJob(): () => void {
 				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama runs`)
 			})
 			.catch((err) => console.error('[retention] purge failed:', err))
+	const sweepCheckpoints = () =>
+		void sweepNakamaCheckpoints(callNakamaRpc)
+			.then(({ deleted, noContest }) => {
+				if (deleted > 0) console.log(`[retention] swept ${deleted} Nakama checkpoints (${noContest} no contest)`)
+			})
+			.catch((err) => console.error('[retention] checkpoint sweep failed:', err))
 	sweep()
-	const timer = setInterval(sweep, RETENTION_INTERVAL_MS)
+	sweepCheckpoints()
+	const timer = setInterval(() => {
+		sweep()
+		sweepCheckpoints()
+	}, RETENTION_INTERVAL_MS)
 	timer.unref()
 	return () => clearInterval(timer)
 }
