@@ -137,7 +137,7 @@ describe('relayed actions', () => {
 		).toBe('too_large')
 	})
 
-	it('ignores senders who are not in the lobby', () => {
+	it('ignores senders who are not in the lobby, but names the drop for the log', () => {
 		const step = send(lobbyWith('a', 'b'), 'z', {
 			cid: 'c',
 			action: 'x',
@@ -145,6 +145,7 @@ describe('relayed actions', () => {
 			params: {},
 		})
 		expect(step.out).toEqual([])
+		expect((step as RelayStep).refused).toEqual({ key: 'x', reason: 'no_seat' })
 	})
 
 	it('rate-limits a flooding sender', () => {

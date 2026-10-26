@@ -7552,8 +7552,7 @@ function relayAction(lobby, senderId, data, ctx) {
     out: [reject(senderId, { cid, action: key, reason })],
     refused: { key, reason }
   });
-  const sender = findPlayer(lobby, senderId);
-  if (!sender) return { lobby, out: [] };
+  if (!findPlayer(lobby, senderId)) return { lobby, out: [], refused: { key, reason: "no_seat" } };
   if (!ACTION_KEY_PATTERN.test(key)) return refuse2("bad_action");
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)

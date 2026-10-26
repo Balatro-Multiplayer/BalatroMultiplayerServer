@@ -99,8 +99,8 @@ function stringField(data: { [key: string]: unknown }, key: string): string {
 // the caller can log (and later record) it.
 export interface RelayStep extends Step {
 	dropped?: SenderRefusal
-	// Set when the action was refused (the sender hears the reason), so the
-	// caller can log it with the match and the sender.
+	// Set when the action was refused, so the caller can log it with the
+	// match and the sender. The sender hears the reason unless it has no seat.
 	refused?: { key: string; reason: string }
 }
 
@@ -150,8 +150,8 @@ function relayAction(
 		refused: { key, reason },
 	})
 
-	const sender = findPlayer(lobby, senderId)
-	if (!sender) return { lobby, out: [] }
+	// No seat, no reply: the sender is not a player here. The caller still logs it.
+	if (!findPlayer(lobby, senderId)) return { lobby, out: [], refused: { key, reason: 'no_seat' } }
 	if (!ACTION_KEY_PATTERN.test(key)) return refuse('bad_action')
 	const params = data.params === undefined ? null : data.params
 	if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
