@@ -22,12 +22,15 @@ import {
 	decideModerationOutcome,
 } from './moderation'
 import { isAllowlisted, obscenityMatches } from './filter'
-import { settingsOf } from '../server_kind'
+import { settingsOf, type ServerSettings } from '../server_kind'
 import { type ChatLogLine, type ChatVerdict, enqueue } from '../mirror/outbox'
 import { lobbyKindOfLabel } from '../review/ranked'
 
-function noticeAccepted(profile: Profile): boolean {
-	return profile.tosAcceptedVersion >= NOTICE_VERSION
+// Why the player may not chat yet: the Notice on a kind that requires it,
+// otherwise the age question (asked once on every kind). null once cleared.
+function consentMissing(profile: Profile, settings: ServerSettings): string | null {
+	if (settings.noticeRequired) return profile.tosAcceptedVersion >= NOTICE_VERSION ? null : 'Accept the Notice first'
+	return profile.ageAnswered ? null : 'Answer the age question first'
 }
 
 // {} -> {enabled, player}: turns chat on for the caller (the API's
@@ -40,13 +43,14 @@ export function rpcChatEnable(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	const config = readConfig(nk)
+	const settings = settingsOf(ctx)
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
 			if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, 'Chat access is permanently restricted')
-			if (!noticeAccepted(current)) throw runtimeError(PERMISSION_DENIED, 'Accept the Notice first')
+			const missing = consentMissing(current, settings)
+			if (missing) throw runtimeError(PERMISSION_DENIED, missing)
 			return { ...current, chatEnabled: true }
 		},
 		ctx.username,
@@ -76,7 +80,8 @@ export function rpcChatSend(
 	const profile = profileFor(nk, userId, ctx.username)
 	if (profile.chatBlocked || !profile.chatEnabled)
 		throw runtimeError(PERMISSION_DENIED, 'Chat is not enabled for this account')
-	if (!noticeAccepted(profile)) throw runtimeError(PERMISSION_DENIED, 'Accept the Notice first')
+	const missing = consentMissing(profile, settingsOf(ctx))
+	if (missing) throw runtimeError(PERMISSION_DENIED, missing)
 	const banned = chatBanRefusal(readBans(nk, userId), Date.now())
 	if (banned) throw runtimeError(PERMISSION_DENIED, banned)
 

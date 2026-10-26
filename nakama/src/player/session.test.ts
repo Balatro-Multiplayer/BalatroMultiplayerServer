@@ -119,6 +119,43 @@ describe('session_init', () => {
 	})
 })
 
+describe('the Notice by server kind', () => {
+	const COMMUNITY = { ...ENV, BMP_SERVER_KIND: 'community' }
+	const login = (nk: unknown, env: { [key: string]: string }) =>
+		JSON.parse(rpcSessionInit(playerCtx(USER, env), fakeLogger, nk as any, '{}'))
+
+	it('asks a new player on a Community server only the age', () => {
+		const res = login(fakeNk(account('')), COMMUNITY)
+		expect(res.tosRequired).toBe(false)
+		expect(res.ageRequired).toBe(true)
+	})
+
+	it('takes the age answer on a Community server without recording a Notice acceptance', () => {
+		const nk = fakeNk({ ...account(''), uuidv4: () => 'u1' })
+		login(nk, COMMUNITY)
+		const res = JSON.parse(rpcTosAccept(playerCtx(USER, COMMUNITY), fakeLogger, nk as any, JSON.stringify({ chatEligible: false })))
+		expect(res).toMatchObject({ tosRequired: false, ageRequired: false })
+		expect(res.player).toMatchObject({ chatEnabled: false, chatBlocked: true })
+		expect(readProfile(nk as any, USER)!.profile).toMatchObject({ tosAcceptedVersion: 0, noticeAcceptedAt: null })
+		expect(JSON.parse(rpcAdminMirrorPull(serverCtx(), fakeLogger, nk as any, '{}')).entries).toEqual([])
+		expect(login(nk, COMMUNITY)).toMatchObject({ tosRequired: false, ageRequired: false })
+	})
+
+	it('asks the age once: a player who answered it on the Official server is not asked again', () => {
+		const nk = fakeNk({ ...account(''), uuidv4: () => 'u1' })
+		rpcTosAccept(playerCtx(USER), fakeLogger, nk as any, JSON.stringify({ chatEligible: true }))
+		expect(login(nk, ENV)).toMatchObject({ tosRequired: false, ageRequired: false })
+		expect(login(nk, COMMUNITY)).toMatchObject({ tosRequired: false, ageRequired: false })
+	})
+
+	it('counts an older profile with an accepted Notice as answered', () => {
+		const nk = fakeNk(account(''))
+		const { ageAnswered: _, ...older } = { ...defaultProfile('u'), synced: true, tosAcceptedVersion: NOTICE_VERSION }
+		writeProfile(nk as any, USER, older as any)
+		expect(login(nk, ENV)).toMatchObject({ tosRequired: false, ageRequired: false })
+	})
+})
+
 describe('withResolvedMutes', () => {
 	it('moves resolved legacy ids into mutedUserIds', () => {
 		const p = { ...defaultProfile('A'), unresolvedMutedPlayerIds: ['x', 'y'] }

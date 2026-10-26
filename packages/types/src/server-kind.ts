@@ -4,7 +4,8 @@
 // reach the Official server.
 //
 // - official: Steam login only; every dev flag is refused; a mod report must
-//   list only allowed mods; permanent account bans also ban networks. An unset kind is official, so forgetting the
+//   list only allowed mods; permanent account bans also ban networks; players
+//   must accept the Notice. An unset kind is official, so forgetting the
 //   setting fails safe.
 // - community: Device login on; the dev-only flags are refused; chat is
 //   judged by the local word filter unless MODERATION_REMOTE=on; any mod may
@@ -37,6 +38,9 @@ export interface ServerSettings {
 	// Whether logins record network hashes and permanent account bans ban
 	// networks (ADR 0005). Needs IP_HASH_SALT.
 	networkBans: boolean
+	// Whether players must accept the Notice before they play. Every kind
+	// still asks the age once, for chat.
+	noticeRequired: boolean
 }
 
 export type ServerKindError =
@@ -106,6 +110,7 @@ export function serverSettings(env: Env): ServerSettingsResult {
 				testingRpcs: true,
 				allowedModsChecked: false,
 				networkBans: false,
+				noticeRequired: false,
 			},
 		}
 	}
@@ -121,6 +126,7 @@ export function serverSettings(env: Env): ServerSettingsResult {
 			testingRpcs: false,
 			allowedModsChecked: kind === 'official',
 			networkBans: kind === 'official',
+			noticeRequired: kind === 'official',
 		},
 	}
 }

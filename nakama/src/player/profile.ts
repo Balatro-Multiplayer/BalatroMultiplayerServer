@@ -24,6 +24,9 @@ export interface Profile {
 	tosAcceptedVersion: number
 	// When the player accepted that Notice version (ms), or null.
 	noticeAcceptedAt: number | null
+	// True once the player answered the age question (it sets chatEnabled or
+	// chatBlocked). Asked once, on every server kind.
+	ageAnswered: boolean
 	chatEnabled: boolean
 	chatBlocked: boolean
 	mutedUserIds: string[]
@@ -74,6 +77,7 @@ export function defaultProfile(steamName: string): Profile {
 		privileges: [],
 		tosAcceptedVersion: 0,
 		noticeAcceptedAt: null,
+		ageAnswered: false,
 		chatEnabled: false,
 		chatBlocked: false,
 		mutedUserIds: [],
@@ -86,6 +90,17 @@ export function defaultProfile(steamName: string): Profile {
 
 function stringList(value: unknown): string[] {
 	return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []
+}
+
+// Data without ageAnswered (an older profile, or the Postgres sync): the
+// first Notice acceptance asked the age, and only the age answer sets chat
+// on or blocks it.
+function ageAnsweredBefore(value: { [key: string]: unknown }): boolean {
+	return (
+		(typeof value.tosAcceptedVersion === 'number' && value.tosAcceptedVersion > 0) ||
+		value.chatEnabled === true ||
+		value.chatBlocked === true
+	)
 }
 
 // The stored object as a Profile, filling in anything missing (older shapes).
@@ -101,6 +116,7 @@ export function profileOf(value: { [key: string]: unknown }, fallbackName: strin
 		privileges: stringList(value.privileges),
 		tosAcceptedVersion: typeof value.tosAcceptedVersion === 'number' ? value.tosAcceptedVersion : 0,
 		noticeAcceptedAt: typeof value.noticeAcceptedAt === 'number' ? value.noticeAcceptedAt : null,
+		ageAnswered: typeof value.ageAnswered === 'boolean' ? value.ageAnswered : ageAnsweredBefore(value),
 		chatEnabled: value.chatEnabled === true,
 		chatBlocked: value.chatBlocked === true,
 		mutedUserIds: stringList(value.mutedUserIds),
@@ -125,6 +141,7 @@ export function withSync(profile: Profile, sync: PlayerSync, unlocked: readonly 
 		privileges,
 		tosAcceptedVersion: typeof sync.tosAcceptedVersion === 'number' ? sync.tosAcceptedVersion : 0,
 		noticeAcceptedAt: typeof sync.noticeAcceptedAt === 'number' ? sync.noticeAcceptedAt : null,
+		ageAnswered: profile.ageAnswered || ageAnsweredBefore(sync as unknown as { [key: string]: unknown }),
 		chatEnabled: sync.chatEnabled === true,
 		chatBlocked: sync.chatBlocked === true,
 		mutedUserIds: stringList(sync.mutedUserIds),

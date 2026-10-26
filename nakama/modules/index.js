@@ -1996,6 +1996,7 @@ function defaultProfile(steamName) {
     privileges: [],
     tosAcceptedVersion: 0,
     noticeAcceptedAt: null,
+    ageAnswered: false,
     chatEnabled: false,
     chatBlocked: false,
     mutedUserIds: [],
@@ -2008,6 +2009,9 @@ function defaultProfile(steamName) {
 function stringList(value) {
   return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
 }
+function ageAnsweredBefore(value) {
+  return typeof value.tosAcceptedVersion === "number" && value.tosAcceptedVersion > 0 || value.chatEnabled === true || value.chatBlocked === true;
+}
 function profileOf(value, fallbackName) {
   const base = defaultProfile(cleanName(value.steamName) || fallbackName);
   return __spreadProps(__spreadValues({}, base), {
@@ -2019,6 +2023,7 @@ function profileOf(value, fallbackName) {
     privileges: stringList(value.privileges),
     tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
     noticeAcceptedAt: typeof value.noticeAcceptedAt === "number" ? value.noticeAcceptedAt : null,
+    ageAnswered: typeof value.ageAnswered === "boolean" ? value.ageAnswered : ageAnsweredBefore(value),
     chatEnabled: value.chatEnabled === true,
     chatBlocked: value.chatBlocked === true,
     mutedUserIds: stringList(value.mutedUserIds),
@@ -2040,6 +2045,7 @@ function withSync(profile, sync, unlocked = []) {
     privileges,
     tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
     noticeAcceptedAt: typeof sync.noticeAcceptedAt === "number" ? sync.noticeAcceptedAt : null,
+    ageAnswered: profile.ageAnswered || ageAnsweredBefore(sync),
     chatEnabled: sync.chatEnabled === true,
     chatBlocked: sync.chatBlocked === true,
     mutedUserIds: stringList(sync.mutedUserIds),
@@ -3886,7 +3892,8 @@ function serverSettings(env) {
         moderationRemote,
         testingRpcs: true,
         allowedModsChecked: false,
-        networkBans: false
+        networkBans: false,
+        noticeRequired: false
       }
     };
   }
@@ -3901,7 +3908,8 @@ function serverSettings(env) {
       moderationRemote,
       testingRpcs: false,
       allowedModsChecked: kind === "official",
-      networkBans: kind === "official"
+      networkBans: kind === "official",
+      noticeRequired: kind === "official"
     }
   };
 }
@@ -5169,12 +5177,14 @@ function withResolvedMutes(profile, resolved) {
     unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
   });
 }
-function loginResponse(userId, profile, config) {
-  const tosRequired = profile.tosAcceptedVersion < NOTICE_VERSION;
+function loginResponse(userId, profile, config, settings) {
+  const tosRequired = settings.noticeRequired && profile.tosAcceptedVersion < NOTICE_VERSION;
   return {
     tosRequired,
     // An update to a Notice the player accepted before (only with tosRequired).
     tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
+    // The age question is still open (with tosRequired, inside the Notice).
+    ageRequired: !profile.ageAnswered,
     player: playerView(userId, profile),
     serverConfig: clientConfig(config)
   };
@@ -5229,19 +5239,21 @@ function rpcSessionInit(ctx, logger, nk, payload) {
   if (profile.discordIdHash) recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
   writeIntegrity(nk, userId, UNVERIFIED);
   clearModReport(nk, userId);
-  return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
+  return JSON.stringify(loginResponse(userId, profile, readConfig(nk), settingsOf(ctx)));
 }
 function rpcTosAccept(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
   const eligible = parsePayload(payload).chatEligible;
   const config = readConfig(nk);
+  const settings = settingsOf(ctx);
   const acceptedAt = Date.now();
   const profile = updateProfile(
     nk,
     userId,
     (current) => {
-      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt });
+      const next = settings.noticeRequired ? __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }) : __spreadValues({}, current);
       if (typeof eligible === "boolean") {
+        next.ageAnswered = true;
         next.chatEnabled = eligible;
         next.chatBlocked = !eligible;
       }
@@ -5249,8 +5261,9 @@ function rpcTosAccept(ctx, logger, nk, payload) {
     },
     ctx.username
   );
-  enqueue(nk, { kind: "notice", at: acceptedAt, userId, version: NOTICE_VERSION });
-  return JSON.stringify(loginResponse(userId, profile, config));
+  if (settings.noticeRequired)
+    enqueue(nk, { kind: "notice", at: acceptedAt, userId, version: NOTICE_VERSION });
+  return JSON.stringify(loginResponse(userId, profile, config, settings));
 }
 
 // src/player/rpc.ts
@@ -8790,18 +8803,20 @@ function obscenityMatches(message) {
 }
 
 // src/chat/rpc.ts
-function noticeAccepted(profile) {
-  return profile.tosAcceptedVersion >= NOTICE_VERSION;
+function consentMissing(profile, settings) {
+  if (settings.noticeRequired) return profile.tosAcceptedVersion >= NOTICE_VERSION ? null : "Accept the Notice first";
+  return profile.ageAnswered ? null : "Answer the age question first";
 }
 function rpcChatEnable(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  const config = readConfig(nk);
+  const settings = settingsOf(ctx);
   const profile = updateProfile(
     nk,
     userId,
     (current) => {
       if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, "Chat access is permanently restricted");
-      if (!noticeAccepted(current)) throw runtimeError(PERMISSION_DENIED, "Accept the Notice first");
+      const missing = consentMissing(current, settings);
+      if (missing) throw runtimeError(PERMISSION_DENIED, missing);
       return __spreadProps(__spreadValues({}, current), { chatEnabled: true });
     },
     ctx.username
@@ -8820,7 +8835,8 @@ function rpcChatSend(ctx, logger, nk, payload) {
   const profile = profileFor(nk, userId, ctx.username);
   if (profile.chatBlocked || !profile.chatEnabled)
     throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
-  if (!noticeAccepted(profile)) throw runtimeError(PERMISSION_DENIED, "Accept the Notice first");
+  const missing = consentMissing(profile, settingsOf(ctx));
+  if (missing) throw runtimeError(PERMISSION_DENIED, missing);
   const banned = chatBanRefusal(readBans(nk, userId), Date.now());
   if (banned) throw runtimeError(PERMISSION_DENIED, banned);
   const current = currentLobby(nk, userId);

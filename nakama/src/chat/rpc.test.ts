@@ -34,6 +34,29 @@ describe('chat_enable', () => {
 	})
 })
 
+describe('chat on a Community server (no Notice)', () => {
+	const COMMUNITY = { BMP_SERVER_KIND: 'community' }
+	const enableOn = (nk: unknown) => JSON.parse(rpcChatEnable(playerCtx(USER, COMMUNITY), fakeLogger, nk as any, '{}'))
+	const sendOn = (nk: unknown) => rpcChatSend(playerCtx(USER, COMMUNITY), fakeLogger, nk as any, JSON.stringify({ message: 'hi' }))
+
+	it('turns chat on once the age is answered, without the Notice', () => {
+		expect(enableOn(nkWith({ ageAnswered: true })).player.chatEnabled).toBe(true)
+	})
+
+	it('waits for the age answer', () => {
+		expect(() => enableOn(nkWith({}))).toThrow(/age/)
+		expect(() => sendOn(nkWith({ chatEnabled: true }))).toThrow(/age/)
+	})
+
+	it('keeps chat off for an under-16 answer', () => {
+		expect(() => enableOn(nkWith({ ageAnswered: true, chatBlocked: true }))).toThrow(/restricted/)
+	})
+
+	it('lets an enabled player through to the lobby check', () => {
+		expect(() => sendOn(nkWith({ ageAnswered: true, chatEnabled: true }))).toThrow(/Not in a lobby/)
+	})
+})
+
 describe('chat_send gates', () => {
 	it('refuses when chat is off server-wide', () => {
 		const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }, { chatEnabled: false })
@@ -56,7 +79,7 @@ describe('chat_send gates', () => {
 
 // Seated in lobby ABCDEF; the moderation service answers with verdict.
 function seated(verdict: unknown, config = {}) {
-	const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }, config)
+	const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, ageAnswered: true, chatEnabled: true }, config)
 	let next = 0
 	nk.uuidv4 = () => `u${++next}`
 	nk.matchGet = () => ({})

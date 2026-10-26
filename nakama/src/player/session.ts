@@ -19,7 +19,7 @@ import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
 import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
 import { enforceAccountBan } from '../moderation/enforce'
 import { banNetworks } from '../moderation/network'
-import { settingsOf } from '../server_kind'
+import { settingsOf, type ServerSettings } from '../server_kind'
 import { parsePayload, requireUser } from '../rpc'
 import {
 	cleanName,
@@ -79,13 +79,16 @@ export function withResolvedMutes(profile: Profile, resolved: { [playerId: strin
 }
 
 // The login response: the API's gameLoginPayload, minus its tokens (the
-// client already holds a Nakama session).
-export function loginResponse(userId: string, profile: Profile, config: ServerConfig) {
-	const tosRequired = profile.tosAcceptedVersion < NOTICE_VERSION
+// client already holds a Nakama session). Only a server kind with
+// noticeRequired asks for the Notice; every kind asks the age once.
+export function loginResponse(userId: string, profile: Profile, config: ServerConfig, settings: ServerSettings) {
+	const tosRequired = settings.noticeRequired && profile.tosAcceptedVersion < NOTICE_VERSION
 	return {
 		tosRequired,
 		// An update to a Notice the player accepted before (only with tosRequired).
 		tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
+		// The age question is still open (with tosRequired, inside the Notice).
+		ageRequired: !profile.ageAnswered,
 		player: playerView(userId, profile),
 		serverConfig: clientConfig(config),
 	}
@@ -157,13 +160,14 @@ export function rpcSessionInit(
 	// and unreported until this session's profile_set_mods.
 	writeIntegrity(nk, userId, UNVERIFIED)
 	clearModReport(nk, userId)
-	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))
+	return JSON.stringify(loginResponse(userId, profile, readConfig(nk), settingsOf(ctx)))
 }
 
-// {chatEligible?} -> loginResponse. Accepts the current Notice version (and
-// stores when); with
-// chatEligible (worked out client-side from the birthdate, never sent raw)
-// also turns chat on or blocks it, as the API's acceptTos does.
+// {chatEligible?} -> loginResponse. On a server kind with noticeRequired,
+// accepts the current Notice version (and stores when). With chatEligible
+// (worked out client-side from the birthdate, never sent raw) it also takes
+// the age answer: chat on, or blocked, as the API's acceptTos does. On other
+// kinds only the age answer is taken.
 export function rpcTosAccept(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -173,13 +177,17 @@ export function rpcTosAccept(
 	const userId = requireUser(ctx)
 	const eligible = parsePayload(payload).chatEligible
 	const config = readConfig(nk)
+	const settings = settingsOf(ctx)
 	const acceptedAt = Date.now()
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
-			const next: Profile = { ...current, tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }
+			const next: Profile = settings.noticeRequired
+				? { ...current, tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }
+				: { ...current }
 			if (typeof eligible === 'boolean') {
+				next.ageAnswered = true
 				next.chatEnabled = eligible
 				next.chatBlocked = !eligible
 			}
@@ -188,6 +196,7 @@ export function rpcTosAccept(
 		ctx.username,
 	)
 	// Postgres (webadmin) keeps who accepted which version, and when.
-	enqueue(nk, { kind: 'notice', at: acceptedAt, userId, version: NOTICE_VERSION })
-	return JSON.stringify(loginResponse(userId, profile, config))
+	if (settings.noticeRequired)
+		enqueue(nk, { kind: 'notice', at: acceptedAt, userId, version: NOTICE_VERSION })
+	return JSON.stringify(loginResponse(userId, profile, config, settings))
 }
