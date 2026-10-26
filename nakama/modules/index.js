@@ -9685,6 +9685,9 @@ function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   logger.info("Deleted account %s", userId);
   return JSON.stringify({ deleted: true });
 }
+function refuseClientAccountDelete(ctx, logger, nk) {
+  throw runtimeError(PERMISSION_DENIED, "Delete your account on the website (your profile page)");
+}
 
 // src/moderation/report.ts
 var REPORT_TYPES = ["cheating", "chat_abuse", "griefing", "inappropriate_username", "other"];
@@ -9795,6 +9798,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom);
   initializer.registerBeforeLinkCustom(refuseCustomIdChange);
   initializer.registerBeforeUnlinkCustom(refuseCustomIdChange);
+  initializer.registerBeforeDeleteAccount(refuseClientAccountDelete);
   initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice);
   initializer.registerBeforeSessionRefresh(beforeSessionRefresh);
   logger.info("BMP Steam login module loaded");

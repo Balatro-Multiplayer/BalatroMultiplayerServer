@@ -70,7 +70,7 @@ import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
 import { seedAllowedModIdsExtra } from './standing/seed'
-import { rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
+import { refuseClientAccountDelete, rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 import { rpcReportSubmit } from './moderation/report'
@@ -100,6 +100,7 @@ function InitModule(
 	initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom)
 	initializer.registerBeforeLinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeUnlinkCustom(refuseCustomIdChange)
+	initializer.registerBeforeDeleteAccount(refuseClientAccountDelete)
 	initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice)
 	initializer.registerBeforeSessionRefresh(beforeSessionRefresh)
 	logger.info('BMP Steam login module loaded')

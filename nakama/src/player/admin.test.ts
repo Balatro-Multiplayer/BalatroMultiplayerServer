@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from '../testing/fake_nk'
-import { rpcAdminAccountDelete, rpcAdminProfileSet } from './admin'
+import { refuseClientAccountDelete, rpcAdminAccountDelete, rpcAdminProfileSet } from './admin'
 import { discordOwner, rpcAdminDiscordSet } from './discord'
 import { emptyProgress } from '../achievements/progress'
 import { writeProgress } from '../achievements/storage'
@@ -87,5 +87,14 @@ describe('admin_account_delete', () => {
 		expect(deleted).toEqual([`logout:${ALICE}:`, ALICE])
 		expect(discordOwner(nk as any, HASH)).toBeNull()
 		expect(() => rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, anonymousId: '99999999-9999-4999-8999-999999999999' }))).toThrow(/No such user/)
+	})
+})
+
+describe('refuseClientAccountDelete', () => {
+	it("refuses Nakama's own account delete, so every deletion runs the anonymization", () => {
+		const { nk } = setup()
+		expect(() => refuseClientAccountDelete(playerCtx(ALICE), fakeLogger, nk as any)).toThrow(
+			expect.objectContaining({ code: 7, message: expect.stringMatching(/website/) }),
+		)
 	})
 })

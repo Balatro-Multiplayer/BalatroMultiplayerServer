@@ -331,6 +331,7 @@ declare namespace nkruntime {
 		): void
 		registerBeforeLinkCustom(fn: BeforeHookFunction<AccountCustom>): void
 		registerBeforeUnlinkCustom(fn: BeforeHookFunction<AccountCustom>): void
+		registerBeforeDeleteAccount(fn: (ctx: Context, logger: Logger, nk: Nakama) => void): void
 		registerRpc(id: string, fn: RpcFunction): void
 		registerBeforeSessionRefresh(
 			fn: BeforeHookFunction<{ token?: string; vars?: { [key: string]: string } }>,

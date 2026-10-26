@@ -2,7 +2,7 @@
 // the player's Nakama profile so the game sees them at once: privileges,
 // display name and joker preferences, a Discord unlink, and account deletion.
 // Server only. (Linking Discord is admin_discord_set, in discord.ts.)
-import { FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND, runtimeError } from '../errors'
+import { FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND, PERMISSION_DENIED, runtimeError } from '../errors'
 import { currentLobby } from '../lobby/rpc'
 import type { LobbySignal } from '../lobby/protocol'
 import { parsePayload, requireServer } from '../rpc'
@@ -137,4 +137,16 @@ export function rpcAdminAccountDelete(
 	nk.accountDeleteId(userId, false)
 	logger.info('Deleted account %s', userId)
 	return JSON.stringify({ deleted: true })
+}
+
+// Before-hook for Nakama's own client account delete (DELETE /v2/account):
+// refused. It would skip the anonymization above and leave the Postgres rows
+// under the old id; deletion goes through the website, which runs both with
+// one anonymous id.
+export function refuseClientAccountDelete(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+): void {
+	throw runtimeError(PERMISSION_DENIED, 'Delete your account on the website (your profile page)')
 }
