@@ -139,6 +139,11 @@ describe('matchmade lobbies', () => {
 		expect(snapshotFor(lobby, 'b').type).toBe('ranked')
 		expect(snapshotFor(lobbyWith('a'), 'a').type).toBe('private')
 	})
+
+	it('tells the joiner how long the server holds a dropped seat, in seconds', () => {
+		const lobby = newLobby({ code: 'ABC123', modId: 'm', maxPlayers: 2, creatorId: 'a', now: 0, graceMs: 30_000 })
+		expect(snapshotFor(lobby, 'a').graceSeconds).toBe(30)
+	})
 })
 
 describe('join', () => {
