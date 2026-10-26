@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { drainMirror, MIRROR_PAGE } from '../../features/nakama/mirror.job.js'
 import {
-	CHAT_LOG_TTL_MS,
-	RUN_LOG_TTL_MS,
 	type MirrorPull,
 	type PulledChat,
 	type PulledRun,
@@ -15,6 +13,7 @@ import { decompressFromBase64 } from '../../shared/utils/compression.js'
 import { err, ok } from '../../shared/utils/result.js'
 
 const T0 = 1_790_000_000_000
+const DAY = 24 * 60 * 60 * 1000
 
 function run(over: Partial<PulledRun['run']> = {}): PulledRun {
 	return {
@@ -69,10 +68,12 @@ describe('runRowsOf', () => {
 		})
 		const [a, b] = rows.logs
 		expect(a).toMatchObject({ playerId: 'pg-a', status: 'complete', flagReason: null, carbonHash: 'h', eventCount: 1 })
-		expect(a.expiresAt).toEqual(new Date(T0 + 60_000 + RUN_LOG_TTL_MS))
+		expect(a.expiresAt).toEqual(new Date(T0 + 60_000 + 180 * DAY))
 		expect(JSON.parse(decompressFromBase64(a.compressedEvents))).toEqual([[1, 'x', null]])
-		// b's log never arrived but its check failed: kept forever, and flagged.
-		expect(b).toMatchObject({ playerId: 'pg-b', flagReason: 'hash_mismatch', expiresAt: null, eventCount: 0 })
+		// b's log never arrived but its check failed: flagged. The sweep keeps it
+		// past expiresAt while its report or ban is open.
+		expect(b).toMatchObject({ playerId: 'pg-b', flagReason: 'hash_mismatch', eventCount: 0 })
+		expect(b.expiresAt).toEqual(new Date(T0 + 60_000 + 180 * DAY))
 		expect(rows.flagged).toEqual([{ playerId: 'pg-b', reason: 'hash_mismatch' }])
 		expect(rows.match).toMatchObject({
 			gameMode: 'ranked:duel',
@@ -101,9 +102,10 @@ describe('runRowsOf', () => {
 })
 
 describe('runRowsOf: flags and disputes', () => {
-	it("keeps a disputed run's logs, as Nakama's retention keeps the run", () => {
+	it("gives a disputed run's logs the evidence limit, 180 days from the end", () => {
 		const rows = runRowsOf(run({ status: 'disputed' }), ids)
-		expect(rows.logs.map((l) => l.expiresAt)).toEqual([null, null])
+		const limit = new Date(T0 + 60_000 + 180 * DAY)
+		expect(rows.logs.map((l) => l.expiresAt)).toEqual([limit, limit])
 	})
 
 	it('marks which players Nakama rated, so a void replays the same games', () => {
@@ -185,13 +187,14 @@ describe('chatRowsOf', () => {
 	it('keeps a clean line for 90 days', () => {
 		const rows = chatRowsOf(line(false), 'pg-a', 'hash')
 		expect(rows.chat).toMatchObject({ playerId: 'pg-a', moderationId: 'hash', mirrorKey: 'k-chat', flagged: false })
-		expect(rows.chat.expiresAt).toEqual(new Date(T0 + CHAT_LOG_TTL_MS))
+		expect(rows.chat.expiresAt).toEqual(new Date(T0 + 90 * DAY))
 		expect(rows.flaggedMessage).toBeNull()
 	})
 
-	it('keeps a flagged line and files it for review', () => {
+	it('keeps a flagged line 180 days as evidence and files it for review', () => {
 		const rows = chatRowsOf(line(true), 'pg-a', null)
-		expect(rows.chat.expiresAt).toBeNull()
+		expect(rows.chat.expiresAt).toEqual(new Date(T0 + 180 * DAY))
+		expect(rows.flaggedMessage?.expiresAt).toEqual(new Date(T0 + 180 * DAY))
 		expect(rows.flaggedMessage).toMatchObject({ matches: { source: 'remote', band: 'high' }, mirrorKey: 'k-chat' })
 	})
 
