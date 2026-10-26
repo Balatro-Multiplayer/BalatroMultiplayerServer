@@ -293,8 +293,14 @@ const logEvent: AuthoritativeAction = {
 			bytes: log.bytes + size,
 			truncated: false,
 		}
+		// The first event of the game marks the start of the race (the match
+		// manifest is written when the racers' run begins).
+		const started =
+			game.started && game.started.raceStartedAt === undefined
+				? { ...game.started, raceStartedAt: ctx.now }
+				: game.started
 		return {
-			game: { ...game, logs: { ...game.logs, [ctx.from]: grown } },
+			game: { ...game, started, logs: { ...game.logs, [ctx.from]: grown } },
 			params: { playerId: ctx.from, t: params.t, opcode: params.opcode, args },
 			to: 'others',
 		}
