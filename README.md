@@ -5,9 +5,6 @@ multiplayer to Balatro. Game clients talk to a [Nakama](https://heroiclabs.com/n
 server running the runtime module in [`nakama/`](nakama); the website and the
 web admin panel run on an Express API backed by PostgreSQL.
 
-In production the game backend is `nakama.balatromp.com` and the website is
-`new.balatromp.com`.
-
 ## The BMP repos
 
 All under [github.com/Balatro-Multiplayer](https://github.com/Balatro-Multiplayer):
@@ -21,79 +18,6 @@ All under [github.com/Balatro-Multiplayer](https://github.com/Balatro-Multiplaye
 
 The client mods only ever talk to Nakama. Nothing in a game client calls the
 Express API directly.
-
-### The `legacy` branch
-
-`main` is the Nakama-based platform. The pre-Nakama server (the MQTT/EMQX-era
-Express server and the older socket server) is frozen on the
-[`legacy`](https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer/tree/legacy) branch. It is kept for reference only; diffing `main`
-against it is not a useful way to find what changed recently.
-
-## Architecture
-
-A pnpm + Turborepo monorepo:
-
-```
-nakama/            Nakama TypeScript runtime module (the game backend)
-apps/server/       Express API: website + web admin backend, Nakama mirror
-apps/web/          Next.js website: leaderboards, stats, match history, admin UI
-apps/moderation/   Stateless chat-moderation verdict service (local classifier)
-packages/types/    @bmp/types, shared types for server/web/internal
-packages/internal/ Public stub for private, deploy-time-only features
-nginx/             Reverse-proxy config for the Official server (prod, blue/green upstream)
-scripts/           deploy-color-swap.sh (blue/green API deploy)
-```
-
-### `nakama/` — the game backend
-
-Bundled by esbuild from `nakama/src` into `nakama/modules/index.js`, which the
-Nakama container loads. It owns everything live:
-
-- **Login**: Steam session tickets via a custom-auth hook on the Official
-  server; Device login on Community and Dev servers.
-- **Lobbies**: an authoritative `bmp_lobby` match that relays gameplay actions,
-  referees ready/start and result reporting, handles spectating, forfeits,
-  rejoin and checkpoint/restore across restarts.
-- **Ranked**: matchmaking queue (solo and group), Elo ratings, seasons with
-  soft reset and inactivity decay, legacy-rating carry-over.
-- **Chat**: lobby chat judged by the moderation service, with a local word
-  filter as fallback.
-- **Replay logs and anti-cheat**: per-player replay logs with an end-of-run
-  hash check and plausibility checks; flagged runs are kept out of ratings.
-- **Moderation**: bans, mutes, reports, account standing, achievements and
-  avatar unlocks.
-- **Mirror outbox**: finished games, ratings, chat and flags are appended to an
-  outbox that the API pulls into Postgres.
-
-### `apps/server/` — the API
-
-Express + Drizzle ORM on PostgreSQL. It serves the website and web admin
-(`/api/*`), mirrors Nakama's outbox into Postgres, owns seasons, the mod
-catalog and server config, and pushes config/bans/rating changes back into
-Nakama through server-only admin RPCs. Nakama calls back into it on
-`/internal/nakama/*`. Postgres holds durable and audit data plus the mirrored
-copy of Nakama's games; live game state stays in Nakama.
-
-### `apps/web/` — the website
-
-Next.js (App Router). Public pages (leaderboards, stats, player profiles,
-match history, downloads) and the moderator/admin panel. It reaches the API
-server-side through a proxy route.
-
-### `apps/moderation/` — chat moderation
-
-A stateless `POST /moderate` service that classifies chat with a local GGUF
-model. It runs as several replicas behind an internal nginx load balancer that
-only Nakama calls. The model file is not in the repo; see
-[`apps/moderation/README.md`](apps/moderation/README.md) for staging it and for
-`SHADOW_MODE` (the Official compose enforces; `compose.local.yml` runs in
-shadow mode).
-
-### `packages/internal/`
-
-A public stub. Some features (for example the launcher-integrity challenge
-strategy) have private implementations that replace this package at deploy
-time. Without them the feature is simply disabled.
 
 ## Self Hosting and Local Development
 
@@ -176,56 +100,6 @@ machines join:
 Players then use your machine's address as `server_host`. The connection is
 plain, not TLS, so set `server_secure = false`. The console (port `7351`)
 stays on your machine.
-
-#### Allowed mods
-
-On a Community server, players with any mods may join every queue. Only the
-Official server checks that a player's mods are all Allowed mods. You have
-nothing to set.
-
-#### Player names are not proven
-
-Players log in with Device login: the game sends a Steam id and name, and the
-server cannot check them. Someone can pretend to be another player. Accounts
-and ratings exist only on your server. Play with people you trust.
-
-#### What works without the API
-
-Without the API: login, Casual, Ranked, private lobbies, chat (with the local
-word filter) and ratings work. Ranked does not need the launcher. These do
-not work:
-
-- Reports: the game says reports are unavailable.
-- Discord linking.
-- Bans from the web admin panel. To keep a player out, ban the account in the
-  Nakama console (Accounts).
-- Match logs and player pages on a website. Links in the game open the
-  `web_url` that each player set (the Official website by default).
-
-#### Add the API and the website
-
-The API stores reports. The website has the web admin panel, where you read
-them. Turn them on with `COMPOSE_PROFILES` in `.env`, then run `up -d` again:
-
-```sh
-COMPOSE_PROFILES=api        # the API on 127.0.0.1:8788
-COMPOSE_PROFILES=api,web    # the API, and the website on 127.0.0.1:3000
-```
-
-A one-shot `migrate` service applies the API's migrations before the API
-starts. To log in to the web admin panel, run
-`docker compose -f compose.local.yml run --rm seed` and open the link it
-prints (see [Test data](#test-data); it also makes four test accounts). The
-API and the website listen only on your machine.
-
-The API cannot ban a Device login player yet: those accounts have no player
-record in the API. Use the Nakama console for bans.
-
-#### Chat moderation
-
-Chat uses the local word filter. For the chat model instead, put the model in
-place (see [`apps/moderation/README.md`](apps/moderation/README.md)), add
-`moderation` to `COMPOSE_PROFILES` and set `MODERATION_REMOTE=on` in `.env`.
 
 ### Dev server
 
@@ -379,77 +253,15 @@ To run several game clients on one Steam account, start each one with a
 different `BMP_IMPERSONATE_NAME`. The `seed` accounts are `TestPlayer1` to
 `TestPlayer4`.
 
-## Tests, typecheck and lint
+## AI Content Disclaimer
 
-```sh
-pnpm test                                        # all unit tests (Vitest) via Turbo
-pnpm lint                                        # Biome
-pnpm build                                       # tsc / next build for every package
-pnpm --filter bmp-nakama-modules typecheck       # the Nakama module
-pnpm --filter balatro-multiplayer-web typecheck  # the website
-```
+This mod does NOT use AI for art or other assets. This mod uses generative AI in it's development as a tool for writing code.
 
-Database schema changes go through Drizzle:
+## Contributing
 
-```sh
-pnpm generate    # write a new migration from apps/server/src/infrastructure/db/schema.ts
-pnpm migrate     # apply migrations
-```
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and guidelines.
 
-Live checks against a running local Dev server are kept outside this repo,
-with the maintainers' client test tooling (ClaudeControl `live/`). Each is a
-standalone Node script that drives throwaway device-auth players through
-Nakama and checks the result in Postgres.
-
-## Deployment
-
-Production runs the same Compose stack on a single host behind Cloudflare,
-with nginx as the only entry point. The API is deployed blue/green:
-[`scripts/deploy-color-swap.sh`](scripts/deploy-color-swap.sh) builds the
-inactive API color, runs migrations, health-checks it, switches
-`nginx/upstream.conf` over and stops the old color without dropping requests.
-Nakama, the website and the moderation replicas are rebuilt and restarted with
-`docker compose up -d`. Nakama gets a shutdown grace period so open lobbies
-checkpoint themselves and resume after a restart.
-
-The Official server (`docker-compose.yml`, `BMP_SERVER_KIND=official`)
-reads two git-ignored `.env` files. `apps/server/.env` is for the API (copy
-[`apps/server/.env.example`](apps/server/.env.example)); it refuses to start
-without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`, `ADMIN_SECRET`,
-`NAKAMA_URL` and `STEAM_WEB_API_KEY`. The root `.env` is for Compose and must
-set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `IP_HASH_SALT`, `NAKAMA_SESSION_KEY`,
-`NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
-`NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; Nakama refuses to start
-without them. Nakama and the API also refuse to start with any dev flag on.
-`IP_HASH_SALT` hashes the networks players log in from, for network bans
-(only the Official server has them); set it once and never change it.
-
-Use the base compose file alone for a dedicated host, or add a host-specific
-overlay with `COMPOSE_OVERLAY=<file>` when sharing a host with other services.
-
-### One-time step: accounts named by a Steam id hash
-
-Nakama names each account by a hash of the Steam id (`steamhash:<hash>`), not
-by the raw id (ADR 0004). The first deploy of that change renames every older
-`steam:<raw id>` account with
-[`apps/server/src/scripts/rewrite-steam-ids.ts`](apps/server/src/scripts/rewrite-steam-ids.ts).
-It must run while Nakama is stopped (it refuses while any other session is
-open on Nakama's database), and Nakama starts again only when it exits 0:
-
-```bash
-docker compose stop nakama
-./scripts/deploy-color-swap.sh   # the new API, which takes the hash at /player-sync
-docker compose run --rm --no-deps -w /app/apps/server \
-  -e NAKAMA_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nakama \
-  api-<active color> node dist/scripts/rewrite-steam-ids.js \
-  && docker compose up -d nakama
-```
-
-It renames the accounts and their ban index entries in one transaction, then
-counts what is left and exits 1 if any `steam:<raw id>` login remains. It is
-safe to run again. The API's and Nakama's `PLAYER_ID_SALT` must be the same
-value. Community and Dev servers need no step: a Device login on a raw Steam
-id moves to the hash at its next login.
+Content changes (new cards, blinds, rulesets, formats, or anything that alters competitive balance) are heavily scrutinized, so open an issue or ask on Discord first. Bug fixes and quality-of-life work are always welcome, check the [issues](https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer/issues), especially those tagged "Help Wanted".
 
 ## License
 
