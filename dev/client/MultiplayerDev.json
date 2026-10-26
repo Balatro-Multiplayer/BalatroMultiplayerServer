@@ -1,0 +1,15 @@
+{
+	"id": "MultiplayerDev",
+	"name": "MultiplayerDev",
+	"display_name": "Multiplayer Dev",
+	"author": ["Balatro Multiplayer"],
+	"description": "For contributors: points Multiplayer API at a Dev server and picks the test account. Not for players.",
+	"prefix": "mpdev",
+	"main_file": "main.lua",
+	"priority": -999999,
+	"badge_colour": "3271AC",
+	"badge_text_colour": "FFFFFF",
+	"version": "1.0.0",
+	"dependencies": ["MultiplayerAPI"],
+	"conflicts": []
+}
