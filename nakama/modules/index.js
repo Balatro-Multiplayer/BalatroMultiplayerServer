@@ -8904,6 +8904,22 @@ function purgeRuns(nk, cutoff, max) {
   } while (cursor);
   return { deleted, more: false };
 }
+var PURGE_NAMED_MAX = 100;
+function purgeNamedRuns(nk, runIds) {
+  if (runIds.length === 0) return { deleted: 0 };
+  const found = nk.storageRead(runIds.map((key) => ({ collection: RUNS_COLLECTION, key, userId: SYSTEM_USER_ID })));
+  for (const o of found) nk.storageDelete(runObjects(o.value));
+  return { deleted: found.length };
+}
+function rpcAdminRunsPurgeNamed(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const runIds = parsePayload(payload).runIds;
+  if (!Array.isArray(runIds) || runIds.length > PURGE_NAMED_MAX || !runIds.every((id) => typeof id === "string" && id.length > 0))
+    throw runtimeError(INVALID_ARGUMENT, `runIds must be a list of at most ${PURGE_NAMED_MAX} run ids`);
+  const result = purgeNamedRuns(nk, runIds);
+  if (result.deleted > 0) logger.info("Purged %d named runs past their evidence limit", result.deleted);
+  return JSON.stringify(result);
+}
 function rpcAdminRunsPurge(ctx, logger, nk, payload) {
   var _a;
   requireServer(ctx);
@@ -9330,6 +9346,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_progress_set", rpcAdminProgressSet);
   initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
   initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
+  initializer.registerRpc("admin_runs_purge_named", rpcAdminRunsPurgeNamed);
   initializer.registerRpc("admin_checkpoints_sweep", rpcAdminCheckpointsSweep);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
   initializer.registerRpc("admin_run_get", rpcAdminRunGet);
