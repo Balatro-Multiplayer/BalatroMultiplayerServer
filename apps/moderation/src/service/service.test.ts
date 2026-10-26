@@ -252,17 +252,24 @@ describe('createModerationService', () => {
 		expect(judged).toHaveLength(0)
 	})
 
-	it('strips unapproved links before judging AND publishing', async () => {
+	it('blocks a message with an unapproved link instead of rewriting it', async () => {
 		const { guard, judged } = recordingGuard()
 		const s = createModerationService({ guard })
 		const r = await s.moderate(req('check this https://evil.example/x'))
-		expect(r.verdict).toBe('allow')
-		// The stripped form is both what the guard judged and what gets published.
-		expect(judged[0]).toBe('check this [link removed]')
-		expect(r.publishText).toBe('check this [link removed]')
+		expect(r).toMatchObject({ verdict: 'reject', band: 'link_block' })
+		expect(r).not.toHaveProperty('publishText')
+		expect(judged).toHaveLength(0)
 	})
 
-	it('keeps approved-domain links intact (no rewrite of the message)', async () => {
+	it('judges a message as typed and never returns a rewrite', async () => {
+		const { guard, judged } = recordingGuard()
+		const s = createModerationService({ guard })
+		const r = await s.moderate(req('i will kill your blind'))
+		expect(judged[0]).toBe('i will kill your blind')
+		expect(r).not.toHaveProperty('publishText')
+	})
+
+	it('allows approved-domain links', async () => {
 		const { guard, judged } = recordingGuard()
 		const s = createModerationService({
 			guard,
@@ -271,7 +278,6 @@ describe('createModerationService', () => {
 		const r = await s.moderate(req('https://www.youtube.com/watch?v=abc'))
 		expect(r.verdict).toBe('allow')
 		expect(judged[0]).toBe('https://www.youtube.com/watch?v=abc')
-		expect(r.publishText).toBeUndefined()
 	})
 
 	it('rejects denylist phrases through leetspeak without judging', async () => {

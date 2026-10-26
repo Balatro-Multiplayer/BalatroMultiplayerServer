@@ -30,7 +30,6 @@ export type ServerOptions = {
 	/** Word-list load state, surfaced so config drift (DEPLOY.md's known failure mode) is visible by polling instead of log archaeology. */
 	lists?: {
 		allowlist: ListStatus
-		rewrites: ListStatus
 		approvedDomains: ListStatus
 	}
 	/** The commit this image was built from (Dockerfile's GIT_SHA build arg); 'unknown' outside CI's build. */
@@ -89,7 +88,6 @@ export function createModerationServer(opts: ServerOptions): Server {
 	const tokens = opts.bearerTokens ?? []
 	const lists = opts.lists ?? {
 		allowlist: 'unset' as const,
-		rewrites: 'unset' as const,
 		approvedDomains: 'unset' as const,
 	}
 	const gitSha = opts.gitSha ?? 'unknown'
