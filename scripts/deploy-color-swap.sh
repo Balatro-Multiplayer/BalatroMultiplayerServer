@@ -118,7 +118,7 @@ while true; do
 	fi
 	if [ "$elapsed" -ge "$CUTOVER_VERIFY_TIMEOUT_S" ]; then
 		echo "[deploy] ERROR: nginx is not serving a working upstream ${CUTOVER_VERIFY_TIMEOUT_S}s after cutover -- api-$ACTIVE was NOT stopped." >&2
-		echo "[deploy] Investigate before retrying (check: docker logs bmp-nginx, docker compose exec nginx cat /etc/nginx/conf.d/upstream.conf)." >&2
+		echo "[deploy] Investigate before retrying (check: docker compose exec nginx cat /var/log/nginx/errors/error.log /etc/nginx/conf.d/upstream.conf)." >&2
 		exit 1
 	fi
 	sleep 2

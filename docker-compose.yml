@@ -214,6 +214,12 @@ services:
     volumes:
       - ./nginx/moderation-upstream.conf:/etc/nginx/conf.d/moderation-upstream.conf:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
+      # The main config and the error log's 7-day limit (nginx/nginx.conf).
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/rotate-error-log.sh:/docker-entrypoint.d/90-rotate-error-log.sh:ro
+    # The error log (client addresses), never on disk or in Docker's log.
+    tmpfs:
+      - /var/log/nginx/errors:size=64m
     depends_on:
       - moderation-1
       - moderation-2
@@ -252,6 +258,9 @@ services:
       - ./nginx/prod/server.conf:/etc/nginx/conf.d/server.conf:ro
       - ./nginx/upstream.conf:/etc/nginx/conf.d/upstream.conf
       - ./nginx/snippets:/etc/nginx/snippets:ro
+      # The main config and the error log's 7-day limit (nginx/nginx.conf).
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/rotate-error-log.sh:/docker-entrypoint.d/90-rotate-error-log.sh:ro
       # Self-signed, 10-year cert for new.balatromp.com (confirmed via
       # `openssl x509` - issuer == subject) - NOT a Cloudflare Origin CA
       # cert despite what an earlier version of this comment claimed. Works
@@ -263,6 +272,9 @@ services:
       # which "Full" mode accepts just as well.
       - /etc/nginx/ssl/bmp.crt:/etc/nginx/ssl/bmp.crt:ro
       - /etc/nginx/ssl/bmp.key:/etc/nginx/ssl/bmp.key:ro
+    # The error log (client addresses), never on disk or in Docker's log.
+    tmpfs:
+      - /var/log/nginx/errors:size=64m
     depends_on:
       api-green:
         condition: service_started
