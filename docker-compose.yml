@@ -213,6 +213,7 @@ services:
     container_name: bmp-moderation-lb
     volumes:
       - ./nginx/moderation-upstream.conf:/etc/nginx/conf.d/moderation-upstream.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
     depends_on:
       - moderation-1
       - moderation-2

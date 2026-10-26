@@ -40,7 +40,7 @@ export default function NoticePage() {
           <ul className='pl-6 space-y-1.5 list-disc'>
             <li><strong className='text-foreground'>A peppered hash of your Steam ID.</strong> When you log in, Steam (Valve) confirms your Steam ID to us. We hash it at once with a secret pepper. Your account is named by this hash. The plain Steam ID is only in memory during the login, and we never store it. We do not access your friends list, game library, email, or any other Steam data.</li>
             <li><strong className='text-foreground'>Your Steam display name.</strong> Your game sends it each time you log in. When you log in to the website, we ask Steam for it.</li>
-            <li><strong className='text-foreground'>A salted hash of your network.</strong> Each time you log in, we hash your IP address with a secret salt. For an IPv6 address, we hash only the first half (the /64 network prefix). We store the hash and the time of your last login from that network. We do not store the IP address itself. We use these hashes only for network bans (see Bans).</li>
+            <li><strong className='text-foreground'>A salted hash of your network.</strong> Each time you log in, we hash your IP address with a secret salt. For an IPv6 address, we hash only the first half (the /64 network prefix). We store the hash and the time of your last login from that network. We do not store the IP address itself, and our web server access logs leave it out. We use these hashes only for network bans (see Bans).</li>
             <li><strong className='text-foreground'>A peppered hash of your Discord user ID, and your Discord display name (optional).</strong> Only if you link your Discord account. We hash the Discord user ID at once and do not store it. We take your Discord display name when you link. You can unlink at any time.</li>
             <li><strong className='text-foreground'>Your settings.</strong> Whether to show your Steam or Discord name (no custom display names are supported), the avatar you pick, and the players you mute.</li>
           </ul>
@@ -95,7 +95,6 @@ export default function NoticePage() {
           <ul className='pl-6 space-y-1.5 list-disc'>
             <li><strong className='text-foreground'>Valve Corporation (United States):</strong> Confirms your Steam login (the game's login ticket, and Steam OpenID on the website) and gives us your Steam display name. Governed by Valve's own privacy policy.</li>
             <li><strong className='text-foreground'>Discord Inc. (United States):</strong> Only if you link Discord. Discord confirms your Discord account and gives us your user ID and display name. We ask Discord only for this basic profile. Governed by Discord's own privacy policy.</li>
-            <li><strong className='text-foreground'>Cloudflare, Inc. (United States):</strong> Passes traffic between you and our servers, so it sees your IP address. Governed by Cloudflare's own privacy policy.</li>
             <li><strong className='text-foreground'>Hetzner Online GmbH (Germany):</strong> Hosts our infrastructure within the EEA. Acts as a data processor with access limited to infrastructure operation under their standard Data Processing Agreement.</li>
             <li><strong className='text-foreground'>Law enforcement or regulatory authorities:</strong> Only if legally compelled or required by mandatory reporting obligations.</li>
           </ul>
@@ -157,7 +156,7 @@ export default function NoticePage() {
 
           <H2>International data transfers</H2>
           <p>We are based in Canada. All user data is stored in Germany, within the EEA. Canada holds an adequacy decision from the European Commission (pursuant to GDPR Article 45), meaning data transfers between Germany and Canada are permitted under GDPR.</p>
-          <p>Some services we use are in the United States. Valve confirms your Steam login and gives us your Steam display name. Discord does the same for your Discord account, only if you link it. Cloudflare passes traffic to our servers. Each is governed by its own privacy policy and terms.</p>
+          <p>Some services we use are in the United States. Valve confirms your Steam login and gives us your Steam display name. Discord does the same for your Discord account, only if you link it. Each is governed by its own privacy policy and terms.</p>
 
           <Hr />
 
