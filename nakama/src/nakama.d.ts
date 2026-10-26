@@ -9,6 +9,9 @@ declare namespace nkruntime {
 		matchId: string
 		// The calling socket's session (realtime hooks, socket RPCs).
 		sessionId?: string
+		// The client's address as Nakama sees it: the first X-Forwarded-For
+		// entry, else the peer (nginx/prod/server.conf sets the header).
+		clientIp?: string
 	}
 
 	interface Logger {
@@ -136,6 +139,10 @@ declare namespace nkruntime {
 			metadata: { [key: string]: unknown } | null,
 		): void
 		sha256Hash(input: string): string
+		// Rows as objects keyed by column name.
+		sqlQuery(query: string, parameters?: unknown[]): { [column: string]: unknown }[]
+		linkDevice(userId: string, deviceId: string): void
+		unlinkDevice(userId: string, deviceId: string): void
 		// Banned users can't log in or refresh a session.
 		usersBanId(userIds: string[]): void
 		usersUnbanId(userIds: string[]): void

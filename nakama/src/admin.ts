@@ -9,6 +9,7 @@ import type { LobbySignal } from './lobby/protocol'
 import { currentLobby } from './lobby/rpc'
 import { isBanType, readBans } from './moderation/bans'
 import { applyBan, liftBan } from './moderation/enforce'
+import { banNetworks } from './moderation/network'
 import { playerView, profileFor } from './player/profile'
 import { mergeConfig, readConfig, writeConfig } from './config'
 import { callExpress } from './express'
@@ -91,7 +92,7 @@ export function rpcAdminConfigSet(
 // ---------------------------------------------------------------------------
 
 // input.userId, which must name an account.
-function requireUserId(nk: nkruntime.Nakama, input: { [key: string]: unknown }): string {
+export function requireUserId(nk: nkruntime.Nakama, input: { [key: string]: unknown }): string {
 	if (typeof input.userId !== 'string' || !USER_ID_PATTERN.test(input.userId))
 		throw runtimeError(INVALID_ARGUMENT, 'userId is required')
 	try {
@@ -129,6 +130,8 @@ export function rpcAdminBanApply(
 	if (expiresAt === undefined) throw runtimeError(INVALID_ARGUMENT, 'expiresAt must be a time or null')
 	const reason = typeof input.reason === 'string' ? input.reason : ''
 	const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason })
+	if (bans.account && banNetworks(nk, settingsOf(ctx), userId, bans.account, Date.now()))
+		logger.info('Network ban %s from %s', bans.account.banId, userId)
 	return JSON.stringify({ bans })
 }
 

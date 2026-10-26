@@ -416,13 +416,39 @@ reads two git-ignored `.env` files. `apps/server/.env` is for the API (copy
 [`apps/server/.env.example`](apps/server/.env.example)); it refuses to start
 without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`, `ADMIN_SECRET`,
 `NAKAMA_URL` and `STEAM_WEB_API_KEY`. The root `.env` is for Compose and must
-set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `NAKAMA_SESSION_KEY`,
+set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `IP_HASH_SALT`, `NAKAMA_SESSION_KEY`,
 `NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
 `NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; Nakama refuses to start
 without them. Nakama and the API also refuse to start with any dev flag on.
+`IP_HASH_SALT` hashes the networks players log in from, for network bans
+(only the Official server has them); set it once and never change it.
 
 Use the base compose file alone for a dedicated host, or add a host-specific
 overlay with `COMPOSE_OVERLAY=<file>` when sharing a host with other services.
+
+### One-time step: accounts named by a Steam id hash
+
+Nakama names each account by a hash of the Steam id (`steamhash:<hash>`), not
+by the raw id (ADR 0004). The first deploy of that change renames every older
+`steam:<raw id>` account with
+[`apps/server/src/scripts/rewrite-steam-ids.ts`](apps/server/src/scripts/rewrite-steam-ids.ts).
+It must run while Nakama is stopped (it refuses while any other session is
+open on Nakama's database), and Nakama starts again only when it exits 0:
+
+```bash
+docker compose stop nakama
+./scripts/deploy-color-swap.sh   # the new API, which takes the hash at /player-sync
+docker compose run --rm --no-deps -w /app/apps/server \
+  -e NAKAMA_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nakama \
+  api-<active color> node dist/scripts/rewrite-steam-ids.js \
+  && docker compose up -d nakama
+```
+
+It renames the accounts and their ban index entries in one transaction, then
+counts what is left and exits 1 if any `steam:<raw id>` login remains. It is
+safe to run again. The API's and Nakama's `PLAYER_ID_SALT` must be the same
+value. Community and Dev servers need no step: a Device login on a raw Steam
+id moves to the hash at its next login.
 
 ## License
 

@@ -1,17 +1,16 @@
 // Carries the Express server's ratings over to Nakama. The legacy database
-// knows players only by sha256(steamId + PLAYER_ID_SALT), which can't be
-// reversed into the "steam:<id>" custom ids Nakama accounts use. So the
-// import parks each player's ratings in a system-owned collection keyed by
-// that hash, and the player claims them at their first Nakama login, when
-// their Steam id is known and can be hashed the same way.
+// knows players only by sha256(steamId + PLAYER_ID_SALT), the same hash
+// Nakama accounts are named by (player/steam_id.ts). The import parks each
+// player's ratings in a system-owned collection keyed by that hash, and the
+// player claims them at their first Nakama login.
 import { INVALID_ARGUMENT, runtimeError } from '../errors'
 import { RATINGS_COLLECTION, SYSTEM_USER_ID } from '../lobby/protocol'
 import { requireServer } from '../rpc'
+import { steamIdHashOf } from '../player/steam_id'
 import { boardId, type RatingRecord } from './apply'
 import { PLACEMENT_GAMES } from './elo'
 
 export const LEGACY_RATINGS_COLLECTION = 'legacy_ratings'
-const STEAM_CUSTOM_ID_PREFIX = 'steam:'
 const HASH_PATTERN = /^[0-9a-f]{64}$/
 const IMPORT_BATCH_LIMIT = 100
 
@@ -32,10 +31,6 @@ export interface LegacyPlayer {
 	boards: LegacyBoard[]
 	claimedBy?: string
 	claimedAt?: number
-}
-
-export function steamIdHash(nk: nkruntime.Nakama, salt: string, steamId: string): string {
-	return nk.sha256Hash(steamId + salt)
 }
 
 function isLegacyBoard(value: unknown): value is LegacyBoard {
@@ -199,12 +194,11 @@ export function claimLegacyRatingsAtLogin(
 	nk: nkruntime.Nakama,
 ) {
 	try {
-		const salt = ctx.env.PLAYER_ID_SALT
-		if (!salt || !ctx.userId) return
-		const account = nk.accountGetId(ctx.userId)
-		if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX)) return
-		const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX.length))
-		claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now())
+		if (!ctx.userId) return
+		const hash = steamIdHashOf(nk, ctx.userId)
+		if (!hash) return
+		const username = nk.accountGetId(ctx.userId).user.username
+		claimLegacyRatings(nk, logger, ctx.userId, username, hash, Date.now())
 	} catch (e) {
 		logger.error('Legacy rating claim failed: %v', e)
 	}

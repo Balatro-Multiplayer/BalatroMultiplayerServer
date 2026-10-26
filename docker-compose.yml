@@ -49,6 +49,7 @@ services:
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$${STEAM_WEB_API_KEY:?}" \
           --runtime.env "PLAYER_ID_SALT=$${PLAYER_ID_SALT:?}" \
+          --runtime.env "IP_HASH_SALT=$${IP_HASH_SALT:?}" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
           --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
           --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
@@ -65,6 +66,9 @@ services:
       # Same salt as the API's, so a login's Steam id hashes to the key the
       # legacy ratings import parked its ratings under.
       PLAYER_ID_SALT: ${PLAYER_ID_SALT:-}
+      # Hashes the networks players log in from, for network bans (ADR 0005).
+      # Its own secret, never shared with the API; set it once, never change it.
+      IP_HASH_SALT: ${IP_HASH_SALT:-}
       # The client ships this (MPAPI api/connection/lifecycle.lua
       # SERVER_DEFAULTS.server_key), so the two must match.
       NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}

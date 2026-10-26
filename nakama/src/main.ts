@@ -22,6 +22,7 @@ import {
 	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
 	beforeAuthenticateDevice,
+	beforeSessionRefresh,
 	refuseCustomIdChange,
 } from './auth'
 import {
@@ -80,6 +81,8 @@ import {
 	rpcLauncherSessionStart,
 } from './integrity'
 import { checkServerKind } from './server_kind'
+import { requireIpHashSalt } from './moderation/network'
+import { rpcAdminIpHashesPurge, rpcAdminNetworkBanLift, rpcAdminNetworkBans } from './moderation/network_admin'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -88,7 +91,8 @@ function InitModule(
 	initializer: nkruntime.Initializer,
 ) {
 	// Throws on a bad BMP_SERVER_KIND or a refused dev flag, so Nakama stops.
-	checkServerKind(ctx.env, logger)
+	const settings = checkServerKind(ctx.env, logger)
+	requireIpHashSalt(settings, ctx.env)
 	configureSeason(ctx.env['RATING_SEASON'])
 	seedAllowedModIdsExtra(nk, logger, ctx.env)
 	initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom)
@@ -96,6 +100,7 @@ function InitModule(
 	initializer.registerBeforeLinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeUnlinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice)
+	initializer.registerBeforeSessionRefresh(beforeSessionRefresh)
 	logger.info('BMP Steam login module loaded')
 
 	// Literal, not LOBBY_MATCH: Nakama reads the registration calls from this
@@ -156,6 +161,9 @@ function InitModule(
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
 	initializer.registerRpc('admin_ban_lift', rpcAdminBanLift)
+	initializer.registerRpc('admin_network_bans', rpcAdminNetworkBans)
+	initializer.registerRpc('admin_network_ban_lift', rpcAdminNetworkBanLift)
+	initializer.registerRpc('admin_ip_hashes_purge', rpcAdminIpHashesPurge)
 	initializer.registerRpc('admin_lobby_list', rpcAdminLobbyList)
 	initializer.registerRpc('admin_lobby_get', rpcAdminLobbyGet)
 	initializer.registerRpc('admin_lobby_kick', rpcAdminLobbyKick)

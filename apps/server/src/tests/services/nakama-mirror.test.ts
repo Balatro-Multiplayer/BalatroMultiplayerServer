@@ -210,7 +210,7 @@ function deps() {
 	const players = {
 		findPlayerIdsByNakamaUserIds: vi.fn(async () => new Map([['na', 'pg-a']])),
 		findPlayerById: vi.fn(async (id: string) => (id === 'pg-legacy' ? { id } : null)),
-		findPlayerBySteamIdHash: vi.fn(async (hash: string) => (hash === 'hash:76' ? { id: 'pg-steam' } : null)),
+		findPlayerBySteamIdHash: vi.fn(async (hash: string) => (hash === 'h76' ? { id: 'pg-steam' } : null)),
 		linkNakamaUser: vi.fn(async () => undefined),
 		createPlayer: vi.fn(async (data: { id: string }) => ({ id: data.id })),
 	}
@@ -220,7 +220,7 @@ function deps() {
 		storeForfeit: vi.fn(async () => undefined),
 		storeNoticeAcceptance: vi.fn(async () => undefined),
 	}
-	const service = createMirrorService({ players, store, hashSteamId: (s) => `hash:${s}` })
+	const service = createMirrorService({ players, store })
 	return { players, store, service }
 }
 
@@ -230,10 +230,10 @@ describe('the mirror service', () => {
 		const resolved = await service.resolvePlayers({
 			entries: [],
 			players: {
-				na: { steamId: '1', legacyPlayerId: null, displayName: 'Ay' },
-				nb: { steamId: '99', legacyPlayerId: 'pg-legacy', displayName: 'Bee' },
-				nc: { steamId: '76', legacyPlayerId: null, displayName: 'Cee' },
-				nd: { steamId: null, legacyPlayerId: null, displayName: '' },
+				na: { steamIdHash: 'h1', legacyPlayerId: null, displayName: 'Ay' },
+				nb: { steamIdHash: 'h99', legacyPlayerId: 'pg-legacy', displayName: 'Bee' },
+				nc: { steamIdHash: 'h76', legacyPlayerId: null, displayName: 'Cee' },
+				nd: { steamIdHash: null, legacyPlayerId: null, displayName: '' },
 			},
 		})
 		expect(resolved.get('na')).toBe('pg-a')
@@ -253,10 +253,10 @@ describe('the mirror service', () => {
 		const chat: PulledChat = { key: 'k-chat', kind: 'chat', at: T0, line: { lobbyCode: 'X', userId: 'na', message: 'm', flagged: false, verdict: null } }
 		const result = await service.storePull({
 			entries: [run(), chat],
-			players: { na: { steamId: '1', legacyPlayerId: null, displayName: '' }, nb: { steamId: null, legacyPlayerId: null, displayName: '' } },
+			players: { na: { steamIdHash: 'h1', legacyPlayerId: null, displayName: '' }, nb: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 		})
 		expect(result).toEqual({ stored: ['k-chat'], failed: ['k-run'] })
-		expect(store.storeChat).toHaveBeenCalledWith(expect.objectContaining({ chat: expect.objectContaining({ moderationId: 'hash:1' }) }))
+		expect(store.storeChat).toHaveBeenCalledWith(expect.objectContaining({ chat: expect.objectContaining({ moderationId: 'h1' }) }))
 	})
 })
 
@@ -265,7 +265,7 @@ describe('a forfeit entry', () => {
 		const { store, service } = deps()
 		await service.storePull({
 			entries: [{ key: 'k-f', kind: 'forfeit', at: T0 + 30_000, userId: 'na', runId: 'r1', code: 'ABCDE', forfeitedAt: T0 }],
-			players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+			players: { na: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 		})
 		expect(store.storeForfeit).toHaveBeenCalledWith({
 			matchId: 'r1',
@@ -282,7 +282,7 @@ describe('a notice entry', () => {
 		const { store, service } = deps()
 		const result = await service.storePull({
 			entries: [{ key: 'k-n', kind: 'notice', at: T0, userId: 'na', version: 2 }],
-			players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+			players: { na: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 		})
 		expect(result.stored).toEqual(['k-n'])
 		expect(store.storeNoticeAcceptance).toHaveBeenCalledWith({ playerId: 'pg-a', version: 2, acceptedAt: new Date(T0) })
@@ -293,7 +293,7 @@ describe('drainMirror', () => {
 	const chat = (n: number): PulledChat => ({ key: `k${n}`, kind: 'chat', at: n, line: { lobbyCode: 'X', userId: 'na', message: 'm', flagged: false, verdict: null } })
 	const page = (from: number, count: number): MirrorPull => ({
 		entries: Array.from({ length: count }, (_, i) => chat(from + i)),
-		players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+		players: { na: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 	})
 
 	it('pulls pages until a short one, acking each', async () => {

@@ -6,7 +6,11 @@ import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
 import { isBanType, liftBan, listBans } from '../../infrastructure/gateways/ban.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { parseExpiresAt } from '../../shared/utils/parse-expires-at.js'
-import { liftBanInNakama } from '../../infrastructure/nakama/moderation-sync.js'
+import {
+	liftBanInNakama,
+	liftNetworkBanInNakama,
+	networkBansInNakama,
+} from '../../infrastructure/nakama/moderation-sync.js'
 import { editNakamaProfile } from '../../infrastructure/nakama/profile-sync.js'
 import { issueBan } from './ban.service.js'
 import { mayIssueBan, mayLiftBan } from '../service-queue/permissions.js'
@@ -158,6 +162,32 @@ router.delete('/players/:id/bans/:banId', async (req, res, next) => {
 		)
 		console.log(`[webadmin] ${req.player!.playerId} lifted ban ${req.params.banId} on ${req.params.id}`)
 		res.json({ ban: lifted })
+	} catch (err) {
+		next(err)
+	}
+})
+
+// Network bans (ADR 0005) live only in Nakama. Staff see the ones that touch
+// a player; only an admin lifts one, as with an account ban.
+router.get('/players/:id/network-bans', async (req, res, next) => {
+	try {
+		const networkBans = await networkBansInNakama(req.params.id)
+		if (!networkBans) throw new AppError('Nakama is unavailable', 503)
+		res.json({ networkBans })
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.delete('/players/:id/network-bans/:banId', async (req, res, next) => {
+	try {
+		const staff = await staffOf(req)
+		if (!staff || !mayLiftBan(staff.role, 'account')) throw new AppError('Your role may not lift a network ban', 403)
+		const outcome = await liftNetworkBanInNakama(req.params.banId)
+		if (outcome === 'unavailable') throw new AppError('Nakama is unavailable', 503)
+		if (outcome === 'not_found') throw new AppError('No matching network ban in force', 404)
+		console.log(`[webadmin] ${req.player!.playerId} lifted network ban ${req.params.banId}`)
+		res.json({ lifted: true })
 	} catch (err) {
 		next(err)
 	}

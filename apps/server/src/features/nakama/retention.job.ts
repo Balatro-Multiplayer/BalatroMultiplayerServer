@@ -3,7 +3,8 @@ import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js
 import type { Result } from '../../shared/utils/result.js'
 import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
-// (The same hourly job also sweeps expired lobby checkpoints: see below.)
+// (The same hourly job also sweeps expired lobby checkpoints and login network
+// hashes: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
 // match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, ask it to
 // delete the older ones. It keeps flagged and disputed runs, which the
@@ -53,6 +54,23 @@ export async function sweepNakamaCheckpoints(rpc: Rpc): Promise<{ deleted: numbe
 	return total
 }
 
+// One sweep of the login network hashes (network bans, ADR 0005): Nakama
+// deletes each 30 days after the last login from that network. Same repeat
+// rule as the run purge.
+export async function purgeNakamaIpHashes(rpc: Rpc): Promise<number> {
+	let total = 0
+	for (let call = 0; call < MAX_CALLS; call++) {
+		const result = await rpc<{ deleted: number; more: boolean }>('admin_ip_hashes_purge', {})
+		if (!result.ok) {
+			if (result.error !== 'disabled') console.warn(`[retention] IP hash purge failed: ${result.error}`)
+			return total
+		}
+		total += result.value.deleted
+		if (!result.value.more) return total
+	}
+	return total
+}
+
 export function startRetentionJob(): () => void {
 	const sweep = () =>
 		void purgeNakamaRuns(callNakamaRpc)
@@ -66,11 +84,19 @@ export function startRetentionJob(): () => void {
 				if (deleted > 0) console.log(`[retention] swept ${deleted} Nakama checkpoints (${noContest} no contest)`)
 			})
 			.catch((err) => console.error('[retention] checkpoint sweep failed:', err))
+	const purgeIpHashes = () =>
+		void purgeNakamaIpHashes(callNakamaRpc)
+			.then((deleted) => {
+				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama login network hashes`)
+			})
+			.catch((err) => console.error('[retention] IP hash purge failed:', err))
 	sweep()
 	sweepCheckpoints()
+	purgeIpHashes()
 	const timer = setInterval(() => {
 		sweep()
 		sweepCheckpoints()
+		purgeIpHashes()
 	}, RETENTION_INTERVAL_MS)
 	timer.unref()
 	return () => clearInterval(timer)
