@@ -1,4 +1,4 @@
-import { desc, eq, inArray, lt } from 'drizzle-orm'
+import { desc, eq, inArray } from 'drizzle-orm'
 import type {
 	LobbyRunStatus,
 	PaginatedRuns,
@@ -7,13 +7,6 @@ import type {
 } from '../../contracts/IReplayLogRepository.js'
 import { db } from '../db/index.js'
 import { lobbyRuns, matchRunLogs } from '../db/schema.js'
-
-export async function purgeExpiredRunLogs(): Promise<number> {
-	const result = await db
-		.delete(matchRunLogs)
-		.where(lt(matchRunLogs.expiresAt, new Date()))
-	return result.rowCount ?? 0
-}
 
 // Account-deletion side effect: gameplay logs aren't deleted (they may still
 // be needed for anti-cheat/replay purposes for the remainder of their normal

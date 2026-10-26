@@ -1,32 +1,9 @@
-// The hourly purge of moderation evidence: expired flagged messages and
-// reported lobbies' kept chat. Which rows go is decided by
+// The hourly purge of reported lobbies' kept chat. Which rows go is decided by
 // features/service-queue/purge.ts; this reads the facts and deletes.
 import { and, eq, inArray, lt, max, sql } from 'drizzle-orm'
-import {
-	flaggedMessagePurgeable,
-	reportedLobbyPurgeable,
-} from '../../features/service-queue/purge.js'
+import { reportedLobbyPurgeable } from '../../features/service-queue/purge.js'
 import { db } from '../db/index.js'
-import { flaggedMessages, reportedLobbyMessages, reports, serviceQueueItems } from '../db/schema.js'
-import { openSourceIds } from './service-queue.gateway.js'
-
-export async function purgeExpiredFlaggedMessages(now: Date = new Date()): Promise<number> {
-	const expired = await db
-		.select({ id: flaggedMessages.id, expiresAt: flaggedMessages.expiresAt })
-		.from(flaggedMessages)
-		.where(lt(flaggedMessages.expiresAt, now))
-	if (expired.length === 0) return 0
-	const open = await openSourceIds(
-		'flagged_chat',
-		expired.map((row) => String(row.id)),
-	)
-	const ids = expired
-		.filter((row) => flaggedMessagePurgeable({ expiresAt: row.expiresAt, hasOpenItem: open.has(String(row.id)) }, now))
-		.map((row) => row.id)
-	if (ids.length === 0) return 0
-	await db.delete(flaggedMessages).where(inArray(flaggedMessages.id, ids))
-	return ids.length
-}
+import { reportedLobbyMessages, reports, serviceQueueItems } from '../db/schema.js'
 
 export async function purgeReportedLobbyMessages(now: Date = new Date()): Promise<number> {
 	// Lobbies with at least one expired line are the candidates.

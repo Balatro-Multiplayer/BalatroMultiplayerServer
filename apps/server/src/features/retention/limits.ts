@@ -24,7 +24,10 @@ export interface EvidenceRetention {
 	links: readonly EvidenceLink[]
 }
 
-export function evidencePurgeable(evidence: EvidenceRetention, now: Date): boolean {
+export function evidencePurgeable(
+	evidence: EvidenceRetention,
+	now: Date,
+): boolean {
 	let keptFrom = evidence.madeAt.getTime()
 	for (const link of evidence.links) {
 		if (link.closedAt === null) return false
@@ -34,13 +37,21 @@ export function evidencePurgeable(evidence: EvidenceRetention, now: Date): boole
 }
 
 // A service queue item (a report, a flag) is open until it is resolved.
-export function linkOfItem(item: { status: string; resolvedAt: Date | null }): EvidenceLink {
+export function linkOfItem(item: {
+	status: string
+	resolvedAt: Date | null
+}): EvidenceLink {
 	return { closedAt: item.status === 'open' ? null : item.resolvedAt }
 }
 
 // A ban is open while it is in force: closed when it ran out or was lifted.
-export function linkOfBan(ban: { expiresAt: Date | null; liftedAt: Date | null }, now: Date): EvidenceLink {
-	const ends = [ban.liftedAt, ban.expiresAt].filter((d): d is Date => d !== null && d <= now)
+export function linkOfBan(
+	ban: { expiresAt: Date | null; liftedAt: Date | null },
+	now: Date,
+): EvidenceLink {
+	const ends = [ban.liftedAt, ban.expiresAt].filter(
+		(d): d is Date => d !== null && d <= now,
+	)
 	if (ends.length === 0) return { closedAt: null }
 	return { closedAt: new Date(Math.min(...ends.map((d) => d.getTime()))) }
 }
@@ -48,7 +59,10 @@ export function linkOfBan(ban: { expiresAt: Date | null; liftedAt: Date | null }
 // A ban record is kept for the ban's length plus 12 months, so until 12 months
 // after it was set to run out (lifting it early does not shorten that). A
 // permanent ban's record is kept.
-export function banRecordPurgeable(ban: { expiresAt: Date | null }, now: Date): boolean {
+export function banRecordPurgeable(
+	ban: { expiresAt: Date | null },
+	now: Date,
+): boolean {
 	if (ban.expiresAt === null) return false
 	return now > banRecordKeptUntil(ban.expiresAt)
 }

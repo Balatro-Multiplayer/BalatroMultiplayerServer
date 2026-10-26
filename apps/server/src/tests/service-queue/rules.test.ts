@@ -16,7 +16,6 @@ import { allowedActionsFor, mayIssueBan, mayLiftBan, permissionFor } from '../..
 import { BASE_PRIORITY, priorityOf } from '../../features/service-queue/priority.js'
 import {
 	REPORTED_CHAT_KEEP_MS,
-	flaggedMessagePurgeable,
 	reportedLobbyPurgeable,
 } from '../../features/service-queue/purge.js'
 import { httpOf } from '../../features/service-queue/refusals.js'
@@ -254,13 +253,6 @@ describe('the integrity flag', () => {
 })
 
 describe('retention', () => {
-	it('keeps an expired flagged message while its item is open', () => {
-		const expired = new Date(NOW.getTime() - 1)
-		expect(flaggedMessagePurgeable({ expiresAt: expired, hasOpenItem: false }, NOW)).toBe(true)
-		expect(flaggedMessagePurgeable({ expiresAt: expired, hasOpenItem: true }, NOW)).toBe(false)
-		expect(flaggedMessagePurgeable({ expiresAt: new Date(NOW.getTime() + 1), hasOpenItem: false }, NOW)).toBe(false)
-	})
-
 	it("keeps a reported lobby's chat while a report is open and for 30 days after the last resolution", () => {
 		const expired = new Date(NOW.getTime() - DAY)
 		const longAgo = new Date(NOW.getTime() - REPORTED_CHAT_KEEP_MS - 1)
