@@ -76,6 +76,9 @@ export const env = {
 	// The server kind (packages/types/src/server-kind.ts). Startup fails
 	// above on the Official server with any dev flag on.
 	BMP_SERVER_KIND: SERVER.kind,
+	// Whether the website asks players to accept the Notice (only the
+	// Official server does, like the game).
+	NOTICE_REQUIRED: SERVER.noticeRequired,
 
 	// Dev-only escape hatch for local Ranked testing without a real BET launcher
 	// (e.g. ClaudeControl-driven clients, which can never answer the launcher-

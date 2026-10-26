@@ -47,7 +47,7 @@ function playerPayload(session: PlayerSession) {
 function tosGate(
 	session: PlayerSession,
 ): { tosRequired: true; tosUpdate: boolean; token: string } | null {
-	if (session.tosAcceptedVersion < NOTICE_VERSION) {
+	if (env.NOTICE_REQUIRED && session.tosAcceptedVersion < NOTICE_VERSION) {
 		return {
 			tosRequired: true,
 			tosUpdate: session.tosAcceptedVersion > 0,
