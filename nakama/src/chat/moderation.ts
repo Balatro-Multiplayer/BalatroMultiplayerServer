@@ -6,10 +6,10 @@ export type ModerationAttempt = { status: number; body: unknown } | null
 export type ModerationBlockReason = 'moderated' | 'unavailable'
 
 export type ModerationOutcome =
-	| { allowed: true; publishText: string | null }
+	| { allowed: true }
 	| { allowed: false; reason: ModerationBlockReason; band?: string }
 
-// The relay's own cap on a message: a rewrite may not exceed it.
+// The relay's cap on a message.
 export const MAX_MESSAGE_LENGTH = 500
 
 function verdictOf(value: unknown): { [key: string]: unknown } | null {
@@ -24,17 +24,8 @@ export function decideModerationOutcome(attempt: ModerationAttempt): ModerationO
 	const body = attempt && attempt.status === 200 ? verdictOf(attempt.body) : null
 	if (!body) return { allowed: false, reason: 'unavailable' }
 
-	if (body.verdict === 'allow') {
-		const rewrite = body.publishText
-		if (rewrite === undefined) return { allowed: true, publishText: null }
-		// A rewrite that is unreadable, blank or too long is blocked, never
-		// swapped for the original it was meant to remove.
-		if (typeof rewrite !== 'string' || !rewrite.trim())
-			return { allowed: false, reason: 'moderated', band: 'unusable_rewrite' }
-		if (rewrite.length > MAX_MESSAGE_LENGTH)
-			return { allowed: false, reason: 'moderated', band: 'oversized_rewrite' }
-		return { allowed: true, publishText: rewrite }
-	}
+	// A message is published as typed or blocked, never rewritten.
+	if (body.verdict === 'allow') return { allowed: true }
 
 	const band = typeof body.band === 'string' ? body.band : undefined
 	// The service's own model being down is not the player's fault.
