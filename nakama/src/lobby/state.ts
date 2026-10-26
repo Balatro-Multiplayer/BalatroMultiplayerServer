@@ -261,8 +261,9 @@ function rejectOp(userId: string, message: string): Outbound {
 }
 
 export const DIFFERENT_MOD = 'Lobby is for a different mod'
-// The clients (api/lobby/nakama.lua) match this text to show the forfeit
-// dialog: change both together.
+// MPAPI matches this text to show the forfeit dialog
+// (ui/forfeited_notice_overlay.lua, MPAPI.is_forfeited_refusal): change both
+// together.
 export const FORFEITED_SEAT = 'You forfeited this match'
 
 // Why userId may not join, or null. A member rejoining (after a disconnect)
