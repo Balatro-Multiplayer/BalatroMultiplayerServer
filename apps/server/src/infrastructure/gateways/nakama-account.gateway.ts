@@ -44,6 +44,16 @@ export function createNakamaAccountGateway(
 		const client = await pool.connect()
 		try {
 			await client.query('BEGIN')
+			// The script checked for a running Nakama before it read; one that
+			// starts since then would write under the rename. The lock makes any
+			// Nakama wait for the commit, and the check under it refuses to go on
+			// if one connected in between.
+			await client.query('LOCK TABLE users, storage IN ACCESS EXCLUSIVE MODE')
+			const others = await countOtherSessions(client)
+			if (others > 0)
+				throw new Error(
+					`${others} other session(s) on Nakama's database: stop Nakama first`,
+				)
 			for (let i = 0; i < plan.accounts.length; i += UPDATE_BATCH) {
 				const batch = plan.accounts.slice(i, i + UPDATE_BATCH)
 				await client.query(
@@ -87,10 +97,16 @@ export function createNakamaAccountGateway(
 	return { findRawSteamLogins, applySteamIdRewrite, countRawSteamLogins }
 }
 
-// Other sessions on Nakama's database: a running Nakama holds a pool open.
-export async function otherDatabaseSessions(pool: pg.Pool): Promise<number> {
-	const result = await pool.query<{ n: string }>(
+async function countOtherSessions(
+	db: Pick<pg.Pool | pg.PoolClient, 'query'>,
+): Promise<number> {
+	const result = await db.query<{ n: string }>(
 		'SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()',
 	)
 	return Number(result.rows[0].n)
+}
+
+// Other sessions on Nakama's database: a running Nakama holds a pool open.
+export function otherDatabaseSessions(pool: pg.Pool): Promise<number> {
+	return countOtherSessions(pool)
 }
