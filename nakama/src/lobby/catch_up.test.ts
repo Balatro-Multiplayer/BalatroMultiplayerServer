@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
-import { CATCH_UP_LIMIT_MS_BY_MOD, catchUpLimitMsFor } from './catch_up'
-import { type Lobby, join, joinRejection, newLobby, setCatchingUp, tick, FORFEITED_SEAT } from './state'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
+import { lobbyMatchLoop } from './match'
+import { CATCH_UP_LIMIT_MS_BY_MOD, CATCH_UP_LIMIT_REASON, catchUpLimitMsFor } from './catch_up'
+import { ServerOp } from './protocol'
+import { type Lobby, disconnect, join, joinRejection, newLobby, setCatchingUp, tick, FORFEITED_SEAT } from './state'
 
 const info = (name: string) => ({ displayName: name, preferredJoker: null, mods: null })
 const LIMIT = 180_000
@@ -52,6 +55,35 @@ describe('the catch-up limit in tick', () => {
 		expect(joinRejection(step.lobby, 'b', 'MultiplayerPvP')).toBe(FORFEITED_SEAT)
 	})
 
+	it('tells the forfeited seat, which is still connected, and kicks it', () => {
+		const lobby = setCatchingUp(runningLobby('MultiplayerPvP'), 'b', true, 1000).lobby
+		const step = tick(lobby, 1000 + LIMIT)
+		expect(step.out).toContainEqual({
+			kind: 'send',
+			op: ServerOp.EVENT,
+			payload: {
+				type: 'player_kicked',
+				lobbyCode: 'ABC123',
+				playerId: 'b',
+				displayName: 'b',
+				data: { kickedBy: 'server', reason: CATCH_UP_LIMIT_REASON },
+			},
+			to: ['b'],
+		})
+		expect(step.out).toContainEqual({ kind: 'kick', userId: 'b' })
+		// The others see the seat leave, as before.
+		const toOthers = step.out.filter((o) => o.kind === 'send' && o.op === ServerOp.EVENT && o.to.indexOf('a') !== -1)
+		expect(toOthers.map((o) => (o as { payload: { type: string } }).payload.type)).toEqual(['player_left'])
+	})
+
+	it('says nothing to, and kicks nobody for, a seat whose grace ran out (it is not connected)', () => {
+		const away = disconnect(runningLobby('MultiplayerPvP'), 'b', 'b-s1', 1000).lobby
+		const step = tick(away, 1000 + 120_000)
+		expect(step.lobby.players.map((p) => p.id)).toEqual(['a'])
+		expect(step.out.some((o) => o.kind === 'kick')).toBe(false)
+		expect(step.out.some((o) => o.kind === 'send' && o.to.indexOf('b') !== -1)).toBe(false)
+	})
+
 	it('does not forfeit a seat that caught up in time', () => {
 		let lobby = setCatchingUp(runningLobby('MultiplayerPvP'), 'b', true, 1000).lobby
 		lobby = setCatchingUp(lobby, 'b', false, 60_000).lobby
@@ -67,5 +99,29 @@ describe('the catch-up limit in tick', () => {
 		const step = tick(lobby, 1000 + 100 * LIMIT)
 		expect(step.out).toEqual([])
 		expect(step.lobby.players.map((p) => p.id)).toEqual(['a', 'b'])
+	})
+})
+
+describe('the catch-up limit in the match loop', () => {
+	afterEach(() => vi.restoreAllMocks())
+
+	it('sends the forfeited seat its player_kicked event, then kicks its presence', () => {
+		vi.spyOn(Date, 'now').mockReturnValue(1000 + LIMIT)
+		const nk: any = fakeNk({ sha256Hash: (s: string) => `h${s.length}`, matchLabelUpdate: () => {} })
+		const calls: string[] = []
+		const dispatcher: any = {
+			broadcastMessage: (op: number, data: string, to: { userId: string }[]) =>
+				calls.push(`send ${op} ${JSON.parse(data).type} -> ${to.map((p) => p.userId).join(',')}`),
+			matchKick: (who: { userId: string }[]) => calls.push(`kick ${who.map((p) => p.userId).join(',')}`),
+			matchLabelUpdate: () => {},
+		}
+		const ctx: any = { ...playerCtx(''), matchId: 'm1' }
+		const presence = (userId: string) => ({ userId, sessionId: `${userId}-s1`, username: userId, node: 'n' })
+		const lobby = setCatchingUp(runningLobby('MultiplayerPvP'), 'b', true, 1000).lobby
+		const state: any = { lobby, presences: { a: presence('a'), b: presence('b') }, pendingInfo: {}, label: '' }
+		const after = lobbyMatchLoop(ctx, fakeLogger, nk, dispatcher, 1, state, [])
+		const toB = calls.filter((c) => c.endsWith('-> b') || c.startsWith('kick'))
+		expect(toB).toEqual([`send ${ServerOp.EVENT} player_kicked -> b`, 'kick b'])
+		expect(after!.state.presences.b).toBeUndefined()
 	})
 })

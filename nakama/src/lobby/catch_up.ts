@@ -11,6 +11,10 @@ export const CATCH_UP_LIMIT_MS_BY_MOD: { [modId: string]: number } = {
 	MultiplayerPvP: 180_000,
 }
 
+// The reason in the player_kicked event a seat forfeited at the limit gets
+// (`data.reason`). MPAPI api/lobby/events.lua reads it: keep both the same.
+export const CATCH_UP_LIMIT_REASON = 'catch_up_limit'
+
 // The limit a new lobby of `modId` gets, or null for none. `overrideSeconds`
 // (the LOBBY_CATCH_UP_LIMIT_SECONDS env var, for tests) replaces the limit of a
 // mod that has one; it never gives a limit to a mod that has none.
