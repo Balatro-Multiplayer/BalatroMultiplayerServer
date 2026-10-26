@@ -1,5 +1,6 @@
 import { eq, max } from 'drizzle-orm'
 import type { ReportType } from '../../shared/types/index.js'
+import { REPORTED_CHAT_KEEP_MS } from '../../features/service-queue/purge.js'
 import type { ItemContext } from '../../features/service-queue/types.js'
 import type { DbExecutor } from '../db/executor.js'
 import { db } from '../db/index.js'
@@ -72,7 +73,7 @@ async function recordReport(report: NewReport): Promise<number> {
 		.returning({ id: reports.id })
 
 	if (report.chat.length > 0) {
-		const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+		const expiresAt = new Date(Date.now() + REPORTED_CHAT_KEEP_MS)
 		await db.insert(reportedLobbyMessages).values(
 			report.chat.map((entry) => ({
 				lobbyId: report.lobbyId,

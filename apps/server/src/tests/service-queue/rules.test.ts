@@ -253,7 +253,12 @@ describe('the integrity flag', () => {
 })
 
 describe('retention', () => {
-	it("keeps a reported lobby's chat while a report is open and for 30 days after the last resolution", () => {
+	it("keeps a reported lobby's chat while a report is open and for 180 days after the last resolution (the evidence rule)", () => {
+		expect(REPORTED_CHAT_KEEP_MS).toBe(180 * DAY)
+		const withinEvidenceLimit = new Date(NOW.getTime() - 100 * DAY)
+		expect(
+			reportedLobbyPurgeable({ openReports: 0, lastResolvedAt: withinEvidenceLimit, latestExpiresAt: new Date(NOW.getTime() - DAY) }, NOW),
+		).toBe(false)
 		const expired = new Date(NOW.getTime() - DAY)
 		const longAgo = new Date(NOW.getTime() - REPORTED_CHAT_KEEP_MS - 1)
 		const recently = new Date(NOW.getTime() - DAY)

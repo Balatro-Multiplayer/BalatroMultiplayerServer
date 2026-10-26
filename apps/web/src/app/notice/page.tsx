@@ -120,7 +120,7 @@ export default function NoticePage() {
             <li><strong className='text-foreground'>Chat messages:</strong> 90 days from the date sent, then permanently deleted.</li>
             <li><strong className='text-foreground'>Blocked or flagged chat messages:</strong> 180 days from the date sent. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Gameplay logs:</strong> 180 days from the end of the match. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
-            <li><strong className='text-foreground'>Chat saved with a report:</strong> kept while a report about that lobby is open, then 30 more days.</li>
+            <li><strong className='text-foreground'>Chat saved with a report:</strong> kept while a report about that lobby is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Ban records:</strong> the length of the ban plus 12 months. For permanent bans: retained indefinitely.</li>
             <li><strong className='text-foreground'>Reports, warnings, moderation decisions and failed launcher checks:</strong> kept as moderation records. They have no fixed time limit yet.</li>
             <li><strong className='text-foreground'>Match results, ratings and season standings:</strong> kept, because leaderboards and other players' match history depend on them.</li>
@@ -133,6 +133,7 @@ export default function NoticePage() {
           <p>When you delete your account on the website, this happens at once:</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
             <li>Your Steam display name, Discord ID hash and display name, network hashes, settings, chat access and installed-mod list are deleted.</li>
+            <li>If a network ban holds some of your network hashes, the ban keeps its copy of them until an admin lifts it. Nothing in it names you: it names the random ID below.</li>
             <li>Everywhere we store your player ID, we replace it with a new random ID. Nothing links that random ID back to you. Your name in other players' games becomes "[deleted player]".</li>
             <li>Chat messages, gameplay logs and reports that are still within their limits stay under the random ID until their normal limit above. Then they are permanently deleted. Match results and ratings stay under the random ID, so other players' history stays whole.</li>
             <li>If you have no ban record, we delete your Steam ID hash too.</li>
