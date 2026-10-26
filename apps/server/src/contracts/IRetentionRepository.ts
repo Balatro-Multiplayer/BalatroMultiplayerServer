@@ -24,6 +24,9 @@ export interface IRetentionRepository {
 	deleteFlaggedMessages(ids: string[]): Promise<number>
 	// Runs whose logs passed their limit, by run id.
 	runCandidates(now: Date): Promise<EvidenceCandidate[]>
+	// The reports and bans that use each run (by run id; a run nothing uses
+	// has no entry).
+	runLinks(runIds: string[], now: Date): Promise<Map<string, EvidenceLink[]>>
 	// Deletes every log of the runs. Returns how many logs went.
 	deleteRunLogs(runIds: string[]): Promise<number>
 	// Ban records that ran out.

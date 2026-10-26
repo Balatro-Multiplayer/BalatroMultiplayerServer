@@ -191,6 +191,44 @@ async function flaggedChatCandidates(
 	}))
 }
 
+// The reports and bans that use each run: its anti-cheat items (one per
+// player log), its result conflicts and the reports that name it.
+async function runLinksOf(
+	runIds: string[],
+	now: Date,
+): Promise<Map<string, EvidenceLink[]>> {
+	const itemsOf = new Map<string, ItemKey[]>(runIds.map((id) => [id, []]))
+	const add = (runId: string, key: ItemKey) => itemsOf.get(runId)?.push(key)
+	for (const part of chunks(runIds)) {
+		const logs = await db
+			.select({ runId: matchRunLogs.runId, playerId: matchRunLogs.playerId })
+			.from(matchRunLogs)
+			.where(inArray(matchRunLogs.runId, part))
+		for (const l of logs)
+			add(l.runId, {
+				itemType: 'anti_cheat',
+				sourceId: antiCheatSourceId(l.runId, l.playerId),
+			})
+		const conflicts = await db
+			.select({
+				id: matchResultConflicts.id,
+				runId: matchResultConflicts.matchId,
+			})
+			.from(matchResultConflicts)
+			.where(inArray(matchResultConflicts.matchId, part))
+		for (const c of conflicts)
+			add(c.runId, { itemType: 'match_conflict', sourceId: String(c.id) })
+		const runReports = await db
+			.select({ id: reports.id, runId: reports.runId })
+			.from(reports)
+			.where(inArray(reports.runId, part))
+		for (const r of runReports)
+			if (r.runId)
+				add(r.runId, { itemType: 'report', sourceId: String(r.id) })
+	}
+	return linksOf(itemsOf, now)
+}
+
 export const retentionRepository: IRetentionRepository = {
 	async deleteExpiredChat(now) {
 		const result = await db
@@ -279,42 +317,18 @@ export const retentionRepository: IRetentionRepository = {
 			)
 		if (runs.length === 0) return []
 
-		const itemsOf = new Map<string, ItemKey[]>(runs.map((r) => [r.runId, []]))
-		const add = (runId: string, key: ItemKey) => itemsOf.get(runId)?.push(key)
-		for (const part of chunks(runs.map((r) => r.runId))) {
-			const logs = await db
-				.select({ runId: matchRunLogs.runId, playerId: matchRunLogs.playerId })
-				.from(matchRunLogs)
-				.where(inArray(matchRunLogs.runId, part))
-			for (const l of logs)
-				add(l.runId, {
-					itemType: 'anti_cheat',
-					sourceId: antiCheatSourceId(l.runId, l.playerId),
-				})
-			const conflicts = await db
-				.select({
-					id: matchResultConflicts.id,
-					runId: matchResultConflicts.matchId,
-				})
-				.from(matchResultConflicts)
-				.where(inArray(matchResultConflicts.matchId, part))
-			for (const c of conflicts)
-				add(c.runId, { itemType: 'match_conflict', sourceId: String(c.id) })
-			const runReports = await db
-				.select({ id: reports.id, runId: reports.runId })
-				.from(reports)
-				.where(inArray(reports.runId, part))
-			for (const r of runReports)
-				if (r.runId)
-					add(r.runId, { itemType: 'report', sourceId: String(r.id) })
-		}
-		const links = await linksOf(itemsOf, now)
+		const links = await runLinksOf(
+			runs.map((r) => r.runId),
+			now,
+		)
 		return runs.map((r) => ({
 			id: r.runId,
 			madeAt: r.madeAt,
 			links: links.get(r.runId) ?? [],
 		}))
 	},
+
+	runLinks: runLinksOf,
 
 	async deleteRunLogs(runIds) {
 		let deleted = 0

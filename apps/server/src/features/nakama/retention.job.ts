@@ -1,14 +1,20 @@
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
+import { retentionRepository } from '../../infrastructure/gateways/retention.gateway.js'
 import type { Result } from '../../shared/utils/result.js'
+import { type EvidenceLink, evidencePurgeable } from '../retention/limits.js'
+import { NAMED_RUNS_PER_CALL } from '../retention/sweep.js'
 import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
 // (The same hourly job also sweeps expired lobby checkpoints, login network
 // hashes and the ban index entries of deleted accounts: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
-// match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, ask it to
-// delete the older ones. It keeps flagged and disputed runs, which the
-// evidence sweep (features/retention/sweep.ts) names once past their limit. Hourly
+// match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, list the
+// older ones (admin_runs_expired), keep each a report or ban still uses (the
+// evidence rule, features/retention/limits.ts) and delete the rest
+// (admin_runs_purge_named). Nakama does not list flagged and disputed runs,
+// which the evidence sweep (features/retention/sweep.ts) names once past
+// their limit. Hourly
 // rather than daily so a sweep missed while Nakama is still booting (or
 // restarting) is retried soon; a sweep with nothing to delete is one call.
 
@@ -19,20 +25,43 @@ const MAX_CALLS = 50
 
 type Rpc = <T>(id: string, body: Record<string, unknown>) => Promise<Result<T, NakamaRpcError>>
 
-// One sweep: calls until Nakama has nothing more to delete. Returns how many
+export interface RunPurgeDeps {
+	rpc: Rpc
+	// The reports and bans that use each run (retention gateway runLinks).
+	runLinks(runIds: string[], now: Date): Promise<Map<string, EvidenceLink[]>>
+}
+
+// One sweep: pages through Nakama's old runs until the end. Returns how many
 // runs went.
-export async function purgeNakamaRuns(rpc: Rpc): Promise<number> {
+export async function purgeNakamaRuns(deps: RunPurgeDeps, now: Date): Promise<number> {
 	let total = 0
+	let cursor = ''
 	for (let call = 0; call < MAX_CALLS; call++) {
-		const result = await rpc<{ deleted: number; more: boolean }>('admin_runs_purge', {
-			olderThanDays: RUN_RETENTION_DAYS,
-		})
-		if (!result.ok) {
-			if (result.error !== 'disabled') console.warn(`[retention] purge failed: ${result.error}`)
+		const page = await deps.rpc<{ runs: { runId: string; endedAt: number }[]; cursor: string }>(
+			'admin_runs_expired',
+			{ olderThanDays: RUN_RETENTION_DAYS, cursor },
+		)
+		if (!page.ok) {
+			if (page.error !== 'disabled') console.warn(`[retention] run listing failed: ${page.error}`)
 			return total
 		}
-		total += result.value.deleted
-		if (!result.value.more) return total
+		const { runs } = page.value
+		const links = runs.length > 0 ? await deps.runLinks(runs.map((r) => r.runId), now) : new Map()
+		const purgeable = runs
+			.filter((r) => evidencePurgeable({ madeAt: new Date(r.endedAt), links: links.get(r.runId) ?? [] }, now))
+			.map((r) => r.runId)
+		for (let i = 0; i < purgeable.length; i += NAMED_RUNS_PER_CALL) {
+			const purged = await deps.rpc<{ deleted: number }>('admin_runs_purge_named', {
+				runIds: purgeable.slice(i, i + NAMED_RUNS_PER_CALL),
+			})
+			if (!purged.ok) {
+				console.warn(`[retention] purge failed: ${purged.error}`)
+				return total
+			}
+			total += purged.value.deleted
+		}
+		cursor = page.value.cursor
+		if (!cursor) return total
 	}
 	return total
 }
@@ -85,7 +114,7 @@ export function purgeNakamaBanIndex(rpc: Rpc): Promise<number> {
 
 export function startRetentionJob(): () => void {
 	const sweep = () =>
-		void purgeNakamaRuns(callNakamaRpc)
+		void purgeNakamaRuns({ rpc: callNakamaRpc, runLinks: retentionRepository.runLinks }, new Date())
 			.then((deleted) => {
 				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama runs`)
 			})

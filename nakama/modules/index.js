@@ -9244,7 +9244,7 @@ function rpcAdminCheckpointsSweep(ctx, logger, nk, payload) {
 var RUN_RETENTION_DAYS = 180;
 var DAY_MS3 = 24 * 60 * 60 * 1e3;
 var LIST_PAGE5 = 100;
-var PURGE_MAX = 500;
+var EXPIRED_MAX = 100;
 function isKept(run) {
   return Object.keys(run.flags || {}).length > 0 || run.status === "disputed";
 }
@@ -9261,21 +9261,18 @@ function runObjects(run) {
   }
   return objects;
 }
-function purgeRuns(nk, cutoff, max) {
-  let deleted = 0;
-  let cursor = "";
+function expiredRuns(nk, cutoff, max, cursor) {
+  const runs = [];
+  let next = cursor;
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE5, cursor);
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE5, next);
     for (const o of page.objects || []) {
       const run = o.value;
-      if (!isPurgeable(run, cutoff)) continue;
-      if (deleted >= max) return { deleted, more: true };
-      nk.storageDelete(runObjects(run));
-      deleted++;
+      if (isPurgeable(run, cutoff)) runs.push({ runId: run.runId, endedAt: run.endedAt });
     }
-    cursor = page.cursor || "";
-  } while (cursor);
-  return { deleted, more: false };
+    next = page.cursor || "";
+  } while (next && runs.length < max);
+  return { runs, cursor: next };
 }
 var PURGE_NAMED_MAX = 100;
 function purgeNamedRuns(nk, runIds) {
@@ -9293,15 +9290,16 @@ function rpcAdminRunsPurgeNamed(ctx, logger, nk, payload) {
   if (result.deleted > 0) logger.info("Purged %d named runs past their evidence limit", result.deleted);
   return JSON.stringify(result);
 }
-function rpcAdminRunsPurge(ctx, logger, nk, payload) {
-  var _a;
+function rpcAdminRunsExpired(ctx, logger, nk, payload) {
+  var _a, _b;
   requireServer(ctx);
-  const days = (_a = parsePayload(payload).olderThanDays) != null ? _a : RUN_RETENTION_DAYS;
+  const input = parsePayload(payload);
+  const days = (_a = input.olderThanDays) != null ? _a : RUN_RETENTION_DAYS;
   if (typeof days !== "number" || !Number.isInteger(days) || days < 1)
     throw runtimeError(INVALID_ARGUMENT, "olderThanDays must be a positive whole number");
-  const result = purgeRuns(nk, Date.now() - days * DAY_MS3, PURGE_MAX);
-  if (result.deleted > 0) logger.info("Purged %d runs older than %d days", result.deleted, days);
-  return JSON.stringify(result);
+  const cursor = (_b = input.cursor) != null ? _b : "";
+  if (typeof cursor !== "string") throw runtimeError(INVALID_ARGUMENT, "cursor must be a string");
+  return JSON.stringify(expiredRuns(nk, Date.now() - days * DAY_MS3, EXPIRED_MAX, cursor));
 }
 
 // src/rating/admin.ts
@@ -9938,7 +9936,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_avatars_for", rpcAdminAvatarsFor);
   initializer.registerRpc("admin_progress_set", rpcAdminProgressSet);
   initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
-  initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
+  initializer.registerRpc("admin_runs_expired", rpcAdminRunsExpired);
   initializer.registerRpc("admin_runs_purge_named", rpcAdminRunsPurgeNamed);
   initializer.registerRpc("admin_checkpoints_sweep", rpcAdminCheckpointsSweep);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);

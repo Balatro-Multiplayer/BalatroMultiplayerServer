@@ -2,32 +2,64 @@ import { describe, expect, it, vi } from 'vitest'
 import { purgeNakamaBanIndex, purgeNakamaIpHashes, purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
 describe('purgeNakamaRuns', () => {
-	it('keeps calling while Nakama says there is more, and totals what went', async () => {
-		const replies = [
-			{ ok: true, value: { deleted: 500, more: true } },
-			{ ok: true, value: { deleted: 12, more: false } },
-		]
-		const rpc = vi.fn(async () => replies.shift())
-		expect(await purgeNakamaRuns(rpc as never)).toBe(512)
-		expect(rpc).toHaveBeenCalledTimes(2)
-		expect(rpc).toHaveBeenCalledWith('admin_runs_purge', { olderThanDays: 180 })
+	const DAY = 24 * 60 * 60 * 1000
+	const now = new Date(1000 * DAY)
+	const old = now.getTime() - 200 * DAY
+	const ok = <T>(value: T) => ({ ok: true, value })
+
+	// Nakama's answers per RPC; admin_runs_expired pages in order.
+	function fakeRpc(pages: { runs: { runId: string; endedAt: number }[]; cursor: string }[]) {
+		const named: string[][] = []
+		const rpc = vi.fn(async (id: string, body: Record<string, unknown>) => {
+			if (id === 'admin_runs_expired') return ok(pages.shift())
+			if (id === 'admin_runs_purge_named') {
+				named.push(body.runIds as string[])
+				return ok({ deleted: (body.runIds as string[]).length })
+			}
+			throw new Error(id)
+		})
+		return { rpc, named }
+	}
+
+	it('deletes the old runs no report or ban uses, and keeps the ones still used', async () => {
+		const { rpc, named } = fakeRpc([
+			{ runs: [{ runId: 'free', endedAt: old }, { runId: 'reported', endedAt: old }], cursor: 'c1' },
+			{ runs: [{ runId: 'banned', endedAt: old }, { runId: 'closed-long-ago', endedAt: old }], cursor: '' },
+		])
+		const runLinks = vi.fn(async (runIds: string[]) => {
+			const links = new Map<string, { closedAt: Date | null }[]>()
+			for (const id of runIds) {
+				if (id === 'reported') links.set(id, [{ closedAt: null }])
+				if (id === 'banned') links.set(id, [{ closedAt: new Date(now.getTime() - 10 * DAY) }])
+				if (id === 'closed-long-ago') links.set(id, [{ closedAt: new Date(now.getTime() - 190 * DAY) }])
+			}
+			return links
+		})
+
+		expect(await purgeNakamaRuns({ rpc: rpc as never, runLinks }, now)).toBe(2)
+		expect(named.flat()).toEqual(['free', 'closed-long-ago'])
+		expect(rpc).toHaveBeenCalledWith('admin_runs_expired', { olderThanDays: 180, cursor: '' })
+		expect(rpc).toHaveBeenCalledWith('admin_runs_expired', { olderThanDays: 180, cursor: 'c1' })
 		expect(RUN_RETENTION_DAYS).toBe(180)
 	})
 
 	it('stops at a failed call, and quietly when Nakama is off', async () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const runLinks = vi.fn(async () => new Map())
 		const failing = vi.fn(async () => ({ ok: false, error: 'unreachable' }))
-		expect(await purgeNakamaRuns(failing as never)).toBe(0)
+		expect(await purgeNakamaRuns({ rpc: failing as never, runLinks }, now)).toBe(0)
 		expect(warn).toHaveBeenCalledTimes(1)
 		const off = vi.fn(async () => ({ ok: false, error: 'disabled' }))
-		expect(await purgeNakamaRuns(off as never)).toBe(0)
+		expect(await purgeNakamaRuns({ rpc: off as never, runLinks }, now)).toBe(0)
 		expect(warn).toHaveBeenCalledTimes(1)
 		warn.mockRestore()
 	})
 
-	it('gives up after a bounded number of calls', async () => {
-		const rpc = vi.fn(async () => ({ ok: true, value: { deleted: 1, more: true } }))
-		expect(await purgeNakamaRuns(rpc as never)).toBe(50)
+	it('gives up after a bounded number of pages', async () => {
+		const rpc = vi.fn(async (id: string) =>
+			id === 'admin_runs_expired' ? ok({ runs: [{ runId: 'r', endedAt: old }], cursor: 'more' }) : ok({ deleted: 1 }),
+		)
+		expect(await purgeNakamaRuns({ rpc: rpc as never, runLinks: async () => new Map() }, now)).toBe(50)
 	})
 })
 
