@@ -55,6 +55,9 @@ export interface LobbyPlayer {
 	sessionId: string
 	info: PlayerInfo
 	awaySince: number | null
+	// When the player said it was catching up (ClientOp.CATCHING_UP); null or
+	// absent when it is not. A join clears it: the new session reports again.
+	catchingUpSince?: number | null
 	ownState: unknown
 }
 
@@ -292,6 +295,10 @@ function forfeitedStill(lobby: Lobby, userId: string): boolean {
 	return started === null || started.runId === runId
 }
 
+export function isCatchingUp(player: LobbyPlayer): boolean {
+	return typeof player.catchingUpSince === 'number'
+}
+
 export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 	const self = findPlayer(lobby, userId)
 	return {
@@ -308,6 +315,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 			mods: p.info.mods,
 			standing: p.info.standing || null,
 			isAway: p.awaySince !== null,
+			catchingUp: isCatchingUp(p),
 		})),
 		ownState: self ? self.ownState : null,
 		game: {
@@ -331,7 +339,8 @@ export function join(
 	const existing = findPlayer(lobby, userId)
 	if (existing) {
 		const wasAway = existing.awaySince !== null
-		const back: LobbyPlayer = { ...existing, sessionId, awaySince: null }
+		const wasCatchingUp = isCatchingUp(existing)
+		const back: LobbyPlayer = { ...existing, sessionId, awaySince: null, catchingUpSince: null }
 		const next = {
 			...lobby,
 			players: lobby.players.map((p) => (p.id === userId ? back : p)),
@@ -360,6 +369,7 @@ export function join(
 			const tail = replayTailOf(next, userId)
 			if (tail) out.push({ kind: 'send', op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] })
 		}
+		if (wasCatchingUp) out.push(catchingUpEvent(next, userId, false))
 		return then({ lobby: next, out }, groupReturned)
 	}
 
@@ -402,6 +412,29 @@ export function join(
 			},
 		],
 	}
+}
+
+function catchingUpEvent(lobby: Lobby, userId: string, catchingUp: boolean): Outbound {
+	const player = findPlayer(lobby, userId)
+	return event(
+		lobby,
+		'player_catching_up',
+		{ playerId: userId, displayName: player ? player.info.displayName : undefined, data: { catchingUp } },
+		othersThan(lobby, userId),
+	)
+}
+
+// The player says it is replaying its own run after a crash (it has joined, so
+// its seat is safe) or that it has caught up. Only the others are told, and
+// only on a change: a repeat keeps the first time.
+export function setCatchingUp(lobby: Lobby, userId: string, catchingUp: boolean, now: number): Step {
+	const player = findPlayer(lobby, userId)
+	if (!player || isCatchingUp(player) === catchingUp) return { lobby, out: [] }
+	const next = {
+		...lobby,
+		players: lobby.players.map((p) => (p.id === userId ? { ...p, catchingUpSince: catchingUp ? now : null } : p)),
+	}
+	return { lobby: next, out: [catchingUpEvent(next, userId, catchingUp)] }
 }
 
 // step, then f on its lobby: their effects in order.

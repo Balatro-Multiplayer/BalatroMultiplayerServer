@@ -1524,7 +1524,10 @@ var ClientOp = {
   SET_STATE: 4,
   // ActionMessage -- a relayed action (to a player id or '*'), or an
   // authoritative one (to 'server').
-  ACTION: 5
+  ACTION: 5,
+  // {catchingUp} -- the sender is (or is no longer) replaying its own run
+  // after a crash. The seat is safe either way: nothing waits for it.
+  CATCHING_UP: 6
 };
 var ServerOp = {
   // Snapshot, to the joining player only.
@@ -3826,6 +3829,9 @@ function forfeitedStill(lobby, userId) {
   const started = lobby.game.started;
   return started === null || started.runId === runId;
 }
+function isCatchingUp(player) {
+  return typeof player.catchingUpSince === "number";
+}
 function snapshotFor(lobby, userId) {
   const self = findPlayer(lobby, userId);
   return {
@@ -3841,7 +3847,8 @@ function snapshotFor(lobby, userId) {
       preferredJoker: p.info.preferredJoker,
       mods: p.info.mods,
       standing: p.info.standing || null,
-      isAway: p.awaySince !== null
+      isAway: p.awaySince !== null,
+      catchingUp: isCatchingUp(p)
     })),
     ownState: self ? self.ownState : null,
     game: {
@@ -3858,7 +3865,8 @@ function join(lobby, userId, sessionId, info) {
   const existing = findPlayer(lobby, userId);
   if (existing) {
     const wasAway = existing.awaySince !== null;
-    const back = __spreadProps(__spreadValues({}, existing), { sessionId, awaySince: null });
+    const wasCatchingUp = isCatchingUp(existing);
+    const back = __spreadProps(__spreadValues({}, existing), { sessionId, awaySince: null, catchingUpSince: null });
     const next2 = __spreadProps(__spreadValues({}, lobby), {
       players: lobby.players.map((p) => p.id === userId ? back : p)
     });
@@ -3883,6 +3891,7 @@ function join(lobby, userId, sessionId, info) {
       const tail = replayTailOf(next2, userId);
       if (tail) out.push({ kind: "send", op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] });
     }
+    if (wasCatchingUp) out.push(catchingUpEvent(next2, userId, false));
     return then({ lobby: next2, out }, groupReturned);
   }
   const player = {
@@ -3921,6 +3930,23 @@ function join(lobby, userId, sessionId, info) {
       }
     ]
   };
+}
+function catchingUpEvent(lobby, userId, catchingUp) {
+  const player = findPlayer(lobby, userId);
+  return event(
+    lobby,
+    "player_catching_up",
+    { playerId: userId, displayName: player ? player.info.displayName : void 0, data: { catchingUp } },
+    othersThan(lobby, userId)
+  );
+}
+function setCatchingUp(lobby, userId, catchingUp, now) {
+  const player = findPlayer(lobby, userId);
+  if (!player || isCatchingUp(player) === catchingUp) return { lobby, out: [] };
+  const next = __spreadProps(__spreadValues({}, lobby), {
+    players: lobby.players.map((p) => p.id === userId ? __spreadProps(__spreadValues({}, p), { catchingUpSince: catchingUp ? now : null }) : p)
+  });
+  return { lobby: next, out: [catchingUpEvent(next, userId, catchingUp)] };
 }
 function then(step, f) {
   const next = f(step.lobby);
@@ -7586,6 +7612,8 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
         senderId,
         data.state === void 0 ? null : data.state
       );
+    case ClientOp.CATCHING_UP:
+      return setCatchingUp(lobby, senderId, data.catchingUp === true, Date.now());
     default:
       return null;
   }

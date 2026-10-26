@@ -17,6 +17,7 @@ import {
 	newLobby,
 	snapshotFor,
 	setMetadata,
+	setCatchingUp,
 	setOwnState,
 	setPlayerInfo,
 	tick,
@@ -457,5 +458,58 @@ describe('setPlayerInfo', () => {
 	it('ignores players not in the lobby', () => {
 		const lobby = lobbyWith('a')
 		expect(setPlayerInfo(lobby, 'z', { displayName: 'Z' })).toEqual({ lobby, out: [] })
+	})
+})
+
+describe('catching up', () => {
+	const snapshotOf = (step: Step) =>
+		step.out.find((o) => o.kind === 'send' && o.op === ServerOp.SNAPSHOT) as
+			| { payload: { players: { id: string; catchingUp: boolean }[] } }
+			| undefined
+
+	it('tells the others, and marks the player in every snapshot', () => {
+		const lobby = lobbyWith('a', 'b')
+		const step = setCatchingUp(lobby, 'b', true, 5000)
+		expect(events(step)).toMatchObject([
+			{ type: 'player_catching_up', playerId: 'b', data: { catchingUp: true }, to: ['a'] },
+		])
+		const later = join(step.lobby, 'a', 'a-s2', info('a'))
+		expect(snapshotOf(later)?.payload.players.map((p) => [p.id, p.catchingUp])).toEqual([
+			['a', false],
+			['b', true],
+		])
+	})
+
+	it('clears the mark and tells the others when the player has caught up', () => {
+		let lobby = setCatchingUp(lobbyWith('a', 'b'), 'b', true, 5000).lobby
+		const step = setCatchingUp(lobby, 'b', false, 9000)
+		expect(events(step)).toMatchObject([
+			{ type: 'player_catching_up', playerId: 'b', data: { catchingUp: false }, to: ['a'] },
+		])
+		expect(step.lobby.players[1].catchingUpSince).toBeNull()
+	})
+
+	it('keeps the time the player started catching up, and says nothing twice', () => {
+		const first = setCatchingUp(lobbyWith('a', 'b'), 'b', true, 5000)
+		const again = setCatchingUp(first.lobby, 'b', true, 8000)
+		expect(again.out).toEqual([])
+		expect(again.lobby.players[1].catchingUpSince).toBe(5000)
+		expect(setCatchingUp(lobbyWith('a', 'b'), 'b', false, 8000).out).toEqual([])
+	})
+
+	it('ignores a player who is not seated', () => {
+		const lobby = lobbyWith('a', 'b')
+		expect(setCatchingUp(lobby, 'zz', true, 1)).toEqual({ lobby, out: [] })
+	})
+
+	it('starts again from not catching up when the player joins a new session', () => {
+		let lobby = setCatchingUp(lobbyWith('a', 'b'), 'b', true, 1000).lobby
+		lobby = disconnect(lobby, 'b', 'b-s1', 2000).lobby
+		const back = join(lobby, 'b', 'b-s2', info('b'))
+		// The new session reports again: a join starts from "not catching up".
+		expect(back.lobby.players[1].catchingUpSince).toBeNull()
+		expect(snapshotOf(back)?.payload.players.map((p) => p.catchingUp)).toEqual([false, false])
+		// The others hear the badge go, as well as the reconnect.
+		expect(eventTypes(back)).toEqual(['player_reconnected', 'player_catching_up'])
 	})
 })
