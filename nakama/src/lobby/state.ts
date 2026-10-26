@@ -83,6 +83,9 @@ export interface Lobby {
 	kickedIds: string[]
 	createdAt: number
 	graceMs: number
+	// How long a seat may stay "catching up" before it is forfeited (lobby/catch_up.ts);
+	// null or absent: no limit.
+	catchUpLimitMs?: number | null
 	resultTimeoutMs: number
 	closed: boolean
 	// Owned by the authoritative actions (src/actions).
@@ -146,6 +149,7 @@ export function newLobby(params: {
 	requiredStanding?: RequiredStanding
 	now: number
 	graceMs: number
+	catchUpLimitMs?: number | null
 	resultTimeoutMs?: number
 }): Lobby {
 	return {
@@ -162,6 +166,7 @@ export function newLobby(params: {
 		kickedIds: [],
 		createdAt: params.now,
 		graceMs: params.graceMs,
+		catchUpLimitMs: params.catchUpLimitMs ?? null,
 		resultTimeoutMs: params.resultTimeoutMs ?? DEFAULT_RESULT_TIMEOUT_MS,
 		closed: false,
 		game: emptyGame(),
@@ -706,7 +711,13 @@ export function setPlayerInfo(lobby: Lobby, userId: string, patch: Partial<Playe
 	}
 }
 
-// Time passing: expire grace periods, and close a lobby its creator never
+// Whether the seat has been catching up for as long as the lobby's mod allows.
+function catchUpLimitReached(lobby: Lobby, player: LobbyPlayer, now: number): boolean {
+	const limit = lobby.catchUpLimitMs
+	return typeof limit === 'number' && typeof player.catchingUpSince === 'number' && now - player.catchingUpSince >= limit
+}
+
+// Time passing: expire grace periods and catch-up limits, and close a lobby its creator never
 // joined.
 export function tick(lobby: Lobby, now: number): Step {
 	if (lobby.closed) return { lobby, out: [] }
@@ -721,8 +732,10 @@ export function tick(lobby: Lobby, now: number): Step {
 	for (const p of lobby.players) {
 		if (step.lobby.closed) break
 		const parked = isParked(step.lobby) && step.lobby.groupQueue!.memberIds.indexOf(p.id) !== -1
-		const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince
-		if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
+		const current = findPlayer(step.lobby, p.id) || p
+		const awaySince = current.awaySince
+		const graceRanOut = !parked && awaySince !== null && now - awaySince >= lobby.graceMs
+		if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
 			const started = step.lobby.game.started
 			const forfeited: Outbound[] =
 				started && started.players.some((q) => q.id === p.id)
