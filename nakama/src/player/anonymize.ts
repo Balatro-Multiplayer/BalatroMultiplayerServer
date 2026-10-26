@@ -3,7 +3,9 @@
 // anonymous id instead, which the API also gives the player's Postgres rows.
 // The other players' games stay whole; nothing left links back to the
 // account. Objects the player owns go with the account (Nakama deletes them).
+import { BINDING_COLLECTION } from '../matchmaking/group/binding'
 import {
+	LOBBY_CHECKPOINT_COLLECTION,
 	LOGS_COLLECTION,
 	MY_RUNS_COLLECTION,
 	RUNS_COLLECTION,
@@ -12,12 +14,15 @@ import {
 } from '../lobby/protocol'
 import { logKey } from '../lobby/storage'
 import { MIRROR_COLLECTION } from '../mirror/outbox'
+import { BAN_TYPES, activeBan, readBans } from '../moderation/bans'
 import { BAN_INDEX_COLLECTION, loginKeys } from '../moderation/enforce'
 import {
 	IP_HASHES_COLLECTION,
 	IP_HASHES_KEY,
 	NETWORK_BANS_COLLECTION,
 } from '../moderation/network'
+import { LEGACY_RATINGS_COLLECTION, type LegacyPlayer } from '../rating/legacy'
+import { steamIdHashOf } from './steam_id'
 
 export const DELETED_PLAYER_NAME = '[deleted player]'
 const LIST_PAGE = 100
@@ -39,6 +44,25 @@ export function replaceId<T>(value: T, from: string, to: string): T {
 		return next as T
 	}
 	return value
+}
+
+// value with the display name dropped wherever it belongs to anonymousId: an
+// object naming them by id, senderId, playerId or userId loses its
+// displayName (and its info.displayName, as a lobby seat keeps it). Pure.
+export function withoutNameOf<T>(value: T, anonymousId: string): T {
+	if (Array.isArray(value)) return value.map((v) => withoutNameOf(v, anonymousId)) as unknown as T
+	if (value === null || typeof value !== 'object') return value
+	const next: { [key: string]: unknown } = {}
+	for (const key of Object.keys(value))
+		next[key] = withoutNameOf((value as { [key: string]: unknown })[key], anonymousId)
+	const theirs = next.id === anonymousId || next.senderId === anonymousId || next.playerId === anonymousId || next.userId === anonymousId
+	if (theirs) {
+		if (typeof next.displayName === 'string') next.displayName = DELETED_PLAYER_NAME
+		const info = next.info as { [key: string]: unknown } | null | undefined
+		if (info && typeof info === 'object' && typeof info.displayName === 'string')
+			next.info = { ...info, displayName: DELETED_PLAYER_NAME }
+	}
+	return next as T
 }
 
 // The run with the player replaced by anonymousId, their display name dropped.
@@ -127,15 +151,18 @@ function anonymizeRuns(
 }
 
 // Every system-owned object of a collection whose value names the player.
+// With dropNames, the player's display names in it go too.
 function rewriteSystemObjects(
 	nk: nkruntime.Nakama,
 	collection: string,
 	userId: string,
 	anonymousId: string,
+	dropNames = false,
 ) {
 	const writes: nkruntime.StorageWriteRequest[] = []
 	for (const o of listAll(nk, SYSTEM_USER_ID, collection)) {
-		const next = replaceId(o.value, userId, anonymousId)
+		const replaced = replaceId(o.value, userId, anonymousId)
+		const next = dropNames ? withoutNameOf(replaced, anonymousId) : replaced
 		if (JSON.stringify(next) === JSON.stringify(o.value)) continue
 		writes.push({
 			collection,
@@ -174,6 +201,36 @@ function anonymizeBanIndex(
 	)
 }
 
+// The legacy ratings the player claimed (rating/legacy.ts), keyed by their
+// Steam id hash. Under the Postgres rule the hash stays only while the player
+// is banned, then naming the anonymous id; otherwise the entry goes.
+function anonymizeLegacyRatings(
+	nk: nkruntime.Nakama,
+	userId: string,
+	anonymousId: string,
+	now: number,
+) {
+	const hash = steamIdHashOf(nk, userId)
+	if (!hash) return
+	const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }])
+	if (!parked || (parked.value as unknown as LegacyPlayer).claimedBy !== userId) return
+	const bans = readBans(nk, userId)
+	const banned = BAN_TYPES.some((type) => activeBan(bans, type, now) !== null)
+	if (!banned) {
+		nk.storageDelete([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }])
+		return
+	}
+	nk.storageWrite([
+		{
+			collection: LEGACY_RATINGS_COLLECTION,
+			key: hash,
+			userId: SYSTEM_USER_ID,
+			value: { ...parked.value, claimedBy: anonymousId },
+			...SERVER_ONLY,
+		},
+	])
+}
+
 // Rewrites everything system-owned that names userId to name anonymousId.
 // Call while the account still exists (its login ids and run pointers are
 // read from it).
@@ -183,7 +240,10 @@ export function anonymizeAccount(
 	anonymousId: string,
 ) {
 	anonymizeRuns(nk, userId, anonymousId)
+	anonymizeLegacyRatings(nk, userId, anonymousId, Date.now())
 	rewriteSystemObjects(nk, MIRROR_COLLECTION, userId, anonymousId)
+	rewriteSystemObjects(nk, LOBBY_CHECKPOINT_COLLECTION, userId, anonymousId, true)
+	rewriteSystemObjects(nk, BINDING_COLLECTION, userId, anonymousId)
 	rewriteSystemObjects(nk, NETWORK_BANS_COLLECTION, userId, anonymousId)
 	anonymizeBanIndex(nk, userId, anonymousId)
 	// A network ban keeps its own copy of the hashes until it is lifted.

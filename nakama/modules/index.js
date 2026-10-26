@@ -9421,6 +9421,21 @@ function replaceId(value, from, to) {
   }
   return value;
 }
+function withoutNameOf(value, anonymousId) {
+  if (Array.isArray(value)) return value.map((v) => withoutNameOf(v, anonymousId));
+  if (value === null || typeof value !== "object") return value;
+  const next = {};
+  for (const key of Object.keys(value))
+    next[key] = withoutNameOf(value[key], anonymousId);
+  const theirs = next.id === anonymousId || next.senderId === anonymousId || next.playerId === anonymousId || next.userId === anonymousId;
+  if (theirs) {
+    if (typeof next.displayName === "string") next.displayName = DELETED_PLAYER_NAME;
+    const info = next.info;
+    if (info && typeof info === "object" && typeof info.displayName === "string")
+      next.info = __spreadProps(__spreadValues({}, info), { displayName: DELETED_PLAYER_NAME });
+  }
+  return next;
+}
 function anonymizedRun(run, userId, anonymousId) {
   const next = replaceId(run, userId, anonymousId);
   return __spreadProps(__spreadValues({}, next), {
@@ -9484,10 +9499,11 @@ function anonymizeRuns(nk, userId, anonymousId) {
       ]);
   }
 }
-function rewriteSystemObjects(nk, collection, userId, anonymousId) {
+function rewriteSystemObjects(nk, collection, userId, anonymousId, dropNames = false) {
   const writes = [];
   for (const o of listAll(nk, SYSTEM_USER_ID, collection)) {
-    const next = replaceId(o.value, userId, anonymousId);
+    const replaced = replaceId(o.value, userId, anonymousId);
+    const next = dropNames ? withoutNameOf(replaced, anonymousId) : replaced;
     if (JSON.stringify(next) === JSON.stringify(o.value)) continue;
     writes.push(__spreadValues({
       collection,
@@ -9516,9 +9532,32 @@ function anonymizeBanIndex(nk, userId, anonymousId) {
     }, SERVER_ONLY2))
   );
 }
+function anonymizeLegacyRatings(nk, userId, anonymousId, now) {
+  const hash = steamIdHashOf(nk, userId);
+  if (!hash) return;
+  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
+  if (!parked || parked.value.claimedBy !== userId) return;
+  const bans = readBans(nk, userId);
+  const banned = BAN_TYPES.some((type) => activeBan(bans, type, now) !== null);
+  if (!banned) {
+    nk.storageDelete([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
+    return;
+  }
+  nk.storageWrite([
+    __spreadValues({
+      collection: LEGACY_RATINGS_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID,
+      value: __spreadProps(__spreadValues({}, parked.value), { claimedBy: anonymousId })
+    }, SERVER_ONLY2)
+  ]);
+}
 function anonymizeAccount(nk, userId, anonymousId) {
   anonymizeRuns(nk, userId, anonymousId);
+  anonymizeLegacyRatings(nk, userId, anonymousId, Date.now());
   rewriteSystemObjects(nk, MIRROR_COLLECTION, userId, anonymousId);
+  rewriteSystemObjects(nk, LOBBY_CHECKPOINT_COLLECTION, userId, anonymousId, true);
+  rewriteSystemObjects(nk, BINDING_COLLECTION, userId, anonymousId);
   rewriteSystemObjects(nk, NETWORK_BANS_COLLECTION, userId, anonymousId);
   anonymizeBanIndex(nk, userId, anonymousId);
   nk.storageDelete([

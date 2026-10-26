@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+	LOBBY_CHECKPOINT_COLLECTION,
 	LOGS_COLLECTION,
 	MY_RUNS_COLLECTION,
 	RUNS_COLLECTION,
@@ -9,6 +10,9 @@ import {
 import { runWrites } from '../lobby/storage'
 import { MIRROR_COLLECTION, enqueue } from '../mirror/outbox'
 import { BAN_INDEX_COLLECTION } from '../moderation/enforce'
+import { writeBans } from '../moderation/bans'
+import { LEGACY_RATINGS_COLLECTION } from '../rating/legacy'
+import { BINDING_COLLECTION } from '../matchmaking/group/binding'
 import {
 	IP_HASHES_COLLECTION,
 	IP_HASHES_KEY,
@@ -16,11 +20,14 @@ import {
 	recordNetworkLogin,
 } from '../moderation/network'
 import { fakeLogger, fakeNk, serverCtx } from '../testing/fake_nk'
+import { DELETED_PLAYER_NAME } from './anonymize'
 import { rpcAdminAccountDelete } from './admin'
 
 const ALICE = '11111111-1111-4111-8111-111111111111'
 const BOB = '22222222-2222-4222-8222-222222222222'
 const ANON = '99999999-9999-4999-8999-999999999999'
+// A Steam id hash per test account, as Steam login names it.
+const hashOf = (id: string) => id.charAt(0).repeat(64)
 
 function setup() {
 	const gone: string[] = []
@@ -31,7 +38,7 @@ function setup() {
 				throw new Error('not found')
 			return {
 				user: { id, username: id, displayName: id },
-				customId: `steamhash:${id}`,
+				customId: `steamhash:${hashOf(id)}`,
 			}
 		},
 		sessionLogout: () => undefined,
@@ -207,7 +214,7 @@ describe('admin_account_delete anonymizes the account', () => {
 		nk.storageWrite([
 			{
 				collection: BAN_INDEX_COLLECTION,
-				key: `custom:steamhash:${ALICE}`,
+				key: `custom:steamhash:${hashOf(ALICE)}`,
 				userId: SYSTEM_USER_ID,
 				value: { userId: ALICE, ban },
 			},
@@ -233,7 +240,7 @@ describe('admin_account_delete anonymizes the account', () => {
 				nk,
 				BAN_INDEX_COLLECTION,
 				SYSTEM_USER_ID,
-				`custom:steamhash:${ALICE}`,
+				`custom:steamhash:${hashOf(ALICE)}`,
 			),
 		).toEqual({ userId: ANON, ban })
 		expect(stored(nk, NETWORK_BANS_COLLECTION, SYSTEM_USER_ID, 'b1')).toEqual({
@@ -246,5 +253,60 @@ describe('admin_account_delete anonymizes the account', () => {
 		expect(
 			stored(nk, IP_HASHES_COLLECTION, ALICE, IP_HASHES_KEY),
 		).toBeUndefined()
+	})
+
+	it("frees a claimed legacy rating's Steam id hash, unless the player is banned", () => {
+		const parked = (claimedBy: string) => ({ boards: [], claimedBy, claimedAt: 1 })
+		const free = setup()
+		free.nk.storageWrite([
+			{ collection: LEGACY_RATINGS_COLLECTION, key: hashOf(ALICE), userId: SYSTEM_USER_ID, value: parked(ALICE) },
+		])
+		deleteAlice(free.nk)
+		expect(stored(free.nk, LEGACY_RATINGS_COLLECTION, SYSTEM_USER_ID, hashOf(ALICE))).toBeUndefined()
+
+		const banned = setup()
+		banned.nk.storageWrite([
+			{ collection: LEGACY_RATINGS_COLLECTION, key: hashOf(ALICE), userId: SYSTEM_USER_ID, value: parked(ALICE) },
+		])
+		writeBans(banned.nk as any, ALICE, { queue: { banId: 'b1', reason: 'cheating', expiresAt: null } })
+		deleteAlice(banned.nk)
+		expect(stored(banned.nk, LEGACY_RATINGS_COLLECTION, SYSTEM_USER_ID, hashOf(ALICE))).toEqual(parked(ANON))
+	})
+
+	it('replaces the player in lobby checkpoints and group parties, without their name', () => {
+		const { nk } = setup()
+		const seat = (id: string, name: string) => ({ id, sessionId: '', info: { displayName: name }, awaySince: 1 })
+		nk.storageWrite([
+			{
+				collection: LOBBY_CHECKPOINT_COLLECTION,
+				key: 'ABC123',
+				userId: SYSTEM_USER_ID,
+				value: {
+					at: 1,
+					claimedAt: null,
+					lobby: {
+						code: 'ABC123',
+						hostId: ALICE,
+						players: [seat(ALICE, 'Alice'), seat(BOB, 'Bob')],
+						chat: [{ senderId: ALICE, displayName: 'Alice', text: 'gg' }],
+					},
+				},
+			},
+			{
+				collection: BINDING_COLLECTION,
+				key: 'party-1',
+				userId: SYSTEM_USER_ID,
+				value: { partyId: 'party-1', homeCode: 'ABC123', modId: 'M', memberIds: [ALICE, BOB] },
+			},
+		])
+
+		deleteAlice(nk)
+
+		const lobby = stored(nk, LOBBY_CHECKPOINT_COLLECTION, SYSTEM_USER_ID, 'ABC123').lobby
+		expect(lobby.hostId).toBe(ANON)
+		expect(lobby.players).toEqual([seat(ANON, DELETED_PLAYER_NAME), seat(BOB, 'Bob')])
+		expect(lobby.chat).toEqual([{ senderId: ANON, displayName: DELETED_PLAYER_NAME, text: 'gg' }])
+		expect(JSON.stringify(lobby)).not.toContain('Alice')
+		expect(stored(nk, BINDING_COLLECTION, SYSTEM_USER_ID, 'party-1').memberIds).toEqual([ANON, BOB])
 	})
 })
