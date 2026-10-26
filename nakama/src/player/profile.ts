@@ -22,6 +22,8 @@ export interface Profile {
 	discordUsername: string | null
 	privileges: string[]
 	tosAcceptedVersion: number
+	// When the player accepted that Notice version (ms), or null.
+	noticeAcceptedAt: number | null
 	chatEnabled: boolean
 	chatBlocked: boolean
 	mutedUserIds: string[]
@@ -48,6 +50,7 @@ export interface PlayerSync {
 	discordUsername: string | null
 	privileges: string[]
 	tosAcceptedVersion: number
+	noticeAcceptedAt?: number | null
 	chatEnabled: boolean
 	chatBlocked: boolean
 	mutedUserIds: string[]
@@ -70,6 +73,7 @@ export function defaultProfile(steamName: string): Profile {
 		discordUsername: null,
 		privileges: [],
 		tosAcceptedVersion: 0,
+		noticeAcceptedAt: null,
 		chatEnabled: false,
 		chatBlocked: false,
 		mutedUserIds: [],
@@ -96,6 +100,7 @@ export function profileOf(value: { [key: string]: unknown }, fallbackName: strin
 		discordUsername: typeof value.discordUsername === 'string' ? value.discordUsername : null,
 		privileges: stringList(value.privileges),
 		tosAcceptedVersion: typeof value.tosAcceptedVersion === 'number' ? value.tosAcceptedVersion : 0,
+		noticeAcceptedAt: typeof value.noticeAcceptedAt === 'number' ? value.noticeAcceptedAt : null,
 		chatEnabled: value.chatEnabled === true,
 		chatBlocked: value.chatBlocked === true,
 		mutedUserIds: stringList(value.mutedUserIds),
@@ -119,6 +124,7 @@ export function withSync(profile: Profile, sync: PlayerSync, unlocked: readonly 
 		discordUsername: sync.discordUsername ?? null,
 		privileges,
 		tosAcceptedVersion: typeof sync.tosAcceptedVersion === 'number' ? sync.tosAcceptedVersion : 0,
+		noticeAcceptedAt: typeof sync.noticeAcceptedAt === 'number' ? sync.noticeAcceptedAt : null,
 		chatEnabled: sync.chatEnabled === true,
 		chatBlocked: sync.chatBlocked === true,
 		mutedUserIds: stringList(sync.mutedUserIds),

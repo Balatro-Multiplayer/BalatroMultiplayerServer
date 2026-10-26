@@ -1,12 +1,14 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
 import { writeConfig, DEFAULT_CONFIG } from '../config'
 import { emptyProgress } from '../achievements/progress'
 import { readProgress, writeProgress } from '../achievements/storage'
 import { readBans } from '../moderation/bans'
 import { NotifyCode } from '../notify'
 import { readModReport, writeModReport } from '../standing/storage'
-import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
-import { readProfile } from './profile'
+import { rpcAdminMirrorPull } from '../admin'
+import { fakeLogger, fakeNk, playerCtx, serverCtx } from '../testing/fake_nk'
+import { readProfile, writeProfile } from './profile'
 import { rpcSessionInit, rpcTosAccept, withResolvedMutes } from './session'
 import { defaultProfile } from './profile'
 
@@ -32,7 +34,7 @@ const SYNC = {
 	discordIdHash: null,
 	discordUsername: null,
 	privileges: ['bean'],
-	tosAcceptedVersion: 3,
+	tosAcceptedVersion: NOTICE_VERSION,
 	chatEnabled: true,
 	chatBlocked: false,
 	mutedUserIds: ['22222222-2222-4222-8222-222222222222'],
@@ -52,8 +54,7 @@ describe('session_init', () => {
 				return { code: 200, headers: {}, body: JSON.stringify(SYNC) }
 			},
 		})
-		writeConfig(nk as any, { ...DEFAULT_CONFIG, tosVersion: 3 })
-		const res = JSON.parse(rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, JSON.stringify({ steamName: 'Alice' })))
+				const res = JSON.parse(rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, JSON.stringify({ steamName: 'Alice' })))
 		expect(res.tosRequired).toBe(false)
 		// j_mime needs the staff privilege, which the sync didn't bring: reset.
 		expect(res.player).toMatchObject({ id: USER, displayName: 'Alice', preferredJoker: 'j_joker', chatEnabled: true })
@@ -87,13 +88,31 @@ describe('session_init', () => {
 		expect(readProfile(nk as any, USER)!.profile.synced).toBe(true)
 	})
 
-	it('accepts the ToS with chat eligibility', () => {
+	it('accepts the Notice with chat eligibility, storing its version and the time', () => {
+		vi.useFakeTimers({ now: 1_790_000_000_000 })
+		try {
+			const nk = fakeNk({ ...account(''), uuidv4: () => 'u1' })
+			const res = JSON.parse(rpcTosAccept(playerCtx(USER), fakeLogger, nk as any, JSON.stringify({ chatEligible: false })))
+			expect(res.tosRequired).toBe(false)
+			expect(res.player.chatBlocked).toBe(true)
+			const { profile } = readProfile(nk as any, USER)!
+			expect(profile.tosAcceptedVersion).toBe(NOTICE_VERSION)
+			expect(profile.noticeAcceptedAt).toBe(1_790_000_000_000)
+			const pulled = JSON.parse(rpcAdminMirrorPull(serverCtx(), fakeLogger, nk as any, '{}'))
+			expect(pulled.entries).toEqual([
+				{ key: expect.any(String), kind: 'notice', at: 1_790_000_000_000, userId: USER, version: NOTICE_VERSION },
+			])
+			expect(pulled.players[USER]).toBeDefined()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it('asks again when the Notice version is newer than the accepted one', () => {
 		const nk = fakeNk(account(''))
-		writeConfig(nk as any, { ...DEFAULT_CONFIG, tosVersion: 4 })
-		const res = JSON.parse(rpcTosAccept(playerCtx(USER), fakeLogger, nk as any, JSON.stringify({ chatEligible: false })))
-		expect(res.tosRequired).toBe(false)
-		expect(res.player.chatBlocked).toBe(true)
-		expect(readProfile(nk as any, USER)!.profile.tosAcceptedVersion).toBe(4)
+		writeProfile(nk as any, USER, { ...defaultProfile('u'), synced: true, tosAcceptedVersion: NOTICE_VERSION - 1 })
+		const res = JSON.parse(rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, '{}'))
+		expect(res.tosRequired).toBe(true)
 	})
 })
 
