@@ -19,7 +19,10 @@ interface AdminPlayer {
   privileges: Privilege[]
   chatEnabled: boolean
   chatBlocked: boolean
-  tosAcceptedVersion: string | null
+  // The Notice version the player accepted (0 = none), and when (null when
+  // the acceptance predates stored times).
+  tosAcceptedVersion: number
+  noticeAcceptedAt: string | null
   createdAt: string
   updatedAt: string
   activeBans: number
@@ -44,6 +47,12 @@ interface Ban {
 interface PlayerDetailResponse {
   player: AdminPlayer
   bans: Ban[]
+}
+
+function noticeLine(player: Pick<AdminPlayer, 'tosAcceptedVersion' | 'noticeAcceptedAt'>): string {
+  if (player.tosAcceptedVersion <= 0) return 'Notice: not accepted'
+  const when = player.noticeAcceptedAt ? new Date(player.noticeAcceptedAt).toLocaleString() : 'time not recorded'
+  return `Notice: version ${player.tosAcceptedVersion}, accepted ${when}`
 }
 
 export default function AdminUsersPage() {
@@ -149,6 +158,7 @@ export default function AdminUsersPage() {
               <div>
                 <h2 className='text-lg font-bold tracking-tight'>{detail.steamName}</h2>
                 <p className='font-mono text-xs text-muted-foreground'>{detail.id}</p>
+                <p className='text-xs text-muted-foreground'>{noticeLine(detail)}</p>
               </div>
 
               <Card>
