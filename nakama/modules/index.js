@@ -8707,15 +8707,7 @@ function verdictOf(value) {
 function decideModerationOutcome(attempt) {
   const body = attempt && attempt.status === 200 ? verdictOf(attempt.body) : null;
   if (!body) return { allowed: false, reason: "unavailable" };
-  if (body.verdict === "allow") {
-    const rewrite = body.publishText;
-    if (rewrite === void 0) return { allowed: true, publishText: null };
-    if (typeof rewrite !== "string" || !rewrite.trim())
-      return { allowed: false, reason: "moderated", band: "unusable_rewrite" };
-    if (rewrite.length > MAX_MESSAGE_LENGTH)
-      return { allowed: false, reason: "moderated", band: "oversized_rewrite" };
-    return { allowed: true, publishText: rewrite };
-  }
+  if (body.verdict === "allow") return { allowed: true };
   const band = typeof body.band === "string" ? body.band : void 0;
   if (band === "guard_unavailable") return { allowed: false, reason: "unavailable" };
   return { allowed: false, reason: "moderated", band };
@@ -8852,7 +8844,6 @@ function rpcChatSend(ctx, logger, nk, payload) {
     lobbyId: lobbyIdOf(current.matchId),
     lobbyKind: lobbyKindOfLabel(match ? match.label : null)
   };
-  let text = message;
   if (!isAllowlisted(message, config.chatAllowlist)) {
     if (settingsOf(ctx).moderationRemote) {
       const outcome = decideModerationOutcome(
@@ -8870,7 +8861,6 @@ function rpcChatSend(ctx, logger, nk, payload) {
         }
         throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
       }
-      if (outcome.publishText !== null) text = outcome.publishText;
     } else {
       const matches = obscenityMatches(message);
       if (matches.length > 0) {
@@ -8881,10 +8871,10 @@ function rpcChatSend(ctx, logger, nk, payload) {
   }
   nk.matchSignal(
     current.matchId,
-    JSON.stringify({ type: "chat_post", userId, text })
+    JSON.stringify({ type: "chat_post", userId, text: message })
   );
   logChat(nk, logger, lobby, userId, message, null);
-  return JSON.stringify({ text });
+  return JSON.stringify({ text: message });
 }
 function logChat(nk, logger, lobby, userId, message, blocked) {
   try {

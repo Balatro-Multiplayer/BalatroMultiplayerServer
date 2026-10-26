@@ -2,10 +2,9 @@ import type { RankEngine } from '../guard/rankEngine.js'
 import type { GuardTurn } from '../guard/types.js'
 import { createDeterministicAnalyzer } from '../pipeline/analyze.js'
 import { decideModeration } from '../pipeline/decide.js'
-import { stripLinks } from '../pipeline/links.js'
+import { hasUnapprovedLink } from '../pipeline/links.js'
 import { capForScoring, normalizeForAllowlist } from '../pipeline/normalize.js'
 import { DEFAULT_POLICY } from '../pipeline/policy.js'
-import { type RewriteRule, applyRewrites } from '../pipeline/rewrite.js'
 import type {
 	Decision,
 	GuardInput,
@@ -48,13 +47,6 @@ export type ModerateResponse = {
 	verdict: 'allow' | 'reject'
 	band: Decision['band'] | 'shed'
 	reason?: string
-	/**
-	 * Present when the transform tier changed the text — an unapproved link
-	 * stripped to "[link removed]" and/or a community-vocabulary rewrite
-	 * ("cock" → "cocktail"). On allow, the relay MUST publish this instead of the
-	 * original — the transformed form is what was judged.
-	 */
-	publishText?: string
 	latency_ms: number
 }
 
@@ -64,15 +56,9 @@ export type ModerationServiceOptions = {
 	policy?: ModerationPolicy
 	allowlist?: Set<string>
 	/**
-	 * Deterministic community-vocabulary rewrites (REWRITES_PATH), applied to
-	 * the message before every other tier. The rewritten text is what gets
-	 * judged and (via `publishText`) published.
-	 */
-	rewrites?: readonly RewriteRule[]
-	/**
-	 * Approved link domains (APPROVED_DOMAINS_PATH). Any URL whose domain is not
-	 * in this set is replaced with a placeholder before every other tier — see
-	 * pipeline/links.ts. Empty (the default) strips ALL links.
+	 * Approved link domains (APPROVED_DOMAINS_PATH). A message with any URL
+	 * whose domain is not in this set is blocked (pipeline/links.ts). Empty (the
+	 * default) blocks every link.
 	 */
 	approvedDomains?: readonly string[]
 	admission?: AdmissionController
@@ -241,13 +227,7 @@ export function createModerationService(
 	const guardText = (message: string): string =>
 		capForScoring([message], policy.scoreMaxChars)[0] ?? message
 
-	const rewrites = opts.rewrites ?? []
 	const approvedDomains = opts.approvedDomains ?? []
-	// Deterministic pre-judge transform: strip unapproved links, then apply
-	// community rewrites. Links go first so an approved URL is never mangled by
-	// a word rewrite. The result is what every tier judges AND what is published.
-	const transform = (raw: string): string =>
-		applyRewrites(stripLinks(raw, approvedDomains), rewrites)
 
 	return {
 		ready: () => opts.guard.ready(),
@@ -269,12 +249,11 @@ export function createModerationService(
 				}
 			}
 
-			// Transform tier first: strip unapproved links, then community-vocabulary
-			// rewrites. The transformed text is what every tier judges and what gets
-			// published (publishText).
-			const text = transform(req.message)
+			// Every tier judges the message as typed: it is published as typed or
+			// blocked, never rewritten.
+			const { message } = req
 
-			const normalized = normalizeForAllowlist(text)
+			const normalized = normalizeForAllowlist(message)
 			if (normalized === null) {
 				return {
 					verdict: 'reject',
@@ -284,14 +263,16 @@ export function createModerationService(
 				}
 			}
 
-			const evidence = analyzer.analyze(text)
+			const evidence = analyzer.analyze(message)
 			const isAllowlisted = allowlist.has(normalized)
+			const unapprovedLink = hasUnapprovedLink(message, approvedDomains)
 
 			// Skip the guard when a cheaper tier already decides the outcome. When
 			// we do judge, cap the input length (the deterministic scan above
 			// already saw the FULL message — only the LLM's cost is bounded here).
 			const deterministicOutcome =
 				isAllowlisted ||
+				unapprovedLink ||
 				evidence.threatMatches.length > 0 ||
 				evidence.obscenityMatches.length > 0 ||
 				evidence.safetySignals.some((s) => s.severity === 'red')
@@ -302,13 +283,14 @@ export function createModerationService(
 			const context = (req.context ?? []).slice(-8)
 			const guard: GuardInput = deterministicOutcome
 				? { skipped: 'deterministic' }
-				: await lane.judge(guardText(text), context, policy.guardDeadlineMs)
+				: await lane.judge(guardText(message), context, policy.guardDeadlineMs)
 
 			const decision = decideModeration({
-				message: text,
+				message,
 				nowMs: started,
 				isAllowlisted,
 				threatMatches: evidence.threatMatches,
+				hasUnapprovedLink: unapprovedLink,
 				obscenityMatches: evidence.obscenityMatches,
 				safetySignals: evidence.safetySignals,
 				guard,
@@ -319,8 +301,7 @@ export function createModerationService(
 			const v = decision.verdict
 			// Operational telemetry only — NO message content, and no matched
 			// WORDS either (obscenity/threat matches carry the literal matched
-			// text; only their counts are safe to log). `rewritten` flags that a
-			// rewrite happened without logging either form. `wouldHaveBlocked` +
+			// text; only their counts are safe to log). `wouldHaveBlocked` +
 			// the guard fields are the whole point of shadow mode: without them a
 			// shadow would-block and a genuine Controversial review are
 			// indistinguishable in this stream, and EVAL.md's daily
@@ -331,7 +312,6 @@ export function createModerationService(
 				lobbyCode: req.lobbyCode,
 				decision: decision.decision,
 				band: decision.band,
-				rewritten: text !== req.message,
 				allowlisted: v.allowlisted,
 				wouldHaveBlocked: v.wouldHaveBlocked ?? false,
 				guardSafety: v.guardSafety,
@@ -348,9 +328,6 @@ export function createModerationService(
 				verdict: decision.decision,
 				band: decision.band,
 				latency_ms,
-			}
-			if (text !== req.message) {
-				response.publishText = text
 			}
 			if (decision.decision === 'reject') {
 				response.reason = decision.band

@@ -100,7 +100,6 @@ export function rpcChatSend(
 		lobbyKind: lobbyKindOfLabel(match ? match.label : null),
 	}
 
-	let text = message
 	if (!isAllowlisted(message, config.chatAllowlist)) {
 		if (settingsOf(ctx).moderationRemote) {
 			const outcome = decideModerationOutcome(
@@ -120,7 +119,6 @@ export function rpcChatSend(
 				}
 				throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
 			}
-			if (outcome.publishText !== null) text = outcome.publishText
 		} else {
 			const matches = obscenityMatches(message)
 			if (matches.length > 0) {
@@ -132,11 +130,10 @@ export function rpcChatSend(
 
 	nk.matchSignal(
 		current.matchId,
-		JSON.stringify({ type: 'chat_post', userId, text } as LobbySignal),
+		JSON.stringify({ type: 'chat_post', userId, text: message } as LobbySignal),
 	)
-	// What the player typed, never the rewrite: a rewrite must not launder it.
 	logChat(nk, logger, lobby, userId, message, null)
-	return JSON.stringify({ text })
+	return JSON.stringify({ text: message })
 }
 
 // Queues a chat line for the API's chat log (mirror/outbox.ts). A blocked line

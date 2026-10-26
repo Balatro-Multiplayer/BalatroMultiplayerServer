@@ -105,10 +105,11 @@ const logged = (nk: any) =>
 	[...nk.objects.entries()].filter(([k]: [string]) => k.startsWith(MIRROR_COLLECTION + '/')).map(([, o]: any) => o.value.line)
 
 describe('chat_send moderation', () => {
-	it('posts an allowed message and logs what was typed', () => {
+	it('posts an allowed message as typed and logs it', () => {
+		// A publishText from an older service is ignored: chat is never rewritten.
 		const nk = seated({ verdict: 'allow', publishText: 'h*llo' })
-		expect(say(nk, 'hello')).toEqual({ text: 'h*llo' })
-		expect(nk.posted).toEqual(['h*llo'])
+		expect(say(nk, 'hello')).toEqual({ text: 'hello' })
+		expect(nk.posted).toEqual(['hello'])
 		expect(logged(nk)).toEqual([{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'hello', flagged: false, verdict: null }])
 	})
 
