@@ -86,7 +86,8 @@ A stateless `POST /moderate` service that classifies chat with a local GGUF
 model. It runs as several replicas behind an internal nginx load balancer that
 only Nakama calls. The model file is not in the repo; see
 [`apps/moderation/README.md`](apps/moderation/README.md) for staging it and for
-the shadow-mode default.
+`SHADOW_MODE` (the Official compose enforces; `compose.local.yml` runs in
+shadow mode).
 
 ### `packages/internal/`
 
