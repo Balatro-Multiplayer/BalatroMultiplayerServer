@@ -57,9 +57,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
 ));
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
 var require_Char = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isHighSurrogate = isHighSurrogate;
@@ -107,9 +107,9 @@ var require_Char = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
 var require_BuiltinStrategies = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.keepStartCensorStrategy = keepStartCensorStrategy2;
@@ -171,9 +171,9 @@ var require_BuiltinStrategies = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
 var require_Interval = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareIntervals = compareIntervals;
@@ -191,9 +191,9 @@ var require_Interval = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
 var require_MatchPayload = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareMatchByPositionAndId = compareMatchByPositionAndId2;
@@ -207,9 +207,9 @@ var require_MatchPayload = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
 var require_TextCensor = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TextCensor = void 0;
@@ -300,9 +300,9 @@ var require_TextCensor = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
 var require_BlacklistedTerm = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignIncrementingIds = assignIncrementingIds2;
@@ -313,9 +313,9 @@ var require_BlacklistedTerm = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
 var require_DataSet = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PhraseBuilder = exports.DataSet = void 0;
@@ -482,17 +482,17 @@ var require_DataSet = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
 var require_Matcher = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
 var require_Nodes = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.SyntaxKind = void 0;
@@ -506,9 +506,9 @@ var require_Nodes = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
 var require_Util = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.potentiallyMatchesEmptyString = potentiallyMatchesEmptyString;
@@ -549,9 +549,9 @@ var require_Util = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
 var require_TransformerSet = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TransformerSet = void 0;
@@ -591,9 +591,9 @@ var require_TransformerSet = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
 var require_CharacterIterator = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CharacterIterator = void 0;
@@ -656,9 +656,9 @@ var require_CharacterIterator = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
 var require_IntervalCollection = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IntervalCollection = void 0;
@@ -700,9 +700,9 @@ var require_IntervalCollection = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
 var require_RegExpMatcher = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.RegExpMatcher = void 0;
@@ -878,9 +878,9 @@ var require_RegExpMatcher = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
 var require_ParserError = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ParserError = void 0;
@@ -905,9 +905,9 @@ var require_ParserError = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
 var require_Parser = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Parser = void 0;
@@ -1099,9 +1099,9 @@ var require_Parser = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
 var require_Pattern = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.pattern = pattern2;
@@ -1122,9 +1122,9 @@ var require_Pattern = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
 var require_Transformers = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSimpleTransformer = createSimpleTransformer2;
@@ -1138,9 +1138,9 @@ var require_Transformers = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
 var require_transformer = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CollapseDuplicatesTransformer = void 0;
@@ -1172,9 +1172,9 @@ var require_transformer = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
 var require_collapse_duplicates = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.collapseDuplicatesTransformer = collapseDuplicatesTransformer2;
@@ -1198,9 +1198,9 @@ var require_collapse_duplicates = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
 var require_remap_characters = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.remapCharactersTransformer = remapCharactersTransformer2;
@@ -1228,9 +1228,9 @@ var require_remap_characters = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
 var require_confusables = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.confusables = void 0;
@@ -1308,9 +1308,9 @@ var require_confusables = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
 var require_resolve_confusables = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveConfusablesTransformer = resolveConfusablesTransformer2;
@@ -1322,9 +1322,9 @@ var require_resolve_confusables = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
 var require_dictionary = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.dictionary = void 0;
@@ -1343,9 +1343,9 @@ var require_dictionary = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
 var require_resolve_leetspeak = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveLeetSpeakTransformer = resolveLeetSpeakTransformer2;
@@ -1357,9 +1357,9 @@ var require_resolve_leetspeak = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
 var require_to_ascii_lowercase = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.toAsciiLowerCaseTransformer = toAsciiLowerCaseTransformer2;
@@ -1371,9 +1371,9 @@ var require_to_ascii_lowercase = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
 var require_english = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.englishDataset = exports.englishRecommendedTransformers = exports.englishRecommendedWhitelistMatcherTransformers = exports.englishRecommendedBlacklistMatcherTransformers = void 0;
@@ -1423,9 +1423,9 @@ var require_english = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
 var require_skip_non_alphabetic = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.skipNonAlphabeticTransformer = skipNonAlphabeticTransformer2;
@@ -1437,9 +1437,9 @@ var require_skip_non_alphabetic = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
 var require_dist = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -6940,6 +6940,27 @@ function stringField(data, key) {
   return typeof value === "string" ? value : "";
 }
 function action(lobby, senderId, data, ctx) {
+  const sender = findPlayer(lobby, senderId);
+  if (!sender || sender.awaySince === null) return relayAction(lobby, senderId, data, ctx);
+  const back = __spreadProps(__spreadValues({}, lobby), {
+    players: lobby.players.map((p) => p.id === senderId ? __spreadProps(__spreadValues({}, p), { awaySince: null }) : p)
+  });
+  const payload = {
+    type: "player_reconnected",
+    lobbyCode: lobby.code,
+    playerId: senderId,
+    displayName: sender.info.displayName
+  };
+  const announce3 = {
+    kind: "send",
+    op: ServerOp.EVENT,
+    payload,
+    to: back.players.map((p) => p.id).filter((id) => id !== senderId)
+  };
+  const step = relayAction(back, senderId, data, ctx);
+  return __spreadProps(__spreadValues({}, step), { out: [announce3, ...step.out] });
+}
+function relayAction(lobby, senderId, data, ctx) {
   const cid = stringField(data, "cid").slice(0, MAX_CID_LENGTH);
   const key = stringField(data, "action");
   const to = stringField(data, "to");
@@ -6948,7 +6969,7 @@ function action(lobby, senderId, data, ctx) {
     out: [reject(senderId, { cid, action: key, reason })]
   });
   const sender = findPlayer(lobby, senderId);
-  if (!sender || sender.awaySince !== null) return { lobby, out: [] };
+  if (!sender) return { lobby, out: [] };
   if (!ACTION_KEY_PATTERN.test(key)) return refuse2("bad_action");
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
@@ -7781,7 +7802,7 @@ function callModeration(nk, logger, env, request) {
   }
 }
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
 var import_index = __toESM(require_dist(), 1);
 var DataSet = import_index.default.DataSet;
 var ParserError = import_index.default.ParserError;
