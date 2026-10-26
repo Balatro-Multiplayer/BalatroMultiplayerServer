@@ -8,7 +8,7 @@ function nakama(): any {
 	let next = 0
 	return fakeNk({
 		uuidv4: () => `u${++next}`,
-		accountGetId: (id: string) => ({ customId: id === 'a' ? 'steam:76561198000000001' : '' }),
+		accountGetId: (id: string) => ({ customId: id === 'a' ? 'steamhash:dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d' : '' }),
 	})
 }
 
@@ -46,8 +46,8 @@ describe('the mirror outbox', () => {
 		expect(entries[0].logs).toEqual({ a: { events: [[1, 'x', null]] } })
 		expect(entries[0].ratings).toEqual({ a: { rating: 640 } })
 		expect(players).toEqual({
-			a: { steamId: '76561198000000001', legacyPlayerId: null, displayName: '' },
-			b: { steamId: null, legacyPlayerId: 'pg-b', displayName: 'Bee' },
+			a: { steamIdHash: 'dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d', legacyPlayerId: null, displayName: '' },
+			b: { steamIdHash: null, legacyPlayerId: 'pg-b', displayName: 'Bee' },
 		})
 		expect(pull(nk, { limit: 1 }).entries).toHaveLength(1)
 	})

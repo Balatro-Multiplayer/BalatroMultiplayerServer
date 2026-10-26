@@ -37,20 +37,21 @@ describe('/internal/nakama', () => {
 describe('/internal/nakama/player-sync', () => {
 	const KEY = 'secret-key'
 	const NAKAMA_ID = '11111111-1111-4111-8111-111111111111'
+	const STEAM_ID_HASH = 'dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d'
 	afterEach(() => {
 		env.INTERNAL_API_KEY = original
 	})
 
-	it('creates a player row for a new Steam account', async () => {
+	it('creates a player row for a new Steam account, under the hash Nakama sent', async () => {
 		env.INTERNAL_API_KEY = KEY
 		const players = await import('../../infrastructure/gateways/player.gateway.js')
 		const res = await request(app)
 			.post('/internal/nakama/player-sync')
 			.set('X-BMP-Internal-Key', KEY)
-			.send({ steamId: '7656', nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
+			.send({ steamIdHash: STEAM_ID_HASH, nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
 		expect(res.status).toBe(200)
 		expect(vi.mocked(players.createPlayer)).toHaveBeenCalledWith(
-			expect.objectContaining({ steamName: 'Alice', nakamaUserId: NAKAMA_ID }),
+			expect.objectContaining({ steamName: 'Alice', nakamaUserId: NAKAMA_ID, steamIdHash: STEAM_ID_HASH }),
 		)
 		expect(res.body).toMatchObject({ mutedUserIds: [], unresolvedMutedPlayerIds: [], bans: [] })
 	})
@@ -92,8 +93,9 @@ describe('/internal/nakama/player-sync', () => {
 		const res = await request(app)
 			.post('/internal/nakama/player-sync')
 			.set('X-BMP-Internal-Key', KEY)
-			.send({ steamId: '7656', nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
+			.send({ steamIdHash: STEAM_ID_HASH, nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
 		expect(res.status).toBe(200)
+		expect(vi.mocked(players.findPlayerBySteamIdHash)).toHaveBeenCalledWith(STEAM_ID_HASH)
 		expect(vi.mocked(players.linkNakamaUser)).toHaveBeenCalledWith('legacy-1', NAKAMA_ID)
 		expect(res.body).toMatchObject({
 			playerId: 'legacy-1',
@@ -111,7 +113,16 @@ describe('/internal/nakama/player-sync', () => {
 		const res = await request(app)
 			.post('/internal/nakama/player-sync')
 			.set('X-BMP-Internal-Key', KEY)
-			.send({ steamId: 'abc', nakamaUserId: NAKAMA_ID })
+			.send({ steamIdHash: 'abc', nakamaUserId: NAKAMA_ID })
+		expect(res.status).toBe(400)
+	})
+
+	it('refuses a raw Steam id', async () => {
+		env.INTERNAL_API_KEY = KEY
+		const res = await request(app)
+			.post('/internal/nakama/player-sync')
+			.set('X-BMP-Internal-Key', KEY)
+			.send({ steamId: '76561198000000001', nakamaUserId: NAKAMA_ID })
 		expect(res.status).toBe(400)
 	})
 })

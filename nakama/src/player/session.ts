@@ -2,8 +2,9 @@
 // authenticating and gets back the player, the ToS gate and the server
 // config.
 // At a Steam account's first call the player's Postgres data is synced over
-// through the API (player-sync); if that fails the login still succeeds and
-// the sync is tried again next time.
+// through the API (player-sync), found by the Steam id hash the account is
+// named by; if that fails the login still succeeds and the sync is tried
+// again next time.
 import { recordMilestone } from '../achievements/record'
 import { progressFor } from '../achievements/storage'
 import { noteReturn } from '../lobby/forfeits'
@@ -26,13 +27,7 @@ import {
 	type PlayerSync,
 	type Profile,
 } from './profile'
-
-const STEAM_CUSTOM_ID = /^steam:(\d+)$/
-
-export function steamIdOf(nk: nkruntime.Nakama, userId: string): string | null {
-	const match = STEAM_CUSTOM_ID.exec(nk.accountGetId(userId).customId || '')
-	return match ? match[1] : null
-}
+import { steamIdHashOf } from './steam_id'
 
 function isPlayerSync(value: { [key: string]: unknown }): boolean {
 	return typeof value.playerId === 'string' && Array.isArray(value.bans)
@@ -44,10 +39,10 @@ function fetchSync(
 	logger: nkruntime.Logger,
 	nk: nkruntime.Nakama,
 	userId: string,
-	steamId: string,
+	steamIdHash: string,
 	steamName: string,
 ): PlayerSync | null {
-	const reply = callExpress(nk, logger, ctx.env, '/player-sync', { steamId, nakamaUserId: userId, steamName })
+	const reply = callExpress(nk, logger, ctx.env, '/player-sync', { steamIdHash, nakamaUserId: userId, steamName })
 	if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
 		logger.warn('Player sync for %s failed (HTTP %v); retrying next login', userId, reply && reply.status)
 		return null
@@ -111,12 +106,12 @@ export function rpcSessionInit(
 	noteReturn(nk, logger, userId, Date.now())
 	const steamName = cleanName(parsePayload(payload).steamName) || ctx.username
 	const stored = readProfile(nk, userId, steamName)
-	const steamId = steamIdOf(nk, userId)
+	const steamIdHash = steamIdHashOf(nk, userId)
 
 	let sync: PlayerSync | null = null
 	let resolved: { [playerId: string]: string } = {}
 	if (!stored || !stored.profile.synced) {
-		if (steamId) sync = fetchSync(ctx, logger, nk, userId, steamId, steamName)
+		if (steamIdHash) sync = fetchSync(ctx, logger, nk, userId, steamIdHash, steamName)
 	} else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
 		resolved = resolveMutes(ctx, logger, nk, stored.profile)
 	}
@@ -128,7 +123,7 @@ export function rpcSessionInit(
 		(current) => {
 			let next: Profile = { ...current, steamName, nakamaLogin: true }
 			if (sync) next = withSync(next, sync, unlocked)
-			else if (!steamId) next.synced = true // device login: nothing to sync
+			else if (!steamIdHash) next.synced = true // device login: nothing to sync
 			return withResolvedMutes(next, resolved)
 		},
 		steamName,

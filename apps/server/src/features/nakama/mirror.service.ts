@@ -101,7 +101,7 @@ export interface PulledForfeit {
 export type PulledEntry = PulledRun | PulledChat | PulledForfeit
 
 export interface MirrorPlayer {
-	steamId: string | null
+	steamIdHash: string | null
 	legacyPlayerId: string | null
 	displayName: string
 }
@@ -477,17 +477,16 @@ export interface MirrorDeps {
 		storeChat(rows: ChatRows): Promise<void>
 		storeForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void>
 	}
-	hashSteamId(steamId: string): string
 }
 
 export type MirrorService = ReturnType<typeof createMirrorService>
 
 export function createMirrorService(deps: MirrorDeps) {
-	const { players, store, hashSteamId } = deps
+	const { players, store } = deps
 
 	// Nakama user id -> player id for everyone in the pull. A Nakama user
 	// without a linked row (their first-login sync failed, or a dev device
-	// login) gets one: the row their profile names, else found by Steam id,
+	// login) gets one: the row their profile names, else found by Steam id hash,
 	// else created.
 	async function resolvePlayers(
 		pulled: MirrorPull,
@@ -501,8 +500,8 @@ export function createMirrorService(deps: MirrorDeps) {
 				(info.legacyPlayerId
 					? await players.findPlayerById(info.legacyPlayerId)
 					: null) ??
-				(info.steamId
-					? await players.findPlayerBySteamIdHash(hashSteamId(info.steamId))
+				(info.steamIdHash
+					? await players.findPlayerBySteamIdHash(info.steamIdHash)
 					: null)
 			if (existing) {
 				await players.linkNakamaUser(existing.id, userId)
@@ -512,7 +511,7 @@ export function createMirrorService(deps: MirrorDeps) {
 			const created = await players.createPlayer({
 				id: randomUUID(),
 				steamName: (info.displayName || 'Player').slice(0, 64),
-				steamIdHash: info.steamId ? hashSteamId(info.steamId) : undefined,
+				steamIdHash: info.steamIdHash ?? undefined,
 				nakamaUserId: userId,
 			})
 			ids.set(userId, created.id)
@@ -539,14 +538,8 @@ export function createMirrorService(deps: MirrorDeps) {
 				} else {
 					const playerId = ids.get(entry.line.userId)
 					if (playerId) {
-						const steamId = pulled.players[entry.line.userId]?.steamId
-						await store.storeChat(
-							chatRowsOf(
-								entry,
-								playerId,
-								steamId ? hashSteamId(steamId) : null,
-							),
-						)
+						const steamIdHash = pulled.players[entry.line.userId]?.steamIdHash ?? null
+						await store.storeChat(chatRowsOf(entry, playerId, steamIdHash))
 					}
 				}
 				stored.push(entry.key)

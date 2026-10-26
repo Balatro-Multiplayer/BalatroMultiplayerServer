@@ -32,7 +32,7 @@ export function requireInternalKey(req: Request, res: Response, next: NextFuncti
 	next()
 }
 
-const STEAM_ID = /^\d{1,20}$/
+const STEAM_ID_HASH = /^[0-9a-f]{64}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_RESOLVE = 500
 
@@ -57,15 +57,16 @@ export function createInternalNakamaRouter(
 		res.json({ ok: true })
 	})
 
-	// {steamId, nakamaUserId, steamName} -> PlayerSync. Called once per
-	// Nakama account, at its first session_init.
+	// {steamIdHash, nakamaUserId, steamName} -> PlayerSync. Called once per
+	// Nakama account, at its first session_init. Nakama sends the hash its
+	// account is named by; the raw Steam id never leaves Nakama's login.
 	router.post('/player-sync', async (req, res, next) => {
 		try {
-			const { steamId, nakamaUserId, steamName } = req.body ?? {}
-			if (typeof steamId !== 'string' || !STEAM_ID.test(steamId)) throw new AppError('Bad steamId', 400)
+			const { steamIdHash, nakamaUserId, steamName } = req.body ?? {}
+			if (typeof steamIdHash !== 'string' || !STEAM_ID_HASH.test(steamIdHash)) throw new AppError('Bad steamIdHash', 400)
 			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
 			const name = typeof steamName === 'string' ? steamName.slice(0, 64) : ''
-			res.json(await sync.syncPlayer({ steamId, nakamaUserId, steamName: name }))
+			res.json(await sync.syncPlayer({ steamIdHash, nakamaUserId, steamName: name }))
 		} catch (err) {
 			next(err)
 		}

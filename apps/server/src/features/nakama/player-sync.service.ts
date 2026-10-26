@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { BanRecord } from '../../infrastructure/gateways/ban.gateway.js'
 import type { PlayerRecord } from '../../infrastructure/gateways/player.gateway.js'
-import { hashProviderId } from '../../shared/utils/hash.js'
 
 // A player's Postgres data as Nakama stores it at their first Nakama login
 // (nakama/src/player/sync.ts). Mutes are Nakama user ids; muted players who
@@ -67,8 +66,8 @@ export function createPlayerSyncService(deps: PlayerSyncDeps) {
 	// Finds (or creates) the player row for a Steam account and records its
 	// Nakama user id, so Postgres-side features (reports, bans, webadmin) can
 	// reach the Nakama account.
-	async function syncPlayer(input: { steamId: string; nakamaUserId: string; steamName: string }): Promise<PlayerSync> {
-		const steamIdHash = hashProviderId(input.steamId)
+	async function syncPlayer(input: { steamIdHash: string; nakamaUserId: string; steamName: string }): Promise<PlayerSync> {
+		const { steamIdHash } = input
 		let player = await players.findPlayerBySteamIdHash(steamIdHash)
 		if (player) {
 			await players.linkNakamaUser(player.id, input.nakamaUserId)
