@@ -6,7 +6,7 @@ import { rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './ach
 import { rpcAdminAvatarsReset } from './achievements/reset'
 import {
 	rpcAdminBanApply,
-	rpcAdminBanIndexPurge,
+	rpcAdminBanIndexForget,
 	rpcAdminBanLift,
 	rpcAdminConfigSet,
 	rpcAdminLobbyClose,
@@ -163,7 +163,7 @@ function InitModule(
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
 	initializer.registerRpc('admin_ban_lift', rpcAdminBanLift)
-	initializer.registerRpc('admin_ban_index_purge', rpcAdminBanIndexPurge)
+	initializer.registerRpc('admin_ban_index_forget', rpcAdminBanIndexForget)
 	initializer.registerRpc('admin_network_bans', rpcAdminNetworkBans)
 	initializer.registerRpc('admin_network_ban_lift', rpcAdminNetworkBanLift)
 	initializer.registerRpc('admin_ip_hashes_purge', rpcAdminIpHashesPurge)

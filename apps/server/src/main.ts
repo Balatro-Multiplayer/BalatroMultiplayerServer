@@ -13,7 +13,6 @@ import { startSeasonJob } from './features/ratings/season.job.js'
 import { db, pool } from './infrastructure/db/index.js'
 import { loadConfigFromDb } from './infrastructure/gateways/config.gateway.js'
 import { purgeReportedLobbyMessages } from './infrastructure/gateways/moderation-retention.gateway.js'
-import { purgeExpiredDeletedPlayerHashes } from './infrastructure/gateways/player.gateway.js'
 import {
 	pushConfigToNakama,
 	setIntegrityEnforced,
@@ -88,16 +87,6 @@ async function purgeReportedLobbyMessagesJob() {
 	}
 }
 
-async function purgeExpiredDeletedPlayerHashesJob() {
-	try {
-		await purgeExpiredDeletedPlayerHashes()
-	} catch (err) {
-		console.error(
-			'[cleanup] Failed to purge expired deleted-player hashes:',
-			err,
-		)
-	}
-}
 
 type PrivateModule = {
 	registerPrivate: (app: Express, deps: RegisterPrivateDeps) => Promise<void>
@@ -156,11 +145,6 @@ async function start() {
 		startRetentionJob()
 		startSeasonJob()
 
-		void purgeExpiredDeletedPlayerHashesJob()
-		setInterval(
-			() => void purgeExpiredDeletedPlayerHashesJob(),
-			60 * 60 * 1000,
-		).unref()
 
 		server = app.listen(env.PORT, () => {
 			console.log(`[server] API server listening on port ${env.PORT}`)

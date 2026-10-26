@@ -625,7 +625,7 @@ export async function deletionFacts(
 // Deletes or moves every row of playerId in Postgres (see the top). The
 // peppered Steam ID hash stays on the anonymous row only when the player has
 // a ban record (it enforces the ban on a new account;
-// purgeExpiredDeletedPlayerHashes clears it later). A player id with no row
+// the hourly purgeDeletedPlayerHashes clears it later). A player id with no row
 // still has its other rows handled.
 export async function anonymizePlayer(
 	playerId: string,

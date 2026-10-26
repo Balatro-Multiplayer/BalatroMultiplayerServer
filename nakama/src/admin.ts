@@ -8,7 +8,7 @@ import { lookupCode } from './lobby/codes'
 import type { LobbySignal } from './lobby/protocol'
 import { currentLobby } from './lobby/rpc'
 import { isBanType, readBans } from './moderation/bans'
-import { applyBan, liftBan, purgeDeletedBanIndex } from './moderation/enforce'
+import { applyBan, liftBan, forgetBanIndex } from './moderation/enforce'
 import { banNetworks } from './moderation/network'
 import { playerView, profileFor } from './player/profile'
 import { mergeConfig, readConfig, writeConfig } from './config'
@@ -149,21 +149,21 @@ export function rpcAdminBanLift(
 	return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) })
 }
 
-// Deleted accounts' ban index entries removed per call at most; the caller
-// repeats while `more` is set.
-export const BAN_INDEX_PURGE_MAX = 500
-
-// {} -> {deleted, more}: drops the ban index entries of deleted accounts
-// whose account ban has run out (the API's hourly retention job).
-export function rpcAdminBanIndexPurge(
+// {steamIdHashes} -> {deleted}: forgets the ban index entries of deleted
+// accounts whose Steam id hash Postgres has just cleared (the API's hourly
+// job; moderation/enforce.ts forgetBanIndex).
+export function rpcAdminBanIndexForget(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
 	nk: nkruntime.Nakama,
-	_payload: string,
+	payload: string,
 ) {
 	requireServer(ctx)
-	const result = purgeDeletedBanIndex(nk, Date.now(), BAN_INDEX_PURGE_MAX)
-	if (result.deleted > 0) logger.info('Purged %d ban index entries of deleted accounts', result.deleted)
+	const hashes = parsePayload(payload).steamIdHashes
+	if (!Array.isArray(hashes) || !hashes.every((h) => typeof h === 'string'))
+		throw runtimeError(INVALID_ARGUMENT, 'steamIdHashes must be a list of hashes')
+	const result = forgetBanIndex(nk, hashes, Date.now())
+	if (result.deleted > 0) logger.info('Forgot %d ban index entries of deleted accounts', result.deleted)
 	return JSON.stringify(result)
 }
 

@@ -3,7 +3,7 @@ import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY, SYSTEM_USER_ID } from '../
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk } from '../testing/fake_nk'
 import { readBans } from './bans'
-import { applyBan, BAN_INDEX_COLLECTION, checkLoginBan, liftBan, purgeDeletedBanIndex } from './enforce'
+import { applyBan, BAN_INDEX_COLLECTION, checkLoginBan, liftBan, forgetBanIndex } from './enforce'
 
 const U = '11111111-1111-4111-8111-111111111111'
 
@@ -111,10 +111,10 @@ describe('checkLoginBan', () => {
 	})
 })
 
-describe('purgeDeletedBanIndex', () => {
+describe('forgetBanIndex', () => {
 	const entry = (userId: string, expiresAt: number | null) => ({ userId, ban: { banId: 'b-' + userId, expiresAt, reason: '' } })
-	it('deletes the entries of deleted accounts whose ban has run out, and nothing else', () => {
-		const LIVE = 'live'
+	const LIVE = 'live'
+	const setup = () => {
 		const nk = fakeNk({
 			accountGetId: (id: string) => {
 				if (id !== LIVE) throw new Error('account not found')
@@ -123,23 +123,24 @@ describe('purgeDeletedBanIndex', () => {
 		})
 		const put = (key: string, value: unknown) =>
 			nk.storageWrite([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID, value }])
-		put('custom:steamhash:gone-expired', entry('anon-1', 1000))
-		put('device:devicehash:gone-expired', entry('anon-1', 1000))
-		put('custom:steamhash:gone-running', entry('anon-2', 5000))
-		put('custom:steamhash:gone-permanent', entry('anon-3', null))
-		put('custom:steamhash:live', entry(LIVE, 1000))
-		expect(purgeDeletedBanIndex(nk as any, 2000, 100)).toEqual({ deleted: 2, more: false })
-		expect(indexKeys(nk)).toEqual([
-			`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:gone-permanent`,
-			`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:gone-running`,
-			`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:live`,
-		])
+		return { nk, put }
+	}
+	it('keeps an expired ban of a deleted account until its Steam id hash is forgotten', () => {
+		const { nk, put } = setup()
+		put('custom:steamhash:gone', entry('anon-1', 1000))
+		put('device:devicehash:gone', entry('anon-1', 1000))
+		put('custom:steamhash:other', entry('anon-2', 1000))
+		expect(forgetBanIndex(nk as any, [], 2000)).toEqual({ deleted: 0 })
+		expect(indexKeys(nk)).toHaveLength(3)
+		expect(forgetBanIndex(nk as any, ['gone'], 2000)).toEqual({ deleted: 2 })
+		expect(indexKeys(nk)).toEqual([`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:other`])
 	})
-	it('stops after max entries and says there are more', () => {
-		const nk = fakeNk({ accountGetId: () => { throw new Error('account not found') } })
-		for (const key of ['a', 'b', 'c'])
-			nk.storageWrite([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID, value: entry('anon-' + key, 1) }])
-		expect(purgeDeletedBanIndex(nk as any, 2, 2)).toEqual({ deleted: 2, more: true })
-		expect(purgeDeletedBanIndex(nk as any, 2, 2)).toEqual({ deleted: 1, more: false })
+	it('never forgets a ban in force, or a live account', () => {
+		const { nk, put } = setup()
+		put('custom:steamhash:running', entry('anon-1', 5000))
+		put('custom:steamhash:permanent', entry('anon-2', null))
+		put('custom:steamhash:live', entry(LIVE, 1000))
+		expect(forgetBanIndex(nk as any, ['running', 'permanent', 'live', 'unknown'], 2000)).toEqual({ deleted: 0 })
+		expect(indexKeys(nk)).toHaveLength(3)
 	})
 })

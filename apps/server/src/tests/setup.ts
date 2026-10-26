@@ -66,7 +66,7 @@ vi.mock('../infrastructure/db/index.js', () => ({
 		delete: vi.fn().mockReturnValue({
 			where: vi.fn().mockResolvedValue(undefined),
 		}),
-		// Only wired up as needed (e.g. purgeExpiredDeletedPlayerHashes); not
+		// Only wired up as needed (e.g. expiredDeletedPlayerHashes); not
 		// every test path touches it. mockResolvedValue([]) as a safe default.
 		query: { players: { findMany: vi.fn().mockResolvedValue([]) } },
 	},
@@ -137,7 +137,8 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 	updateChatStatus: vi.fn().mockResolvedValue(undefined),
 	reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
-	purgeExpiredDeletedPlayerHashes: vi.fn().mockResolvedValue(0),
+	expiredDeletedPlayerHashes: vi.fn().mockResolvedValue([]),
+	clearDeletedPlayerHashes: vi.fn().mockResolvedValue(0),
 }))
 
 // Reset in-memory state between tests

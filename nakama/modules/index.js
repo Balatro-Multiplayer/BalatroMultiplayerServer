@@ -4917,7 +4917,7 @@ function checkLoginBan(nk, logger, key, now) {
     throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban));
   if (!accountExists(nk, entry.userId)) {
     deleteIndexKey(nk, key);
-    logger.info("Account ban of deleted account %s expired; index entry dropped", entry.userId);
+    logger.info("Account ban of deleted account %s expired; index entry dropped at a login on its id", entry.userId);
     return;
   }
   const before = readBans(nk, entry.userId);
@@ -4931,17 +4931,27 @@ function checkLoginBan(nk, logger, key, now) {
   nk.usersUnbanId([entry.userId]);
   logger.info("Account ban of %s expired; unbanned", entry.userId);
 }
-function purgeDeletedBanIndex(nk, now, max) {
-  let deleted = 0;
-  const more = forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+function forgetBanIndex(nk, steamIdHashes, now) {
+  if (steamIdHashes.length === 0) return { deleted: 0 };
+  const forgotten = {};
+  const entries = nk.storageRead(
+    steamIdHashes.map((hash) => ({
+      collection: BAN_INDEX_COLLECTION,
+      key: BAN_INDEX_CUSTOM_PREFIX + STEAM_HASH_CUSTOM_ID_PREFIX + hash,
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  for (const o of entries) {
     const entry = o.value;
-    if (activeBan({ account: entry.ban }, "account", now)) return;
-    if (accountExists(nk, entry.userId)) return;
-    if (deleted >= max) return "stop";
-    deleteIndexKey(nk, o.key);
-    deleted++;
+    if (activeBan({ account: entry.ban }, "account", now) || accountExists(nk, entry.userId)) continue;
+    forgotten[entry.userId] = true;
+  }
+  const keys = [];
+  forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+    if (forgotten[o.value.userId]) keys.push(o.key);
   });
-  return { deleted, more };
+  for (const key of keys) deleteIndexKey(nk, key);
+  return { deleted: keys.length };
 }
 
 // src/shared/time.ts
@@ -6687,11 +6697,13 @@ function rpcAdminBanLift(ctx, logger, nk, payload) {
   if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
   return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) });
 }
-var BAN_INDEX_PURGE_MAX = 500;
-function rpcAdminBanIndexPurge(ctx, logger, nk, _payload) {
+function rpcAdminBanIndexForget(ctx, logger, nk, payload) {
   requireServer(ctx);
-  const result = purgeDeletedBanIndex(nk, Date.now(), BAN_INDEX_PURGE_MAX);
-  if (result.deleted > 0) logger.info("Purged %d ban index entries of deleted accounts", result.deleted);
+  const hashes = parsePayload(payload).steamIdHashes;
+  if (!Array.isArray(hashes) || !hashes.every((h) => typeof h === "string"))
+    throw runtimeError(INVALID_ARGUMENT, "steamIdHashes must be a list of hashes");
+  const result = forgetBanIndex(nk, hashes, Date.now());
+  if (result.deleted > 0) logger.info("Forgot %d ban index entries of deleted accounts", result.deleted);
   return JSON.stringify(result);
 }
 var MOD_ID_PATTERN4 = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -9958,7 +9970,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);
   initializer.registerRpc("admin_ban_lift", rpcAdminBanLift);
-  initializer.registerRpc("admin_ban_index_purge", rpcAdminBanIndexPurge);
+  initializer.registerRpc("admin_ban_index_forget", rpcAdminBanIndexForget);
   initializer.registerRpc("admin_network_bans", rpcAdminNetworkBans);
   initializer.registerRpc("admin_network_ban_lift", rpcAdminNetworkBanLift);
   initializer.registerRpc("admin_ip_hashes_purge", rpcAdminIpHashesPurge);

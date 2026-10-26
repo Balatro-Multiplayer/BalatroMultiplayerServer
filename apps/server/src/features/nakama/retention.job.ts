@@ -1,5 +1,9 @@
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
+import {
+	clearDeletedPlayerHashes,
+	expiredDeletedPlayerHashes,
+} from '../../infrastructure/gateways/player.gateway.js'
 import { retentionRepository } from '../../infrastructure/gateways/retention.gateway.js'
 import { EVIDENCE_KEEP_DAYS } from '../../shared/retention-periods.js'
 import type { Result } from '../../shared/utils/result.js'
@@ -7,8 +11,8 @@ import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
 import { storedEvidencePurgeable } from '../retention/limits.js'
 import { NAMED_RUNS_PER_CALL } from '../retention/sweep.js'
 
-// (The same hourly job also sweeps expired lobby checkpoints, login network
-// hashes and the ban index entries of deleted accounts: see below.)
+// (The same hourly job also sweeps expired lobby checkpoints and login network
+// hashes, and clears deleted players' Steam id hashes: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
 // match_run_logs keeps them here (EVIDENCE_KEEP_DAYS): every hour, list the
 // older ones (admin_runs_expired), keep each a report or ban still uses (the
@@ -105,11 +109,31 @@ export function purgeNakamaIpHashes(rpc: Rpc): Promise<number> {
 	return purgeUntilDone(rpc, 'admin_ip_hashes_purge', 'IP hash')
 }
 
-// One sweep of the account-ban index entries of deleted accounts whose ban
-// has run out: they hold the Steam id hash (or device id hash) only to
-// enforce the ban.
-export function purgeNakamaBanIndex(rpc: Rpc): Promise<number> {
-	return purgeUntilDone(rpc, 'admin_ban_index_purge', 'ban index')
+export interface DeletedHashPurgeDeps {
+	rpc: Rpc
+	// Deleted rows past 12 months with no ban in force that still keep their
+	// Steam id hash (player gateway expiredDeletedPlayerHashes).
+	expired: () => Promise<{ id: string; steamIdHash: string }[]>
+	// Clears those rows' hashes (player gateway clearDeletedPlayerHashes).
+	clear: (playerIds: string[]) => Promise<number>
+}
+
+// The hourly end of account deletion: a deleted player's Steam id hash is kept
+// only with a ban record, until 12 months have passed with no ban in force.
+// Nakama's ban index keeps the same hash under the same rule, so Nakama
+// forgets it first (admin_ban_index_forget), then Postgres clears it. If
+// Nakama cannot, Postgres keeps the hashes and the next hour tries again.
+export async function purgeDeletedPlayerHashes(deps: DeletedHashPurgeDeps): Promise<number> {
+	const expired = await deps.expired()
+	if (expired.length === 0) return 0
+	const forgot = await deps.rpc<{ deleted: number }>('admin_ban_index_forget', {
+		steamIdHashes: expired.map((row) => row.steamIdHash),
+	})
+	if (!forgot.ok && forgot.error !== 'disabled') {
+		console.warn(`[retention] ban index forget failed: ${forgot.error}`)
+		return 0
+	}
+	return deps.clear(expired.map((row) => row.id))
 }
 
 export function startRetentionJob(): () => void {
@@ -131,17 +155,21 @@ export function startRetentionJob(): () => void {
 				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama login network hashes`)
 			})
 			.catch((err) => console.error('[retention] IP hash purge failed:', err))
-	const purgeBanIndex = () =>
-		void purgeNakamaBanIndex(callNakamaRpc)
-			.then((deleted) => {
-				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama ban index entries of deleted accounts`)
+	const purgeHashes = () =>
+		void purgeDeletedPlayerHashes({
+			rpc: callNakamaRpc,
+			expired: expiredDeletedPlayerHashes,
+			clear: clearDeletedPlayerHashes,
+		})
+			.then((cleared) => {
+				if (cleared > 0) console.log(`[retention] cleared the Steam ID hashes of ${cleared} deleted players`)
 			})
-			.catch((err) => console.error('[retention] ban index purge failed:', err))
+			.catch((err) => console.error('[retention] deleted-player hash purge failed:', err))
 	const all = () => {
 		sweep()
 		sweepCheckpoints()
 		purgeIpHashes()
-		purgeBanIndex()
+		purgeHashes()
 	}
 	all()
 	const timer = setInterval(all, RETENTION_INTERVAL_MS)

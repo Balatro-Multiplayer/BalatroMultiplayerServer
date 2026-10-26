@@ -260,34 +260,43 @@ export async function reactivateIfDeleted(playerId: string): Promise<void> {
 		.where(eq(players.id, playerId))
 }
 
-// Final step of account deletion, run periodically rather than at delete
-// time: once an account has been deleted for 12+ months AND has no currently
-// active ban, steamIdHash/discordIdHash are cleared too, so the account can
-// no longer be linked back to a real Steam/Discord identity at all. This does
-// NOT let anyone evade a currently-active ban -- a permanent ban never
-// satisfies "no active ban", so its hash is retained forever; only accounts
-// whose ban (if any) has already fully run its course ever reach this. The
-// row itself is never hard-deleted (matchmakingRatings/playerBans stay
-// attached to it), it just becomes permanently anonymous.
-export async function purgeExpiredDeletedPlayerHashes(): Promise<number> {
-	const cutoff = new Date(Date.now() - DELETED_HASH_RETENTION_MS)
-	const candidates = await db.query.players.findMany({
-		where: and(
-			isNotNull(players.deletedAt),
-			lt(players.deletedAt, cutoff),
-			isNotNull(players.steamIdHash),
-		),
-	})
+// Final step of account deletion, run hourly (features/nakama/retention.job.ts
+// purgeDeletedPlayerHashes): once an account has been deleted for 12+ months
+// AND has no ban in force, its steamIdHash/discordIdHash are cleared, so the
+// anonymous row can no longer be linked back to a Steam/Discord identity.
+// This does NOT let anyone evade a ban in force: a permanent ban never
+// satisfies "no ban in force", so its hash is kept forever. The row itself is
+// never hard-deleted (its bans and other moderation records stay attached to
+// it); it just becomes permanently anonymous. Nakama's ban index keeps the
+// same hash under the same rule, so the job has Nakama forget it first.
+function deletedHashCutoff(): Date {
+	return new Date(Date.now() - DELETED_HASH_RETENTION_MS)
+}
 
-	let purged = 0
+export async function expiredDeletedPlayerHashes(): Promise<{ id: string; steamIdHash: string }[]> {
+	const candidates = await db.query.players.findMany({
+		where: and(isNotNull(players.deletedAt), lt(players.deletedAt, deletedHashCutoff()), isNotNull(players.steamIdHash)),
+	})
+	const expired: { id: string; steamIdHash: string }[] = []
 	for (const candidate of candidates) {
+		if (!candidate.steamIdHash) continue
 		const activeBans = await getActiveBans(candidate.id)
 		if (activeBans.length > 0) continue
-		await db
-			.update(players)
-			.set({ steamIdHash: null, discordIdHash: null, updatedAt: new Date() })
-			.where(eq(players.id, candidate.id))
-		purged++
+		expired.push({ id: candidate.id, steamIdHash: candidate.steamIdHash })
 	}
-	return purged
+	return expired
+}
+
+// Clears the hashes of rows expiredDeletedPlayerHashes listed. A row given
+// back meanwhile (a login with the same Steam identity) is left alone.
+export async function clearDeletedPlayerHashes(playerIds: string[]): Promise<number> {
+	if (playerIds.length === 0) return 0
+	const cleared = await db
+		.update(players)
+		.set({ steamIdHash: null, discordIdHash: null, updatedAt: new Date() })
+		.where(
+			and(inArray(players.id, playerIds), isNotNull(players.deletedAt), lt(players.deletedAt, deletedHashCutoff())),
+		)
+		.returning({ id: players.id })
+	return cleared.length
 }

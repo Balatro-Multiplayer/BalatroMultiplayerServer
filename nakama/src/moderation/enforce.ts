@@ -11,15 +11,19 @@
 // login before-hooks look the account up in ban_index (Steam id or device id
 // -> ban) and unban an expired one before Nakama's own check runs.
 //
-// A deleted account's entries stay while its ban is in force (they refuse a
-// new account on the same login id) and name its anonymous id, which has no
-// account. Once that ban runs out they go, at the next login on that id or at
-// the API's hourly sweep (purgeDeletedBanIndex), whichever comes first.
+// A deleted account's entries name its anonymous id, which has no account.
+// They stay only when the player has a ban record (player/anonymize.ts), and
+// then exactly as long as Postgres keeps the Steam id hash: while a ban is in
+// force they refuse a new account on the same login id, and 12 months after
+// deletion with no ban in force the API's hourly job has them forgotten
+// (forgetBanIndex). A login on that id after the ban runs out drops them
+// too: the API then gives the deleted account's row back (the restore).
 import { runtimeError, PERMISSION_DENIED } from '../errors'
 import { currentLobby } from '../lobby/rpc'
 import { SYSTEM_USER_ID, type LobbySignal } from '../lobby/protocol'
 import { notify, NotifyCode } from '../notify'
 import { forEachStored } from '../shared/storage'
+import { STEAM_HASH_CUSTOM_ID_PREFIX } from '../player/steam_id'
 import { ACCOUNT_BANNED, banMessage } from './access'
 import {
 	activeBan,
@@ -174,7 +178,7 @@ export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, ke
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban))
 	if (!accountExists(nk, entry.userId)) {
 		deleteIndexKey(nk, key)
-		logger.info('Account ban of deleted account %s expired; index entry dropped', entry.userId)
+		logger.info('Account ban of deleted account %s expired; index entry dropped at a login on its id', entry.userId)
 		return
 	}
 	const before = readBans(nk, entry.userId)
@@ -190,22 +194,35 @@ export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, ke
 	logger.info('Account ban of %s expired; unbanned', entry.userId)
 }
 
-// {deleted, more}: deletes the ban_index entries of deleted accounts whose
-// account ban has run out, at most max per call. Entries of live accounts are
-// left to the lazy unban at their next login.
-export function purgeDeletedBanIndex(
+// {deleted}: forgets the ban_index entries of deleted accounts whose Steam id
+// hash Postgres no longer keeps (12 months after deletion with no ban in
+// force: the API's hourly job, which sends the hashes it cleared). Each hash
+// leads to the anonymous id of its entry; every entry of that anonymous id
+// goes (its device ids too). A ban still in force, or a live account, is
+// never forgotten.
+export function forgetBanIndex(
 	nk: nkruntime.Nakama,
+	steamIdHashes: string[],
 	now: number,
-	max: number,
-): { deleted: number; more: boolean } {
-	let deleted = 0
-	const more = forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+): { deleted: number } {
+	if (steamIdHashes.length === 0) return { deleted: 0 }
+	const forgotten: { [userId: string]: true } = {}
+	const entries = nk.storageRead(
+		steamIdHashes.map((hash) => ({
+			collection: BAN_INDEX_COLLECTION,
+			key: BAN_INDEX_CUSTOM_PREFIX + STEAM_HASH_CUSTOM_ID_PREFIX + hash,
+			userId: SYSTEM_USER_ID,
+		})),
+	)
+	for (const o of entries) {
 		const entry = o.value as unknown as IndexEntry
-		if (activeBan({ account: entry.ban }, 'account', now)) return
-		if (accountExists(nk, entry.userId)) return
-		if (deleted >= max) return 'stop'
-		deleteIndexKey(nk, o.key)
-		deleted++
+		if (activeBan({ account: entry.ban }, 'account', now) || accountExists(nk, entry.userId)) continue
+		forgotten[entry.userId] = true
+	}
+	const keys: string[] = []
+	forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+		if (forgotten[(o.value as unknown as IndexEntry).userId]) keys.push(o.key)
 	})
-	return { deleted, more }
+	for (const key of keys) deleteIndexKey(nk, key)
+	return { deleted: keys.length }
 }

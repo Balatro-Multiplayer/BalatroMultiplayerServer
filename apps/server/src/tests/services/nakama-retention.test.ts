@@ -1,6 +1,6 @@
 import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
 import { describe, expect, it, vi } from 'vitest'
-import { purgeNakamaBanIndex, purgeNakamaIpHashes, purgeNakamaRuns, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
+import { purgeDeletedPlayerHashes, purgeNakamaIpHashes, purgeNakamaRuns, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
 describe('purgeNakamaRuns', () => {
 	const DAY = 24 * 60 * 60 * 1000
@@ -105,14 +105,43 @@ describe('purgeNakamaIpHashes', () => {
 	})
 })
 
-describe('purgeNakamaBanIndex', () => {
-	it('keeps calling while Nakama says there is more, and totals what went', async () => {
-		const replies = [
-			{ ok: true, value: { deleted: 3, more: true } },
-			{ ok: true, value: { deleted: 1, more: false } },
-		]
-		const rpc = vi.fn(async () => replies.shift())
-		expect(await purgeNakamaBanIndex(rpc as never)).toBe(4)
-		expect(rpc).toHaveBeenCalledWith('admin_ban_index_purge', {})
+describe('purgeDeletedPlayerHashes', () => {
+	const expired = [
+		{ id: 'anon-1', steamIdHash: 'h1' },
+		{ id: 'anon-2', steamIdHash: 'h2' },
+	]
+
+	it('has Nakama forget the ban index entries first, then clears the hashes in Postgres', async () => {
+		const calls: string[] = []
+		const rpc = vi.fn(async (id: string) => {
+			calls.push(id)
+			return { ok: true, value: { deleted: 2 } }
+		})
+		const clear = vi.fn(async (ids: string[]) => {
+			calls.push('clear')
+			return ids.length
+		})
+		expect(await purgeDeletedPlayerHashes({ rpc: rpc as never, expired: async () => expired, clear })).toBe(2)
+		expect(rpc).toHaveBeenCalledWith('admin_ban_index_forget', { steamIdHashes: ['h1', 'h2'] })
+		expect(clear).toHaveBeenCalledWith(['anon-1', 'anon-2'])
+		expect(calls).toEqual(['admin_ban_index_forget', 'clear'])
+	})
+
+	it('keeps the hashes in Postgres while Nakama cannot forget them, so the next hour retries', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const clear = vi.fn(async () => 0)
+		const rpc = vi.fn(async () => ({ ok: false, error: 'unavailable' }))
+		expect(await purgeDeletedPlayerHashes({ rpc: rpc as never, expired: async () => expired, clear })).toBe(0)
+		expect(clear).not.toHaveBeenCalled()
+		warn.mockRestore()
+	})
+
+	it('clears them when no Nakama is set up, and calls nothing when none expired', async () => {
+		const clear = vi.fn(async (ids: string[]) => ids.length)
+		const disabled = vi.fn(async () => ({ ok: false, error: 'disabled' }))
+		expect(await purgeDeletedPlayerHashes({ rpc: disabled as never, expired: async () => expired, clear })).toBe(2)
+		const rpc = vi.fn()
+		expect(await purgeDeletedPlayerHashes({ rpc: rpc as never, expired: async () => [], clear })).toBe(0)
+		expect(rpc).not.toHaveBeenCalled()
 	})
 })
