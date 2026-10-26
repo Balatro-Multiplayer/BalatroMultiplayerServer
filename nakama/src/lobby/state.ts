@@ -57,9 +57,10 @@ export interface LobbyPlayer {
 	sessionId: string
 	info: PlayerInfo
 	awaySince: number | null
-	// When the player said it was catching up (ClientOp.CATCHING_UP); null or
-	// absent when it is not. A join clears it: the new session reports again.
-	catchingUpSince?: number | null
+	// When the player said it was catching up (ClientOp.CATCHING_UP); null when
+	// it is not. A join clears it: the new session reports again. A checkpoint
+	// written before this field has none: read it through isCatchingUp.
+	catchingUpSince: number | null
 	ownState: unknown
 }
 
@@ -390,6 +391,7 @@ export function join(
 		sessionId,
 		info,
 		awaySince: null,
+		catchingUpSince: null,
 		ownState: null,
 	}
 	// A matchmade lobby has no creator to wait for: whoever arrives first hosts.

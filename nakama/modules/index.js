@@ -4297,6 +4297,7 @@ function join(lobby, userId, sessionId, info, now = Date.now()) {
     sessionId,
     info,
     awaySince: null,
+    catchingUpSince: null,
     ownState: null
   };
   const next = __spreadProps(__spreadValues({}, lobby), {
