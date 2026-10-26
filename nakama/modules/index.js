@@ -3850,7 +3850,8 @@ function snapshotFor(lobby, userId) {
       reported: Object.keys(lobby.game.reports)
     },
     groupQueue: viewOf(lobby),
-    teamPlan: lobby.teamPlan || null
+    teamPlan: lobby.teamPlan || null,
+    graceSeconds: Math.ceil(lobby.graceMs / 1e3)
   };
 }
 function join(lobby, userId, sessionId, info) {

@@ -64,9 +64,9 @@ const ratingRows = (ids) =>
 
 async function main() {
 	const [a, b] = [await player('a'), await player('b')]
-	const gameCode = `CS${stamp}G`.toUpperCase().slice(0, 8)
-	const emptyCode = `CS${stamp}E`.toUpperCase().slice(0, 8)
-	const freshCode = `CS${stamp}F`.toUpperCase().slice(0, 8)
+	const gameCode = `CSG${stamp}`.toUpperCase().slice(0, 8)
+	const emptyCode = `CSE${stamp}`.toUpperCase().slice(0, 8)
+	const freshCode = `CSF${stamp}`.toUpperCase().slice(0, 8)
 	const runId = `cs-run-${stamp}`
 	const now = Date.now()
 

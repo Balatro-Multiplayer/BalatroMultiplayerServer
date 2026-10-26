@@ -317,6 +317,9 @@ export interface Snapshot {
 	groupQueue: GroupQueueView | null
 	// A matchmade Teams game: the two teams, each group kept whole.
 	teamPlan: string[][] | null
+	// How long the server holds a dropped seat before it forfeits it. The
+	// client gives up reconnecting a little after this.
+	graceSeconds: number
 }
 
 // A private lobby queueing as one group (matchmaking/group): forming while
