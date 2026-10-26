@@ -325,6 +325,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 		},
 		groupQueue: viewOf(lobby),
 		teamPlan: lobby.teamPlan || null,
+		graceSeconds: Math.ceil(lobby.graceMs / 1000),
 	}
 }
 
