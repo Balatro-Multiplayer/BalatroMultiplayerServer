@@ -33,13 +33,17 @@ function world(kind: Kind = 'official', salt = 'test-salt') {
 		BMP_SERVER_KIND: kind,
 		STEAM_WEB_API_KEY: 'k',
 		IP_HASH_SALT: salt,
+		PLAYER_ID_SALT: 'player-salt',
 	}
 	const accounts: { [id: string]: string } = { [A]: STEAM_A, [B]: STEAM_B }
 	let steamIdForTicket = STEAM_A
 	const nk = fakeNk({
 		accountGetId: (id: string) => ({
 			user: { id, username: id },
-			customId: `steam:${accounts[id]}`,
+			// As Steam login names it (player/steam_id.ts).
+			customId: `steamhash:${createHash('sha256')
+				.update(`${accounts[id]}player-salt`)
+				.digest('hex')}`,
 			devices: [],
 		}),
 		usersBanId: () => undefined,

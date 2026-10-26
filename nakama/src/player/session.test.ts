@@ -14,6 +14,8 @@ import { defaultProfile } from './profile'
 
 const USER = '11111111-1111-4111-8111-111111111111'
 const ENV = { EXPRESS_INTERNAL_URL: 'http://api', EXPRESS_INTERNAL_KEY: 'k' }
+const STEAM_ID_HASH = 'dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d'
+const STEAM_ACCOUNT = `steamhash:${STEAM_ID_HASH}`
 
 function account(customId: string) {
 	const state = { displayName: '' }
@@ -44,13 +46,14 @@ const SYNC = {
 
 describe('session_init', () => {
 	it('syncs a Steam account from the API once, with bans and mutes', () => {
-		const acc = account('steam:765')
+		const acc = account(STEAM_ACCOUNT)
 		let calls = 0
 		const nk = fakeNk({
 			...acc,
-			httpRequest: (url: string) => {
+			httpRequest: (url: string, _method: string, _headers: unknown, body: string) => {
 				calls++
 				expect(url).toBe('http://api/internal/nakama/player-sync')
+				expect(JSON.parse(body)).toEqual({ steamIdHash: STEAM_ID_HASH, nakamaUserId: USER, steamName: 'Alice' })
 				return { code: 200, headers: {}, body: JSON.stringify(SYNC) }
 			},
 		})
@@ -74,7 +77,7 @@ describe('session_init', () => {
 	})
 
 	it('still logs in when the sync fails, and retries next time', () => {
-		const nk = fakeNk({ ...account('steam:765'), httpRequest: () => ({ code: 502, headers: {}, body: '{}' }) })
+		const nk = fakeNk({ ...account(STEAM_ACCOUNT), httpRequest: () => ({ code: 502, headers: {}, body: '{}' }) })
 		const res = JSON.parse(rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, JSON.stringify({ steamName: 'Bob' })))
 		expect(res.player.displayName).toBe('Bob')
 		expect(res.tosRequired).toBe(true)
@@ -116,6 +119,43 @@ describe('session_init', () => {
 	})
 })
 
+describe('the Notice by server kind', () => {
+	const COMMUNITY = { ...ENV, BMP_SERVER_KIND: 'community' }
+	const login = (nk: unknown, env: { [key: string]: string }) =>
+		JSON.parse(rpcSessionInit(playerCtx(USER, env), fakeLogger, nk as any, '{}'))
+
+	it('asks a new player on a Community server only the age', () => {
+		const res = login(fakeNk(account('')), COMMUNITY)
+		expect(res.tosRequired).toBe(false)
+		expect(res.ageRequired).toBe(true)
+	})
+
+	it('takes the age answer on a Community server without recording a Notice acceptance', () => {
+		const nk = fakeNk({ ...account(''), uuidv4: () => 'u1' })
+		login(nk, COMMUNITY)
+		const res = JSON.parse(rpcTosAccept(playerCtx(USER, COMMUNITY), fakeLogger, nk as any, JSON.stringify({ chatEligible: false })))
+		expect(res).toMatchObject({ tosRequired: false, ageRequired: false })
+		expect(res.player).toMatchObject({ chatEnabled: false, chatBlocked: true })
+		expect(readProfile(nk as any, USER)!.profile).toMatchObject({ tosAcceptedVersion: 0, noticeAcceptedAt: null })
+		expect(JSON.parse(rpcAdminMirrorPull(serverCtx(), fakeLogger, nk as any, '{}')).entries).toEqual([])
+		expect(login(nk, COMMUNITY)).toMatchObject({ tosRequired: false, ageRequired: false })
+	})
+
+	it('asks the age once: a player who answered it on the Official server is not asked again', () => {
+		const nk = fakeNk({ ...account(''), uuidv4: () => 'u1' })
+		rpcTosAccept(playerCtx(USER), fakeLogger, nk as any, JSON.stringify({ chatEligible: true }))
+		expect(login(nk, ENV)).toMatchObject({ tosRequired: false, ageRequired: false })
+		expect(login(nk, COMMUNITY)).toMatchObject({ tosRequired: false, ageRequired: false })
+	})
+
+	it('counts an older profile with an accepted Notice as answered', () => {
+		const nk = fakeNk(account(''))
+		const { ageAnswered: _, ...older } = { ...defaultProfile('u'), synced: true, tosAcceptedVersion: NOTICE_VERSION }
+		writeProfile(nk as any, USER, older as any)
+		expect(login(nk, ENV)).toMatchObject({ tosRequired: false, ageRequired: false })
+	})
+})
+
 describe('withResolvedMutes', () => {
 	it('moves resolved legacy ids into mutedUserIds', () => {
 		const p = { ...defaultProfile('A'), unresolvedMutedPlayerIds: ['x', 'y'] }
@@ -137,7 +177,7 @@ describe('session_init mod report', () => {
 describe('session_init avatars', () => {
 	function syncing(sync: object) {
 		return fakeNk({
-			...account('steam:765'),
+			...account(STEAM_ACCOUNT),
 			httpRequest: () => ({ code: 200, headers: {}, body: JSON.stringify({ ...SYNC, ...sync }) }),
 		})
 	}

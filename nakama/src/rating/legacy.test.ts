@@ -13,8 +13,9 @@ function fakeNk() {
 	const records: { id: string; owner: string; score: number }[] = []
 	return sharedFakeNk({
 		records,
-		sha256Hash: (s: string) => (s === '76561198000000001salt' ? HASH : 'f'.repeat(64)),
-		accountGetId: () => ({ user: { username: 'Bob' }, customId: 'steam:76561198000000001' }),
+		// The account is already named by the hash; nothing is hashed again.
+		sha256Hash: () => 'f'.repeat(64),
+		accountGetId: () => ({ user: { username: 'Bob' }, customId: `steamhash:${HASH}` }),
 		leaderboardCreate: () => undefined,
 		leaderboardRecordWrite: (id: string, owner: string, _n: string, score: number) => { records.push({ id, owner, score }) },
 	})
@@ -66,11 +67,14 @@ describe('claiming at login', () => {
 		expect(claimLegacyRatings(nk as never, logger, 'u1', 'Bob', HASH, 5)).toBe(1)
 		expect(nk.objects.get('ratings/u1/MultiplayerSPDRN:x:1')?.value.rating).toBe(700)
 	})
-	it('does nothing for a player with nothing parked, or without a salt', () => {
+	it('does nothing for a player with nothing parked, or with no Steam login', () => {
 		const nk = fakeNk()
 		claimLegacyRatingsAtLogin(player, logger, nk as never)
-		claimLegacyRatingsAtLogin({ userId: 'u1', env: {} } as never, logger, nk as never)
 		expect(nk.objects.size).toBe(0)
+		imp(nk, { [HASH]: { boards: [board()] } })
+		nk.accountGetId = () => ({ user: { username: 'Dev' }, customId: '' })
+		claimLegacyRatingsAtLogin(player, logger, nk as never)
+		expect(nk.objects.has('ratings/u1/MultiplayerSPDRN:x:1')).toBe(false)
 	})
 	it('never throws out of the login hook', () => {
 		const nk = fakeNk()

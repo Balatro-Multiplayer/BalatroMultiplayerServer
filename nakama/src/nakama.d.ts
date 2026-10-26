@@ -139,6 +139,10 @@ declare namespace nkruntime {
 			metadata: { [key: string]: unknown } | null,
 		): void
 		sha256Hash(input: string): string
+		// Rows as objects keyed by column name.
+		sqlQuery(query: string, parameters?: unknown[]): { [column: string]: unknown }[]
+		linkDevice(userId: string, deviceId: string): void
+		unlinkDevice(userId: string, deviceId: string): void
 		// Banned users can't log in or refresh a session.
 		usersBanId(userIds: string[]): void
 		usersUnbanId(userIds: string[]): void

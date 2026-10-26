@@ -1,7 +1,8 @@
 // Run retention: a finished game's record, logs and player pointers are kept
 // for RUN_RETENTION_DAYS, then deleted -- unless the run is flagged or
-// disputed, which a moderator may still need (the API's matchRunLogs
-// "null expiresAt = keep" rule). The API's daily job calls admin_runs_purge.
+// disputed. Those are evidence: only the API knows when no report or ban uses
+// them any more, so its evidence sweep names them in admin_runs_purge_named.
+// The API's hourly job calls admin_runs_purge.
 import { INVALID_ARGUMENT, runtimeError } from '../errors'
 import { parsePayload, requireServer } from '../rpc'
 import { LOGS_COLLECTION, MY_RUNS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from './protocol'
@@ -51,6 +52,38 @@ export function purgeRuns(nk: nkruntime.Nakama, cutoff: number, max: number): { 
 		cursor = page.cursor || ''
 	} while (cursor)
 	return { deleted, more: false }
+}
+
+// Run ids per admin_runs_purge_named call at most.
+export const PURGE_NAMED_MAX = 100
+
+// Deletes the named runs whatever they hold: the API decided they are past
+// their limit. An id with no run is skipped.
+export function purgeNamedRuns(nk: nkruntime.Nakama, runIds: string[]): { deleted: number } {
+	if (runIds.length === 0) return { deleted: 0 }
+	const found = nk.storageRead(runIds.map((key) => ({ collection: RUNS_COLLECTION, key, userId: SYSTEM_USER_ID })))
+	for (const o of found) nk.storageDelete(runObjects(o.value as unknown as RunRecord))
+	return { deleted: found.length }
+}
+
+// {runIds} -> {deleted}.
+export function rpcAdminRunsPurgeNamed(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	requireServer(ctx)
+	const runIds = parsePayload(payload).runIds
+	if (
+		!Array.isArray(runIds) ||
+		runIds.length > PURGE_NAMED_MAX ||
+		!runIds.every((id) => typeof id === 'string' && id.length > 0)
+	)
+		throw runtimeError(INVALID_ARGUMENT, `runIds must be a list of at most ${PURGE_NAMED_MAX} run ids`)
+	const result = purgeNamedRuns(nk, runIds as string[])
+	if (result.deleted > 0) logger.info('Purged %d named runs past their evidence limit', result.deleted)
+	return JSON.stringify(result)
 }
 
 // {olderThanDays?} -> {deleted, more}.

@@ -19,6 +19,7 @@ describe('server kind', () => {
 			testingRpcs: false,
 			allowedModsChecked: true,
 			networkBans: true,
+			noticeRequired: true,
 		})
 	})
 
@@ -64,6 +65,7 @@ describe('server kind', () => {
 			testingRpcs: false,
 			allowedModsChecked: false,
 			networkBans: false,
+			noticeRequired: false,
 		})
 	})
 
@@ -101,6 +103,7 @@ describe('server kind', () => {
 			testingRpcs: true,
 			allowedModsChecked: false,
 			networkBans: false,
+			noticeRequired: false,
 		})
 	})
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { LOGS_COLLECTION, MY_RUNS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from './protocol'
-import { isPurgeable, purgeRuns, rpcAdminRunsPurge } from './retention'
+import { isPurgeable, PURGE_NAMED_MAX, purgeNamedRuns, purgeRuns, rpcAdminRunsPurge, rpcAdminRunsPurgeNamed } from './retention'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -41,6 +41,8 @@ function fakeNk(runs: RunRecord[], page = 2) {
 			const next = keys[start + slice.length]
 			return { objects: slice.map((k) => ({ value: objects.get(k) })), cursor: next || '' }
 		},
+		storageRead: (reads: { collection: string; key: string; userId: string }[]) =>
+			reads.filter((r) => objects.has(id(r))).map((r) => ({ ...r, value: objects.get(id(r)) })),
 		storageDelete: (deletes: { collection: string; key: string; userId: string }[]) => {
 			for (const d of deletes) objects.delete(id(d))
 		},
@@ -107,5 +109,35 @@ describe('rpcAdminRunsPurge', () => {
 		expect(() => rpcAdminRunsPurge({ userId: 'u' } as never, logger, nk as never, '{}')).toThrow()
 		expect(() => rpcAdminRunsPurge({} as never, logger, nk as never, '{"olderThanDays":0}')).toThrow(/positive/)
 		expect(JSON.parse(rpcAdminRunsPurge({} as never, logger, nk as never, '{}'))).toEqual({ deleted: 0, more: false })
+	})
+})
+
+describe('purgeNamedRuns', () => {
+	it('deletes the named runs, flagged or disputed too, and skips ids it does not hold', () => {
+		const runs = [
+			run('r1', 300 * DAY, { flags: { a: 'hash_mismatch' } }),
+			run('r2', 300 * DAY, { status: 'disputed' }),
+			run('r3', 300 * DAY, { status: 'disputed' }),
+		]
+		const nk = fakeNk(runs)
+		for (const r of runs) nk.objects.set(nk.id({ collection: LOGS_COLLECTION, key: `${r.runId}:a`, userId: SYSTEM_USER_ID }), {})
+		expect(purgeNamedRuns(nk as never, ['r1', 'r2', 'gone'])).toEqual({ deleted: 2 })
+		expect([...nk.objects.keys()].sort()).toEqual([
+			`${LOGS_COLLECTION}/${SYSTEM_USER_ID}/r3:a`,
+			`${RUNS_COLLECTION}/${SYSTEM_USER_ID}/r3`,
+		])
+	})
+})
+
+describe('rpcAdminRunsPurgeNamed', () => {
+	const logger = { info: () => undefined } as unknown as nkruntime.Logger
+	it('is for the server only and takes a bounded list of run ids', () => {
+		const nk = fakeNk([run('r1', DAY, { status: 'disputed' })])
+		expect(() => rpcAdminRunsPurgeNamed({ userId: 'u' } as never, logger, nk as never, '{"runIds":[]}')).toThrow()
+		expect(() => rpcAdminRunsPurgeNamed({} as never, logger, nk as never, '{"runIds":"r1"}')).toThrow(/runIds/)
+		expect(() => rpcAdminRunsPurgeNamed({} as never, logger, nk as never, '{"runIds":[1]}')).toThrow(/runIds/)
+		const tooMany = JSON.stringify({ runIds: Array.from({ length: PURGE_NAMED_MAX + 1 }, (_, i) => `r${i}`) })
+		expect(() => rpcAdminRunsPurgeNamed({} as never, logger, nk as never, tooMany)).toThrow(/runIds/)
+		expect(JSON.parse(rpcAdminRunsPurgeNamed({} as never, logger, nk as never, '{"runIds":["r1"]}'))).toEqual({ deleted: 1 })
 	})
 })

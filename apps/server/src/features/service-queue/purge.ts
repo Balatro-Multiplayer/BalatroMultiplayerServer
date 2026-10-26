@@ -1,17 +1,8 @@
-// The retention rules the hourly purge applies to moderation evidence: an
-// expired flagged message is kept while its item is open, and a reported
-// lobby's chat is kept until 30 days after its last report was resolved.
+// The retention rule the hourly purge applies to a reported lobby's chat: it
+// is kept until 30 days after its last report was resolved. Other evidence
+// follows features/retention/limits.ts.
 
 export const REPORTED_CHAT_KEEP_MS = 30 * 24 * 60 * 60 * 1000
-
-export interface FlaggedMessageRetention {
-	expiresAt: Date
-	hasOpenItem: boolean
-}
-
-export function flaggedMessagePurgeable(row: FlaggedMessageRetention, now: Date): boolean {
-	return row.expiresAt < now && !row.hasOpenItem
-}
 
 export interface ReportedLobbyRetention {
 	// Open reports filed in the lobby.

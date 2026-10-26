@@ -1,4 +1,4 @@
-import { desc, eq, inArray, lt } from 'drizzle-orm'
+import { desc, eq, inArray } from 'drizzle-orm'
 import type {
 	LobbyRunStatus,
 	PaginatedRuns,
@@ -7,13 +7,6 @@ import type {
 } from '../../contracts/IReplayLogRepository.js'
 import { db } from '../db/index.js'
 import { lobbyRuns, matchRunLogs } from '../db/schema.js'
-
-export async function purgeExpiredRunLogs(): Promise<number> {
-	const result = await db
-		.delete(matchRunLogs)
-		.where(lt(matchRunLogs.expiresAt, new Date()))
-	return result.rowCount ?? 0
-}
 
 // A player's own runs, for "My Matches". Two queries (run ids this player has a log row for, then
 // those runs' own rows) rather than a join, since matchRunLogs has no FK

@@ -9,7 +9,7 @@
 // An entry stays until it is acked, so nothing is lost while the API is away.
 import { readProfile } from '../player/profile'
 import type { LobbyKind } from '../review/ranked'
-import { steamIdOf } from '../player/session'
+import { steamIdHashOf } from '../player/steam_id'
 import { LOGS_COLLECTION, RATINGS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from '../lobby/protocol'
 
 export const MIRROR_COLLECTION = 'mirror_outbox'
@@ -77,10 +77,10 @@ export function enqueue(nk: nkruntime.Nakama, entry: MirrorEntry) {
 }
 
 // Who a Nakama user is in Postgres terms: the player row the API linked at
-// their first login (legacyPlayerId), else their Steam id for the API to
-// find or create the row by.
+// their first login (legacyPlayerId), else their Steam id hash for the API
+// to find or create the row by.
 export interface MirrorPlayer {
-	steamId: string | null
+	steamIdHash: string | null
 	legacyPlayerId: string | null
 	displayName: string
 	// The account was deleted: the API must not link this id to a row.
@@ -147,10 +147,10 @@ function expandRun(nk: nkruntime.Nakama, key: string, entry: Extract<MirrorEntry
 }
 
 function mirrorPlayer(nk: nkruntime.Nakama, userId: string): MirrorPlayer {
-	let steamId: string | null = null
+	let steamIdHash: string | null = null
 	let deleted = false
 	try {
-		steamId = steamIdOf(nk, userId)
+		steamIdHash = steamIdHashOf(nk, userId)
 	} catch (e) {
 		// The account is gone; the API keeps whatever row it already has.
 		deleted = true
@@ -158,7 +158,7 @@ function mirrorPlayer(nk: nkruntime.Nakama, userId: string): MirrorPlayer {
 	const stored = readProfile(nk, userId)
 	const profile = stored ? stored.profile : null
 	return {
-		steamId,
+		steamIdHash,
 		legacyPlayerId: profile ? profile.legacyPlayerId : null,
 		displayName: profile ? profile.steamName : '',
 		deleted,

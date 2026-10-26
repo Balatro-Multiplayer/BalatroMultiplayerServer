@@ -103,7 +103,9 @@ export const chatLogs = pgTable('chat_logs', {
 	moderationId: text('moderation_id'),
 	message: text('message').notNull(),
 	flagged: boolean('flagged').notNull().default(false),
-	// NULL for flagged/reported messages; set to sentAt + 30 days otherwise
+	// The earliest the line may go: sentAt + 90 days, or + 180 days for a
+	// flagged line, which the sweep keeps longer while a report or ban uses it
+	// (features/retention). NULL on older flagged lines: read as sentAt + 180 days.
 	expiresAt: timestamp('expires_at', { withTimezone: true }),
 	moderationVerdict: jsonb('moderation_verdict'),
 	sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
@@ -757,11 +759,13 @@ export const matchRunLogs = pgTable(
 		eventCount: integer('event_count').notNull().default(0),
 		status: varchar('status', { length: 16 }).notNull().default('partial'), // partial | complete
 		// null | 'hash_mismatch' | 'elapsed_time_gate' -- set by Phase 8's
-		// evaluateAntiCheat at ranked result resolution. A non-null value forces
-		// expiresAt to null (see below) regardless of the normal 30-day TTL.
+		// evaluateAntiCheat at ranked result resolution.
 		flagReason: varchar('flag_reason', { length: 32 }),
 		finalizedAt: timestamp('finalized_at', { withTimezone: true }),
-		expiresAt: timestamp('expires_at', { withTimezone: true }), // null = indefinite (flagged/disputed)
+		// The earliest the log may go: the run's end + 180 days. The sweep keeps
+		// it longer while a report or ban uses the run (features/retention).
+		// NULL on older flagged or disputed logs: read as finalizedAt + 180 days.
+		expiresAt: timestamp('expires_at', { withTimezone: true }),
 	},
 	(t) => [primaryKey({ columns: [t.runId, t.playerId] })],
 )

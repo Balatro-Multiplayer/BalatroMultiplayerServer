@@ -7,7 +7,8 @@ import { RUN_LOG_TTL_MS } from './mirror.service.js'
 // hashes: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
 // match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, ask it to
-// delete the older ones. It keeps flagged and disputed runs itself. Hourly
+// delete the older ones. It keeps flagged and disputed runs, which the
+// evidence sweep (features/retention/sweep.ts) names once past their limit. Hourly
 // rather than daily so a sweep missed while Nakama is still booting (or
 // restarting) is retried soon; a sweep with nothing to delete is one call.
 

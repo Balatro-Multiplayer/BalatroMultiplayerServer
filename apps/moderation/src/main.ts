@@ -36,7 +36,6 @@ function listPath(envVar: string, filename: string): string | undefined {
 }
 
 const ALLOWLIST_PATH = listPath('ALLOWLIST_PATH', 'allowlist.txt')
-const REWRITES_PATH = listPath('REWRITES_PATH', 'rewrites.txt')
 const APPROVED_DOMAINS_PATH = listPath(
 	'APPROVED_DOMAINS_PATH',
 	'approved-domains.txt',
@@ -138,36 +137,9 @@ const GUARD_HIGH_THRESHOLD = process.env.GUARD_HIGH_THRESHOLD
 	? Number(process.env.GUARD_HIGH_THRESHOLD)
 	: undefined
 
-// Deterministic community-vocabulary rewrites (REWRITES_PATH): applied before
-// every other tier; the rewritten text is judged and published. See
-// pipeline/rewrite.ts for why this exists (guard can't be taught past some
-// game abbreviations even with domain context).
-let rewrites: import('./pipeline/rewrite.js').RewriteRule[] = []
-let rewritesStatus: ListStatus = 'unset'
-if (REWRITES_PATH) {
-	const { readFileSync } = await import('node:fs')
-	const { parseRewrites } = await import('./pipeline/rewrite.js')
-	try {
-		rewrites = parseRewrites(readFileSync(REWRITES_PATH, 'utf8'))
-		rewritesStatus = rewrites.length
-		console.error(`[moderation] rewrites loaded: ${rewrites.length} rules`)
-		if (rewrites.length === 0) {
-			console.error(
-				'[moderation] WARNING: REWRITES_PATH parsed to zero rules — check the file is not empty or misformatted',
-			)
-		}
-	} catch (err) {
-		rewritesStatus = 'error'
-		console.error(
-			`[moderation] failed to read REWRITES_PATH (${String(err)}) — continuing without rewrites`,
-		)
-		failIfListsRequired('REWRITES_PATH', err)
-	}
-}
-
 // Approved link domains (APPROVED_DOMAINS_PATH): any URL whose domain is not
-// listed is replaced with a placeholder before judging/publishing. Empty or
-// unset = strip ALL links (Balatro chat renders no images; see pipeline/links).
+// listed blocks the message. Empty or unset = block every link (Balatro chat
+// renders no images; see pipeline/links).
 let approvedDomains: string[] = []
 let approvedDomainsStatus: ListStatus = 'unset'
 if (APPROVED_DOMAINS_PATH) {
@@ -183,13 +155,13 @@ if (APPROVED_DOMAINS_PATH) {
 		)
 		if (approvedDomains.length === 0) {
 			console.error(
-				'[moderation] WARNING: APPROVED_DOMAINS_PATH parsed to zero domains — check the file is not empty or misformatted (this strips ALL links, same as leaving the path unset)',
+				'[moderation] WARNING: APPROVED_DOMAINS_PATH parsed to zero domains: check the file is not empty or misformatted (this blocks ALL links, same as leaving the path unset)',
 			)
 		}
 	} catch (err) {
 		approvedDomainsStatus = 'error'
 		console.error(
-			`[moderation] failed to read APPROVED_DOMAINS_PATH (${String(err)}) — stripping all links`,
+			`[moderation] failed to read APPROVED_DOMAINS_PATH (${String(err)}), blocking all links`,
 		)
 		failIfListsRequired('APPROVED_DOMAINS_PATH', err)
 	}
@@ -288,7 +260,6 @@ const service = createModerationService({
 	guard,
 	policy: { ...DEFAULT_POLICY, shadowMode: SHADOW_MODE },
 	...(allowlist ? { allowlist } : {}),
-	...(rewrites.length ? { rewrites } : {}),
 	...(approvedDomains.length ? { approvedDomains } : {}),
 	admission: createAdmissionController(
 		{ burst: INGRESS_BURST, refillPerSec: INGRESS_RATE },
@@ -309,7 +280,6 @@ const server = createModerationServer({
 	gitSha: process.env.GIT_SHA,
 	lists: {
 		allowlist: allowlistStatus,
-		rewrites: rewritesStatus,
 		approvedDomains: approvedDomainsStatus,
 	},
 })

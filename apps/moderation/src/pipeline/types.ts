@@ -91,6 +91,7 @@ export type SafetySignal = {
 export type Band =
 	| 'preset'
 	| 'threat_block'
+	| 'link_block'
 	| 'blocklist'
 	| 'safety_block'
 	| 'guard_block'
@@ -135,6 +136,8 @@ export type DecisionInput = {
 	nowMs: number
 	isAllowlisted: boolean
 	threatMatches: MatchRecord[]
+	/** The message holds a link whose domain is not approved (pipeline/links). */
+	hasUnapprovedLink: boolean
 	obscenityMatches: MatchRecord[]
 	safetySignals: SafetySignal[]
 	guard: GuardInput
