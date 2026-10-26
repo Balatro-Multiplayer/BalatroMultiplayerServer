@@ -299,7 +299,7 @@ export function isCatchingUp(player: LobbyPlayer): boolean {
 	return typeof player.catchingUpSince === 'number'
 }
 
-export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
+export function snapshotFor(lobby: Lobby, userId: string, now: number = Date.now()): Snapshot {
 	const self = findPlayer(lobby, userId)
 	return {
 		code: lobby.code,
@@ -326,6 +326,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 		groupQueue: viewOf(lobby),
 		teamPlan: lobby.teamPlan || null,
 		graceSeconds: Math.ceil(lobby.graceMs / 1000),
+		serverNow: now,
 	}
 }
 
@@ -335,6 +336,7 @@ export function join(
 	userId: string,
 	sessionId: string,
 	info: PlayerInfo,
+	now: number = Date.now(),
 ): Step {
 	const existing = findPlayer(lobby, userId)
 	if (existing) {
@@ -352,7 +354,7 @@ export function join(
 			{
 				kind: 'send',
 				op: ServerOp.SNAPSHOT,
-				payload: snapshotFor(next, userId),
+				payload: snapshotFor(next, userId, now),
 				to: [userId],
 			},
 		]
@@ -395,7 +397,7 @@ export function join(
 			{
 				kind: 'send',
 				op: ServerOp.SNAPSHOT,
-				payload: snapshotFor(next, userId),
+				payload: snapshotFor(next, userId, now),
 				to: [userId],
 			},
 			event(

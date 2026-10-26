@@ -109,6 +109,10 @@ export interface StartedGame {
 	stake: number | null
 	options: unknown
 	startedAt: number
+	// When the first replay event of the game reached the server: the moment
+	// the racers' run began (a draft and countdown come between startedAt and
+	// it). Clients measure the race clock from it. Absent until that event.
+	raceStartedAt?: number
 	hostId: string
 	players: Participant[]
 }
@@ -327,6 +331,10 @@ export interface Snapshot {
 	// How long the server holds a dropped seat before it forfeits it. The
 	// client gives up reconnecting a little after this.
 	graceSeconds: number
+	// The server clock when this snapshot was made (ms), so a client can place
+	// game.started.raceStartedAt on its own clock without trusting the two
+	// clocks to agree.
+	serverNow: number
 }
 
 // A private lobby queueing as one group (matchmaking/group): forming while

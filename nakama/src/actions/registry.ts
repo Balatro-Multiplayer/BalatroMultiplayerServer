@@ -254,7 +254,7 @@ const MAX_OPCODE_LENGTH = 64
 // the others are told (null when the event was dropped or is not for this run).
 type Appended = { game: GameState; relayed: SpectateEvent | null } | { reject: string }
 
-function appendLogEvent(lobby: Lobby, from: string, params: unknown): Appended {
+function appendLogEvent(lobby: Lobby, from: string, now: number, params: unknown): Appended {
 	if (
 		!isPlainObject(params) ||
 		typeof params.t !== 'number' ||
@@ -293,8 +293,13 @@ function appendLogEvent(lobby: Lobby, from: string, params: unknown): Appended {
 		bytes: log.bytes + size,
 		truncated: false,
 	}
+	// The first event of the game marks the start of the race (the match
+	// manifest is written when the racers' run begins). Single events and
+	// batches both come through here.
+	const stamped =
+		started.raceStartedAt === undefined ? { ...started, raceStartedAt: now } : started
 	return {
-		game: { ...game, logs: { ...game.logs, [from]: grown } },
+		game: { ...game, started: stamped, logs: { ...game.logs, [from]: grown } },
 		relayed: { playerId: from, t: params.t, opcode: params.opcode, args },
 	}
 }
@@ -307,7 +312,7 @@ const logEvent: AuthoritativeAction = {
 	reduce(lobby, ctx, params) {
 		if (!lobby.game.started) return { reject: 'not_in_game' }
 		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
-		const appended = appendLogEvent(lobby, ctx.from, params)
+		const appended = appendLogEvent(lobby, ctx.from, ctx.now, params)
 		if ('reject' in appended) return appended
 		return {
 			game: appended.game,
@@ -340,7 +345,7 @@ const logEvents: AuthoritativeAction = {
 		let current = lobby
 		const relayed: SpectateEvent[] = []
 		for (const event of params.events) {
-			const appended = appendLogEvent(current, ctx.from, event)
+			const appended = appendLogEvent(current, ctx.from, ctx.now, event)
 			if ('reject' in appended) return appended
 			current = { ...current, game: appended.game }
 			if (appended.relayed) relayed.push(appended.relayed)

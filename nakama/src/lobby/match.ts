@@ -578,7 +578,7 @@ export function lobbyMatchJoin(
 			nk,
 			dispatcher,
 			attached,
-			join(attached.lobby, presence.userId, presence.sessionId, info),
+			join(attached.lobby, presence.userId, presence.sessionId, info, Date.now()),
 		)
 	}
 	return current ? { state: current } : null

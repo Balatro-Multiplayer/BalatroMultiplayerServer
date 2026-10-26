@@ -405,6 +405,28 @@ describe('replay logs', () => {
 		expect(step.lobby.game.logs.a.lines).toEqual(['[1,"play",[1]]', '[2,"play",[2]]'])
 	})
 
+	it('stamps the race start on the first recorded event and keeps it', () => {
+		const lobby = started('a', 'b')
+		expect(lobby.game.started?.raceStartedAt).toBeUndefined()
+		let step = log(lobby, 'b', 1, 2000)
+		expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+		step = log(step.lobby, 'a', 2, 9000)
+		expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+		expect(snapshotFor(step.lobby, 'a', 9500).game.started?.raceStartedAt).toBe(2000)
+	})
+
+	it('starts the race again for a restarted game', () => {
+		let lobby = log(started('a', 'b'), 'a', 1, 2000).lobby
+		lobby = send(lobby, 'a', 'mpapi_restart_game', {}, 3000).lobby
+		expect(lobby.game.started?.raceStartedAt).toBeUndefined()
+	})
+
+	it('tells a joiner the server time, to measure the race against', () => {
+		const lobby = log(started('a', 'b'), 'a', 1, 2000).lobby
+		const snap = snapshotFor(lobby, 'b', 61_000)
+		expect(snap.serverNow).toBe(61_000)
+	})
+
 	it('drops an event sent for a run the server has restarted', () => {
 		const lobby = started('a', 'b')
 		const runId = lobby.game.started!.runId
@@ -480,6 +502,15 @@ describe('replay logs', () => {
 			send(lobby, from, 'mpapi_log_events', { events }, now)
 		const events = (from: number, count: number, run?: string) =>
 			Array.from({ length: count }, (_, i) => ({ t: from + i, opcode: 'play', args: [from + i], run }))
+
+		it('stamps the race start on the first batch and keeps it', () => {
+			const lobby = started('a', 'b')
+			const runId = lobby.game.started!.runId
+			let step = batch(lobby, 'b', events(1, 2, runId), 2000)
+			expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+			step = batch(step.lobby, 'a', events(3, 1, runId), 9000)
+			expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+		})
 
 		it('keeps the events in order and tells the others once', () => {
 			const lobby = started('a', 'b', 'c')
