@@ -81,9 +81,10 @@ services:
       # nginx, so a blue/green swap is invisible here).
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       # Chat is judged by moderation-lb (hardcoded in nakama/src/chat). It
-      # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
-      # missing model from blocking. "off" judges chat with the local word
-      # filter (nakama/src/chat/filter.ts) instead.
+      # must be up, or chat fails closed. The model enforces here
+      # (SHADOW_MODE defaults to 0 below), so a missing model refuses every
+      # message. "off" judges chat with the local word filter
+      # (nakama/src/chat/filter.ts) instead.
       MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
       MODERATION_REMOTE: ${MODERATION_REMOTE:-on}
     volumes:
@@ -171,8 +172,9 @@ services:
     container_name: bmp-moderation-1
     # No host port: only moderation-lb talks to these, over the compose network.
     environment:
-      # Logs what it WOULD block without blocking. Set 0 to enforce.
-      SHADOW_MODE: ${SHADOW_MODE:-1}
+      # The model enforces (the Notice says chat may be blocked). Set 1 to
+      # only log what it WOULD block.
+      SHADOW_MODE: ${SHADOW_MODE:-0}
       GUARD_THREADS: ${MODERATION_GUARD_THREADS:-2}
       GUARD_LOW_THRESHOLD: ${MODERATION_GUARD_LOW_THRESHOLD:-0.35}
       GUARD_HIGH_THRESHOLD: ${MODERATION_GUARD_HIGH_THRESHOLD:-0.8}

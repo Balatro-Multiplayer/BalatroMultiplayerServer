@@ -86,7 +86,7 @@ in — check it before concluding anything about behaviour.
 nothing unjudged is ever published. If players suddenly cannot talk at all,
 check `model_loaded` in `/health` before looking anywhere else.
 
-**In shadow mode (the default), a missing or still-loading model publishes
+**In shadow mode (the default when unset, and in `compose.local.yml`), a missing or still-loading model publishes
 instead**, marked `review` in the log. That mode already publishes everything
 the guard would have blocked, so treating "cannot answer" more harshly than
 "answered Unsafe" would only ever cost you working chat. The deterministic
@@ -144,7 +144,7 @@ replica:
 | Variable | Default | Meaning |
 |---|---|---|
 | `GUARD_MODEL` | `/model-cache` | Model file, or a directory holding exactly one `.gguf`. |
-| `SHADOW_MODE` | `1` in compose | `1` = log what the guard *would* block without blocking. `0` = enforce. |
+| `SHADOW_MODE` | `0` in `docker-compose.yml` (Official), `1` in `compose.local.yml`; shadow when unset | `1` = log what the guard *would* block without blocking. `0` = enforce. |
 | `GUARD_THREADS` | `2` | Only set this alongside a CPU cap — see [CPU](#cpu). |
 | `GUARD_LOW_THRESHOLD` / `GUARD_HIGH_THRESHOLD` | `0.35` / `0.8` | Routing thresholds against the model's yes-probability score — see `rankEngine.ts`. |
 | `MODERATION_BEARER_TOKEN` | unset | Optional `Authorization: Bearer`. The service publishes no host port, so a network boundary already protects it; set one before exposing it. |
