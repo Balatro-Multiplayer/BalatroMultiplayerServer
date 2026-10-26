@@ -3,7 +3,7 @@ import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY, SYSTEM_USER_ID } from '../
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk } from '../testing/fake_nk'
 import { readBans } from './bans'
-import { applyBan, BAN_INDEX_COLLECTION, checkLoginBan, liftBan } from './enforce'
+import { applyBan, BAN_INDEX_COLLECTION, checkLoginBan, liftBan, purgeDeletedBanIndex } from './enforce'
 
 const U = '11111111-1111-4111-8111-111111111111'
 
@@ -88,7 +88,58 @@ describe('checkLoginBan', () => {
 		expect(indexKeys(nk)).toEqual([])
 		expect(readBans(nk as any, U)).toEqual({})
 	})
+	it('drops the index entry of a deleted account when its ban has run out', () => {
+		// After deletion the entry names the anonymous id, which has no account.
+		const R = 'anon-1'
+		const unbanned: string[] = []
+		const nk = fakeNk({
+			accountGetId: () => {
+				throw new Error('account not found')
+			},
+			usersUnbanId: (ids: string[]) => unbanned.push(...ids),
+		})
+		nk.storageWrite([
+			{ collection: BAN_INDEX_COLLECTION, key: 'custom:steamhash:abc', userId: SYSTEM_USER_ID, value: { userId: R, ban: { banId: 'b1', expiresAt: 1000, reason: '' } } },
+		])
+		expect(() => checkLoginBan(nk as any, fakeLogger, 'custom:steamhash:abc', 999)).toThrow(/^Account banned until/)
+		expect(() => checkLoginBan(nk as any, fakeLogger, 'custom:steamhash:abc', 1000)).not.toThrow()
+		expect(indexKeys(nk)).toEqual([])
+		expect(unbanned).toEqual([])
+	})
 	it('lets unindexed logins through', () => {
 		expect(() => checkLoginBan(fakeNk() as any, fakeLogger, 'custom:1', 0)).not.toThrow()
+	})
+})
+
+describe('purgeDeletedBanIndex', () => {
+	const entry = (userId: string, expiresAt: number | null) => ({ userId, ban: { banId: 'b-' + userId, expiresAt, reason: '' } })
+	it('deletes the entries of deleted accounts whose ban has run out, and nothing else', () => {
+		const LIVE = 'live'
+		const nk = fakeNk({
+			accountGetId: (id: string) => {
+				if (id !== LIVE) throw new Error('account not found')
+				return { user: { id }, customId: 'steamhash:live', devices: [] }
+			},
+		})
+		const put = (key: string, value: unknown) =>
+			nk.storageWrite([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID, value }])
+		put('custom:steamhash:gone-expired', entry('anon-1', 1000))
+		put('device:devicehash:gone-expired', entry('anon-1', 1000))
+		put('custom:steamhash:gone-running', entry('anon-2', 5000))
+		put('custom:steamhash:gone-permanent', entry('anon-3', null))
+		put('custom:steamhash:live', entry(LIVE, 1000))
+		expect(purgeDeletedBanIndex(nk as any, 2000, 100)).toEqual({ deleted: 2, more: false })
+		expect(indexKeys(nk)).toEqual([
+			`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:gone-permanent`,
+			`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:gone-running`,
+			`${BAN_INDEX_COLLECTION}/${SYSTEM_USER_ID}/custom:steamhash:live`,
+		])
+	})
+	it('stops after max entries and says there are more', () => {
+		const nk = fakeNk({ accountGetId: () => { throw new Error('account not found') } })
+		for (const key of ['a', 'b', 'c'])
+			nk.storageWrite([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID, value: entry('anon-' + key, 1) }])
+		expect(purgeDeletedBanIndex(nk as any, 2, 2)).toEqual({ deleted: 2, more: true })
+		expect(purgeDeletedBanIndex(nk as any, 2, 2)).toEqual({ deleted: 1, more: false })
 	})
 })

@@ -4885,12 +4885,28 @@ function moveLoginKey(nk, from, to) {
   ]);
   nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }]);
 }
+function accountExists(nk, userId) {
+  try {
+    nk.accountGetId(userId);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function deleteIndexKey(nk, key) {
+  nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
+}
 function checkLoginBan(nk, logger, key, now) {
   const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
   if (objects.length === 0) return;
   const entry = objects[0].value;
   if (activeBan({ account: entry.ban }, "account", now))
     throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban));
+  if (!accountExists(nk, entry.userId)) {
+    deleteIndexKey(nk, key);
+    logger.info("Account ban of deleted account %s expired; index entry dropped", entry.userId);
+    return;
+  }
   const before = readBans(nk, entry.userId);
   const after = withoutExpired(before, now);
   if (after !== before) writeBans(nk, entry.userId, after);
@@ -4901,6 +4917,23 @@ function checkLoginBan(nk, logger, key, now) {
   deleteIndex(nk, entry.userId);
   nk.usersUnbanId([entry.userId]);
   logger.info("Account ban of %s expired; unbanned", entry.userId);
+}
+function purgeDeletedBanIndex(nk, now, max) {
+  let deleted = 0;
+  let cursor = "";
+  do {
+    const page = nk.storageList(SYSTEM_USER_ID, BAN_INDEX_COLLECTION, 100, cursor);
+    for (const o of page.objects || []) {
+      const entry = o.value;
+      if (activeBan({ account: entry.ban }, "account", now)) continue;
+      if (accountExists(nk, entry.userId)) continue;
+      if (deleted >= max) return { deleted, more: true };
+      deleteIndexKey(nk, o.key);
+      deleted++;
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  return { deleted, more: false };
 }
 
 // src/moderation/network.ts
@@ -6659,6 +6692,13 @@ function rpcAdminBanLift(ctx, logger, nk, payload) {
   if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
   return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) });
 }
+var BAN_INDEX_PURGE_MAX = 500;
+function rpcAdminBanIndexPurge(ctx, logger, nk, _payload) {
+  requireServer(ctx);
+  const result = purgeDeletedBanIndex(nk, Date.now(), BAN_INDEX_PURGE_MAX);
+  if (result.deleted > 0) logger.info("Purged %d ban index entries of deleted accounts", result.deleted);
+  return JSON.stringify(result);
+}
 var MOD_ID_PATTERN4 = /^[A-Za-z0-9_.-]{1,64}$/;
 var LOBBY_LIST_LIMIT = 100;
 function rpcAdminLobbyList(ctx, logger, nk, payload) {
@@ -8342,7 +8382,7 @@ function joinInfoOf(nk, settings, presence, meta) {
     standing
   };
 }
-function accountExists(nk, userId) {
+function accountExists2(nk, userId) {
   try {
     nk.accountGetId(userId);
     return true;
@@ -8363,7 +8403,7 @@ function otherLobbyOf(nk, ctx, userId) {
 }
 function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, presence, metadata) {
   const meta = metadata || {};
-  if (!accountExists(nk, presence.userId)) {
+  if (!accountExists2(nk, presence.userId)) {
     return { state, accept: false, rejectMessage: "No such account" };
   }
   if (meta.role === SPECTATOR_ROLE) {
@@ -9813,6 +9853,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);
   initializer.registerRpc("admin_ban_lift", rpcAdminBanLift);
+  initializer.registerRpc("admin_ban_index_purge", rpcAdminBanIndexPurge);
   initializer.registerRpc("admin_network_bans", rpcAdminNetworkBans);
   initializer.registerRpc("admin_network_ban_lift", rpcAdminNetworkBanLift);
   initializer.registerRpc("admin_ip_hashes_purge", rpcAdminIpHashesPurge);

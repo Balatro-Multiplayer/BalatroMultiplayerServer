@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { purgeNakamaIpHashes, purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
+import { purgeNakamaBanIndex, purgeNakamaIpHashes, purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
 describe('purgeNakamaRuns', () => {
 	it('keeps calling while Nakama says there is more, and totals what went', async () => {
@@ -68,5 +68,17 @@ describe('purgeNakamaIpHashes', () => {
 		expect(await purgeNakamaIpHashes(rpc as never)).toBe(0)
 		expect(warn).not.toHaveBeenCalled()
 		warn.mockRestore()
+	})
+})
+
+describe('purgeNakamaBanIndex', () => {
+	it('keeps calling while Nakama says there is more, and totals what went', async () => {
+		const replies = [
+			{ ok: true, value: { deleted: 3, more: true } },
+			{ ok: true, value: { deleted: 1, more: false } },
+		]
+		const rpc = vi.fn(async () => replies.shift())
+		expect(await purgeNakamaBanIndex(rpc as never)).toBe(4)
+		expect(rpc).toHaveBeenCalledWith('admin_ban_index_purge', {})
 	})
 })

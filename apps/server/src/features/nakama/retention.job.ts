@@ -3,8 +3,8 @@ import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js
 import type { Result } from '../../shared/utils/result.js'
 import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
-// (The same hourly job also sweeps expired lobby checkpoints and login network
-// hashes: see below.)
+// (The same hourly job also sweeps expired lobby checkpoints, login network
+// hashes and the ban index entries of deleted accounts: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
 // match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, ask it to
 // delete the older ones. It keeps flagged and disputed runs, which the
@@ -54,21 +54,33 @@ export async function sweepNakamaCheckpoints(rpc: Rpc): Promise<{ deleted: numbe
 	return total
 }
 
-// One sweep of the login network hashes (network bans, ADR 0005): Nakama
-// deletes each 30 days after the last login from that network. Same repeat
-// rule as the run purge.
-export async function purgeNakamaIpHashes(rpc: Rpc): Promise<number> {
+// Calls a purge RPC that answers {deleted, more} until Nakama has nothing
+// more to delete. Returns how many went.
+async function purgeUntilDone(rpc: Rpc, id: string, what: string): Promise<number> {
 	let total = 0
 	for (let call = 0; call < MAX_CALLS; call++) {
-		const result = await rpc<{ deleted: number; more: boolean }>('admin_ip_hashes_purge', {})
+		const result = await rpc<{ deleted: number; more: boolean }>(id, {})
 		if (!result.ok) {
-			if (result.error !== 'disabled') console.warn(`[retention] IP hash purge failed: ${result.error}`)
+			if (result.error !== 'disabled') console.warn(`[retention] ${what} purge failed: ${result.error}`)
 			return total
 		}
 		total += result.value.deleted
 		if (!result.value.more) return total
 	}
 	return total
+}
+
+// One sweep of the login network hashes (network bans, ADR 0005): Nakama
+// deletes each 30 days after the last login from that network.
+export function purgeNakamaIpHashes(rpc: Rpc): Promise<number> {
+	return purgeUntilDone(rpc, 'admin_ip_hashes_purge', 'IP hash')
+}
+
+// One sweep of the account-ban index entries of deleted accounts whose ban
+// has run out: they hold the Steam id hash (or device id hash) only to
+// enforce the ban.
+export function purgeNakamaBanIndex(rpc: Rpc): Promise<number> {
+	return purgeUntilDone(rpc, 'admin_ban_index_purge', 'ban index')
 }
 
 export function startRetentionJob(): () => void {
@@ -90,14 +102,20 @@ export function startRetentionJob(): () => void {
 				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama login network hashes`)
 			})
 			.catch((err) => console.error('[retention] IP hash purge failed:', err))
-	sweep()
-	sweepCheckpoints()
-	purgeIpHashes()
-	const timer = setInterval(() => {
+	const purgeBanIndex = () =>
+		void purgeNakamaBanIndex(callNakamaRpc)
+			.then((deleted) => {
+				if (deleted > 0) console.log(`[retention] purged ${deleted} Nakama ban index entries of deleted accounts`)
+			})
+			.catch((err) => console.error('[retention] ban index purge failed:', err))
+	const all = () => {
 		sweep()
 		sweepCheckpoints()
 		purgeIpHashes()
-	}, RETENTION_INTERVAL_MS)
+		purgeBanIndex()
+	}
+	all()
+	const timer = setInterval(all, RETENTION_INTERVAL_MS)
 	timer.unref()
 	return () => clearInterval(timer)
 }

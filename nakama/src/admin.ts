@@ -8,7 +8,7 @@ import { lookupCode } from './lobby/codes'
 import type { LobbySignal } from './lobby/protocol'
 import { currentLobby } from './lobby/rpc'
 import { isBanType, readBans } from './moderation/bans'
-import { applyBan, liftBan } from './moderation/enforce'
+import { applyBan, liftBan, purgeDeletedBanIndex } from './moderation/enforce'
 import { banNetworks } from './moderation/network'
 import { playerView, profileFor } from './player/profile'
 import { mergeConfig, readConfig, writeConfig } from './config'
@@ -147,6 +147,24 @@ export function rpcAdminBanLift(
 	const userId = requireUserId(nk, input)
 	if (typeof input.banId !== 'string' || !input.banId) throw runtimeError(INVALID_ARGUMENT, 'banId is required')
 	return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) })
+}
+
+// Deleted accounts' ban index entries removed per call at most; the caller
+// repeats while `more` is set.
+export const BAN_INDEX_PURGE_MAX = 500
+
+// {} -> {deleted, more}: drops the ban index entries of deleted accounts
+// whose account ban has run out (the API's hourly retention job).
+export function rpcAdminBanIndexPurge(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	_payload: string,
+) {
+	requireServer(ctx)
+	const result = purgeDeletedBanIndex(nk, Date.now(), BAN_INDEX_PURGE_MAX)
+	if (result.deleted > 0) logger.info('Purged %d ban index entries of deleted accounts', result.deleted)
+	return JSON.stringify(result)
 }
 
 // ---------------------------------------------------------------------------

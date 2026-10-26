@@ -10,6 +10,11 @@
 // usersBanId has no expiry, so a temporary account ban is lifted lazily: the
 // login before-hooks look the account up in ban_index (Steam id or device id
 // -> ban) and unban an expired one before Nakama's own check runs.
+//
+// A deleted account's entries stay while its ban is in force (they refuse a
+// new account on the same login id) and name its anonymous id, which has no
+// account. Once that ban runs out they go, at the next login on that id or at
+// the API's hourly sweep (purgeDeletedBanIndex), whichever comes first.
 import { runtimeError, PERMISSION_DENIED } from '../errors'
 import { currentLobby } from '../lobby/rpc'
 import { SYSTEM_USER_ID, type LobbySignal } from '../lobby/protocol'
@@ -142,6 +147,19 @@ export function moveLoginKey(nk: nkruntime.Nakama, from: string, to: string) {
 	nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }])
 }
 
+function accountExists(nk: nkruntime.Nakama, userId: string): boolean {
+	try {
+		nk.accountGetId(userId)
+		return true
+	} catch {
+		return false
+	}
+}
+
+function deleteIndexKey(nk: nkruntime.Nakama, key: string) {
+	nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }])
+}
+
 // For the login before-hooks: refuses a login into a banned account, and
 // lifts an account ban that has run out. key is a loginKeys entry.
 export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, key: string, now: number) {
@@ -150,6 +168,11 @@ export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, ke
 	const entry = objects[0].value as unknown as IndexEntry
 	if (activeBan({ account: entry.ban }, 'account', now))
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban))
+	if (!accountExists(nk, entry.userId)) {
+		deleteIndexKey(nk, key)
+		logger.info('Account ban of deleted account %s expired; index entry dropped', entry.userId)
+		return
+	}
 	const before = readBans(nk, entry.userId)
 	const after = withoutExpired(before, now)
 	if (after !== before) writeBans(nk, entry.userId, after)
@@ -161,4 +184,29 @@ export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, ke
 	deleteIndex(nk, entry.userId)
 	nk.usersUnbanId([entry.userId])
 	logger.info('Account ban of %s expired; unbanned', entry.userId)
+}
+
+// {deleted, more}: deletes the ban_index entries of deleted accounts whose
+// account ban has run out, at most max per call. Entries of live accounts are
+// left to the lazy unban at their next login.
+export function purgeDeletedBanIndex(
+	nk: nkruntime.Nakama,
+	now: number,
+	max: number,
+): { deleted: number; more: boolean } {
+	let deleted = 0
+	let cursor = ''
+	do {
+		const page = nk.storageList(SYSTEM_USER_ID, BAN_INDEX_COLLECTION, 100, cursor)
+		for (const o of page.objects || []) {
+			const entry = o.value as unknown as IndexEntry
+			if (activeBan({ account: entry.ban }, 'account', now)) continue
+			if (accountExists(nk, entry.userId)) continue
+			if (deleted >= max) return { deleted, more: true }
+			deleteIndexKey(nk, o.key)
+			deleted++
+		}
+		cursor = page.cursor || ''
+	} while (cursor)
+	return { deleted, more: false }
 }
