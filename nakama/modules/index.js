@@ -2684,7 +2684,7 @@ function spendLobbyCreate(nk, userId, now) {
 
 // src/player/steam_id.ts
 var STEAM_HASH_CUSTOM_ID_PREFIX = "steamhash:";
-var STEAM_HASH_DEVICE_ID_PREFIX = "devicehash:";
+var DEVICE_ID_HASH_PREFIX = "devicehash:";
 var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
 var STEAM_HASH_CUSTOM_ID = /^steamhash:([0-9a-f]{64})$/;
 function steamIdHash(nk, salt, steamId) {
@@ -7330,11 +7330,12 @@ function beforeAuthenticateDevice(ctx, logger, nk, data) {
     throw runtimeError(PERMISSION_DENIED, "Device login is disabled");
   }
   const account = data.account;
-  if (account && account.id && STEAM_ID64_PATTERN.test(account.id)) {
-    const hashedId = STEAM_HASH_DEVICE_ID_PREFIX + steamIdHash(nk, playerIdSalt(ctx, logger), account.id);
-    moveRawDeviceAccount(nk, logger, account.id, hashedId);
+  if (account && account.id) {
+    const rawId = account.id;
+    const hashedId = DEVICE_ID_HASH_PREFIX + steamIdHash(nk, playerIdSalt(ctx, logger), rawId);
+    moveRawDeviceAccount(nk, logger, rawId, hashedId);
     account.id = hashedId;
-    delete data.username;
+    if (STEAM_ID64_PATTERN.test(rawId)) delete data.username;
   }
   if (account && account.id) checkLoginBan(nk, logger, "device:" + account.id, Date.now());
   return data;
@@ -7351,7 +7352,7 @@ function moveRawDeviceAccount(nk, logger, rawId, hashedId) {
   }
   nk.unlinkDevice(userId, rawId);
   moveLoginKey(nk, "device:" + rawId, "device:" + hashedId);
-  logger.info("Moved the Device login of %s to its Steam id hash", userId);
+  logger.info("Moved the Device login of %s to its hash", userId);
 }
 function refuseBannedNetwork(ctx, nk) {
   const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));

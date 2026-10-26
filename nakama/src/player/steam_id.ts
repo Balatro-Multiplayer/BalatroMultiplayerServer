@@ -3,14 +3,15 @@
 // sha256(steamId + PLAYER_ID_SALT) in hex, the same function the API uses
 // (hashProviderId), so it is also the Postgres player's steamIdHash.
 //
-// Steam login: custom id "steamhash:<hash>". Device login with a SteamID64
-// (Community and Dev servers): device id "devicehash:<hash>". Accounts made
-// before this were "steam:<raw id>" (moved by the API's
-// rewrite-steam-ids script) and raw SteamID64 device ids (moved at their
-// next login, auth.ts).
+// Steam login: custom id "steamhash:<hash>". Device login (Community and Dev
+// servers): device id "devicehash:<hash of the device id>", the same function,
+// so a SteamID64 device id hashes to the account's Steam id hash. Accounts
+// made before this were "steam:<raw id>" (moved by the API's
+// rewrite-steam-ids script) and raw device ids (moved at their next login,
+// auth.ts).
 
 export const STEAM_HASH_CUSTOM_ID_PREFIX = 'steamhash:'
-export const STEAM_HASH_DEVICE_ID_PREFIX = 'devicehash:'
+export const DEVICE_ID_HASH_PREFIX = 'devicehash:'
 export const STEAM_ID64_PATTERN = /^7656119\d{10}$/
 const STEAM_HASH_CUSTOM_ID = /^steamhash:([0-9a-f]{64})$/
 

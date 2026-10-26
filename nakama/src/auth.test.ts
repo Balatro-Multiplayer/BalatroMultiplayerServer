@@ -83,10 +83,27 @@ describe('Device login', () => {
 	})
 
 	it('is accepted on a Community server with no ALLOW_DEVICE_AUTH set', () => {
-		const request = { account: { id: 'bmp-dev-TestPlayer1' }, create: true }
-		expect(deviceLogin({ BMP_SERVER_KIND: 'community' }, request)).toEqual(
-			request,
-		)
+		const out = deviceLogin({ BMP_SERVER_KIND: 'community' }, { account: { id: 'bmp-dev-TestPlayer1' }, create: true })
+		expect(out?.create).toBe(true)
+		expect(out?.account?.id).toMatch(/^devicehash:[0-9a-f]{64}$/)
+	})
+
+	it('stores any device id only as its hash, the same on every login', () => {
+		// sha256('bmp-dev-TestPlayer1' + 'pepper'), worked out once with node:crypto.
+		const TEST_HASH = 'c3deab977d0c924144b4601d980c2315831abc91197bacced5d2030d61ae6719'
+		const env = { BMP_SERVER_KIND: 'dev' }
+		const first = deviceLogin(env, { account: { id: 'bmp-dev-TestPlayer1' }, create: true, username: 'TestPlayer1' })
+		const second = deviceLogin(env, { account: { id: 'bmp-dev-TestPlayer1' }, create: true, username: 'TestPlayer1' })
+		expect(first?.account?.id).toBe(`devicehash:${TEST_HASH}`)
+		expect(second?.account?.id).toBe(first?.account?.id)
+		expect(JSON.stringify(first)).not.toContain('bmp-dev-TestPlayer1')
+	})
+
+	it('moves a test account on its raw device id to the hash at its next login, keeping the account', () => {
+		const devices = new Map([['bmp-dev-TestPlayer1', 'user-2']])
+		const out = deviceLogin({ BMP_SERVER_KIND: 'dev' }, { account: { id: 'bmp-dev-TestPlayer1' }, create: true }, deviceNk(devices))
+		expect(out?.account?.id).toMatch(/^devicehash:/)
+		expect([...devices.entries()]).toEqual([[out?.account?.id, 'user-2']])
 	})
 
 	it('stores a Steam id only as its hash', () => {

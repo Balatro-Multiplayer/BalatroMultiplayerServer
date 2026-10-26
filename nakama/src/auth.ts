@@ -11,10 +11,11 @@
 // Device login (no Steam proof) depends on the server kind (server_kind.ts):
 // never on the Official server, always on a Community server, and on a Dev
 // server unless ALLOW_DEVICE_AUTH=false. On a Community server the normal
-// client logs in with its raw SteamID64 as the device id; the hook replaces it
-// with "devicehash:<hash>", so the same Steam id is always the same account
-// and the raw id is never stored. Its Steam name reaches the profile and the
-// display name through session_init, as with Steam login.
+// client logs in with its raw SteamID64 as the device id, a Dev mod test
+// account with bmp-dev-<name>. The hook replaces any device id with
+// "devicehash:<hash>", so the same id is always the same account and the raw
+// id is never stored. The Steam name reaches the profile and the display name
+// through session_init, as with Steam login.
 import {
 	INVALID_ARGUMENT,
 	PERMISSION_DENIED,
@@ -31,7 +32,7 @@ import {
 } from './moderation/network'
 import {
 	STEAM_HASH_CUSTOM_ID_PREFIX,
-	STEAM_HASH_DEVICE_ID_PREFIX,
+	DEVICE_ID_HASH_PREFIX,
 	STEAM_ID64_PATTERN,
 	steamIdHash,
 } from './player/steam_id'
@@ -155,23 +156,24 @@ export function beforeAuthenticateDevice(
 		throw runtimeError(PERMISSION_DENIED, 'Device login is disabled')
 	}
 	const account = data.account
-	if (account && account.id && STEAM_ID64_PATTERN.test(account.id)) {
-		const hashedId = STEAM_HASH_DEVICE_ID_PREFIX + steamIdHash(nk, playerIdSalt(ctx, logger), account.id)
-		moveRawDeviceAccount(nk, logger, account.id, hashedId)
+	if (account && account.id) {
+		const rawId = account.id
+		const hashedId = DEVICE_ID_HASH_PREFIX + steamIdHash(nk, playerIdSalt(ctx, logger), rawId)
+		moveRawDeviceAccount(nk, logger, rawId, hashedId)
 		account.id = hashedId
 		// Nakama usernames are unique and Steam names are not: a Steam-id login
 		// lets Nakama pick the username, and the Steam name becomes the display
-		// name instead.
+		// name instead. A test account (Dev mod) keeps the name it sends.
 		// biome-ignore lint/performance/noDelete: the key must be gone, not undefined -- the request becomes a Go struct
-		delete data.username
+		if (STEAM_ID64_PATTERN.test(rawId)) delete data.username
 	}
 	if (account && account.id) checkLoginBan(nk, logger, 'device:' + account.id, Date.now())
 	return data
 }
 
 // An account made before Device login ids were hashed: move its device id
-// (and its ban index entry) from the raw Steam id to the hash, so the login
-// lands in the same account and the raw id is gone from the database.
+// (and its ban index entry) from the raw id to the hash, so the login lands in
+// the same account and the raw id is gone from the database.
 function moveRawDeviceAccount(nk: nkruntime.Nakama, logger: nkruntime.Logger, rawId: string, hashedId: string) {
 	const rows = nk.sqlQuery('SELECT user_id::text AS user_id FROM user_device WHERE id = $1', [rawId])
 	if (rows.length === 0) return
@@ -185,7 +187,7 @@ function moveRawDeviceAccount(nk: nkruntime.Nakama, logger: nkruntime.Logger, ra
 	}
 	nk.unlinkDevice(userId, rawId)
 	moveLoginKey(nk, 'device:' + rawId, 'device:' + hashedId)
-	logger.info('Moved the Device login of %s to its Steam id hash', userId)
+	logger.info('Moved the Device login of %s to its hash', userId)
 }
 
 // Network bans (moderation/network.ts): every login and session refresh from
