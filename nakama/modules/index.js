@@ -1585,7 +1585,6 @@ var RATINGS_COLLECTION = "ratings";
 var CONFIG_COLLECTION = "server_config";
 var CONFIG_KEY = "global";
 var DEFAULT_CONFIG = {
-  tosVersion: 1,
   chatEnabled: true,
   rankedEnabled: true,
   casualQueueEnabled: true,
@@ -1609,8 +1608,6 @@ function modIdsOf(value) {
 }
 function mergeConfig(current, update) {
   const next = __spreadValues({}, current);
-  const tos = update.tosVersion;
-  if (typeof tos === "number" && Number.isInteger(tos) && tos >= 0) next.tosVersion = tos;
   const season = update.season;
   if (typeof season === "number" && Number.isInteger(season) && season > 0) next.season = season;
   const flags = [
@@ -1998,6 +1995,7 @@ function defaultProfile(steamName) {
     discordUsername: null,
     privileges: [],
     tosAcceptedVersion: 0,
+    noticeAcceptedAt: null,
     chatEnabled: false,
     chatBlocked: false,
     mutedUserIds: [],
@@ -2020,6 +2018,7 @@ function profileOf(value, fallbackName) {
     discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
     privileges: stringList(value.privileges),
     tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
+    noticeAcceptedAt: typeof value.noticeAcceptedAt === "number" ? value.noticeAcceptedAt : null,
     chatEnabled: value.chatEnabled === true,
     chatBlocked: value.chatBlocked === true,
     mutedUserIds: stringList(value.mutedUserIds),
@@ -2040,6 +2039,7 @@ function withSync(profile, sync, unlocked = []) {
     discordUsername: (_b = sync.discordUsername) != null ? _b : null,
     privileges,
     tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
+    noticeAcceptedAt: typeof sync.noticeAcceptedAt === "number" ? sync.noticeAcceptedAt : null,
     chatEnabled: sync.chatEnabled === true,
     chatBlocked: sync.chatBlocked === true,
     mutedUserIds: stringList(sync.mutedUserIds),
@@ -3337,6 +3337,9 @@ function recordMilestone(nk, logger, userId, milestone, privileges) {
   }
 }
 
+// ../packages/types/src/notice.ts
+var NOTICE_VERSION = 1;
+
 // src/express.ts
 var TIMEOUT_MS = 3e3;
 function callExpress(nk, logger, env, path, body) {
@@ -3833,10 +3836,10 @@ function withResolvedMutes(profile, resolved) {
   });
 }
 function loginResponse(userId, profile, config) {
-  const tosRequired = profile.tosAcceptedVersion < config.tosVersion;
+  const tosRequired = profile.tosAcceptedVersion < NOTICE_VERSION;
   return {
     tosRequired,
-    // An update to a ToS the player accepted before (only with tosRequired).
+    // An update to a Notice the player accepted before (only with tosRequired).
     tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
     player: playerView(userId, profile),
     serverConfig: clientConfig(config)
@@ -3898,11 +3901,12 @@ function rpcTosAccept(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
   const eligible = parsePayload(payload).chatEligible;
   const config = readConfig(nk);
+  const acceptedAt = Date.now();
   const profile = updateProfile(
     nk,
     userId,
     (current) => {
-      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: config.tosVersion });
+      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt });
       if (typeof eligible === "boolean") {
         next.chatEnabled = eligible;
         next.chatBlocked = !eligible;
@@ -3911,6 +3915,7 @@ function rpcTosAccept(ctx, logger, nk, payload) {
     },
     ctx.username
   );
+  enqueue(nk, { kind: "notice", at: acceptedAt, userId, version: NOTICE_VERSION });
   return JSON.stringify(loginResponse(userId, profile, config));
 }
 
@@ -3982,7 +3987,7 @@ function pullEntries(nk, limit) {
     } else if (entry.kind === "chat") {
       userIds[entry.line.userId] = true;
       entries.push({ key: object.key, kind: "chat", at: entry.at, line: entry.line });
-    } else if (entry.kind === "forfeit") {
+    } else if (entry.kind === "forfeit" || entry.kind === "notice") {
       userIds[entry.userId] = true;
       entries.push(__spreadValues({ key: object.key }, entry));
     } else {
@@ -8740,8 +8745,8 @@ function obscenityMatches(message) {
 }
 
 // src/chat/rpc.ts
-function tosAccepted(profile, config) {
-  return profile.tosAcceptedVersion >= config.tosVersion;
+function noticeAccepted(profile) {
+  return profile.tosAcceptedVersion >= NOTICE_VERSION;
 }
 function rpcChatEnable(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -8751,7 +8756,7 @@ function rpcChatEnable(ctx, logger, nk, payload) {
     userId,
     (current) => {
       if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, "Chat access is permanently restricted");
-      if (!tosAccepted(current, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
+      if (!noticeAccepted(current)) throw runtimeError(PERMISSION_DENIED, "Accept the Notice first");
       return __spreadProps(__spreadValues({}, current), { chatEnabled: true });
     },
     ctx.username
@@ -8770,7 +8775,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
   const profile = profileFor(nk, userId, ctx.username);
   if (profile.chatBlocked || !profile.chatEnabled)
     throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
-  if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
+  if (!noticeAccepted(profile)) throw runtimeError(PERMISSION_DENIED, "Accept the Notice first");
   const banned = chatBanRefusal(readBans(nk, userId), Date.now());
   if (banned) throw runtimeError(PERMISSION_DENIED, banned);
   const current = currentLobby(nk, userId);

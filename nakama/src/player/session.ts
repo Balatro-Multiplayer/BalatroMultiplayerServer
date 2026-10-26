@@ -1,5 +1,5 @@
 // session_init: the game client's login. The client calls it right after
-// authenticating and gets back the player, the ToS gate and the server
+// authenticating and gets back the player, the Notice gate and the server
 // config.
 // At a Steam account's first call the player's Postgres data is synced over
 // through the API (player-sync); if that fails the login still succeeds and
@@ -7,8 +7,10 @@
 import { recordMilestone } from '../achievements/record'
 import { progressFor } from '../achievements/storage'
 import { noteReturn } from '../lobby/forfeits'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
 import { clientConfig, readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
+import { enqueue } from '../mirror/outbox'
 import { UNVERIFIED, writeIntegrity } from '../integrity'
 import { clearModReport } from '../standing/storage'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
@@ -84,10 +86,10 @@ export function withResolvedMutes(profile: Profile, resolved: { [playerId: strin
 // The login response: the API's gameLoginPayload, minus its tokens (the
 // client already holds a Nakama session).
 export function loginResponse(userId: string, profile: Profile, config: ServerConfig) {
-	const tosRequired = profile.tosAcceptedVersion < config.tosVersion
+	const tosRequired = profile.tosAcceptedVersion < NOTICE_VERSION
 	return {
 		tosRequired,
-		// An update to a ToS the player accepted before (only with tosRequired).
+		// An update to a Notice the player accepted before (only with tosRequired).
 		tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
 		player: playerView(userId, profile),
 		serverConfig: clientConfig(config),
@@ -163,7 +165,8 @@ export function rpcSessionInit(
 	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))
 }
 
-// {chatEligible?} -> loginResponse. Accepts the current ToS version; with
+// {chatEligible?} -> loginResponse. Accepts the current Notice version (and
+// stores when); with
 // chatEligible (worked out client-side from the birthdate, never sent raw)
 // also turns chat on or blocks it, as the API's acceptTos does.
 export function rpcTosAccept(
@@ -175,11 +178,12 @@ export function rpcTosAccept(
 	const userId = requireUser(ctx)
 	const eligible = parsePayload(payload).chatEligible
 	const config = readConfig(nk)
+	const acceptedAt = Date.now()
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
-			const next: Profile = { ...current, tosAcceptedVersion: config.tosVersion }
+			const next: Profile = { ...current, tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }
 			if (typeof eligible === 'boolean') {
 				next.chatEnabled = eligible
 				next.chatBlocked = !eligible
@@ -188,5 +192,7 @@ export function rpcTosAccept(
 		},
 		ctx.username,
 	)
+	// Postgres (webadmin) keeps who accepted which version, and when.
+	enqueue(nk, { kind: 'notice', at: acceptedAt, userId, version: NOTICE_VERSION })
 	return JSON.stringify(loginResponse(userId, profile, config))
 }

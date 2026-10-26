@@ -72,6 +72,7 @@ describe('/internal/nakama/player-sync', () => {
 			chatEnabled: true,
 			chatBlocked: false,
 			tosAcceptedVersion: 2,
+			noticeAcceptedAt: new Date(7000),
 			deletedAt: null,
 		})
 		vi.mocked(mutes.listMutes).mockResolvedValueOnce(['legacy-2', 'legacy-3'])
@@ -100,6 +101,7 @@ describe('/internal/nakama/player-sync', () => {
 			steamName: 'Alice',
 			preferredJoker: 'j_mime',
 			tosAcceptedVersion: 2,
+			noticeAcceptedAt: 7000,
 			mutedUserIds: ['n-2'],
 			unresolvedMutedPlayerIds: ['legacy-3'],
 			bans: [{ banId: 'b1', type: 'queue', expiresAt: 5000, reason: 'dodging' }],

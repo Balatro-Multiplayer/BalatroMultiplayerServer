@@ -51,6 +51,7 @@ router.get('/players', async (req, res, next) => {
 				chatEnabled: players.chatEnabled,
 				chatBlocked: players.chatBlocked,
 				tosAcceptedVersion: players.tosAcceptedVersion,
+				noticeAcceptedAt: players.noticeAcceptedAt,
 				createdAt: players.createdAt,
 				updatedAt: players.updatedAt,
 				activeBans: sql<number>`cast(count(${playerBans.id}) filter (where ${activeBanCond()}) as int)`,

@@ -15,6 +15,8 @@ export interface PlayerSync {
 	discordUsername: string | null
 	privileges: string[]
 	tosAcceptedVersion: number
+	// When that version was accepted (ms), or null.
+	noticeAcceptedAt: number | null
 	chatEnabled: boolean
 	chatBlocked: boolean
 	mutedUserIds: string[]
@@ -94,6 +96,7 @@ export function createPlayerSyncService(deps: PlayerSyncDeps) {
 			discordUsername: player.discordUsername,
 			privileges: player.privileges,
 			tosAcceptedVersion: player.tosAcceptedVersion,
+			noticeAcceptedAt: player.noticeAcceptedAt ? player.noticeAcceptedAt.getTime() : null,
 			chatEnabled: player.chatEnabled,
 			chatBlocked: player.chatBlocked,
 			mutedUserIds: muted.resolved,

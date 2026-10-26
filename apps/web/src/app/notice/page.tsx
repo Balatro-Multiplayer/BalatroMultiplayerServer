@@ -1,8 +1,17 @@
+// Any change to the Notice text must raise NOTICE_VERSION (and NOTICE_DATE) in @bmp/types notice.ts in the same commit.
+import { NOTICE_DATE } from '@bmp/types'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Privacy & Terms Notice',
 }
+
+const lastUpdated = new Date(`${NOTICE_DATE}T00:00:00Z`).toLocaleDateString('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
 
 export default function NoticePage() {
   return (
@@ -14,7 +23,7 @@ export default function NoticePage() {
         <h1 className='text-2xl font-bold' style={{ fontFamily: "'m6x11', monospace", textShadow: '3px 3px 0 rgba(0,0,0,0.4)' }}>
           Privacy &amp; Terms Notice
         </h1>
-        <p className='text-xs text-muted-foreground' style={{ marginBottom: 32 }}>Last updated: June 13, 2026</p>
+        <p className='text-xs text-muted-foreground' style={{ marginBottom: 32 }}>Last updated: {lastUpdated}</p>
 
         <div className='space-y-3.5 text-sm leading-relaxed text-muted-foreground'>
           <p>This notice explains how Balatro Multiplayer works, what data we collect, what we do with it, and your rights. It is written in plain language and constitutes the binding terms and privacy policy for the service.</p>

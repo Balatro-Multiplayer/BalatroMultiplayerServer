@@ -4,7 +4,6 @@ import { nakamaConfigOf, pushConfigToNakama, setIntegrityEnforced } from '../../
 import type { AppConfig } from '../../state/config.js'
 
 const config: AppConfig = {
-	tosVersion: 4,
 	mods: [],
 	chatAllowlist: new Set(['gg']),
 	chatEnabled: false,
@@ -31,7 +30,6 @@ describe('pushing config to Nakama', () => {
 
 	it('maps the switches Nakama enforces', () => {
 		expect(nakamaConfigOf(config)).toEqual({
-			tosVersion: 4,
 			chatEnabled: false,
 			rankedEnabled: true,
 			casualQueueEnabled: false,
