@@ -4304,7 +4304,8 @@ function serverSettings(env) {
         autoVerifyLauncher: flag(env, "DEV_AUTO_VERIFY_LAUNCHER") === true,
         fakeLauncherStrategy: flag(env, "DEV_FAKE_LAUNCHER_STRATEGY") === true,
         moderationRemote,
-        testingRpcs: true
+        testingRpcs: true,
+        allowedModsChecked: false
       }
     };
   }
@@ -4317,7 +4318,8 @@ function serverSettings(env) {
       autoVerifyLauncher: false,
       fakeLauncherStrategy: false,
       moderationRemote,
-      testingRpcs: false
+      testingRpcs: false,
+      allowedModsChecked: kind === "official"
     }
   };
 }
@@ -4497,7 +4499,7 @@ function rpcRunActive(ctx, logger, nk, payload) {
   if (!current) return JSON.stringify({});
   const signal2 = { type: "get_active", userId };
   const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal2)));
-  return JSON.stringify(active ? { active, standing: standingFor(nk, userId, Date.now()) } : {});
+  return JSON.stringify(active ? { active, standing: standingFor(nk, settingsOf(ctx), userId, Date.now()) } : {});
 }
 function rpcLobbyLeave(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -4574,7 +4576,7 @@ function rpcProfileSetMods(ctx, logger, nk, payload) {
   updateProfile(nk, userId, (current) => __spreadProps(__spreadValues({}, current), { mods: list }), ctx.username);
   const now = Date.now();
   writeModReport(nk, userId, { mods: list, reportedAt: now });
-  const standing = standingFor(nk, userId, now);
+  const standing = standingFor(nk, settingsOf(ctx), userId, now);
   pushToLobby(nk, userId, { mods: list, standing: standing.standing });
   return JSON.stringify({ mods: list, standing });
 }
@@ -4682,7 +4684,7 @@ function rpcAdminIntegritySet(ctx, logger, nk, payload) {
     reason: optionalString(input.reason),
     message: optionalString(input.message)
   });
-  pushToLobby(nk, userId, { standing: standingFor(nk, userId, Date.now()).standing });
+  pushToLobby(nk, userId, { standing: standingFor(nk, settingsOf(ctx), userId, Date.now()).standing });
   return JSON.stringify({});
 }
 function rpcAdminQueueCancel(ctx, logger, nk, payload) {
@@ -4760,6 +4762,7 @@ var VALID = { standing: "valid", disallowed: [], reason: null };
 function standingOf(input) {
   if (input.verified) return VERIFIED;
   if (!input.report) return { standing: "none", disallowed: [], reason: "unreported" };
+  if (input.allowedIds === "any") return VALID;
   const disallowed = disallowedMods(input.report.mods, input.allowedIds);
   if (disallowed.length > 0) return { standing: "none", disallowed, reason: "mods_not_allowed" };
   return VALID;
@@ -4773,18 +4776,18 @@ function requiredStandingFor(ranked, integrityEnforced) {
 }
 
 // src/standing/current.ts
-function standingFor(nk, userId, now, config = readConfig(nk)) {
+function standingFor(nk, settings, userId, now, config = readConfig(nk)) {
   return standingOf({
     verified: isVerified(readIntegrity(nk, userId), now),
     report: readModReport(nk, userId),
-    allowedIds: allowedModIds(config)
+    allowedIds: settings.allowedModsChecked ? allowedModIds(config) : "any"
   });
 }
 
 // src/standing/rpc.ts
 function rpcAccountStanding(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  return JSON.stringify(standingFor(nk, userId, Date.now()));
+  return JSON.stringify(standingFor(nk, settingsOf(ctx), userId, Date.now()));
 }
 
 // src/achievements/rpc.ts
@@ -5040,12 +5043,12 @@ function takeTicketRemoved(nk, ticket) {
 }
 
 // src/matchmaking/gate.ts
-function queueRefusalFor(nk, userId, ranked, now) {
+function queueRefusalFor(nk, settings, userId, ranked, now) {
   const config = readConfig(nk);
   const access = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
   if (access) return { code: "access_denied", message: access };
   if (ranked && integrityRefusal(config, readIntegrity(nk, userId), now)) return { code: "integrity_required" };
-  return standingRefusal(standingFor(nk, userId, now, config));
+  return standingRefusal(standingFor(nk, settings, userId, now, config));
 }
 function matchmakerAdd(envelope) {
   return envelope.matchmakerAdd || envelope.matchmaker_add || {};
@@ -5061,7 +5064,7 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
   const unpinned = ticketQueryRefusal(matchmakerAdd(envelope).query, props);
   if (unpinned) throw runtimeError(INVALID_ARGUMENT, TICKET_QUERY_MESSAGES[unpinned]);
   const ranked = props.kind === "ranked";
-  const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
+  const refused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, ranked, Date.now());
   if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused));
   const group = groupOf(nk, ctx.userId);
   if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE);
@@ -5071,12 +5074,12 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
 function refusedMemberOf(player) {
   return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) };
 }
-function refusedPlayers(nk, plan) {
+function refusedPlayers(nk, settings, plan) {
   const now = Date.now();
   const ranked = plan.rankedMode !== "";
   const out = [];
   for (const userId of plan.playerIds) {
-    const refusal = queueRefusalFor(nk, userId, ranked, now);
+    const refusal = queueRefusalFor(nk, settings, userId, ranked, now);
     if (refusal) out.push({ userId, refusal });
   }
   return out;
@@ -5388,7 +5391,7 @@ function matchmakerMatched(ctx, logger, nk, matches) {
     requeuePartiesOf(nk, partyIdsOf(matches));
     throw new Error(plan);
   }
-  const refused = refusedPlayers(nk, plan);
+  const refused = refusedPlayers(nk, settingsOf(ctx), plan);
   const groups = resolveGroups(nk, plan);
   if (refused.length > 0 || groups.faulty.length > 0) {
     refuseMatch(nk, plan, refused, groups);
@@ -5498,19 +5501,19 @@ var RANKED_PREFIX = "ranked:";
 function isOnline(nk, userId) {
   return nk.streamUserList({ mode: NOTIFICATIONS_STREAM2, subject: userId }, true, true).length > 0;
 }
-function announceStandings(nk, now) {
+function announceStandings(nk, settings, now) {
   const config = readConfig(nk);
   let told = 0;
   for (const userId of reporterIds(nk)) {
     if (!isOnline(nk, userId)) continue;
-    const view = standingFor(nk, userId, now, config);
+    const view = standingFor(nk, settings, userId, now, config);
     notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view));
     pushToLobby(nk, userId, { standing: view.standing });
     told++;
   }
   return told;
 }
-function regateQueued(nk, now) {
+function regateQueued(nk, settings, now) {
   const cancelledParties = [];
   let solos = 0;
   for (const queued of liveQueuedPlayers(nk, null, now)) {
@@ -5518,14 +5521,14 @@ function regateQueued(nk, now) {
     const group = groupOf(nk, userId);
     if (group && group.phase === "queued") {
       if (cancelledParties.indexOf(group.partyId) !== -1) continue;
-      const refusal2 = queueRefusalFor(nk, userId, false, now);
+      const refusal2 = queueRefusalFor(nk, settings, userId, false, now);
       if (!refusal2 || !isStandingRefusal(refusal2)) continue;
       cancelGroupFor(nk, group.homeCode, group.partyId, "member_refused", refusedMemberOf({ userId, refusal: refusal2 }));
       cancelledParties.push(group.partyId);
       continue;
     }
     const ranked = record.gameMode.indexOf(RANKED_PREFIX) === 0;
-    const refusal = queueRefusalFor(nk, userId, ranked, now);
+    const refusal = queueRefusalFor(nk, settings, userId, ranked, now);
     if (!refusal || !isStandingRefusal(refusal)) continue;
     const mode = ranked ? record.gameMode.slice(RANKED_PREFIX.length) : record.gameMode;
     cancelSoloQueue(nk, userId, record.modId, mode, refusal);
@@ -5534,9 +5537,9 @@ function regateQueued(nk, now) {
   }
   return { solos, groups: cancelledParties.length };
 }
-function standingInputsUpdated(nk, logger, now) {
-  const told = announceStandings(nk, now);
-  const cancelled = regateQueued(nk, now);
+function standingInputsUpdated(nk, settings, logger, now) {
+  const told = announceStandings(nk, settings, now);
+  const cancelled = regateQueued(nk, settings, now);
   logger.info(
     "Standing inputs changed: told %d player(s); cancelled %d solo ticket(s), %d group(s)",
     told,
@@ -5807,12 +5810,12 @@ function rpcAdminRunSetResult(ctx, logger, nk, payload) {
   logger.info("Run %s result overturned by the service queue", next.runId);
   return JSON.stringify({ run: next });
 }
-function moderationContextOf(nk, userId, now) {
+function moderationContextOf(nk, settings, userId, now) {
   const seat = currentLobby(nk, userId);
   const match = seat ? nk.matchGet(seat.matchId) : null;
   return {
     mods: readModReport(nk, userId),
-    standing: standingFor(nk, userId, now),
+    standing: standingFor(nk, settings, userId, now),
     integrity: readIntegrity(nk, userId),
     ranked: rankedContextOf(liveRecordsOf(nk, userId, now), match ? match.label : null)
   };
@@ -5855,7 +5858,7 @@ function rpcAdminConfigSet(ctx, logger, nk, payload) {
   const config = mergeConfig(before, parsePayload(payload));
   writeConfig(nk, config);
   logger.info("Server config updated: %v", JSON.stringify(config));
-  if (standingInputsChanged(before, config)) standingInputsUpdated(nk, logger, Date.now());
+  if (standingInputsChanged(before, config)) standingInputsUpdated(nk, settingsOf(ctx), logger, Date.now());
   return JSON.stringify(config);
 }
 function requireUserId2(nk, input) {
@@ -5963,7 +5966,7 @@ function rpcAdminPlayerGet(ctx, logger, nk, payload) {
     bans: readBans(nk, userId),
     lobby: currentLobby(nk, userId),
     online
-  }, moderationContextOf(nk, userId, Date.now())));
+  }, moderationContextOf(nk, settingsOf(ctx), userId, Date.now())));
 }
 var MIRROR_PULL_DEFAULT = 10;
 var MIRROR_PULL_MAX = 50;
@@ -7465,9 +7468,9 @@ function parseMods(raw) {
     return null;
   }
 }
-function joinInfoOf(nk, presence, meta) {
+function joinInfoOf(nk, settings, presence, meta) {
   const sentMods = parseMods(meta.mods);
-  const standing = standingFor(nk, presence.userId, Date.now()).standing;
+  const standing = standingFor(nk, settings, presence.userId, Date.now()).standing;
   const stored = readProfile(nk, presence.userId, presence.username);
   const joker = stored ? selectableOrDefault(stored.profile.preferredJoker, holdingsOf(nk, presence.userId, stored.profile.privileges)) : DEFAULT_AVATAR;
   if (stored && stored.profile.nakamaLogin) {
@@ -7526,7 +7529,7 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
   if (rejection) {
     return { state, accept: false, rejectMessage: rejection };
   }
-  const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, presence.userId, Date.now()));
+  const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, settingsOf(ctx), presence.userId, Date.now()));
   if (standingRefused) {
     logger.info("Lobby %s refused %s: %s", state.lobby.code, presence.userId, standingRefused.reason);
     return { state, accept: false, rejectMessage: rejoinRejectMessage(standingRefused) };
@@ -7539,7 +7542,7 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
       rejectMessage: `Already in lobby ${otherCode}`
     };
   }
-  const info = joinInfoOf(nk, presence, meta);
+  const info = joinInfoOf(nk, settingsOf(ctx), presence, meta);
   return {
     state: __spreadProps(__spreadValues({}, state), {
       pendingInfo: __spreadProps(__spreadValues({}, state.pendingInfo), { [presence.userId]: info })
@@ -8033,10 +8036,10 @@ function partyIdOf(message) {
 function refuse(refusal) {
   return runtimeError(PERMISSION_DENIED, refusalMessage(refusal));
 }
-function memberFactsOf(nk, memberIds, exceptTicket, now) {
+function memberFactsOf(nk, settings, memberIds, exceptTicket, now) {
   const refusals = {};
   for (const id of memberIds) {
-    const refused = queueRefusalFor(nk, id, false, now);
+    const refused = queueRefusalFor(nk, settings, id, false, now);
     if (refused) refusals[id] = refused;
   }
   return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) };
@@ -8061,7 +8064,7 @@ function beforePartyJoin(ctx, logger, nk, envelope) {
   if (!found) return envelope;
   const refused = joinRefusal(found.status, ctx.userId);
   if (refused) throw refuse(refused);
-  const queueRefused = queueRefusalFor(nk, ctx.userId, false, Date.now());
+  const queueRefused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, false, Date.now());
   if (queueRefused) throw refuse(memberRefused(ctx.userId, queueRefused));
   return envelope;
 }
@@ -8076,7 +8079,7 @@ function beforePartyMatchmakerAdd(ctx, logger, nk, envelope) {
     status: found ? found.status : null,
     leaderId: ctx.userId,
     partyUserIds: partyPresences(nk, partyId).map((p) => p.userId),
-    members: memberFactsOf(nk, memberIds, null, Date.now()),
+    members: memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()),
     ticket: partyTicketOf(add)
   });
   if (refused) {
@@ -8168,7 +8171,7 @@ function rpcGroupQueueOpen(ctx, logger, nk, payload) {
   if (!seat) return refusedReply({ code: "not_in_lobby" });
   const home = JSON.parse(signal(nk, seat.matchId, { type: "group_members" }));
   const memberIds = home.members.map((m) => m.id);
-  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, memberIds, null, Date.now()));
+  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()));
   if (refused) return refusedReply(refused);
   const reply = signal(nk, seat.matchId, {
     type: "group_open",

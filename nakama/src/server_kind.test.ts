@@ -8,7 +8,7 @@ const settings = (env: { [key: string]: string }) => {
 }
 
 describe('server kind', () => {
-	it('is the Official server when nothing is set: Steam login only, remote moderation on', () => {
+	it('is the Official server when nothing is set: Steam login only, remote moderation on, allowed mods checked', () => {
 		expect(settings({})).toEqual({
 			kind: 'official',
 			deviceLogin: false,
@@ -17,6 +17,7 @@ describe('server kind', () => {
 			fakeLauncherStrategy: false,
 			moderationRemote: true,
 			testingRpcs: false,
+			allowedModsChecked: true,
 		})
 	})
 
@@ -51,7 +52,7 @@ describe('server kind', () => {
 		).toBe(false)
 	})
 
-	it('turns Device login on for a Community server and judges chat locally', () => {
+	it('turns Device login on for a Community server, judges chat locally and lets any mod queue', () => {
 		expect(settings({ BMP_SERVER_KIND: 'community' })).toEqual({
 			kind: 'community',
 			deviceLogin: true,
@@ -60,6 +61,7 @@ describe('server kind', () => {
 			fakeLauncherStrategy: false,
 			moderationRemote: false,
 			testingRpcs: false,
+			allowedModsChecked: false,
 		})
 	})
 
@@ -95,6 +97,7 @@ describe('server kind', () => {
 			fakeLauncherStrategy: false,
 			moderationRemote: false,
 			testingRpcs: true,
+			allowedModsChecked: false,
 		})
 	})
 

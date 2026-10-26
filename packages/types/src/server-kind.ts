@@ -3,10 +3,12 @@
 // it at startup and refuse to start when it fails, so a dev flag can never
 // reach the Official server.
 //
-// - official: Steam login only; every dev flag is refused. An unset kind is
-//   official, so forgetting the setting fails safe.
+// - official: Steam login only; every dev flag is refused; a mod report must
+//   list only allowed mods. An unset kind is official, so forgetting the
+//   setting fails safe.
 // - community: Device login on; the dev-only flags are refused; chat is
-//   judged by the local word filter unless MODERATION_REMOTE=on.
+//   judged by the local word filter unless MODERATION_REMOTE=on; any mod may
+//   queue.
 // - dev: every dev flag is allowed and overrides the dev defaults.
 //
 // Plain ES2015 with no imports: the Nakama bundle includes this file too.
@@ -30,6 +32,8 @@ export interface ServerSettings {
 	fakeLauncherStrategy: boolean
 	moderationRemote: boolean
 	testingRpcs: boolean
+	// Whether a mod report may list only the allowed mods (standing/).
+	allowedModsChecked: boolean
 }
 
 export type ServerKindError =
@@ -97,6 +101,7 @@ export function serverSettings(env: Env): ServerSettingsResult {
 				fakeLauncherStrategy: flag(env, 'DEV_FAKE_LAUNCHER_STRATEGY') === true,
 				moderationRemote,
 				testingRpcs: true,
+				allowedModsChecked: false,
 			},
 		}
 	}
@@ -110,6 +115,7 @@ export function serverSettings(env: Env): ServerSettingsResult {
 			fakeLauncherStrategy: false,
 			moderationRemote,
 			testingRpcs: false,
+			allowedModsChecked: kind === 'official',
 		},
 	}
 }

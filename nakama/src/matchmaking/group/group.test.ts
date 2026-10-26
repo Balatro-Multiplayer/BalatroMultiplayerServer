@@ -12,7 +12,7 @@ import { writeBans } from '../../moderation/bans'
 import { NotifyCode } from '../../notify'
 import { standingInputsUpdated } from '../../standing/changed'
 import { clearModReport, writeModReport } from '../../standing/storage'
-import { fakeLogger, fakeNk, playerCtx, type FakeNk } from '../../testing/fake_nk'
+import { fakeLogger, fakeNk, playerCtx, settingsFor, type FakeNk } from '../../testing/fake_nk'
 import { reportVanilla } from '../../testing/reports'
 import { beforeMatchmakerAdd, IN_GROUP_QUEUE } from '../gate'
 import { matchmakerMatched, type MatchedEntry } from '../matched'
@@ -430,7 +430,7 @@ describe('the group queue and standings', () => {
 			},
 		])
 		writeConfig(w.nk as any, PINNED)
-		standingInputsUpdated(w.nk as any, fakeLogger, Date.now())
+		standingInputsUpdated(w.nk as any, settingsFor(), fakeLogger, Date.now())
 		expect(w.lobby().groupQueue).toBeNull()
 		expect(w.sent[w.sent.length - 1]).toMatchObject({ phase: 'idle', refused: { userId: 'b', mods: ['Cryptid'] } })
 		const told = (code: number) => w.nk.notifications.filter((n) => n.code === code)

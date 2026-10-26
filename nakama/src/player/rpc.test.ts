@@ -23,8 +23,8 @@ function nkWith(profile = defaultProfile('Alice')) {
 	return { nk, names }
 }
 
-function call(fn: Function, nk: unknown, body: unknown) {
-	return JSON.parse(fn(playerCtx(USER), fakeLogger, nk, JSON.stringify(body)))
+function call(fn: Function, nk: unknown, body: unknown, env: { [key: string]: string } = {}) {
+	return JSON.parse(fn(playerCtx(USER, env), fakeLogger, nk, JSON.stringify(body)))
 }
 
 describe('profile_set_display', () => {
@@ -109,6 +109,18 @@ describe('profile_set_mods', () => {
 		expect(reply.standing).toEqual({ standing: 'none', disallowed: ['Cryptid'], reason: 'mods_not_allowed' })
 		expect(readModReport(nk as any, USER)!.mods).toEqual(['Steamodded-1.0.0~BETA-1814a', 'MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'])
 		expect(call(rpcProfileSetMods, nk, { mods: ['MultiplayerAPI-0.1.2'] }).standing.standing).toBe('valid')
+	})
+
+	it.each(['community', 'dev'])('lets any mod keep the standing on a %s server', (kind) => {
+		const { nk } = nkWith()
+		const reply = call(rpcProfileSetMods, nk, { mods: ['MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'] }, { BMP_SERVER_KIND: kind })
+		expect(reply.standing).toEqual({ standing: 'valid', disallowed: [], reason: null })
+	})
+
+	it('checks the allowed mods on the Official server', () => {
+		const { nk } = nkWith()
+		const reply = call(rpcProfileSetMods, nk, { mods: ['MultiplayerAPI-0.1.2', 'Cryptid-0.5.3'] }, { BMP_SERVER_KIND: 'official' })
+		expect(reply.standing).toEqual({ standing: 'none', disallowed: ['Cryptid'], reason: 'mods_not_allowed' })
 	})
 })
 

@@ -274,7 +274,7 @@ export function rpcRunActive(
 	const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)))
 	// With the caller's standing, so the client knows before it tries whether
 	// it meets active.requiredStanding.
-	return JSON.stringify(active ? { active, standing: standingFor(nk, userId, Date.now()) } : {})
+	return JSON.stringify(active ? { active, standing: standingFor(nk, settingsOf(ctx), userId, Date.now()) } : {})
 }
 
 // Leave the current lobby without joining its match first (the reconnect

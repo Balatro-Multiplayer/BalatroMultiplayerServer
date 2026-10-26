@@ -14,6 +14,7 @@ import { progressFor } from '../achievements/storage'
 import { isSelectable } from '../shared/avatars/unlocked'
 import { displayNameOf, playerView, updateProfile, type Profile } from './profile'
 import { syncDisplayName } from './session'
+import { settingsOf } from '../server_kind'
 
 const MAX_MODS = 300
 const MAX_MOD_LENGTH = 128
@@ -108,7 +109,7 @@ export function rpcProfileSetMods(
 	updateProfile(nk, userId, (current) => ({ ...current, mods: list }), ctx.username)
 	const now = Date.now()
 	writeModReport(nk, userId, { mods: list, reportedAt: now })
-	const standing = standingFor(nk, userId, now)
+	const standing = standingFor(nk, settingsOf(ctx), userId, now)
 	pushToLobby(nk, userId, { mods: list, standing: standing.standing })
 	return JSON.stringify({ mods: list, standing })
 }

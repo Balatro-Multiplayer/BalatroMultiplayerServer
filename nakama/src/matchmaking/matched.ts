@@ -18,6 +18,7 @@ import { partitionTeams, type TeamPlan } from './group/teams'
 import { clearMatched } from './queue'
 import { readConfig } from '../config'
 import { requiredStandingFor, type RequiredStanding } from '../standing/standing'
+import { settingsOf } from '../server_kind'
 
 // A matched ticket's player. Numeric ticket properties arrive merged into
 // properties; partyId is set for a party ticket's members.
@@ -144,7 +145,7 @@ export function matchmakerMatched(
 		requeuePartiesOf(nk, partyIdsOf(matches))
 		throw new Error(plan)
 	}
-	const refused = refusedPlayers(nk, plan)
+	const refused = refusedPlayers(nk, settingsOf(ctx), plan)
 	const groups = resolveGroups(nk, plan)
 	if (refused.length > 0 || groups.faulty.length > 0) {
 		// The matchmaker spent every ticket of the group all the same, so their

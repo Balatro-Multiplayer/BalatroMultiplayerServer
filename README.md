@@ -174,21 +174,9 @@ stays on your machine.
 
 #### Allowed mods
 
-Matchmaking takes only players whose mods are all Allowed mods. On a
-Community server these are the BMP mods (and Steamodded, Lovely and the
-BMM compatibility shim) plus the SMODS ids in `QUEUE_ALLOWED_MOD_IDS_EXTRA`.
-That setting is in [`nakama/local.yml`](nakama/local.yml), under
-`runtime.env`. Add the ids your players run, comma-separated:
-
-```yaml
-  env:
-    - "QUEUE_ALLOWED_MOD_IDS_EXTRA=MultiplayerPvP,ClaudeControl,SomeModId"
-```
-
-Then run `docker compose -f compose.local.yml restart nakama`. The server adds
-these ids to its stored list at each start. It never removes one: to remove an
-id, edit `queueAllowedModIdsExtra` in the Nakama console (Storage, collection
-`server_config`, key `global`), or delete all data with `down -v`.
+On a Community server, players with any mods may join every queue. Only the
+Official server checks that a player's mods are all Allowed mods. You have
+nothing to set.
 
 #### Player names are not proven
 
