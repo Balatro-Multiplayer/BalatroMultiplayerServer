@@ -18,6 +18,7 @@ describe('server kind', () => {
 			moderationRemote: true,
 			testingRpcs: false,
 			allowedModsChecked: true,
+			networkBans: true,
 		})
 	})
 
@@ -62,6 +63,7 @@ describe('server kind', () => {
 			moderationRemote: false,
 			testingRpcs: false,
 			allowedModsChecked: false,
+			networkBans: false,
 		})
 	})
 
@@ -98,6 +100,7 @@ describe('server kind', () => {
 			moderationRemote: false,
 			testingRpcs: true,
 			allowedModsChecked: false,
+			networkBans: false,
 		})
 	})
 

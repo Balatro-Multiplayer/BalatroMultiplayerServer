@@ -21,7 +21,13 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from './errors'
+import { NETWORK_BAN_MESSAGE } from './moderation/access'
 import { checkLoginBan } from './moderation/enforce'
+import {
+	clientNetworkHash,
+	isNetworkBanned,
+	recordNetworkLogin,
+} from './moderation/network'
 import { claimLegacyRatingsAtLogin } from './rating/legacy'
 import { settingsOf } from './server_kind'
 
@@ -99,6 +105,7 @@ export function beforeAuthenticateCustom(
 		)
 	}
 
+	refuseBannedNetwork(ctx, nk)
 	const steamId = verifySteamTicket(ctx, logger, nk, ticket)
 	account.id = STEAM_CUSTOM_ID_PREFIX + steamId
 	checkLoginBan(nk, logger, 'custom:' + account.id, Date.now())
@@ -131,14 +138,22 @@ export function beforeAuthenticateDevice(
 	if (!settingsOf(ctx).deviceLogin) {
 		throw runtimeError(PERMISSION_DENIED, 'Device login is disabled')
 	}
-	const deviceId = data.account && data.account.id
-	if (deviceId) checkLoginBan(nk, logger, 'device:' + deviceId, Date.now())
+	const deviceId = data.account?.id
+	if (deviceId) checkLoginBan(nk, logger, `device:${deviceId}`, Date.now())
 	// Nakama usernames are unique and Steam names are not: a Steam-id login
 	// lets Nakama pick the username, and the Steam name becomes the display
 	// name instead.
 	// biome-ignore lint/performance/noDelete: the key must be gone, not undefined -- the request becomes a Go struct
 	if (deviceId && STEAM_ID64_PATTERN.test(deviceId)) delete data.username
 	return data
+}
+
+// Network bans (moderation/network.ts): every login and session refresh from
+// a banned network is refused, whatever the account.
+function refuseBannedNetwork(ctx: nkruntime.Context, nk: nkruntime.Nakama) {
+	const hash = clientNetworkHash(ctx, nk, settingsOf(ctx))
+	if (hash !== null && isNetworkBanned(nk, hash))
+		throw runtimeError(PERMISSION_DENIED, NETWORK_BAN_MESSAGE)
 }
 
 // After every Steam login (Nakama allows one after-hook per message, so all
@@ -151,4 +166,21 @@ export function afterAuthenticateCustom(
 	_request: nkruntime.AuthenticateCustomRequest,
 ) {
 	claimLegacyRatingsAtLogin(ctx, logger, nk)
+	try {
+		const hash = clientNetworkHash(ctx, nk, settingsOf(ctx))
+		if (hash !== null && ctx.userId)
+			recordNetworkLogin(nk, ctx.userId, hash, Date.now())
+	} catch (e) {
+		logger.error('Recording the login network failed: %v', e)
+	}
+}
+
+export function beforeSessionRefresh(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	data: { token?: string; vars?: { [key: string]: string } },
+) {
+	refuseBannedNetwork(ctx, nk)
+	return data
 }

@@ -416,10 +416,12 @@ reads two git-ignored `.env` files. `apps/server/.env` is for the API (copy
 [`apps/server/.env.example`](apps/server/.env.example)); it refuses to start
 without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`, `ADMIN_SECRET`,
 `NAKAMA_URL` and `STEAM_WEB_API_KEY`. The root `.env` is for Compose and must
-set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `NAKAMA_SESSION_KEY`,
+set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `IP_HASH_SALT`, `NAKAMA_SESSION_KEY`,
 `NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
 `NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; Nakama refuses to start
 without them. Nakama and the API also refuse to start with any dev flag on.
+`IP_HASH_SALT` hashes the networks players log in from, for network bans
+(only the Official server has them); set it once and never change it.
 
 Use the base compose file alone for a dedicated host, or add a host-specific
 overlay with `COMPOSE_OVERLAY=<file>` when sharing a host with other services.

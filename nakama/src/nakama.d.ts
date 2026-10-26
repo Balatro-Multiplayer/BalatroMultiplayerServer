@@ -9,6 +9,9 @@ declare namespace nkruntime {
 		matchId: string
 		// The calling socket's session (realtime hooks, socket RPCs).
 		sessionId?: string
+		// The client's address as Nakama sees it: the first X-Forwarded-For
+		// entry, else the peer (nginx/prod/server.conf sets the header).
+		clientIp?: string
 	}
 
 	interface Logger {

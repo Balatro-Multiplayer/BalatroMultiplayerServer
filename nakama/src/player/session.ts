@@ -15,6 +15,8 @@ import { PERMISSION_DENIED, runtimeError } from '../errors'
 import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
 import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
 import { enforceAccountBan } from '../moderation/enforce'
+import { banNetworks } from '../moderation/network'
+import { settingsOf } from '../server_kind'
 import { parsePayload, requireUser } from '../rpc'
 import {
 	cleanName,
@@ -148,6 +150,7 @@ export function rpcSessionInit(
 	const accountBan = activeBan(readBans(nk, userId), 'account', Date.now())
 	if (accountBan) {
 		enforceAccountBan(nk, userId, accountBan)
+		banNetworks(nk, settingsOf(ctx), userId, accountBan, Date.now())
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan))
 	}
 	syncDisplayName(nk, userId, profile)
