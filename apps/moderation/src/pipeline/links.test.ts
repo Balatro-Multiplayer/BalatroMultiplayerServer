@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LINK_PLACEHOLDER, parseApprovedDomains, stripLinks } from './links.js'
+import { hasUnapprovedLink, parseApprovedDomains } from './links.js'
 
 const APPROVED = parseApprovedDomains('# ok\nyoutube.com\ntenor.com\n')
 
@@ -13,44 +13,44 @@ describe('parseApprovedDomains', () => {
 	})
 })
 
-describe('stripLinks', () => {
-	it('removes an unapproved link, keeping surrounding text', () => {
-		expect(stripLinks('check this https://evil.example/x lol', APPROVED)).toBe(
-			`check this ${LINK_PLACEHOLDER} lol`,
-		)
-	})
-
-	it('strips a bare gif url that is the whole message', () => {
+describe('hasUnapprovedLink', () => {
+	it('finds an unapproved link inside a message', () => {
 		expect(
-			stripLinks('https://tenor.com/view/cat-gif', parseApprovedDomains('')),
-		).toBe(LINK_PLACEHOLDER)
+			hasUnapprovedLink('check this https://evil.example/x lol', APPROVED),
+		).toBe(true)
 	})
 
-	it('keeps approved domains and their subdomains', () => {
-		expect(stripLinks('https://www.youtube.com/watch?v=abc', APPROVED)).toBe(
-			'https://www.youtube.com/watch?v=abc',
-		)
-		expect(stripLinks('https://tenor.com/view/x', APPROVED)).toBe(
-			'https://tenor.com/view/x',
-		)
-	})
-
-	it('handles a mix of approved and unapproved links independently', () => {
+	it('treats every link as unapproved when no domain is approved', () => {
 		expect(
-			stripLinks('a https://tenor.com/g and https://spam.co/x', APPROVED),
-		).toBe(`a https://tenor.com/g and ${LINK_PLACEHOLDER}`)
+			hasUnapprovedLink(
+				'https://tenor.com/view/cat-gif',
+				parseApprovedDomains(''),
+			),
+		).toBe(true)
+	})
+
+	it('accepts approved domains and their subdomains', () => {
+		expect(
+			hasUnapprovedLink('https://www.youtube.com/watch?v=abc', APPROVED),
+		).toBe(false)
+		expect(hasUnapprovedLink('https://tenor.com/view/x', APPROVED)).toBe(false)
+	})
+
+	it('flags a mix when any one link is unapproved', () => {
+		expect(
+			hasUnapprovedLink(
+				'a https://tenor.com/g and https://spam.co/x',
+				APPROVED,
+			),
+		).toBe(true)
 	})
 
 	it('matches www. links without a scheme', () => {
-		expect(stripLinks('go to www.spam.co now', APPROVED)).toBe(
-			`go to ${LINK_PLACEHOLDER} now`,
-		)
+		expect(hasUnapprovedLink('go to www.spam.co now', APPROVED)).toBe(true)
 	})
 
-	it('leaves link-free messages untouched (no false positives on slang)', () => {
-		expect(stripLinks('gg wp ez', APPROVED)).toBe('gg wp ez')
-		expect(stripLinks('good game 1.5.2 patch', APPROVED)).toBe(
-			'good game 1.5.2 patch',
-		)
+	it('ignores link-free messages (no false positives on slang)', () => {
+		expect(hasUnapprovedLink('gg wp ez', APPROVED)).toBe(false)
+		expect(hasUnapprovedLink('good game 1.5.2 patch', APPROVED)).toBe(false)
 	})
 })

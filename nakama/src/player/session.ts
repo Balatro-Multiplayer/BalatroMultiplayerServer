@@ -1,20 +1,25 @@
 // session_init: the game client's login. The client calls it right after
-// authenticating and gets back the player, the ToS gate and the server
+// authenticating and gets back the player, the Notice gate and the server
 // config.
 // At a Steam account's first call the player's Postgres data is synced over
-// through the API (player-sync); if that fails the login still succeeds and
-// the sync is tried again next time.
+// through the API (player-sync), found by the Steam id hash the account is
+// named by; if that fails the login still succeeds and the sync is tried
+// again next time.
 import { recordMilestone } from '../achievements/record'
 import { progressFor } from '../achievements/storage'
 import { noteReturn } from '../lobby/forfeits'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
 import { clientConfig, readConfig, type ServerConfig } from '../config'
 import { callExpress } from '../express'
+import { enqueue } from '../mirror/outbox'
 import { UNVERIFIED, writeIntegrity } from '../integrity'
 import { clearModReport } from '../standing/storage'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
 import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
 import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
 import { enforceAccountBan } from '../moderation/enforce'
+import { banNetworks } from '../moderation/network'
+import { settingsOf, type ServerSettings } from '../server_kind'
 import { parsePayload, requireUser } from '../rpc'
 import {
 	cleanName,
@@ -26,13 +31,7 @@ import {
 	type PlayerSync,
 	type Profile,
 } from './profile'
-
-const STEAM_CUSTOM_ID = /^steam:(\d+)$/
-
-export function steamIdOf(nk: nkruntime.Nakama, userId: string): string | null {
-	const match = STEAM_CUSTOM_ID.exec(nk.accountGetId(userId).customId || '')
-	return match ? match[1] : null
-}
+import { steamIdHashOf } from './steam_id'
 
 function isPlayerSync(value: { [key: string]: unknown }): boolean {
 	return typeof value.playerId === 'string' && Array.isArray(value.bans)
@@ -44,10 +43,10 @@ function fetchSync(
 	logger: nkruntime.Logger,
 	nk: nkruntime.Nakama,
 	userId: string,
-	steamId: string,
+	steamIdHash: string,
 	steamName: string,
 ): PlayerSync | null {
-	const reply = callExpress(nk, logger, ctx.env, '/player-sync', { steamId, nakamaUserId: userId, steamName })
+	const reply = callExpress(nk, logger, ctx.env, '/player-sync', { steamIdHash, nakamaUserId: userId, steamName })
 	if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
 		logger.warn('Player sync for %s failed (HTTP %v); retrying next login', userId, reply && reply.status)
 		return null
@@ -80,13 +79,16 @@ export function withResolvedMutes(profile: Profile, resolved: { [playerId: strin
 }
 
 // The login response: the API's gameLoginPayload, minus its tokens (the
-// client already holds a Nakama session).
-export function loginResponse(userId: string, profile: Profile, config: ServerConfig) {
-	const tosRequired = profile.tosAcceptedVersion < config.tosVersion
+// client already holds a Nakama session). Only a server kind with
+// noticeRequired asks for the Notice; every kind asks the age once.
+export function loginResponse(userId: string, profile: Profile, config: ServerConfig, settings: ServerSettings) {
+	const tosRequired = settings.noticeRequired && profile.tosAcceptedVersion < NOTICE_VERSION
 	return {
 		tosRequired,
-		// An update to a ToS the player accepted before (only with tosRequired).
+		// An update to a Notice the player accepted before (only with tosRequired).
 		tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
+		// The age question is still open (with tosRequired, inside the Notice).
+		ageRequired: !profile.ageAnswered,
 		player: playerView(userId, profile),
 		serverConfig: clientConfig(config),
 	}
@@ -111,12 +113,12 @@ export function rpcSessionInit(
 	noteReturn(nk, logger, userId, Date.now())
 	const steamName = cleanName(parsePayload(payload).steamName) || ctx.username
 	const stored = readProfile(nk, userId, steamName)
-	const steamId = steamIdOf(nk, userId)
+	const steamIdHash = steamIdHashOf(nk, userId)
 
 	let sync: PlayerSync | null = null
 	let resolved: { [playerId: string]: string } = {}
 	if (!stored || !stored.profile.synced) {
-		if (steamId) sync = fetchSync(ctx, logger, nk, userId, steamId, steamName)
+		if (steamIdHash) sync = fetchSync(ctx, logger, nk, userId, steamIdHash, steamName)
 	} else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
 		resolved = resolveMutes(ctx, logger, nk, stored.profile)
 	}
@@ -128,7 +130,7 @@ export function rpcSessionInit(
 		(current) => {
 			let next: Profile = { ...current, steamName, nakamaLogin: true }
 			if (sync) next = withSync(next, sync, unlocked)
-			else if (!steamId) next.synced = true // device login: nothing to sync
+			else if (!steamIdHash) next.synced = true // device login: nothing to sync
 			return withResolvedMutes(next, resolved)
 		},
 		steamName,
@@ -148,6 +150,7 @@ export function rpcSessionInit(
 	const accountBan = activeBan(readBans(nk, userId), 'account', Date.now())
 	if (accountBan) {
 		enforceAccountBan(nk, userId, accountBan)
+		banNetworks(nk, settingsOf(ctx), userId, accountBan, Date.now())
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan))
 	}
 	syncDisplayName(nk, userId, profile)
@@ -157,12 +160,14 @@ export function rpcSessionInit(
 	// and unreported until this session's profile_set_mods.
 	writeIntegrity(nk, userId, UNVERIFIED)
 	clearModReport(nk, userId)
-	return JSON.stringify(loginResponse(userId, profile, readConfig(nk)))
+	return JSON.stringify(loginResponse(userId, profile, readConfig(nk), settingsOf(ctx)))
 }
 
-// {chatEligible?} -> loginResponse. Accepts the current ToS version; with
-// chatEligible (worked out client-side from the birthdate, never sent raw)
-// also turns chat on or blocks it, as the API's acceptTos does.
+// {chatEligible?} -> loginResponse. On a server kind with noticeRequired,
+// accepts the current Notice version (and stores when). With chatEligible
+// (worked out client-side from the birthdate, never sent raw) it also takes
+// the age answer: chat on, or blocked, as the API's acceptTos does. On other
+// kinds only the age answer is taken.
 export function rpcTosAccept(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -172,12 +177,17 @@ export function rpcTosAccept(
 	const userId = requireUser(ctx)
 	const eligible = parsePayload(payload).chatEligible
 	const config = readConfig(nk)
+	const settings = settingsOf(ctx)
+	const acceptedAt = Date.now()
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
-			const next: Profile = { ...current, tosAcceptedVersion: config.tosVersion }
+			const next: Profile = settings.noticeRequired
+				? { ...current, tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }
+				: { ...current }
 			if (typeof eligible === 'boolean') {
+				next.ageAnswered = true
 				next.chatEnabled = eligible
 				next.chatBlocked = !eligible
 			}
@@ -185,5 +195,8 @@ export function rpcTosAccept(
 		},
 		ctx.username,
 	)
-	return JSON.stringify(loginResponse(userId, profile, config))
+	// Postgres (webadmin) keeps who accepted which version, and when.
+	if (settings.noticeRequired)
+		enqueue(nk, { kind: 'notice', at: acceptedAt, userId, version: NOTICE_VERSION })
+	return JSON.stringify(loginResponse(userId, profile, config, settings))
 }

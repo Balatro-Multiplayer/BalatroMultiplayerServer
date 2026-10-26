@@ -1,8 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { compressToBase64 } from '../../shared/utils/compression.js'
+import { DELETED_PLAYER_ID, DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
+import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
 
 // The Nakama -> Postgres mirror (nakama/src/mirror/outbox.ts): Nakama keeps
-// an outbox of finished runs and chat lines, and this pulls it, stores each
+// an outbox of finished runs, chat lines, forfeits and Notice acceptances,
+// and this pulls it, stores each
 // entry in the tables the website, webadmin and service queue already read,
 // and acks what it stored. Every write is idempotent (keyed by the run id or
 // the outbox key), so an entry pulled twice is stored once.
@@ -98,12 +101,23 @@ export interface PulledForfeit {
 	lobbyKind?: GameKind
 }
 
-export type PulledEntry = PulledRun | PulledChat | PulledForfeit
+// A player accepted a Notice version (nakama player/session.ts tos_accept).
+export interface PulledNotice {
+	key: string
+	kind: 'notice'
+	at: number
+	userId: string
+	version: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice
 
 export interface MirrorPlayer {
-	steamId: string | null
+	steamIdHash: string | null
 	legacyPlayerId: string | null
 	displayName: string
+	// The Nakama account no longer exists (deleted). Absent from older bundles.
+	deleted?: boolean
 }
 
 export interface MirrorPull {
@@ -115,12 +129,9 @@ export interface MirrorPull {
 // The rows an entry becomes (pure)
 // ---------------------------------------------------------------------------
 
-// How long a run's logs are kept unless one is flagged.
-export const RUN_LOG_TTL_MS = 180 * 24 * 60 * 60 * 1000
-// How long a chat line is kept unless it is flagged.
-export const CHAT_LOG_TTL_MS = 90 * 24 * 60 * 60 * 1000
-// How long a flagged message is kept.
-export const FLAGGED_TTL_MS = 90 * 24 * 60 * 60 * 1000
+// expiresAt is the earliest a row may go (retention/limits.ts). A run's logs
+// and a flagged line are evidence: the sweep keeps them past it while a report
+// or ban that uses them is open, then 180 days. Normal chat goes at 90 days.
 
 export interface RunRows {
 	lobbyKind: GameKind
@@ -143,7 +154,7 @@ export interface RunRows {
 		status: 'complete' | 'partial'
 		flagReason: FlagReason | null
 		finalizedAt: Date
-		expiresAt: Date | null
+		expiresAt: Date
 	}[]
 	// Only for a matchmade game (the API's matchmaking_matches).
 	match: {
@@ -294,11 +305,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			status: check === 'unavailable' ? 'partial' : 'complete',
 			flagReason,
 			finalizedAt,
-			// Kept as long as Nakama keeps the run (retention isKept): flagged or disputed.
-			expiresAt:
-				flagReason || run.status === 'disputed'
-					? null
-					: new Date(run.endedAt + RUN_LOG_TTL_MS),
+			expiresAt: new Date(run.endedAt + EVIDENCE_KEEP_MS),
 		})
 	}
 
@@ -386,7 +393,7 @@ export interface ChatRows {
 		flagged: boolean
 		moderationVerdict: unknown
 		sentAt: Date
-		expiresAt: Date | null
+		expiresAt: Date
 		mirrorKey: string
 		lobbyId: string | null
 	}
@@ -436,7 +443,7 @@ export function chatRowsOf(
 			flagged: line.flagged,
 			moderationVerdict: line.verdict ?? null,
 			sentAt,
-			expiresAt: line.flagged ? null : new Date(entry.at + CHAT_LOG_TTL_MS),
+			expiresAt: new Date(entry.at + (line.flagged ? EVIDENCE_KEEP_MS : CHAT_KEEP_MS)),
 			mirrorKey: entry.key,
 			lobbyId: line.lobbyId && UUID.test(line.lobbyId) ? line.lobbyId : null,
 		},
@@ -446,7 +453,7 @@ export function chatRowsOf(
 					playerId,
 					message: line.message,
 					matches: flagMatchesOf(line.verdict),
-					expiresAt: new Date(entry.at + FLAGGED_TTL_MS),
+					expiresAt: new Date(entry.at + EVIDENCE_KEEP_MS),
 					mirrorKey: entry.key,
 				}
 			: null,
@@ -456,6 +463,12 @@ export function chatRowsOf(
 // ---------------------------------------------------------------------------
 // Storing (effects injected)
 // ---------------------------------------------------------------------------
+
+export interface NoticeAcceptanceRow {
+	playerId: string
+	version: number
+	acceptedAt: Date
+}
 
 export interface MirrorDeps {
 	players: {
@@ -470,39 +483,53 @@ export interface MirrorDeps {
 			steamName: string
 			steamIdHash?: string
 			nakamaUserId?: string
+			deleted?: boolean
 		}): Promise<{ id: string }>
 	}
 	store: {
 		storeRun(rows: RunRows): Promise<void>
 		storeChat(rows: ChatRows): Promise<void>
 		storeForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void>
+		storeNoticeAcceptance(row: NoticeAcceptanceRow): Promise<void>
 	}
-	hashSteamId(steamId: string): string
 }
 
 export type MirrorService = ReturnType<typeof createMirrorService>
 
 export function createMirrorService(deps: MirrorDeps) {
-	const { players, store, hashSteamId } = deps
+	const { players, store } = deps
 
 	// Nakama user id -> player id for everyone in the pull. A Nakama user
 	// without a linked row (their first-login sync failed, or a dev device
-	// login) gets one: the row their profile names, else found by Steam id,
-	// else created.
+	// login) gets one: the row their profile names, else found by Steam id hash,
+	// else created. A deleted account gets a deleted row that does not keep
+	// its Nakama id: deletion (player/anonymize.ts) already rewrote what it
+	// could, and an entry written after it must not link back to the account.
+	// The standard deleted-player id is the same in both: it maps to itself.
 	async function resolvePlayers(
 		pulled: MirrorPull,
 	): Promise<Map<string, string>> {
 		const userIds = Object.keys(pulled.players)
 		const ids = await players.findPlayerIdsByNakamaUserIds(userIds)
 		for (const userId of userIds) {
+			if (userId === DELETED_PLAYER_ID) ids.set(userId, DELETED_PLAYER_ID)
 			if (ids.has(userId)) continue
 			const info = pulled.players[userId]
+			if (info.deleted) {
+				const created = await players.createPlayer({
+					id: randomUUID(),
+					steamName: DELETED_PLAYER_NAME,
+					deleted: true,
+				})
+				ids.set(userId, created.id)
+				continue
+			}
 			const existing =
 				(info.legacyPlayerId
 					? await players.findPlayerById(info.legacyPlayerId)
 					: null) ??
-				(info.steamId
-					? await players.findPlayerBySteamIdHash(hashSteamId(info.steamId))
+				(info.steamIdHash
+					? await players.findPlayerBySteamIdHash(info.steamIdHash)
 					: null)
 			if (existing) {
 				await players.linkNakamaUser(existing.id, userId)
@@ -512,7 +539,7 @@ export function createMirrorService(deps: MirrorDeps) {
 			const created = await players.createPlayer({
 				id: randomUUID(),
 				steamName: (info.displayName || 'Player').slice(0, 64),
-				steamIdHash: info.steamId ? hashSteamId(info.steamId) : undefined,
+				steamIdHash: info.steamIdHash ?? undefined,
 				nakamaUserId: userId,
 			})
 			ids.set(userId, created.id)
@@ -536,17 +563,19 @@ export function createMirrorService(deps: MirrorDeps) {
 				} else if (entry.kind === 'forfeit') {
 					const playerId = ids.get(entry.userId)
 					if (playerId) await store.storeForfeit(forfeitRowOf(entry, playerId), entry.lobbyKind ?? null)
+				} else if (entry.kind === 'notice') {
+					const playerId = ids.get(entry.userId)
+					if (playerId)
+						await store.storeNoticeAcceptance({
+							playerId,
+							version: entry.version,
+							acceptedAt: new Date(entry.at),
+						})
 				} else {
 					const playerId = ids.get(entry.line.userId)
 					if (playerId) {
-						const steamId = pulled.players[entry.line.userId]?.steamId
-						await store.storeChat(
-							chatRowsOf(
-								entry,
-								playerId,
-								steamId ? hashSteamId(steamId) : null,
-							),
-						)
+						const steamIdHash = pulled.players[entry.line.userId]?.steamIdHash ?? null
+						await store.storeChat(chatRowsOf(entry, playerId, steamIdHash))
 					}
 				}
 				stored.push(entry.key)

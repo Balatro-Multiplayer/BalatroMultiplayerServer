@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAllowlisted, normalizeForAllowlist, obscenityMatches, remoteModerationEnabled } from './filter'
+import { isAllowlisted, normalizeForAllowlist, obscenityMatches } from './filter'
 
 describe('the chat allowlist', () => {
 	it('keys a message the way the API did', () => {
@@ -24,10 +24,5 @@ describe('the local word filter', () => {
 		const [match] = obscenityMatches('you are a fucking cheater')
 		expect(match.word).toBe('fuck')
 		expect(match.startIndex).toBe(10)
-	})
-
-	it('is only used with the moderation service switched off', () => {
-		expect(remoteModerationEnabled({})).toBe(true)
-		expect(remoteModerationEnabled({ MODERATION_REMOTE: 'off' })).toBe(false)
 	})
 })

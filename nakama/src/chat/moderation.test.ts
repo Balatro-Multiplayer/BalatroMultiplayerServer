@@ -4,12 +4,9 @@ import { decideModerationOutcome } from './moderation'
 const ok = (body: unknown, status = 200) => ({ status, body })
 
 describe('decideModerationOutcome', () => {
-	it('allows an allow verdict, with or without a rewrite', () => {
-		expect(decideModerationOutcome(ok({ verdict: 'allow' }))).toEqual({ allowed: true, publishText: null })
-		expect(decideModerationOutcome(ok({ verdict: 'allow', publishText: 'gg' }))).toEqual({
-			allowed: true,
-			publishText: 'gg',
-		})
+	it('allows an allow verdict, ignoring any publishText', () => {
+		expect(decideModerationOutcome(ok({ verdict: 'allow' }))).toEqual({ allowed: true, review: false })
+		expect(decideModerationOutcome(ok({ verdict: 'allow', publishText: 'gg' }))).toEqual({ allowed: true, review: false })
 	})
 	it('blocks a reject as moderated, with its band', () => {
 		expect(decideModerationOutcome(ok({ verdict: 'reject', band: 'slur' }))).toEqual({
@@ -27,12 +24,5 @@ describe('decideModerationOutcome', () => {
 			allowed: false,
 			reason: 'unavailable',
 		})
-	})
-	it('blocks a rewrite it cannot publish rather than sending the original', () => {
-		for (const publishText of ['  ', 5, 'x'.repeat(501)])
-			expect(decideModerationOutcome(ok({ verdict: 'allow', publishText }))).toMatchObject({
-				allowed: false,
-				reason: 'moderated',
-			})
 	})
 })

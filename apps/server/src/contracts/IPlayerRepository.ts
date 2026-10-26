@@ -26,6 +26,8 @@ export interface IPlayerRepository {
 		steamIdHash?: string
 		discordIdHash?: string
 		nakamaUserId?: string
+		// A row for a deleted account (deletedAt set).
+		deleted?: boolean
 	}): Promise<PlayerRecord>
 	linkSteam(playerId: string, steamIdHash: string): Promise<void>
 	linkNakamaUser(playerId: string, nakamaUserId: string): Promise<void>
@@ -42,12 +44,28 @@ export interface IPlayerRepository {
 	): Promise<void>
 	updatePreferredJoker(playerId: string, preferredJoker: string): Promise<void>
 	updateSteamName(playerId: string, steamName: string): Promise<void>
-	updateTosAcceptedVersion(playerId: string, version: number): Promise<void>
+	recordNoticeAcceptance(
+		playerId: string,
+		version: number,
+		acceptedAt: Date,
+	): Promise<void>
 	updateChatStatus(
 		playerId: string,
 		chatEnabled: boolean,
 		chatBlocked: boolean,
 	): Promise<void>
-	softDeletePlayer(playerId: string): Promise<void>
+	// Account deletion (gateways/player-anonymization.gateway.ts): own data
+	// goes, shared games take the standard deleted-player id, moderation data
+	// takes anonymousId. keptRunIds: the runs whose logs stay as evidence.
+	anonymizePlayer(
+		playerId: string,
+		anonymousId: string,
+		keptRunIds: readonly string[],
+	): Promise<void>
+	// The runs the player has a log in or a report on, and whether they have
+	// a ban record.
+	deletionFacts(
+		playerId: string,
+	): Promise<{ runIds: string[]; hasBanRecord: boolean }>
 	reactivateIfDeleted(playerId: string): Promise<void>
 }

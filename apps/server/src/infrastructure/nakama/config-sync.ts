@@ -14,7 +14,6 @@ export function setIntegrityEnforced(enforced: boolean): void {
 // The server switches Nakama enforces (nakama/src/config.ts ServerConfig).
 export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 	return {
-		tosVersion: config.tosVersion,
 		chatEnabled: config.chatEnabled,
 		rankedEnabled: config.rankedEnabled,
 		casualQueueEnabled: config.casualQueueEnabled,

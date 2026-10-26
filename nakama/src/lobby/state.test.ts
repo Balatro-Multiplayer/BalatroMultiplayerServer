@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ServerOp } from './protocol'
 import {
 	CREATOR_JOIN_TIMEOUT_MS,
+	FORFEITED_SEAT,
 	adminRemove,
 	adminView,
 	type Lobby,
@@ -16,6 +17,7 @@ import {
 	newLobby,
 	snapshotFor,
 	setMetadata,
+	setCatchingUp,
 	setOwnState,
 	setPlayerInfo,
 	tick,
@@ -137,6 +139,11 @@ describe('matchmade lobbies', () => {
 		expect(lobby.hostId).toBe('b')
 		expect(snapshotFor(lobby, 'b').type).toBe('ranked')
 		expect(snapshotFor(lobbyWith('a'), 'a').type).toBe('private')
+	})
+
+	it('tells the joiner how long the server holds a dropped seat, in seconds', () => {
+		const lobby = newLobby({ code: 'ABC123', modId: 'm', maxPlayers: 2, creatorId: 'a', now: 0, graceMs: 30_000 })
+		expect(snapshotFor(lobby, 'a').graceSeconds).toBe(30)
 	})
 })
 
@@ -287,6 +294,41 @@ describe('disconnect and grace period', () => {
 		expect(expired.lobby.players.map((p) => p.id)).toEqual(['a'])
 	})
 
+	describe('a seat forfeited by the grace period', () => {
+		const running = () => {
+			const lobby = lobbyWith('a', 'b')
+			return {
+				...lobby,
+				game: { ...lobby.game, started: { runId: 'r1', players: [{ id: 'a' }, { id: 'b' }] } as any },
+			}
+		}
+		const forfeitB = (lobby: Lobby) => tick(disconnect(lobby, 'b', 'b-s1', 1000).lobby, 1000 + GRACE).lobby
+
+		it('refuses the player back with a forfeit reason while the game runs', () => {
+			const lobby = forfeitB(running())
+			expect(joinRejection(lobby, 'b', 'MultiplayerPvP')).toBe(FORFEITED_SEAT)
+		})
+
+		it('still refuses them once the game has ended and the lobby is a waiting room again', () => {
+			const lobby = forfeitB(running())
+			const ended = { ...lobby, game: { ...lobby.game, started: null } }
+			expect(joinRejection(ended, 'b', 'MultiplayerPvP')).toBe(FORFEITED_SEAT)
+		})
+
+		it('does not refuse a seat lost outside a game, or another player', () => {
+			const idle = forfeitB(lobbyWith('a', 'b'))
+			expect(joinRejection(idle, 'b', 'MultiplayerPvP')).toBeNull()
+			const lobby = forfeitB(running())
+			expect(joinRejection(lobby, 'a', 'MultiplayerPvP')).toBeNull()
+		})
+
+		it('forgets the forfeit when a new game has started', () => {
+			const lobby = forfeitB(running())
+			const next = { ...lobby, game: { ...lobby.game, started: { runId: 'r2', players: [{ id: 'a' }] } as any } }
+			expect(joinRejection(next, 'b', 'MultiplayerPvP')).toBe('The game has already started')
+		})
+	})
+
 	it('closes the lobby straight away once nobody is connected', () => {
 		let lobby = lobbyWith('a', 'b')
 		lobby = disconnect(lobby, 'b', 'b-s1', 1000).lobby
@@ -416,5 +458,58 @@ describe('setPlayerInfo', () => {
 	it('ignores players not in the lobby', () => {
 		const lobby = lobbyWith('a')
 		expect(setPlayerInfo(lobby, 'z', { displayName: 'Z' })).toEqual({ lobby, out: [] })
+	})
+})
+
+describe('catching up', () => {
+	const snapshotOf = (step: Step) =>
+		step.out.find((o) => o.kind === 'send' && o.op === ServerOp.SNAPSHOT) as
+			| { payload: { players: { id: string; catchingUp: boolean }[] } }
+			| undefined
+
+	it('tells the others, and marks the player in every snapshot', () => {
+		const lobby = lobbyWith('a', 'b')
+		const step = setCatchingUp(lobby, 'b', true, 5000)
+		expect(events(step)).toMatchObject([
+			{ type: 'player_catching_up', playerId: 'b', data: { catchingUp: true }, to: ['a'] },
+		])
+		const later = join(step.lobby, 'a', 'a-s2', info('a'))
+		expect(snapshotOf(later)?.payload.players.map((p) => [p.id, p.catchingUp])).toEqual([
+			['a', false],
+			['b', true],
+		])
+	})
+
+	it('clears the mark and tells the others when the player has caught up', () => {
+		let lobby = setCatchingUp(lobbyWith('a', 'b'), 'b', true, 5000).lobby
+		const step = setCatchingUp(lobby, 'b', false, 9000)
+		expect(events(step)).toMatchObject([
+			{ type: 'player_catching_up', playerId: 'b', data: { catchingUp: false }, to: ['a'] },
+		])
+		expect(step.lobby.players[1].catchingUpSince).toBeNull()
+	})
+
+	it('keeps the time the player started catching up, and says nothing twice', () => {
+		const first = setCatchingUp(lobbyWith('a', 'b'), 'b', true, 5000)
+		const again = setCatchingUp(first.lobby, 'b', true, 8000)
+		expect(again.out).toEqual([])
+		expect(again.lobby.players[1].catchingUpSince).toBe(5000)
+		expect(setCatchingUp(lobbyWith('a', 'b'), 'b', false, 8000).out).toEqual([])
+	})
+
+	it('ignores a player who is not seated', () => {
+		const lobby = lobbyWith('a', 'b')
+		expect(setCatchingUp(lobby, 'zz', true, 1)).toEqual({ lobby, out: [] })
+	})
+
+	it('starts again from not catching up when the player joins a new session', () => {
+		let lobby = setCatchingUp(lobbyWith('a', 'b'), 'b', true, 1000).lobby
+		lobby = disconnect(lobby, 'b', 'b-s1', 2000).lobby
+		const back = join(lobby, 'b', 'b-s2', info('b'))
+		// The new session reports again: a join starts from "not catching up".
+		expect(back.lobby.players[1].catchingUpSince).toBeNull()
+		expect(snapshotOf(back)?.payload.players.map((p) => p.catchingUp)).toEqual([false, false])
+		// The others hear the badge go, as well as the reconnect.
+		expect(eventTypes(back)).toEqual(['player_reconnected', 'player_catching_up'])
 	})
 })

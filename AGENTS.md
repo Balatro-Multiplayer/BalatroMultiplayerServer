@@ -47,10 +47,10 @@ IPs, personal paths and player data out of commits, comments and fixtures.
 - `nakama/modules/index.js` is generated and committed: it is what the
   container runs. Rebuild it (`pnpm --filter bmp-nakama-modules build`) in the
   same change as any `nakama/src` edit, then restart the `nakama` container.
-- The lobby metadata key `drafted_stake` (`DRAFTED_STAKE_KEY` in
-  `actions/registry.ts`) is a contract with the PvP mod: the host writes the
-  stake it drafted, and `mpapi_restart_game` restarts on it. The host writes the
-  empty string when a new game starts, so a stale draft is ignored.
+- Setup (`actions/setup.ts`, ADR 0003) runs the Draft and the votes. When a
+  Draft ends on one deck and stake, the server writes them into the started
+  game, and `mpapi_restart_game` keeps them and every Setup result. The
+  Setup step ids and vote option keys are a contract with PvP and SPDRN.
 - The Nakama bundle must stay a plain script (ESM, no exports, unminified):
   Nakama finds `InitModule` and every handler by global name.
 - Match state round-trips through Go between calls. Keep it to plain objects
@@ -82,10 +82,15 @@ IPs, personal paths and player data out of commits, comments and fixtures.
 - Migrations do not run on API boot (blue/green would race them). Run
   `pnpm migrate` explicitly; new schema goes through `pnpm generate`.
 - Chat calls `moderation-lb`; if it is down chat fails closed unless
-  `MODERATION_REMOTE=off`, which uses the local word filter.
-- Local-only switches: `ALLOW_DEVICE_AUTH`, `ALLOW_RANKED_LOBBIES`,
-  `DEV_AUTO_VERIFY_LAUNCHER`, `DEV_FAKE_LAUNCHER_STRATEGY`. Keep them out of
-  any deployed config.
+  `MODERATION_REMOTE=off`, which uses the local word filter (the default on
+  Community and Dev servers).
+- `BMP_SERVER_KIND=official|community|dev` (unset = `official`), read by
+  Nakama and the API through `packages/types/src/server-kind.ts`. The dev
+  flags `ALLOW_DEVICE_AUTH`, `ALLOW_RANKED_LOBBIES`,
+  `DEV_AUTO_VERIFY_LAUNCHER`, `DEV_FAKE_LAUNCHER_STRATEGY` stop startup on the
+  Official server; a Community server has Device login on and refuses the
+  other three; a Dev server allows all. Read the settings (`settingsOf` in
+  Nakama, `env` in the API), never the raw flags.
 - To isolate recent work, use `git log` on `main`; the `legacy` branch is the
   frozen MQTT-era server.
 
@@ -118,9 +123,9 @@ Formatting is Biome: tabs, single quotes, no semicolons.
   `testing/fake_nk.ts`; API tests mock `db` in `src/tests/setup.ts`.
 - Types: `pnpm build`, plus `pnpm --filter bmp-nakama-modules typecheck` and
   `pnpm --filter balatro-multiplayer-web typecheck`.
-- Live, against the local stack (`docker-compose.local.yml`): rebuild the
+- Live, against the local stack (`compose.local.yml`): rebuild the
   bundle, restart Nakama, then run the relevant
-  `node nakama/scripts/live/<area>.live.mjs`. These use throwaway device-auth
+  `node <ClaudeControl>/live/<area>.live.mjs` (not in this repo). These use throwaway device-auth
   players with a test prefix and query Postgres in the `bmp-postgres`
   container. Unit tests alone do not prove a Nakama change: Go round-tripping
   and socket behaviour only show up live. Client-level checks drive real game

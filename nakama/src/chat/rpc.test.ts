@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
 import { DEFAULT_CONFIG, writeConfig } from '../config'
 import { defaultProfile, writeProfile, type Profile } from '../player/profile'
 import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY } from '../lobby/protocol'
@@ -10,7 +11,7 @@ const USER = '11111111-1111-4111-8111-111111111111'
 
 function nkWith(profile: Partial<Profile>, config = {}) {
 	const nk = fakeNk()
-	writeConfig(nk as any, { ...DEFAULT_CONFIG, tosVersion: 2, ...config })
+	writeConfig(nk as any, { ...DEFAULT_CONFIG, ...config })
 	writeProfile(nk as any, USER, { ...defaultProfile('Alice'), ...profile })
 	return nk
 }
@@ -19,43 +20,66 @@ const enable = (nk: unknown) => JSON.parse(rpcChatEnable(playerCtx(USER), fakeLo
 const send = (nk: unknown) => rpcChatSend(playerCtx(USER), fakeLogger, nk as any, JSON.stringify({ message: 'hi' }))
 
 describe('chat_enable', () => {
-	it('turns chat on once the current ToS is accepted', () => {
-		const nk = nkWith({ tosAcceptedVersion: 2 })
+	it('turns chat on once the current Notice is accepted', () => {
+		const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION })
 		expect(enable(nk).player.chatEnabled).toBe(true)
 	})
 
-	it('waits for the current ToS', () => {
-		expect(() => enable(nkWith({ tosAcceptedVersion: 1 }))).toThrow(/Terms of Service/)
+	it('waits for the current Notice', () => {
+		expect(() => enable(nkWith({ tosAcceptedVersion: NOTICE_VERSION - 1 }))).toThrow(/Accept the Notice/)
 	})
 
 	it('refuses a chat-blocked account', () => {
-		expect(() => enable(nkWith({ tosAcceptedVersion: 2, chatBlocked: true }))).toThrow(/restricted/)
+		expect(() => enable(nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatBlocked: true }))).toThrow(/restricted/)
+	})
+})
+
+describe('chat on a Community server (no Notice)', () => {
+	const COMMUNITY = { BMP_SERVER_KIND: 'community' }
+	const enableOn = (nk: unknown) => JSON.parse(rpcChatEnable(playerCtx(USER, COMMUNITY), fakeLogger, nk as any, '{}'))
+	const sendOn = (nk: unknown) => rpcChatSend(playerCtx(USER, COMMUNITY), fakeLogger, nk as any, JSON.stringify({ message: 'hi' }))
+
+	it('turns chat on once the age is answered, without the Notice', () => {
+		expect(enableOn(nkWith({ ageAnswered: true })).player.chatEnabled).toBe(true)
+	})
+
+	it('waits for the age answer', () => {
+		expect(() => enableOn(nkWith({}))).toThrow(/age/)
+		expect(() => sendOn(nkWith({ chatEnabled: true }))).toThrow(/age/)
+	})
+
+	it('keeps chat off for an under-16 answer', () => {
+		expect(() => enableOn(nkWith({ ageAnswered: true, chatBlocked: true }))).toThrow(/restricted/)
+	})
+
+	it('lets an enabled player through to the lobby check', () => {
+		expect(() => sendOn(nkWith({ ageAnswered: true, chatEnabled: true }))).toThrow(/Not in a lobby/)
 	})
 })
 
 describe('chat_send gates', () => {
 	it('refuses when chat is off server-wide', () => {
-		const nk = nkWith({ tosAcceptedVersion: 2, chatEnabled: true }, { chatEnabled: false })
+		const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }, { chatEnabled: false })
 		expect(() => send(nk)).toThrow(/turned off/)
 	})
 
 	it('refuses players without chat enabled', () => {
-		expect(() => send(nkWith({ tosAcceptedVersion: 2 }))).toThrow(/not enabled/)
-		expect(() => send(nkWith({ tosAcceptedVersion: 2, chatEnabled: true, chatBlocked: true }))).toThrow(/not enabled/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION }))).toThrow(/not enabled/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true, chatBlocked: true }))).toThrow(/not enabled/)
 	})
 
 	it('refuses after a ToS update until it is accepted', () => {
-		expect(() => send(nkWith({ tosAcceptedVersion: 1, chatEnabled: true }))).toThrow(/Terms of Service/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION - 1, chatEnabled: true }))).toThrow(/Accept the Notice/)
 	})
 
 	it('lets an enabled player through to the lobby check', () => {
-		expect(() => send(nkWith({ tosAcceptedVersion: 2, chatEnabled: true }))).toThrow(/Not in a lobby/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }))).toThrow(/Not in a lobby/)
 	})
 })
 
 // Seated in lobby ABCDEF; the moderation service answers with verdict.
 function seated(verdict: unknown, config = {}) {
-	const nk = nkWith({ tosAcceptedVersion: 2, chatEnabled: true }, config)
+	const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, ageAnswered: true, chatEnabled: true }, config)
 	let next = 0
 	nk.uuidv4 = () => `u${++next}`
 	nk.matchGet = () => ({})
@@ -81,10 +105,11 @@ const logged = (nk: any) =>
 	[...nk.objects.entries()].filter(([k]: [string]) => k.startsWith(MIRROR_COLLECTION + '/')).map(([, o]: any) => o.value.line)
 
 describe('chat_send moderation', () => {
-	it('posts an allowed message and logs what was typed', () => {
+	it('posts an allowed message as typed and logs it', () => {
+		// A publishText from an older service is ignored: chat is never rewritten.
 		const nk = seated({ verdict: 'allow', publishText: 'h*llo' })
-		expect(say(nk, 'hello')).toEqual({ text: 'h*llo' })
-		expect(nk.posted).toEqual(['h*llo'])
+		expect(say(nk, 'hello')).toEqual({ text: 'hello' })
+		expect(nk.posted).toEqual(['hello'])
 		expect(logged(nk)).toEqual([{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'hello', flagged: false, verdict: null }])
 	})
 
@@ -94,6 +119,15 @@ describe('chat_send moderation', () => {
 		expect(nk.posted).toEqual([])
 		expect(logged(nk)).toEqual([
 			{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'bad words', flagged: true, verdict: { source: 'remote', band: 'high' } },
+		])
+	})
+
+	it('posts a message the service marks for review, and flags it so a moderator sees it', () => {
+		const nk = seated({ verdict: 'allow', band: 'review' })
+		expect(say(nk, 'borderline')).toEqual({ text: 'borderline' })
+		expect(nk.posted).toEqual(['borderline'])
+		expect(logged(nk)).toEqual([
+			{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'borderline', flagged: true, verdict: { source: 'remote', band: 'review' } },
 		])
 	})
 
@@ -117,5 +151,13 @@ describe('chat_send moderation', () => {
 		expect(nk.http).toEqual([])
 		const [, blocked] = logged(nk)
 		expect(blocked.verdict).toEqual({ source: 'local', matches: [{ word: 'fuck', startIndex: 9, endIndex: 12 }] })
+	})
+
+	it('works on a Community server without the moderation service', () => {
+		const nk = seated({ verdict: 'reject', band: 'guard_unavailable' })
+		const community = { BMP_SERVER_KIND: 'community' }
+		expect(say(nk, 'nice hand', community)).toEqual({ text: 'nice hand' })
+		expect(() => say(nk, 'what the fuck', community)).toThrow(/blocked/)
+		expect(nk.http).toEqual([])
 	})
 })

@@ -26,6 +26,7 @@ import {
 	type MemberFacts,
 	type PartyTicket,
 } from './refusal'
+import { settingsOf, type ServerSettings } from '../../server_kind'
 
 // A field of a realtime envelope: the runtime passes the protobuf's JSON
 // names (camelCase); snake_case is accepted too.
@@ -48,13 +49,14 @@ function refuse(refusal: GroupRefusal): nkruntime.Error {
 // their own (exceptTicket being the group's own).
 export function memberFactsOf(
 	nk: nkruntime.Nakama,
+	settings: ServerSettings,
 	memberIds: string[],
 	exceptTicket: string | null,
 	now: number,
 ): MemberFacts {
 	const refusals: MemberFacts['refusals'] = {}
 	for (const id of memberIds) {
-		const refused = queueRefusalFor(nk, id, false, now)
+		const refused = queueRefusalFor(nk, settings, id, false, now)
 		if (refused) refusals[id] = refused
 	}
 	return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) }
@@ -89,7 +91,7 @@ export function beforePartyJoin(
 	if (!found) return envelope
 	const refused = joinRefusal(found.status, ctx.userId)
 	if (refused) throw refuse(refused)
-	const queueRefused = queueRefusalFor(nk, ctx.userId, false, Date.now())
+	const queueRefused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, false, Date.now())
 	if (queueRefused) throw refuse(memberRefused(ctx.userId, queueRefused))
 	return envelope
 }
@@ -114,7 +116,7 @@ export function beforePartyMatchmakerAdd(
 		status: found ? found.status : null,
 		leaderId: ctx.userId,
 		partyUserIds: partyPresences(nk, partyId).map((p) => p.userId),
-		members: memberFactsOf(nk, memberIds, null, Date.now()),
+		members: memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()),
 		ticket: partyTicketOf(add),
 	})
 	if (refused) {

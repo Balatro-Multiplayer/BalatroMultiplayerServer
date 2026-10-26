@@ -2,16 +2,14 @@
 // near-zero legitimate use for arbitrary links, so a URL is almost pure downside
 // (malware / phishing / NSFW vector the guard can't even see the destination of
 // — it hallucinates "Sexual Content" on a cat-gambling gif). We therefore do not
-// relay links at all UNLESS their domain is explicitly approved: every other URL
-// is replaced with a placeholder BEFORE judging, so it never reaches other
-// players and the whole "are we responsible for the destination" question is
-// moot — we aren't delivering the link.
+// relay links at all UNLESS their domain is explicitly approved: a message with
+// any other URL is blocked, so it never reaches other players and the whole
+// "are we responsible for the destination" question is moot. A message is
+// published as typed or blocked, never rewritten.
 //
 // Approved domains come from a human-edited file (APPROVED_DOMAINS_PATH), one
 // per line; `#` lines are comments. A domain matches its exact host and any
 // subdomain (`youtube.com` approves `www.youtube.com`, `m.youtube.com`).
-
-export const LINK_PLACEHOLDER = '[link removed]'
 
 // http(s):// URLs and bare www. hosts. Real pasted links carry a scheme; we do
 // not guess at scheme-less bare domains (they collide with slang/versions).
@@ -49,16 +47,12 @@ export function isApprovedLink(
 	return isApproved(hostOf(url), approvedDomains)
 }
 
-/**
- * Replaces every URL whose domain is not approved with LINK_PLACEHOLDER.
- * Approved-domain links pass through unchanged. Returns the input untouched
- * when it contains no links.
- */
-export function stripLinks(
+/** True when the message holds a URL whose domain is not approved. */
+export function hasUnapprovedLink(
 	message: string,
 	approvedDomains: readonly string[] = [],
-): string {
-	return message.replace(URL_RE, (url) =>
-		isApproved(hostOf(url), approvedDomains) ? url : LINK_PLACEHOLDER,
+): boolean {
+	return (message.match(URL_RE) ?? []).some(
+		(url) => !isApproved(hostOf(url), approvedDomains),
 	)
 }

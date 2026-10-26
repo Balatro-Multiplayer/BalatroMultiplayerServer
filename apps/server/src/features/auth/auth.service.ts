@@ -1,12 +1,13 @@
+import { randomUUID } from 'node:crypto'
+import { NOTICE_VERSION } from '@bmp/types'
+import type { INakamaAccounts } from '../../contracts/INakamaAccounts.js'
 import type {
 	IPlayerRepository,
 	PlayerRecord,
 } from '../../contracts/IPlayerRepository.js'
-import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/history.gateway.js'
-import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
+import type { IRetentionRepository } from '../../contracts/IRetentionRepository.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
-import { getConfig } from '../../state/config.js'
 import {
 	type PlayerSession,
 	createSession,
@@ -15,6 +16,7 @@ import {
 	linkProvider,
 	unlinkProvider,
 } from '../../state/index.js'
+import { inOpenUse } from '../retention/limits.js'
 import { signJwt } from './jwt.js'
 
 type Provider = 'steam' | 'discord'
@@ -23,6 +25,8 @@ type SessionAndToken = { session: PlayerSession; token: string }
 
 interface AuthServiceDeps {
 	playerRepository: IPlayerRepository
+	nakamaAccounts: INakamaAccounts
+	retention: Pick<IRetentionRepository, 'runLinks'>
 }
 
 export type AuthService = ReturnType<typeof createAuthService>
@@ -243,14 +247,17 @@ export function createAuthService(deps: AuthServiceDeps) {
 	}
 
 	async function acceptTos(playerId: string, chatEligible?: boolean) {
-		const { tosVersion } = getConfig()
-
 		const session = getSession(playerId)
 		if (!session) throw new AppError('Session not found', 401)
 
 		await ensurePlayerExistsInDb(session)
-		await playerRepository.updateTosAcceptedVersion(playerId, tosVersion)
-		session.tosAcceptedVersion = tosVersion
+		const acceptedAt = new Date()
+		await playerRepository.recordNoticeAcceptance(
+			playerId,
+			NOTICE_VERSION,
+			acceptedAt,
+		)
+		session.tosAcceptedVersion = NOTICE_VERSION
 
 		if (chatEligible !== undefined) {
 			await playerRepository.updateChatStatus(
@@ -262,19 +269,45 @@ export function createAuthService(deps: AuthServiceDeps) {
 			session.chatBlocked = !chatEligible
 		}
 
+		// The game reads its own Nakama profile: without this it asks again.
+		// Best effort, as the other profile edits; Postgres has it already.
+		await deps.nakamaAccounts.acceptNotice(playerId, {
+			version: NOTICE_VERSION,
+			acceptedAt: acceptedAt.getTime(),
+			chatEligible,
+		})
+
 		return sessionAndToken(session)
 	}
 
-	// Soft-delete only -- never hard-deletes the players row. Hard-deleting
-	// would cascade or orphan playerBans, letting a banned player self-serve
-	// wipe their own ban by deleting their account. PII is cleared immediately;
-	// steamIdHash is kept until purgeExpiredDeletedPlayerHashes later clears it,
-	// once 12 months have passed and no ban is active (see that function's
-	// comment for why that's not an evasion loophole).
+	// Account deletion (Notice decision 17), in Nakama first, then in
+	// Postgres: the player's own data goes, their side of shared games takes
+	// the standard deleted-player id, and moderation data (bans, reports,
+	// evidence) stays under a random anonymous id, so deleting an account
+	// never wipes a ban. A run's logs are evidence while an open report or ban
+	// uses the run. If Nakama can't delete the account nothing changes, and
+	// the player can try again.
 	async function deleteAccount(playerId: string): Promise<void> {
-		await playerRepository.softDeletePlayer(playerId)
-		await pseudonymizeChatLogsForPlayer(playerId)
-		await pseudonymizeRunLogsForPlayer(playerId)
+		const anonymousId = randomUUID()
+		const facts = await playerRepository.deletionFacts(playerId)
+		const links =
+			facts.runIds.length > 0
+				? await deps.retention.runLinks(facts.runIds)
+				: new Map()
+		const now = new Date()
+		const keptRunIds = facts.runIds.filter((runId) =>
+			inOpenUse(links.get(runId) ?? [], now),
+		)
+		const nakama = await deps.nakamaAccounts.delete(playerId, anonymousId, {
+			keptRunIds,
+			keepSteamIdHash: facts.hasBanRecord,
+		})
+		if (!nakama.ok)
+			throw new AppError(
+				'Account deletion is unavailable right now, try again later',
+				503,
+			)
+		await playerRepository.anonymizePlayer(playerId, anonymousId, keptRunIds)
 	}
 
 	return {

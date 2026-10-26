@@ -37,7 +37,7 @@ function isGuardVerdict(
 }
 
 // The pure moderation decision. Total (never throws), clock/guard injected as
-// data. Precedence: threat > preset > blocklist > safety > guard-block >
+// data. Precedence: threat > link > preset > blocklist > safety > guard-block >
 // review > clean.
 //
 // Per-player rate limiting deliberately does NOT live here: the relay's chat
@@ -51,6 +51,7 @@ export function decideModeration(input: DecisionInput): Decision {
 	const {
 		isAllowlisted,
 		threatMatches,
+		hasUnapprovedLink,
 		obscenityMatches,
 		safetySignals,
 		guard,
@@ -75,6 +76,16 @@ export function decideModeration(input: DecisionInput): Decision {
 			decision: 'reject',
 			band: 'threat_block',
 			verdict: base('threat_block', { threatMatches }),
+		}
+	}
+
+	// 1b. Unapproved link: the message is blocked whole, never published with
+	// the link cut out (a message is published as typed or blocked).
+	if (hasUnapprovedLink) {
+		return {
+			decision: 'reject',
+			band: 'link_block',
+			verdict: base('link_block', {}),
 		}
 	}
 

@@ -4,7 +4,11 @@ import { signJwt } from '../../features/auth/jwt.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import { insertBan, liftBan, listBans } from '../../infrastructure/gateways/ban.gateway.js'
 import { db } from '../../infrastructure/db/index.js'
-import { banInNakama } from '../../infrastructure/nakama/moderation-sync.js'
+import {
+	banInNakama,
+	liftNetworkBanInNakama,
+	networkBansInNakama,
+} from '../../infrastructure/nakama/moderation-sync.js'
 import { createSession } from '../../state/index.js'
 import { createTestApp } from './app.js'
 
@@ -13,6 +17,8 @@ vi.mock(
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
 		banInNakama: vi.fn().mockResolvedValue(true),
+		networkBansInNakama: vi.fn().mockResolvedValue({ ok: true, value: [] }),
+		liftNetworkBanInNakama: vi.fn().mockResolvedValue({ ok: true, value: null }),
 		nakamaUserIdOf: vi.fn().mockResolvedValue(null),
 	}),
 )
@@ -149,6 +155,54 @@ describe('DELETE /api/webadmin/players/:id/bans/:banId: the queue role table', (
 		const res = await request(app).delete('/api/webadmin/players/target-4/bans/ban-9').set('Authorization', token)
 		expect(res.status).toBe(200)
 		expect(vi.mocked(liftBan)).toHaveBeenCalledWith('target-4', 'ban-9', 'moderator:mod-5')
+	})
+})
+
+describe('network bans in the admin panel', () => {
+	const networkBan = { banId: 'ban-7', own: false, networks: 2, bannedAt: 1, liftedAt: null }
+
+	it('shows staff the network bans that touch a player', async () => {
+		const token = authAsModerator('mod-6', 'Mod6')
+		vi.mocked(networkBansInNakama).mockResolvedValue({ ok: true, value: [networkBan] })
+		const res = await request(app).get('/api/webadmin/players/target-5/network-bans').set('Authorization', token)
+		expect(res.status).toBe(200)
+		expect(res.body).toEqual({ networkBans: [networkBan] })
+		expect(vi.mocked(networkBansInNakama)).toHaveBeenCalledWith('target-5')
+	})
+
+	it('says so when Nakama cannot answer', async () => {
+		const token = authAsModerator('mod-7', 'Mod7')
+		vi.mocked(networkBansInNakama).mockResolvedValue({ ok: false, error: 'unavailable' })
+		const res = await request(app).get('/api/webadmin/players/target-5/network-bans').set('Authorization', token)
+		expect(res.status).toBe(503)
+	})
+
+	it('lets an admin lift a network ban', async () => {
+		const token = authAsAdmin('admin-6', 'Admin6')
+		const res = await request(app)
+			.delete('/api/webadmin/players/target-5/network-bans/ban-7')
+			.set('Authorization', token)
+		expect(res.status).toBe(200)
+		expect(res.body).toEqual({ lifted: true })
+		expect(vi.mocked(liftNetworkBanInNakama)).toHaveBeenCalledWith('ban-7')
+	})
+
+	it('refuses a moderator lifting a network ban', async () => {
+		const token = authAsModerator('mod-8', 'Mod8')
+		const res = await request(app)
+			.delete('/api/webadmin/players/target-5/network-bans/ban-7')
+			.set('Authorization', token)
+		expect(res.status).toBe(403)
+		expect(vi.mocked(liftNetworkBanInNakama)).not.toHaveBeenCalled()
+	})
+
+	it('is 404 for a network ban not in force', async () => {
+		const token = authAsAdmin('admin-7', 'Admin7')
+		vi.mocked(liftNetworkBanInNakama).mockResolvedValue({ ok: false, error: 'not_found' })
+		const res = await request(app)
+			.delete('/api/webadmin/players/target-5/network-bans/ban-7')
+			.set('Authorization', token)
+		expect(res.status).toBe(404)
 	})
 })
 

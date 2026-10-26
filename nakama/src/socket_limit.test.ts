@@ -40,3 +40,17 @@ describe('socket.max_message_size_bytes', () => {
 		})
 	}
 })
+
+function inputQueueSize(config: string) {
+	const text = readFileSync(new URL(`../${config}`, import.meta.url), 'utf8')
+	const match = /^match:\n(?:[ \t]+.*\n|\n)*?[ \t]+input_queue_size:\s*(\d+)/m.exec(text)
+	return match ? Number(match[1]) : 128 // Nakama's default
+}
+
+describe('match.input_queue_size', () => {
+	for (const config of ['local.yml', 'prod.yml']) {
+		it(`${config} holds a 261-event burst`, () => {
+			expect(inputQueueSize(config)).toBeGreaterThanOrEqual(1024)
+		})
+	}
+})

@@ -37,20 +37,21 @@ describe('/internal/nakama', () => {
 describe('/internal/nakama/player-sync', () => {
 	const KEY = 'secret-key'
 	const NAKAMA_ID = '11111111-1111-4111-8111-111111111111'
+	const STEAM_ID_HASH = 'dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d'
 	afterEach(() => {
 		env.INTERNAL_API_KEY = original
 	})
 
-	it('creates a player row for a new Steam account', async () => {
+	it('creates a player row for a new Steam account, under the hash Nakama sent', async () => {
 		env.INTERNAL_API_KEY = KEY
 		const players = await import('../../infrastructure/gateways/player.gateway.js')
 		const res = await request(app)
 			.post('/internal/nakama/player-sync')
 			.set('X-BMP-Internal-Key', KEY)
-			.send({ steamId: '7656', nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
+			.send({ steamIdHash: STEAM_ID_HASH, nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
 		expect(res.status).toBe(200)
 		expect(vi.mocked(players.createPlayer)).toHaveBeenCalledWith(
-			expect.objectContaining({ steamName: 'Alice', nakamaUserId: NAKAMA_ID }),
+			expect.objectContaining({ steamName: 'Alice', nakamaUserId: NAKAMA_ID, steamIdHash: STEAM_ID_HASH }),
 		)
 		expect(res.body).toMatchObject({ mutedUserIds: [], unresolvedMutedPlayerIds: [], bans: [] })
 	})
@@ -72,6 +73,7 @@ describe('/internal/nakama/player-sync', () => {
 			chatEnabled: true,
 			chatBlocked: false,
 			tosAcceptedVersion: 2,
+			noticeAcceptedAt: new Date(7000),
 			deletedAt: null,
 		})
 		vi.mocked(mutes.listMutes).mockResolvedValueOnce(['legacy-2', 'legacy-3'])
@@ -92,17 +94,77 @@ describe('/internal/nakama/player-sync', () => {
 		const res = await request(app)
 			.post('/internal/nakama/player-sync')
 			.set('X-BMP-Internal-Key', KEY)
-			.send({ steamId: '7656', nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
+			.send({ steamIdHash: STEAM_ID_HASH, nakamaUserId: NAKAMA_ID, steamName: 'Alice' })
 		expect(res.status).toBe(200)
+		expect(vi.mocked(players.findPlayerBySteamIdHash)).toHaveBeenCalledWith(STEAM_ID_HASH)
 		expect(vi.mocked(players.linkNakamaUser)).toHaveBeenCalledWith('legacy-1', NAKAMA_ID)
 		expect(res.body).toMatchObject({
 			playerId: 'legacy-1',
 			steamName: 'Alice',
 			preferredJoker: 'j_mime',
 			tosAcceptedVersion: 2,
+			noticeAcceptedAt: 7000,
 			mutedUserIds: ['n-2'],
 			unresolvedMutedPlayerIds: ['legacy-3'],
 			bans: [{ banId: 'b1', type: 'queue', expiresAt: 5000, reason: 'dodging' }],
+		})
+	})
+
+	it("gives a new Nakama account a deleted player's anonymous row back, with its bans", async () => {
+		env.INTERNAL_API_KEY = KEY
+		const players = await import(
+			'../../infrastructure/gateways/player.gateway.js'
+		)
+		const bans = await import('../../infrastructure/gateways/ban.gateway.js')
+		const ANON = '99999999-9999-4999-8999-999999999999'
+		vi.mocked(players.findPlayerBySteamIdHash).mockResolvedValueOnce({
+			id: ANON,
+			steamIdHash: STEAM_ID_HASH,
+			discordIdHash: null,
+			discordUsername: null,
+			useDiscordName: false,
+			preferredJoker: 'j_joker',
+			privileges: [],
+			steamName: '[deleted player]',
+			chatEnabled: false,
+			chatBlocked: false,
+			tosAcceptedVersion: 0,
+			noticeAcceptedAt: null,
+			deletedAt: new Date(1000),
+		})
+		vi.mocked(bans.getActiveBans).mockResolvedValueOnce([
+			{
+				id: 'b1',
+				playerId: ANON,
+				banType: 'account',
+				expiresAt: null,
+				issuedBy: 'admin',
+				issuedAt: new Date(0),
+				reason: 'cheating',
+				liftedAt: null,
+				liftedBy: null,
+			},
+		])
+		const res = await request(app)
+			.post('/internal/nakama/player-sync')
+			.set('X-BMP-Internal-Key', KEY)
+			.send({
+				steamIdHash: STEAM_ID_HASH,
+				nakamaUserId: NAKAMA_ID,
+				steamName: 'Alice',
+			})
+		expect(res.status).toBe(200)
+		expect(vi.mocked(players.linkNakamaUser)).toHaveBeenCalledWith(
+			ANON,
+			NAKAMA_ID,
+		)
+		expect(vi.mocked(players.reactivateIfDeleted)).toHaveBeenCalledWith(ANON)
+		expect(vi.mocked(players.createPlayer)).not.toHaveBeenCalled()
+		expect(res.body).toMatchObject({
+			playerId: ANON,
+			bans: [
+				{ banId: 'b1', type: 'account', expiresAt: null, reason: 'cheating' },
+			],
 		})
 	})
 
@@ -111,7 +173,16 @@ describe('/internal/nakama/player-sync', () => {
 		const res = await request(app)
 			.post('/internal/nakama/player-sync')
 			.set('X-BMP-Internal-Key', KEY)
-			.send({ steamId: 'abc', nakamaUserId: NAKAMA_ID })
+			.send({ steamIdHash: 'abc', nakamaUserId: NAKAMA_ID })
+		expect(res.status).toBe(400)
+	})
+
+	it('refuses a raw Steam id', async () => {
+		env.INTERNAL_API_KEY = KEY
+		const res = await request(app)
+			.post('/internal/nakama/player-sync')
+			.set('X-BMP-Internal-Key', KEY)
+			.send({ steamId: '76561198000000001', nakamaUserId: NAKAMA_ID })
 		expect(res.status).toBe(400)
 	})
 })

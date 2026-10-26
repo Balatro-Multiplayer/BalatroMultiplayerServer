@@ -1,0 +1,278 @@
+# A Community or Dev server on your own machine. Standalone: it does not
+# use docker-compose.yml (the Official server's file).
+#
+#   docker compose -f compose.local.yml up -d                  # Community server: Postgres + Nakama
+#   docker compose -f compose.local.yml --profile api up -d    # + the API (bans, reports)
+#   docker compose -f compose.local.yml --profile web up -d    # + the website (and the API)
+#   docker compose -f compose.local.yml --profile moderation up -d   # + the chat model
+#   docker compose -f compose.local.yml run --rm seed          # test players + a web admin login
+#   docker compose -f compose.local.yml run --rm reset         # empty both databases
+#
+# A Dev server is the `dev` profile (the API, the website and a Nakama bundle
+# that rebuilds on save) with BMP_SERVER_KIND=dev. A profile cannot change a
+# setting of Nakama, so the kind comes from the root .env; .env.example has
+# the Dev server block. Then `docker compose -f compose.local.yml up --watch`
+# restarts Nakama after each rebuild.
+#
+# Every key below has a public placeholder default. Set real values in the
+# root .env (see .env.example) before other machines can reach this server.
+name: bmp-local
+
+x-api-image: &api-image
+  build:
+    context: .
+    dockerfile: apps/server/Dockerfile
+  image: bmp-local-api
+
+# What the API, migrate, seed and reset read (apps/server/src/env.ts).
+x-api-env: &api-env
+  BMP_SERVER_KIND: ${BMP_SERVER_KIND:-community}
+  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/bmp
+  JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret}
+  PLAYER_ID_SALT: ${PLAYER_ID_SALT:-local-dev-player-id-salt}
+  ADMIN_SECRET: ${ADMIN_SECRET:-local-dev-admin-secret}
+  STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+  WEB_BASE_URL: ${WEB_BASE_URL:-http://127.0.0.1:3000}
+  NAKAMA_URL: http://nakama:7350
+  NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}
+  NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-local-dev-http-key}
+  INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-dev-internal-key}
+  # Dev server only: the API refuses to start with these on any other kind.
+  DEV_AUTO_VERIFY_LAUNCHER: ${DEV_AUTO_VERIFY_LAUNCHER:-}
+  DEV_FAKE_LAUNCHER_STRATEGY: ${DEV_FAKE_LAUNCHER_STRATEGY:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bmp-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bmp
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # The game backend, from the committed bundle (nakama/modules/index.js).
+  # Its data is the "nakama" database; `migrate up` makes it on first start.
+  nakama:
+    image: heroiclabs/nakama:3.41.0
+    container_name: bmp-nakama
+    # Longer than local.yml's shutdown_grace_sec, so lobbies get to checkpoint.
+    stop_grace_period: 30s
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        db="postgres:postgres@postgres:5432/nakama"
+        /nakama/nakama migrate up --database.address "$$db"
+        exec /nakama/nakama --config /nakama/data/local.yml \
+          --database.address "$$db" \
+          --socket.server_key "$$NAKAMA_SERVER_KEY" \
+          --session.encryption_key "$$NAKAMA_SESSION_KEY" \
+          --session.refresh_encryption_key "$$NAKAMA_REFRESH_KEY" \
+          --runtime.http_key "$$NAKAMA_HTTP_KEY" \
+          --console.password "$$NAKAMA_CONSOLE_PASSWORD" \
+          --console.signing_key "$$NAKAMA_CONSOLE_SIGNING_KEY" \
+          --runtime.env "BMP_SERVER_KIND=$$BMP_SERVER_KIND" \
+          --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
+          --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
+          --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
+          --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY" \
+          --runtime.env "PLAYER_ID_SALT=$$PLAYER_ID_SALT" \
+          --runtime.env "IP_HASH_SALT=$$IP_HASH_SALT" \
+          --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
+          --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
+          --runtime.env "LOBBY_CATCH_UP_LIMIT_SECONDS=$$LOBBY_CATCH_UP_LIMIT_SECONDS" \
+          --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
+          --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
+          --runtime.env "EXPRESS_INTERNAL_URL=http://api:8788" \
+          --runtime.env "EXPRESS_INTERNAL_KEY=$$INTERNAL_API_KEY"
+    environment:
+      # community: Device login, no dev flags. dev: every dev flag allowed
+      # (packages/types/src/server-kind.ts).
+      BMP_SERVER_KIND: ${BMP_SERVER_KIND:-community}
+      # Empty = the kind's default. Only a Dev server takes ALLOW_RANKED_LOBBIES.
+      ALLOW_DEVICE_AUTH: ${ALLOW_DEVICE_AUTH:-}
+      ALLOW_RANKED_LOBBIES: ${ALLOW_RANKED_LOBBIES:-}
+      # The client ships "defaultkey" (MPAPI SERVER_DEFAULTS.server_key).
+      NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}
+      NAKAMA_SESSION_KEY: ${NAKAMA_SESSION_KEY:-local-dev-session-encryption-key}
+      NAKAMA_REFRESH_KEY: ${NAKAMA_REFRESH_KEY:-local-dev-refresh-encryption-key}
+      # Lets the API call Nakama's server-only admin RPCs. Change it before
+      # other machines can reach Nakama.
+      NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-local-dev-http-key}
+      NAKAMA_CONSOLE_PASSWORD: ${NAKAMA_CONSOLE_PASSWORD:-localdevpassword}
+      NAKAMA_CONSOLE_SIGNING_KEY: ${NAKAMA_CONSOLE_SIGNING_KEY:-local-dev-console-signing-key}
+      # Steam login only; a Community server needs neither.
+      STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
+      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
+      PLAYER_ID_SALT: ${PLAYER_ID_SALT:-local-dev-player-id-salt}
+      # Network bans: only BMP_SERVER_KIND=official uses it (and needs it).
+      IP_HASH_SALT: ${IP_HASH_SALT:-local-dev-ip-hash-salt}
+      # Empty = 120s grace after a disconnect, 60s wait for results.
+      LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
+      RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
+      # Shortens the catch-up limit of a mod that has one (PvP: 180s); empty = the default.
+      LOBBY_CATCH_UP_LIMIT_SECONDS: ${LOBBY_CATCH_UP_LIMIT_SECONDS:-}
+      # Empty = the local word filter judges chat. Set "on" with the
+      # moderation profile.
+      MODERATION_REMOTE: ${MODERATION_REMOTE:-}
+      MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
+      # Nakama calls the API at api:8788 (EXPRESS_INTERNAL_URL above). With
+      # no API running those calls fail fast and Nakama carries on.
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-dev-internal-key}
+    volumes:
+      - ./nakama/local.yml:/nakama/data/local.yml:ro
+      - ./nakama/modules:/nakama/data/modules:ro
+    ports:
+      # Game clients. NAKAMA_BIND_ADDRESS=0.0.0.0 lets other machines in.
+      - "${NAKAMA_BIND_ADDRESS:-127.0.0.1}:7350:7350"
+      # The console stays on this machine.
+      - "127.0.0.1:7351:7351"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+    develop:
+      watch:
+        # nakama-bundle (dev profile) rewrites the bundle on every save in
+        # nakama/src; `up --watch` or `watch` then restarts Nakama.
+        - path: ./nakama/modules
+          action: restart
+
+  # Dev profile: rebuilds nakama/modules/index.js on every change in
+  # nakama/src (nakama/build.mjs --watch). Its node_modules stay in the image,
+  # so the host needs no pnpm install.
+  nakama-bundle:
+    profiles: [dev]
+    build:
+      context: .
+      dockerfile: nakama/Dockerfile.bundle
+    image: bmp-local-nakama-bundle
+    container_name: bmp-nakama-bundle
+    volumes:
+      - ./nakama/src:/app/nakama/src:ro
+      - ./nakama/build.mjs:/app/nakama/build.mjs:ro
+      - ./nakama/modules:/app/nakama/modules
+      # nakama/src/server_kind.ts imports the shared rules from here.
+      - ./packages/types/src:/app/packages/types/src:ro
+    restart: unless-stopped
+
+  # Applies the API's migrations, then exits. The API waits for it.
+  migrate:
+    <<: *api-image
+    profiles: [api, web, dev, tools]
+    environment: *api-env
+    command: ["pnpm", "--filter", "balatro-multiplayer-api-server", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *api-image
+    profiles: [api, web, dev]
+    container_name: bmp-api
+    environment: *api-env
+    ports:
+      - "127.0.0.1:8788:8788"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      nakama:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8788/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  web:
+    profiles: [web, dev]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: bmp-local-web
+    container_name: bmp-web
+    environment:
+      API_SERVER_URL: http://api:8788
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One chat classifier, under the name Nakama calls (moderation-lb:8001,
+  # nakama/src/chat/moderation.ts). Put the model in the
+  # moderation-model-cache volume first (apps/moderation/README.md) and set
+  # MODERATION_REMOTE=on for Nakama.
+  moderation:
+    profiles: [moderation]
+    build:
+      context: .
+      dockerfile: apps/moderation/Dockerfile
+    image: bmp-local-moderation
+    container_name: bmp-moderation
+    environment:
+      # Logs what it would block without blocking. Set 0 to enforce.
+      SHADOW_MODE: ${SHADOW_MODE:-1}
+      GUARD_THREADS: ${MODERATION_GUARD_THREADS:-2}
+      MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
+    volumes:
+      - moderation-model-cache:/model-cache
+    networks:
+      default:
+        aliases:
+          - moderation-lb
+    restart: unless-stopped
+
+  # `docker compose -f compose.local.yml run --rm seed`: test players
+  # TestPlayer1-4 (Dev mod: BMP_IMPERSONATE_NAME=TestPlayer1) and a web admin
+  # login link (apps/server/src/features/local-server/seed.ts).
+  seed:
+    <<: *api-image
+    profiles: [tools]
+    environment: *api-env
+    working_dir: /app/apps/server
+    command: ["node", "dist/scripts/seed.js"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      nakama:
+        condition: service_healthy
+    restart: "no"
+
+  # `docker compose -f compose.local.yml run --rm reset`, then
+  # `docker compose -f compose.local.yml restart`: drops both databases and
+  # migrates the API's again (apps/server/src/features/local-server/reset.ts).
+  reset:
+    <<: *api-image
+    profiles: [tools]
+    environment: *api-env
+    working_dir: /app/apps/server
+    command: ["node", "dist/scripts/reset.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  pg-data:
+  moderation-model-cache:

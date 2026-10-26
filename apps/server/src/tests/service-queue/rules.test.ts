@@ -1,3 +1,4 @@
+import { EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
 // The service queue's pure rules: the role table, request bodies, claims,
 // durations, priority, the integrity-flag decision, retention, source ids,
 // source transitions, targets and overturn plans.
@@ -8,24 +9,22 @@ import { expiresAtOf } from '../../features/service-queue/durations.js'
 import {
 	REPEAT_THRESHOLD,
 	decideIntegrityFlag,
-	integritySourceId,
 	utcDayStart,
 } from '../../features/service-queue/integrity-flag.js'
 import { planOverturn, ratedPlacements, samePlaces } from '../../features/service-queue/overturn.js'
 import { allowedActionsFor, mayIssueBan, mayLiftBan, permissionFor } from '../../features/service-queue/permissions.js'
 import { BASE_PRIORITY, priorityOf } from '../../features/service-queue/priority.js'
 import {
-	REPORTED_CHAT_KEEP_MS,
-	flaggedMessagePurgeable,
 	reportedLobbyPurgeable,
 } from '../../features/service-queue/purge.js'
 import { httpOf } from '../../features/service-queue/refusals.js'
 import {
 	antiCheatSourceId,
+	integritySourceId,
 	numericSourceId,
 	parseAntiCheatSourceId,
 	parseIntegritySourceId,
-} from '../../features/service-queue/source-ids.js'
+} from '../../shared/service-queue/source-ids.js'
 import { pickTarget, targetsOf } from '../../features/service-queue/targets.js'
 import { closes, sourceStatusFor } from '../../features/service-queue/transitions.js'
 import { actorOf, contextOf, playerIdOfActor, roleOf } from '../../features/service-queue/types.js'
@@ -254,16 +253,14 @@ describe('the integrity flag', () => {
 })
 
 describe('retention', () => {
-	it('keeps an expired flagged message while its item is open', () => {
-		const expired = new Date(NOW.getTime() - 1)
-		expect(flaggedMessagePurgeable({ expiresAt: expired, hasOpenItem: false }, NOW)).toBe(true)
-		expect(flaggedMessagePurgeable({ expiresAt: expired, hasOpenItem: true }, NOW)).toBe(false)
-		expect(flaggedMessagePurgeable({ expiresAt: new Date(NOW.getTime() + 1), hasOpenItem: false }, NOW)).toBe(false)
-	})
-
-	it("keeps a reported lobby's chat while a report is open and for 30 days after the last resolution", () => {
+	it("keeps a reported lobby's chat while a report is open and for 180 days after the last resolution (the evidence rule)", () => {
+		expect(EVIDENCE_KEEP_MS).toBe(180 * DAY)
+		const withinEvidenceLimit = new Date(NOW.getTime() - 100 * DAY)
+		expect(
+			reportedLobbyPurgeable({ openReports: 0, lastResolvedAt: withinEvidenceLimit, latestExpiresAt: new Date(NOW.getTime() - DAY) }, NOW),
+		).toBe(false)
 		const expired = new Date(NOW.getTime() - DAY)
-		const longAgo = new Date(NOW.getTime() - REPORTED_CHAT_KEEP_MS - 1)
+		const longAgo = new Date(NOW.getTime() - EVIDENCE_KEEP_MS - 1)
 		const recently = new Date(NOW.getTime() - DAY)
 		expect(reportedLobbyPurgeable({ openReports: 1, lastResolvedAt: longAgo, latestExpiresAt: expired }, NOW)).toBe(false)
 		expect(reportedLobbyPurgeable({ openReports: 0, lastResolvedAt: recently, latestExpiresAt: expired }, NOW)).toBe(false)

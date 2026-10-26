@@ -1,3 +1,4 @@
+import { NOTICE_VERSION } from '@bmp/types'
 import { Router } from 'express'
 import rateLimit from 'express-rate-limit'
 import { env } from '../../env.js'
@@ -10,13 +11,11 @@ import {
 	setNakamaAvatar,
 } from '../../infrastructure/nakama/avatar-sync.js'
 import {
-	deleteNakamaAccount,
 	editNakamaProfile,
 	linkNakamaDiscord,
 } from '../../infrastructure/nakama/profile-sync.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { AppError } from '../../shared/utils/errors.js'
-import { getConfig } from '../../state/config.js'
 import { getSession, removeSession } from '../../state/index.js'
 import type { PlayerSession } from '../../state/index.js'
 import { discordLinkService } from '../nakama/discord-link.js'
@@ -48,8 +47,7 @@ function playerPayload(session: PlayerSession) {
 function tosGate(
 	session: PlayerSession,
 ): { tosRequired: true; tosUpdate: boolean; token: string } | null {
-	const { tosVersion } = getConfig()
-	if (session.tosAcceptedVersion < tosVersion) {
+	if (env.NOTICE_REQUIRED && session.tosAcceptedVersion < NOTICE_VERSION) {
 		return {
 			tosRequired: true,
 			tosUpdate: session.tosAcceptedVersion > 0,
@@ -385,7 +383,6 @@ export function createAuthRouter(service: AuthService): Router {
 			const playerId = req.player!.playerId
 
 			await service.deleteAccount(playerId)
-			await deleteNakamaAccount(playerId)
 			removeSession(playerId)
 
 			res.json({ ok: true })

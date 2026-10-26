@@ -15,15 +15,13 @@ and the guard lane shedding its own backlog.
 
 ```
 POST /moderate  {playerId, lobbyCode, message}
-             →  {verdict: "allow" | "reject", band, latency_ms,
-                 publishText?, reason?}
-GET  /health →  {status: "ok" | "loading", model_loaded, enforcement,
+             ->  {verdict: "allow" | "reject", band, latency_ms, reason?}
+GET  /health ->  {status: "ok" | "loading", model_loaded, enforcement,
                  auth, model, model_load_error, build, lists, guard}
 ```
 
-`publishText` on an `allow` means **publish this instead of what was typed** —
-a link stripped, mild profanity softened. The relay publishes the rewrite but
-stores the original as evidence.
+The service never changes a message. The relay publishes an `allow` exactly
+as typed and drops a `reject`.
 
 ## Running it
 
@@ -88,7 +86,7 @@ in — check it before concluding anything about behaviour.
 nothing unjudged is ever published. If players suddenly cannot talk at all,
 check `model_loaded` in `/health` before looking anywhere else.
 
-**In shadow mode (the default), a missing or still-loading model publishes
+**In shadow mode (the default when unset, and in `compose.local.yml`), a missing or still-loading model publishes
 instead**, marked `review` in the log. That mode already publishes everything
 the guard would have blocked, so treating "cannot answer" more harshly than
 "answered Unsafe" would only ever cost you working chat. The deterministic
@@ -146,12 +144,12 @@ replica:
 | Variable | Default | Meaning |
 |---|---|---|
 | `GUARD_MODEL` | `/model-cache` | Model file, or a directory holding exactly one `.gguf`. |
-| `SHADOW_MODE` | `1` in compose | `1` = log what the guard *would* block without blocking. `0` = enforce. |
+| `SHADOW_MODE` | `0` in `docker-compose.yml` (Official), `1` in `compose.local.yml`; shadow when unset | `1` = log what the guard *would* block without blocking. `0` = enforce. |
 | `GUARD_THREADS` | `2` | Only set this alongside a CPU cap — see [CPU](#cpu). |
 | `GUARD_LOW_THRESHOLD` / `GUARD_HIGH_THRESHOLD` | `0.35` / `0.8` | Routing thresholds against the model's yes-probability score — see `rankEngine.ts`. |
 | `MODERATION_BEARER_TOKEN` | unset | Optional `Authorization: Bearer`. The service publishes no host port, so a network boundary already protects it; set one before exposing it. |
 | `PORT` | `8001` | |
-| `ALLOWLIST_PATH` / `REWRITES_PATH` / `APPROVED_DOMAINS_PATH` | bundled copies | Override the shipped word lists. |
+| `ALLOWLIST_PATH` / `APPROVED_DOMAINS_PATH` | bundled copies | Override the shipped lists. |
 | `MODERATION_REQUIRE_LISTS` | `0` | `1` turns an unreadable configured list into a startup failure instead of a silent degrade. |
 
 Compose-level indirection (`docker-compose.yml`'s `moderation-1`..`5`
@@ -166,7 +164,7 @@ per-container var above is itself sourced from these:
 | `MODERATION_BEARER_TOKEN` | unset | → each replica's `MODERATION_BEARER_TOKEN` (same var name, just also settable at the compose level). |
 
 `SHADOW_MODE=1` only relaxes the **model** tier — the deterministic tiers
-(threats, blocklist, PII, rewrites) enforce in both modes. It
+(threats, links, blocklist, PII) enforce in both modes. It
 also covers a model that is absent entirely (see above); a model that is
 merely late still refuses even in shadow mode.
 
@@ -175,8 +173,9 @@ merely late still refuses even in shadow mode.
 Tiers run in order of how *certain* they are, not how severe — the cheap
 certain checks settle most traffic before the model is asked anything:
 
-1. **transform** — strip unapproved links, apply rewrites
-2. **threats** — explicit violence, always blocks
+1. **threats**: explicit violence, always blocks
+2. **links**: a link whose domain is not in `approved-domains.txt` blocks
+   the whole message
 3. **allowlist** — a fast-pass for known-good phrasing; about 60% of real
    chat short-circuits here (`good luck have fun`: 1301ms → 1ms)
 4. **blocklist** — slurs and the like

@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { drainMirror, MIRROR_PAGE } from '../../features/nakama/mirror.job.js'
 import {
-	CHAT_LOG_TTL_MS,
-	RUN_LOG_TTL_MS,
 	type MirrorPull,
 	type PulledChat,
 	type PulledRun,
@@ -11,10 +9,12 @@ import {
 	rankedGameModeOf,
 	runRowsOf,
 } from '../../features/nakama/mirror.service.js'
+import { DELETED_PLAYER_ID } from '../../shared/deleted-player.js'
 import { decompressFromBase64 } from '../../shared/utils/compression.js'
 import { err, ok } from '../../shared/utils/result.js'
 
 const T0 = 1_790_000_000_000
+const DAY = 24 * 60 * 60 * 1000
 
 function run(over: Partial<PulledRun['run']> = {}): PulledRun {
 	return {
@@ -69,10 +69,12 @@ describe('runRowsOf', () => {
 		})
 		const [a, b] = rows.logs
 		expect(a).toMatchObject({ playerId: 'pg-a', status: 'complete', flagReason: null, carbonHash: 'h', eventCount: 1 })
-		expect(a.expiresAt).toEqual(new Date(T0 + 60_000 + RUN_LOG_TTL_MS))
+		expect(a.expiresAt).toEqual(new Date(T0 + 60_000 + 180 * DAY))
 		expect(JSON.parse(decompressFromBase64(a.compressedEvents))).toEqual([[1, 'x', null]])
-		// b's log never arrived but its check failed: kept forever, and flagged.
-		expect(b).toMatchObject({ playerId: 'pg-b', flagReason: 'hash_mismatch', expiresAt: null, eventCount: 0 })
+		// b's log never arrived but its check failed: flagged. The sweep keeps it
+		// past expiresAt while its report or ban is open.
+		expect(b).toMatchObject({ playerId: 'pg-b', flagReason: 'hash_mismatch', eventCount: 0 })
+		expect(b.expiresAt).toEqual(new Date(T0 + 60_000 + 180 * DAY))
 		expect(rows.flagged).toEqual([{ playerId: 'pg-b', reason: 'hash_mismatch' }])
 		expect(rows.match).toMatchObject({
 			gameMode: 'ranked:duel',
@@ -101,9 +103,10 @@ describe('runRowsOf', () => {
 })
 
 describe('runRowsOf: flags and disputes', () => {
-	it("keeps a disputed run's logs, as Nakama's retention keeps the run", () => {
+	it("gives a disputed run's logs the evidence limit, 180 days from the end", () => {
 		const rows = runRowsOf(run({ status: 'disputed' }), ids)
-		expect(rows.logs.map((l) => l.expiresAt)).toEqual([null, null])
+		const limit = new Date(T0 + 60_000 + 180 * DAY)
+		expect(rows.logs.map((l) => l.expiresAt)).toEqual([limit, limit])
 	})
 
 	it('marks which players Nakama rated, so a void replays the same games', () => {
@@ -185,13 +188,14 @@ describe('chatRowsOf', () => {
 	it('keeps a clean line for 90 days', () => {
 		const rows = chatRowsOf(line(false), 'pg-a', 'hash')
 		expect(rows.chat).toMatchObject({ playerId: 'pg-a', moderationId: 'hash', mirrorKey: 'k-chat', flagged: false })
-		expect(rows.chat.expiresAt).toEqual(new Date(T0 + CHAT_LOG_TTL_MS))
+		expect(rows.chat.expiresAt).toEqual(new Date(T0 + 90 * DAY))
 		expect(rows.flaggedMessage).toBeNull()
 	})
 
-	it('keeps a flagged line and files it for review', () => {
+	it('keeps a flagged line 180 days as evidence and files it for review', () => {
 		const rows = chatRowsOf(line(true), 'pg-a', null)
-		expect(rows.chat.expiresAt).toBeNull()
+		expect(rows.chat.expiresAt).toEqual(new Date(T0 + 180 * DAY))
+		expect(rows.flaggedMessage?.expiresAt).toEqual(new Date(T0 + 180 * DAY))
 		expect(rows.flaggedMessage).toMatchObject({ matches: { source: 'remote', band: 'high' }, mirrorKey: 'k-chat' })
 	})
 
@@ -207,7 +211,7 @@ function deps() {
 	const players = {
 		findPlayerIdsByNakamaUserIds: vi.fn(async () => new Map([['na', 'pg-a']])),
 		findPlayerById: vi.fn(async (id: string) => (id === 'pg-legacy' ? { id } : null)),
-		findPlayerBySteamIdHash: vi.fn(async (hash: string) => (hash === 'hash:76' ? { id: 'pg-steam' } : null)),
+		findPlayerBySteamIdHash: vi.fn(async (hash: string) => (hash === 'h76' ? { id: 'pg-steam' } : null)),
 		linkNakamaUser: vi.fn(async () => undefined),
 		createPlayer: vi.fn(async (data: { id: string }) => ({ id: data.id })),
 	}
@@ -215,8 +219,9 @@ function deps() {
 		storeRun: vi.fn(async () => undefined),
 		storeChat: vi.fn(async () => undefined),
 		storeForfeit: vi.fn(async () => undefined),
+		storeNoticeAcceptance: vi.fn(async () => undefined),
 	}
-	const service = createMirrorService({ players, store, hashSteamId: (s) => `hash:${s}` })
+	const service = createMirrorService({ players, store })
 	return { players, store, service }
 }
 
@@ -226,10 +231,10 @@ describe('the mirror service', () => {
 		const resolved = await service.resolvePlayers({
 			entries: [],
 			players: {
-				na: { steamId: '1', legacyPlayerId: null, displayName: 'Ay' },
-				nb: { steamId: '99', legacyPlayerId: 'pg-legacy', displayName: 'Bee' },
-				nc: { steamId: '76', legacyPlayerId: null, displayName: 'Cee' },
-				nd: { steamId: null, legacyPlayerId: null, displayName: '' },
+				na: { steamIdHash: 'h1', legacyPlayerId: null, displayName: 'Ay' },
+				nb: { steamIdHash: 'h99', legacyPlayerId: 'pg-legacy', displayName: 'Bee' },
+				nc: { steamIdHash: 'h76', legacyPlayerId: null, displayName: 'Cee' },
+				nd: { steamIdHash: null, legacyPlayerId: null, displayName: '' },
 			},
 		})
 		expect(resolved.get('na')).toBe('pg-a')
@@ -243,16 +248,45 @@ describe('the mirror service', () => {
 		expect(resolved.get('nd')).toBe(players.createPlayer.mock.calls[0][0].id)
 	})
 
+	it('never stores the Nakama id of a deleted account it has no row for', async () => {
+		const { players, service } = deps()
+		const resolved = await service.resolvePlayers({
+			entries: [],
+			players: { ngone: { steamIdHash: null, legacyPlayerId: null, displayName: '', deleted: true } },
+		})
+		const created = players.createPlayer.mock.calls[0][0] as { id: string; nakamaUserId?: string; deleted?: boolean; steamName: string }
+		expect(created.nakamaUserId).toBeUndefined()
+		expect(created).toEqual(expect.objectContaining({ steamName: '[deleted player]', deleted: true }))
+		expect(resolved.get('ngone')).toBe(created.id)
+	})
+
+	it("maps the standard deleted-player id to itself, every deleted player's side of a shared game", async () => {
+		const { players, service } = deps()
+		const resolved = await service.resolvePlayers({
+			entries: [],
+			players: {
+				[DELETED_PLAYER_ID]: {
+					steamIdHash: null,
+					legacyPlayerId: null,
+					displayName: '',
+					deleted: true,
+				},
+			},
+		})
+		expect(resolved.get(DELETED_PLAYER_ID)).toBe(DELETED_PLAYER_ID)
+		expect(players.createPlayer).not.toHaveBeenCalled()
+	})
+
 	it('stores what it can and leaves the rest', async () => {
 		const { store, service } = deps()
 		store.storeRun.mockRejectedValueOnce(new Error('db down'))
 		const chat: PulledChat = { key: 'k-chat', kind: 'chat', at: T0, line: { lobbyCode: 'X', userId: 'na', message: 'm', flagged: false, verdict: null } }
 		const result = await service.storePull({
 			entries: [run(), chat],
-			players: { na: { steamId: '1', legacyPlayerId: null, displayName: '' }, nb: { steamId: null, legacyPlayerId: null, displayName: '' } },
+			players: { na: { steamIdHash: 'h1', legacyPlayerId: null, displayName: '' }, nb: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 		})
 		expect(result).toEqual({ stored: ['k-chat'], failed: ['k-run'] })
-		expect(store.storeChat).toHaveBeenCalledWith(expect.objectContaining({ chat: expect.objectContaining({ moderationId: 'hash:1' }) }))
+		expect(store.storeChat).toHaveBeenCalledWith(expect.objectContaining({ chat: expect.objectContaining({ moderationId: 'h1' }) }))
 	})
 })
 
@@ -261,7 +295,7 @@ describe('a forfeit entry', () => {
 		const { store, service } = deps()
 		await service.storePull({
 			entries: [{ key: 'k-f', kind: 'forfeit', at: T0 + 30_000, userId: 'na', runId: 'r1', code: 'ABCDE', forfeitedAt: T0 }],
-			players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+			players: { na: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 		})
 		expect(store.storeForfeit).toHaveBeenCalledWith({
 			matchId: 'r1',
@@ -273,11 +307,23 @@ describe('a forfeit entry', () => {
 	})
 })
 
+describe('a notice entry', () => {
+	it('records which Notice version the player accepted, and when', async () => {
+		const { store, service } = deps()
+		const result = await service.storePull({
+			entries: [{ key: 'k-n', kind: 'notice', at: T0, userId: 'na', version: 2 }],
+			players: { na: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
+		})
+		expect(result.stored).toEqual(['k-n'])
+		expect(store.storeNoticeAcceptance).toHaveBeenCalledWith({ playerId: 'pg-a', version: 2, acceptedAt: new Date(T0) })
+	})
+})
+
 describe('drainMirror', () => {
 	const chat = (n: number): PulledChat => ({ key: `k${n}`, kind: 'chat', at: n, line: { lobbyCode: 'X', userId: 'na', message: 'm', flagged: false, verdict: null } })
 	const page = (from: number, count: number): MirrorPull => ({
 		entries: Array.from({ length: count }, (_, i) => chat(from + i)),
-		players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+		players: { na: { steamIdHash: null, legacyPlayerId: null, displayName: '' } },
 	})
 
 	it('pulls pages until a short one, acking each', async () => {

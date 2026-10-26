@@ -32,19 +32,21 @@ export const players = pgTable(
 		chatEnabled: boolean('chat_enabled').notNull().default(false),
 		chatBlocked: boolean('chat_blocked').notNull().default(false),
 		tosAcceptedVersion: integer('tos_accepted_version').notNull().default(0),
+		// When the player accepted that Notice version; null before the first
+		// acceptance that recorded a time.
+		noticeAcceptedAt: timestamp('notice_accepted_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true })
 			.notNull()
 			.defaultNow(),
 		updatedAt: timestamp('updated_at', { withTimezone: true })
 			.notNull()
 			.defaultNow(),
-		// Set when the player deletes their account. The row is never hard-deleted:
-		// PII fields are cleared immediately (see softDeletePlayer), but steamIdHash
-		// survives so an active ban stays enforceable and re-signing in with the same
-		// Steam identity reactivates this same row instead of creating a fresh one.
+		// Set when the player deletes their account. Deletion replaces the row by
+		// one under a random anonymous id (gateways/player-anonymization.gateway.ts);
+		// it keeps steamIdHash only when the player has a ban record, so the ban
+		// stays enforceable and a re-sign-in with that Steam identity lands on it.
 		// Null = active account.
 		deletedAt: timestamp('deleted_at', { withTimezone: true }),
-		ipHash: text('ip_hash'),
 		// Nakama account id, set when the mirror or profile sync first sees
 		// the player's Nakama account. Null for players who never played on it.
 		nakamaUserId: uuid('nakama_user_id'),
@@ -92,13 +94,17 @@ export const gameResults = pgTable('game_results', {
 export const chatLogs = pgTable('chat_logs', {
 	id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
 	lobbyCode: varchar('lobby_code', { length: 6 }).notNull(),
-	// UUID of the sender at send time; pseudonymized to deleted_user_{hash} on account deletion
+	// UUID of the sender at send time; an anonymous id after account deletion
+	// (gateways/player-anonymization.gateway.ts)
 	playerId: text('player_id').notNull(),
-	// Hashed Steam ID (steam_id_hash) — survives account deletion for moderation purposes
+	// Hashed Steam ID (steam_id_hash); kept after account deletion only when
+	// the player has a ban record
 	moderationId: text('moderation_id'),
 	message: text('message').notNull(),
 	flagged: boolean('flagged').notNull().default(false),
-	// NULL for flagged/reported messages; set to sentAt + 30 days otherwise
+	// The earliest the line may go: sentAt + 90 days, or + 180 days for a
+	// flagged line, which the sweep keeps longer while a report or ban uses it
+	// (features/retention). NULL on older flagged lines: read as sentAt + 180 days.
 	expiresAt: timestamp('expires_at', { withTimezone: true }),
 	moderationVerdict: jsonb('moderation_verdict'),
 	sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
@@ -129,6 +135,8 @@ export const actionLogs = pgTable('action_logs', {
 // table (the row with ended_at IS NULL). See getCurrentSeason().
 export const serverConfig = pgTable('server_config', {
 	id: integer('id').primaryKey().default(1),
+	// Unused: the Notice version is in code (@bmp/types notice.ts). Kept so a
+	// running older API color can still read the row; drop it in a later release.
 	tosVersion: integer('tos_version').notNull().default(1),
 	// Runtime-toggleable feature flags, admin-editable via
 	// webadmin/config.route.ts's PATCH /config/feature-flags. Previously
@@ -750,11 +758,13 @@ export const matchRunLogs = pgTable(
 		eventCount: integer('event_count').notNull().default(0),
 		status: varchar('status', { length: 16 }).notNull().default('partial'), // partial | complete
 		// null | 'hash_mismatch' | 'elapsed_time_gate' -- set by Phase 8's
-		// evaluateAntiCheat at ranked result resolution. A non-null value forces
-		// expiresAt to null (see below) regardless of the normal 30-day TTL.
+		// evaluateAntiCheat at ranked result resolution.
 		flagReason: varchar('flag_reason', { length: 32 }),
 		finalizedAt: timestamp('finalized_at', { withTimezone: true }),
-		expiresAt: timestamp('expires_at', { withTimezone: true }), // null = indefinite (flagged/disputed)
+		// The earliest the log may go: the run's end + 180 days. The sweep keeps
+		// it longer while a report or ban uses the run (features/retention).
+		// NULL on older flagged or disputed logs: read as finalizedAt + 180 days.
+		expiresAt: timestamp('expires_at', { withTimezone: true }),
 	},
 	(t) => [primaryKey({ columns: [t.runId, t.playerId] })],
 )

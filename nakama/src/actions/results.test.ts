@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { type RunRecord, ServerOp } from '../lobby/protocol'
 import { activeRunOf } from '../lobby/active'
-import { action } from '../lobby/relay'
+import { LOG_BURST, action } from '../lobby/relay'
 import {
 	type Lobby,
 	type Outbound,
@@ -18,7 +18,7 @@ import {
 	tick,
 } from '../lobby/state'
 import { runWrites } from '../lobby/storage'
-import { MAX_LOG_EVENTS } from './registry'
+import { MAX_LOG_BATCH, MAX_LOG_EVENTS } from './registry'
 import { reconcile, settle } from './results'
 
 const info = (name: string) => ({
@@ -386,6 +386,28 @@ describe('replay logs', () => {
 		expect(step.lobby.game.logs.a.lines).toEqual(['[1,"play",[1]]', '[2,"play",[2]]'])
 	})
 
+	it('stamps the race start on the first recorded event and keeps it', () => {
+		const lobby = started('a', 'b')
+		expect(lobby.game.started?.raceStartedAt).toBeUndefined()
+		let step = log(lobby, 'b', 1, 2000)
+		expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+		step = log(step.lobby, 'a', 2, 9000)
+		expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+		expect(snapshotFor(step.lobby, 'a', 9500).game.started?.raceStartedAt).toBe(2000)
+	})
+
+	it('starts the race again for a restarted game', () => {
+		let lobby = log(started('a', 'b'), 'a', 1, 2000).lobby
+		lobby = send(lobby, 'a', 'mpapi_restart_game', {}, 3000).lobby
+		expect(lobby.game.started?.raceStartedAt).toBeUndefined()
+	})
+
+	it('tells a joiner the server time, to measure the race against', () => {
+		const lobby = log(started('a', 'b'), 'a', 1, 2000).lobby
+		const snap = snapshotFor(lobby, 'b', 61_000)
+		expect(snap.serverNow).toBe(61_000)
+	})
+
 	it('drops an event sent for a run the server has restarted', () => {
 		const lobby = started('a', 'b')
 		const runId = lobby.game.started!.runId
@@ -395,6 +417,26 @@ describe('replay logs', () => {
 		expect(stale.out.filter((o) => o.kind === 'send')).toEqual([])
 		const current = send(lobby, 'a', 'mpapi_log_event', { t: 9, opcode: 'play', run: runId })
 		expect(current.lobby.game.logs.a.lines).toEqual(['[9,"play",null]'])
+	})
+
+	it('keeps a late burst of events in arrival order, after the sender was away', () => {
+		let lobby = started('a', 'b')
+		const runId = lobby.game.started!.runId
+		lobby = log(lobby, 'a', 1).lobby
+		lobby = disconnect(lobby, 'a', 'a-s', 1600).lobby
+		lobby = join(lobby, 'a', 'a-s2', info('a')).lobby
+		// Events made while the socket was down arrive together, in order.
+		for (const t of [2, 3, 4]) {
+			const step = send(lobby, 'a', 'mpapi_log_event', { t, opcode: 'play', args: [t], run: runId }, 1700)
+			expect(rejection(step)).toBeUndefined()
+			lobby = step.lobby
+		}
+		expect(lobby.game.logs.a.lines).toEqual([
+			'[1,"play",[1]]',
+			'[2,"play",[2]]',
+			'[3,"play",[3]]',
+			'[4,"play",[4]]',
+		])
 	})
 
 	it('refuses events outside a game, or malformed ones', () => {
@@ -434,6 +476,89 @@ describe('replay logs', () => {
 		// 150 log events in the same instant, and 'a' can still act.
 		const step = report(lobby, 'a', places('a', 'b'), 1500)
 		expect(rejection(step)).toBeUndefined()
+	})
+
+	describe('batches (mpapi_log_events)', () => {
+		const batch = (lobby: Lobby, from: string, events: unknown[], now = 1500) =>
+			send(lobby, from, 'mpapi_log_events', { events }, now)
+		const events = (from: number, count: number, run?: string) =>
+			Array.from({ length: count }, (_, i) => ({ t: from + i, opcode: 'play', args: [from + i], run }))
+
+		it('stamps the race start on the first batch and keeps it', () => {
+			const lobby = started('a', 'b')
+			const runId = lobby.game.started!.runId
+			let step = batch(lobby, 'b', events(1, 2, runId), 2000)
+			expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+			step = batch(step.lobby, 'a', events(3, 1, runId), 9000)
+			expect(step.lobby.game.started?.raceStartedAt).toBe(2000)
+		})
+
+		it('keeps the events in order and tells the others once', () => {
+			const lobby = started('a', 'b', 'c')
+			const runId = lobby.game.started!.runId
+			const step = batch(lobby, 'a', events(1, 3, runId))
+			expect(step.lobby.game.logs.a.lines).toEqual(['[1,"play",[1]]', '[2,"play",[2]]', '[3,"play",[3]]'])
+			const sent = step.out.filter((o): o is Send => o.kind === 'send')
+			expect(sent).toHaveLength(1)
+			expect(sent[0].to).toEqual(['b', 'c'])
+			expect(sent[0].payload).toMatchObject({
+				from: 'server',
+				action: 'mpapi_log_events',
+				params: { playerId: 'a', t: 3, opcode: 'play', count: 3 },
+			})
+		})
+
+		it('stores a 261-event burst whole, in 6 batches, without a rate refusal', () => {
+			let lobby = started('a', 'b')
+			const runId = lobby.game.started!.runId
+			const all = events(1, 261, runId)
+			for (let at = 0; at < all.length; at += MAX_LOG_BATCH) {
+				const step = batch(lobby, 'a', all.slice(at, at + MAX_LOG_BATCH))
+				expect(rejection(step)).toBeUndefined()
+				lobby = step.lobby
+			}
+			expect(lobby.game.logs.a.lines).toHaveLength(261)
+		})
+
+		it('spends one token per event, so a batch is not cheaper than singles', () => {
+			let lobby = started('a', 'b')
+			// LOG_BURST events at one instant empty the bucket.
+			for (let at = 0; at < LOG_BURST; at += MAX_LOG_BATCH) {
+				const step = batch(lobby, 'a', events(at, Math.min(MAX_LOG_BATCH, LOG_BURST - at)))
+				expect(rejection(step)).toBeUndefined()
+				lobby = step.lobby
+			}
+			expect(rejection(batch(lobby, 'a', events(5000, 1)))).toBe('rate_limited')
+			expect(rejection(log(lobby, 'a', 5001, 1500))).toBe('rate_limited')
+			// Refills at LOG_RATE_PER_SECOND: 2 seconds buy 40 events.
+			expect(rejection(batch(lobby, 'a', events(6000, 40), 3500))).toBeUndefined()
+		})
+
+		it('refuses an empty, oversize or malformed batch, keeping none of it', () => {
+			const lobby = started('a', 'b')
+			expect(rejection(batch(lobby, 'a', []))).toBe('bad_params')
+			expect(rejection(batch(lobby, 'a', events(1, MAX_LOG_BATCH + 1)))).toBe('bad_params')
+			const mixed = batch(lobby, 'a', [...events(1, 2), { t: 'x', opcode: 'play' }])
+			expect(rejection(mixed)).toBe('bad_params')
+			expect(mixed.lobby.game.logs.a).toBeUndefined()
+			expect(rejection(send(lobby, 'a', 'mpapi_log_events', { events: 'no' }))).toBe('bad_params')
+		})
+
+		it('drops events of a restarted run, and ignores a stranger', () => {
+			const lobby = started('a', 'b')
+			const stale = batch(lobby, 'a', events(1, 2, 'old-run'))
+			expect(rejection(stale)).toBeUndefined()
+			expect(stale.lobby.game.logs.a).toBeUndefined()
+			expect(stale.out.filter((o) => o.kind === 'send')).toEqual([])
+			expect(batch(lobby, 'z', events(1, 1)).out).toEqual([])
+		})
+
+		it('passes every event on to spectators', () => {
+			const lobby = { ...started('a', 'b'), spectators: ['s'] }
+			const step = batch(lobby, 'a', events(1, 3))
+			const spectated = step.out.filter((o): o is Send => o.kind === 'send' && o.op === ServerOp.SPECTATE_EVENT)
+			expect(spectated.map((o) => (o.payload as { t: number }).t)).toEqual([1, 2, 3])
+		})
 	})
 
 	it('stores the logs with the run', () => {

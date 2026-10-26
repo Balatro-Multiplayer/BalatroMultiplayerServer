@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk, playerCtx, serverCtx } from '../testing/fake_nk'
-import { rpcAdminAccountDelete, rpcAdminProfileSet } from './admin'
+import { refuseClientAccountDelete, rpcAdminAccountDelete, rpcAdminProfileSet } from './admin'
 import { discordOwner, rpcAdminDiscordSet } from './discord'
 import { emptyProgress } from '../achievements/progress'
 import { writeProgress } from '../achievements/storage'
@@ -69,6 +69,19 @@ describe('admin_profile_set', () => {
 		expect(discordOwner(nk as any, HASH)).toBeNull()
 	})
 
+	it('takes a Notice acceptance and an age answer made on the website, so the game does not ask again', () => {
+		const { nk } = setup()
+		set(nk, { notice: { version: 2, acceptedAt: 1_700_000_000_000 }, chatEligible: false })
+		const profile = readProfile(nk as any, ALICE)?.profile
+		expect(profile?.tosAcceptedVersion).toBe(2)
+		expect(profile?.noticeAcceptedAt).toBe(1_700_000_000_000)
+		expect(profile?.ageAnswered).toBe(true)
+		expect(profile?.chatEnabled).toBe(false)
+		expect(profile?.chatBlocked).toBe(true)
+		expect(() => set(nk, { notice: { version: 'two', acceptedAt: 1 } })).toThrow(/notice/)
+		expect(() => set(nk, { chatEligible: 'yes' })).toThrow(/chatEligible/)
+	})
+
 	it('refuses bad input, unknown players and players', () => {
 		const { nk } = setup()
 		expect(() => set(nk, { privileges: 'admin' })).toThrow(/privileges/)
@@ -82,10 +95,19 @@ describe('admin_account_delete', () => {
 	it('ends the sessions, frees the Discord link and deletes the account', () => {
 		const { nk, deleted } = setup()
 		rpcAdminDiscordSet(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, discordIdHash: HASH }))
-		const res = JSON.parse(rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE })))
+		const res = JSON.parse(rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, anonymousId: '99999999-9999-4999-8999-999999999999', keptRunIds: [], keepSteamIdHash: false })))
 		expect(res).toEqual({ deleted: true })
 		expect(deleted).toEqual([`logout:${ALICE}:`, ALICE])
 		expect(discordOwner(nk as any, HASH)).toBeNull()
-		expect(() => rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE }))).toThrow(/No such user/)
+		expect(() => rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, anonymousId: '99999999-9999-4999-8999-999999999999', keptRunIds: [], keepSteamIdHash: false }))).toThrow(/No such user/)
+	})
+})
+
+describe('refuseClientAccountDelete', () => {
+	it("refuses Nakama's own account delete, so every deletion runs the anonymization", () => {
+		const { nk } = setup()
+		expect(() => refuseClientAccountDelete(playerCtx(ALICE), fakeLogger, nk as any)).toThrow(
+			expect.objectContaining({ code: 7, message: expect.stringMatching(/website/) }),
+		)
 	})
 })

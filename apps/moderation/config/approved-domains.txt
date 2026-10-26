@@ -1,9 +1,9 @@
-# Approved link domains — one per line. Any URL whose domain is NOT listed here
-# is replaced with "[link removed]" before judging AND before publishing, so it
-# never reaches other players. A domain also approves its subdomains
-# (youtube.com approves www.youtube.com, m.youtube.com). `#` lines are comments.
+# Approved link domains, one per line. A message with any URL whose domain is
+# NOT listed here is blocked, so the link never reaches other players. A domain
+# also approves its subdomains (youtube.com approves www.youtube.com,
+# m.youtube.com). `#` lines are comments.
 #
-# Empty (all lines commented) = strip ALL links. Add domains you trust below.
+# Empty (all lines commented) = block ALL links. Add domains you trust below.
 youtube.com
 tenor.com
 store.steampowered.com
