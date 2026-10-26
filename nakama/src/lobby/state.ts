@@ -7,6 +7,7 @@ import type { TeamPlan } from '../matchmaking/group/teams'
 import type { RequiredStanding } from '../standing/standing'
 import { type LobbyKind, lobbyKindOf } from '../review/ranked'
 import { replayTailOf } from './active'
+import { CATCH_UP_LIMIT_REASON } from './catch_up'
 import { setupOf, setupView } from '../actions/setup'
 import {
 	endGroup,
@@ -722,6 +723,26 @@ function catchUpLimitReached(lobby: Lobby, player: LobbyPlayer, now: number): bo
 	return typeof limit === 'number' && typeof player.catchingUpSince === 'number' && now - player.catchingUpSince >= limit
 }
 
+// A seat forfeited at the catch-up limit is still connected (it is catching up,
+// not away): tell it, then kick its presence, or it plays on alone. A seat
+// whose grace ran out has no presence to tell.
+function toldAndKicked(lobby: Lobby, player: LobbyPlayer, graceRanOut: boolean): Outbound[] {
+	if (graceRanOut || player.awaySince !== null) return []
+	return [
+		event(
+			lobby,
+			'player_kicked',
+			{
+				playerId: player.id,
+				displayName: player.info.displayName,
+				data: { kickedBy: 'server', reason: CATCH_UP_LIMIT_REASON },
+			},
+			[player.id],
+		),
+		{ kind: 'kick', userId: player.id },
+	]
+}
+
 // Time passing: expire grace periods and catch-up limits, and close a lobby its creator never
 // joined.
 export function tick(lobby: Lobby, now: number): Step {
@@ -751,7 +772,7 @@ export function tick(lobby: Lobby, now: number): Step {
 				forfeited.length > 0 && started
 					? { ...removed.lobby, forfeitedSeats: { ...(removed.lobby.forfeitedSeats || {}), [p.id]: started.runId } }
 					: removed.lobby
-			step = { lobby: marked, out: step.out.concat(forfeited, removed.out) }
+			step = { lobby: marked, out: step.out.concat(forfeited, removed.out, toldAndKicked(step.lobby, current, graceRanOut)) }
 		}
 	}
 	return step

@@ -3750,6 +3750,17 @@ function eventsOf(log) {
   });
 }
 
+// src/lobby/catch_up.ts
+var CATCH_UP_LIMIT_MS_BY_MOD = {
+  MultiplayerPvP: 18e4
+};
+var CATCH_UP_LIMIT_REASON = "catch_up_limit";
+function catchUpLimitMsFor(modId, overrideSeconds) {
+  const limit = CATCH_UP_LIMIT_MS_BY_MOD[modId];
+  if (limit === void 0) return null;
+  return overrideSeconds !== void 0 && overrideSeconds > 0 ? overrideSeconds * 1e3 : limit;
+}
+
 // src/matchmaking/queue_refusal.ts
 var PRIVATE_LOBBIES_ALLOW_ANY_MODS = "Private lobbies allow any mods.";
 function queueRefusalMessage(refusal) {
@@ -4541,6 +4552,22 @@ function catchUpLimitReached(lobby, player, now) {
   const limit = lobby.catchUpLimitMs;
   return typeof limit === "number" && typeof player.catchingUpSince === "number" && now - player.catchingUpSince >= limit;
 }
+function toldAndKicked(lobby, player, graceRanOut) {
+  if (graceRanOut || player.awaySince !== null) return [];
+  return [
+    event(
+      lobby,
+      "player_kicked",
+      {
+        playerId: player.id,
+        displayName: player.info.displayName,
+        data: { kickedBy: "server", reason: CATCH_UP_LIMIT_REASON }
+      },
+      [player.id]
+    ),
+    { kind: "kick", userId: player.id }
+  ];
+}
 function tick(lobby, now) {
   if (lobby.closed) return { lobby, out: [] };
   if (lobby.players.length === 0) {
@@ -4558,7 +4585,7 @@ function tick(lobby, now) {
       const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
       const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
       const marked = forfeited.length > 0 && started ? __spreadProps(__spreadValues({}, removed.lobby), { forfeitedSeats: __spreadProps(__spreadValues({}, removed.lobby.forfeitedSeats || {}), { [p.id]: started.runId }) }) : removed.lobby;
-      step = { lobby: marked, out: step.out.concat(forfeited, removed.out) };
+      step = { lobby: marked, out: step.out.concat(forfeited, removed.out, toldAndKicked(step.lobby, current, graceRanOut)) };
     }
   }
   return step;
@@ -7597,16 +7624,6 @@ function relayAction(lobby, senderId, data, ctx) {
     lobby: budgeted,
     out: [{ kind: "send", op: ServerOp.ACTION, payload: envelope, to: targets }]
   };
-}
-
-// src/lobby/catch_up.ts
-var CATCH_UP_LIMIT_MS_BY_MOD = {
-  MultiplayerPvP: 18e4
-};
-function catchUpLimitMsFor(modId, overrideSeconds) {
-  const limit = CATCH_UP_LIMIT_MS_BY_MOD[modId];
-  if (limit === void 0) return null;
-  return overrideSeconds !== void 0 && overrideSeconds > 0 ? overrideSeconds * 1e3 : limit;
 }
 
 // src/lobby/chat.ts
