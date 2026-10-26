@@ -24,7 +24,5 @@ export type {
 	TokenBucket,
 	VerdictJson,
 } from './types.js'
-export { applyRewrites, parseRewrites } from './rewrite.js'
-export type { RewriteRule } from './rewrite.js'
-export { LINK_PLACEHOLDER, parseApprovedDomains, stripLinks } from './links.js'
+export { hasUnapprovedLink, parseApprovedDomains } from './links.js'
 export { findThreats } from './threat.js'
