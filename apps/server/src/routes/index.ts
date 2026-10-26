@@ -13,9 +13,11 @@ import { createReportsRouter } from '../features/reports/reports.route.js'
 import statsRouter from '../features/stats/stats.route.js'
 import webadminRouter from '../features/webadmin/webadmin.route.js'
 import * as playerGateway from '../infrastructure/gateways/player.gateway.js'
+import { deleteNakamaAccount } from '../infrastructure/nakama/profile-sync.js'
 
 export const authService = createAuthService({
 	playerRepository: playerGateway,
+	nakamaAccounts: { delete: deleteNakamaAccount },
 })
 
 const router = Router()

@@ -1,5 +1,8 @@
 import type { Privilege } from '../shared/types/index.js'
 
+// The name a deleted player's row and game records show.
+export const DELETED_PLAYER_NAME = '[deleted player]'
+
 export interface PlayerRecord {
 	id: string
 	steamIdHash: string | null
@@ -26,6 +29,8 @@ export interface IPlayerRepository {
 		steamIdHash?: string
 		discordIdHash?: string
 		nakamaUserId?: string
+		// A row for a deleted account (deletedAt set).
+		deleted?: boolean
 	}): Promise<PlayerRecord>
 	linkSteam(playerId: string, steamIdHash: string): Promise<void>
 	linkNakamaUser(playerId: string, nakamaUserId: string): Promise<void>
@@ -52,6 +57,8 @@ export interface IPlayerRepository {
 		chatEnabled: boolean,
 		chatBlocked: boolean,
 	): Promise<void>
-	softDeletePlayer(playerId: string): Promise<void>
+	// Account deletion: the player id becomes anonymousId everywhere
+	// (gateways/player-anonymization.gateway.ts).
+	anonymizePlayer(playerId: string, anonymousId: string): Promise<void>
 	reactivateIfDeleted(playerId: string): Promise<void>
 }

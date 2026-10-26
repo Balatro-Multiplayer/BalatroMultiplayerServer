@@ -29,10 +29,18 @@ export async function linkNakamaDiscord(playerId: string, discordIdHash: string,
 	return result.ok
 }
 
-export async function deleteNakamaAccount(playerId: string): Promise<boolean> {
+// no_account: the player has no Nakama account (never linked, Nakama off,
+// or already deleted). unavailable: Nakama did not delete it; nothing changed.
+export type NakamaAccountDeletion = 'deleted' | 'no_account' | 'unavailable'
+
+// Deletes the player's Nakama account after renaming them to anonymousId in
+// Nakama storage (nakama/src/player/anonymize.ts).
+export async function deleteNakamaAccount(playerId: string, anonymousId: string): Promise<NakamaAccountDeletion> {
 	const userId = await nakamaUserIdOf(playerId)
-	if (!userId) return false
-	const result = await callNakamaRpc('admin_account_delete', { userId })
-	if (!result.ok) console.warn(`[nakama] Account of ${playerId} not deleted: ${result.error}`)
-	return result.ok
+	if (!userId) return 'no_account'
+	const result = await callNakamaRpc('admin_account_delete', { userId, anonymousId })
+	if (result.ok) return 'deleted'
+	if (result.error === 'not_found' || result.error === 'disabled') return 'no_account'
+	console.warn(`[nakama] Account of ${playerId} not deleted: ${result.error}`)
+	return 'unavailable'
 }

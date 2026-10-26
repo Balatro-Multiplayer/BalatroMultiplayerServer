@@ -1,10 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import { NOTICE_VERSION } from '@bmp/types'
 import type {
 	IPlayerRepository,
 	PlayerRecord,
 } from '../../contracts/IPlayerRepository.js'
-import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/history.gateway.js'
-import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 import {
@@ -23,6 +22,10 @@ type SessionAndToken = { session: PlayerSession; token: string }
 
 interface AuthServiceDeps {
 	playerRepository: IPlayerRepository
+	nakamaAccounts: {
+		// infrastructure/nakama/profile-sync.ts deleteNakamaAccount
+		delete(playerId: string, anonymousId: string): Promise<'deleted' | 'no_account' | 'unavailable'>
+	}
 }
 
 export type AuthService = ReturnType<typeof createAuthService>
@@ -267,16 +270,16 @@ export function createAuthService(deps: AuthServiceDeps) {
 		return sessionAndToken(session)
 	}
 
-	// Soft-delete only -- never hard-deletes the players row. Hard-deleting
-	// would cascade or orphan playerBans, letting a banned player self-serve
-	// wipe their own ban by deleting their account. PII is cleared immediately;
-	// steamIdHash is kept until purgeExpiredDeletedPlayerHashes later clears it,
-	// once 12 months have passed and no ban is active (see that function's
-	// comment for why that's not an evasion loophole).
+	// Account deletion (Notice decision 17): the player id becomes a random
+	// anonymous id, in Nakama first, then in Postgres. Bans stay attached to
+	// the anonymous row, so deleting an account never wipes a ban. If Nakama
+	// can't delete the account nothing changes, and the player can try again.
 	async function deleteAccount(playerId: string): Promise<void> {
-		await playerRepository.softDeletePlayer(playerId)
-		await pseudonymizeChatLogsForPlayer(playerId)
-		await pseudonymizeRunLogsForPlayer(playerId)
+		const anonymousId = randomUUID()
+		const nakama = await deps.nakamaAccounts.delete(playerId, anonymousId)
+		if (nakama === 'unavailable')
+			throw new AppError('Account deletion is unavailable right now, try again later', 503)
+		await playerRepository.anonymizePlayer(playerId, anonymousId)
 	}
 
 	return {

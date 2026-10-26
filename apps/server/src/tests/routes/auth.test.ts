@@ -256,22 +256,65 @@ describe('DELETE /api/auth/account', () => {
 		expect(res.status).toBe(401)
 	})
 
-	it('soft-deletes the player instead of hard-deleting', async () => {
-		createSession('Alice', { id: 'del-p1' })
-		const token = signJwt({ playerId: 'del-p1', steamName: 'Alice' })
+	const NAKAMA_ID = '22222222-2222-4222-8222-222222222222'
+	const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+	const rpc = () => vi.mocked(adminClient.callNakamaRpc)
+	const anonymize = () => vi.mocked(playerGateway.anonymizePlayer)
 
-		const res = await request(app)
-			.delete('/api/auth/account')
-			.set('Authorization', `Bearer ${token}`)
+	function signedIn(id: string, nakamaUserId: string | null) {
+		createSession('Alice', { id })
+		vi.mocked(playerGateway.findPlayerById).mockResolvedValue({ id, nakamaUserId } as any)
+		return signJwt({ playerId: id, steamName: 'Alice' })
+	}
+	const del = (token: string) => request(app).delete('/api/auth/account').set('Authorization', `Bearer ${token}`)
+
+	afterEach(() => {
+		rpc().mockReset()
+	})
+
+	it('anonymizes Nakama first, then Postgres, with one random id', async () => {
+		const token = signedIn('del-p1', NAKAMA_ID)
+		const order: string[] = []
+		rpc().mockImplementation(async () => {
+			order.push('nakama')
+			return ok({ deleted: true })
+		})
+		anonymize().mockImplementation(async () => {
+			order.push('postgres')
+		})
+
+		const res = await del(token)
 
 		expect(res.status).toBe(200)
 		expect(res.body).toEqual({ ok: true })
-		// The fix: deletion goes through softDeletePlayer, never a hard delete of
-		// the players row -- this is what keeps playerBans attached/enforceable
-		// instead of being cascade-deleted with it.
-		expect(vi.mocked(playerGateway.softDeletePlayer)).toHaveBeenCalledWith(
-			'del-p1',
-		)
+		expect(order).toEqual(['nakama', 'postgres'])
+		const [rpcId, body] = rpc().mock.calls[0] as [string, { userId: string; anonymousId: string }]
+		expect(rpcId).toBe('admin_account_delete')
+		expect(body.userId).toBe(NAKAMA_ID)
+		expect(body.anonymousId).toMatch(UUID)
+		expect(anonymize()).toHaveBeenCalledWith('del-p1', body.anonymousId)
+	})
+
+	it('changes nothing in Postgres while Nakama cannot delete the account', async () => {
+		const token = signedIn('del-p3', NAKAMA_ID)
+		rpc().mockResolvedValue(err('unreachable'))
+
+		const res = await del(token)
+
+		expect(res.status).toBe(503)
+		expect(anonymize()).not.toHaveBeenCalled()
+		expect(sessions.has('del-p3')).toBe(true)
+	})
+
+	it('anonymizes Postgres when there is no Nakama account to delete', async () => {
+		const token = signedIn('del-p4', NAKAMA_ID)
+		rpc().mockResolvedValue(err('not_found'))
+		expect((await del(token)).status).toBe(200)
+		expect(anonymize()).toHaveBeenCalledWith('del-p4', expect.stringMatching(UUID))
+
+		const unlinked = signedIn('del-p5', null)
+		expect((await del(unlinked)).status).toBe(200)
+		expect(anonymize()).toHaveBeenCalledWith('del-p5', expect.stringMatching(UUID))
 	})
 
 	it('clears the session on deletion', async () => {

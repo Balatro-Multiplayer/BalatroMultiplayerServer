@@ -41,10 +41,10 @@ export const players = pgTable(
 		updatedAt: timestamp('updated_at', { withTimezone: true })
 			.notNull()
 			.defaultNow(),
-		// Set when the player deletes their account. The row is never hard-deleted:
-		// PII fields are cleared immediately (see softDeletePlayer), but steamIdHash
-		// survives so an active ban stays enforceable and re-signing in with the same
-		// Steam identity reactivates this same row instead of creating a fresh one.
+		// Set when the player deletes their account. Deletion replaces the row by
+		// one under a random anonymous id (gateways/player-anonymization.gateway.ts);
+		// it keeps steamIdHash only when the player has a ban record, so the ban
+		// stays enforceable and a re-sign-in with that Steam identity lands on it.
 		// Null = active account.
 		deletedAt: timestamp('deleted_at', { withTimezone: true }),
 		ipHash: text('ip_hash'),
@@ -95,9 +95,11 @@ export const gameResults = pgTable('game_results', {
 export const chatLogs = pgTable('chat_logs', {
 	id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
 	lobbyCode: varchar('lobby_code', { length: 6 }).notNull(),
-	// UUID of the sender at send time; pseudonymized to deleted_user_{hash} on account deletion
+	// UUID of the sender at send time; an anonymous id after account deletion
+	// (gateways/player-anonymization.gateway.ts)
 	playerId: text('player_id').notNull(),
-	// Hashed Steam ID (steam_id_hash) — survives account deletion for moderation purposes
+	// Hashed Steam ID (steam_id_hash); kept after account deletion only when
+	// the player has a ban record
 	moderationId: text('moderation_id'),
 	message: text('message').notNull(),
 	flagged: boolean('flagged').notNull().default(false),

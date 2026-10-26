@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { compressToBase64 } from '../../shared/utils/compression.js'
+import { DELETED_PLAYER_NAME } from '../../contracts/IPlayerRepository.js'
 
 // The Nakama -> Postgres mirror (nakama/src/mirror/outbox.ts): Nakama keeps
 // an outbox of finished runs, chat lines, forfeits and Notice acceptances,
@@ -114,6 +115,8 @@ export interface MirrorPlayer {
 	steamId: string | null
 	legacyPlayerId: string | null
 	displayName: string
+	// The Nakama account no longer exists (deleted). Absent from older bundles.
+	deleted?: boolean
 }
 
 export interface MirrorPull {
@@ -486,6 +489,7 @@ export interface MirrorDeps {
 			steamName: string
 			steamIdHash?: string
 			nakamaUserId?: string
+			deleted?: boolean
 		}): Promise<{ id: string }>
 	}
 	store: {
@@ -505,7 +509,9 @@ export function createMirrorService(deps: MirrorDeps) {
 	// Nakama user id -> player id for everyone in the pull. A Nakama user
 	// without a linked row (their first-login sync failed, or a dev device
 	// login) gets one: the row their profile names, else found by Steam id,
-	// else created.
+	// else created. A deleted account gets a deleted row that does not keep
+	// its Nakama id: deletion (player/anonymize.ts) already rewrote what it
+	// could, and an entry written after it must not link back to the account.
 	async function resolvePlayers(
 		pulled: MirrorPull,
 	): Promise<Map<string, string>> {
@@ -514,6 +520,15 @@ export function createMirrorService(deps: MirrorDeps) {
 		for (const userId of userIds) {
 			if (ids.has(userId)) continue
 			const info = pulled.players[userId]
+			if (info.deleted) {
+				const created = await players.createPlayer({
+					id: randomUUID(),
+					steamName: DELETED_PLAYER_NAME,
+					deleted: true,
+				})
+				ids.set(userId, created.id)
+				continue
+			}
 			const existing =
 				(info.legacyPlayerId
 					? await players.findPlayerById(info.legacyPlayerId)

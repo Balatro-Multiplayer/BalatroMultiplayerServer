@@ -244,6 +244,18 @@ describe('the mirror service', () => {
 		expect(resolved.get('nd')).toBe(players.createPlayer.mock.calls[0][0].id)
 	})
 
+	it('never stores the Nakama id of a deleted account it has no row for', async () => {
+		const { players, service } = deps()
+		const resolved = await service.resolvePlayers({
+			entries: [],
+			players: { ngone: { steamId: null, legacyPlayerId: null, displayName: '', deleted: true } },
+		})
+		const created = players.createPlayer.mock.calls[0][0] as { id: string; nakamaUserId?: string; deleted?: boolean; steamName: string }
+		expect(created.nakamaUserId).toBeUndefined()
+		expect(created).toEqual(expect.objectContaining({ steamName: '[deleted player]', deleted: true }))
+		expect(resolved.get('ngone')).toBe(created.id)
+	})
+
 	it('stores what it can and leaves the rest', async () => {
 		const { store, service } = deps()
 		store.storeRun.mockRejectedValueOnce(new Error('db down'))

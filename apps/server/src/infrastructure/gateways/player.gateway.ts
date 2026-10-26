@@ -63,6 +63,7 @@ export async function createPlayer(data: {
 	steamIdHash?: string
 	discordIdHash?: string
 	nakamaUserId?: string
+	deleted?: boolean
 }): Promise<PlayerRecord> {
 	const [row] = await db
 		.insert(players)
@@ -72,6 +73,7 @@ export async function createPlayer(data: {
 			steamIdHash: data.steamIdHash ?? null,
 			discordIdHash: data.discordIdHash ?? null,
 			nakamaUserId: data.nakamaUserId ?? null,
+			deletedAt: data.deleted ? new Date() : null,
 		})
 		.returning()
 	return row
@@ -248,25 +250,7 @@ export async function updateChatStatus(
 		.where(eq(players.id, playerId))
 }
 
-// Soft-delete: the row is never removed (so playerBans stays attached and
-// enforceable), but every identifying/PII field except steamIdHash is cleared
-// immediately. steamIdHash survives so an active ban stays enforceable and a
-// re-signin with the same Steam identity reactivates this same row instead of
-// creating a fresh, ban-free one. See purgeExpiredDeletedPlayerHashes for the
-// later step that clears steamIdHash too, once it's no longer needed.
-export async function softDeletePlayer(playerId: string): Promise<void> {
-	await db
-		.update(players)
-		.set({
-			deletedAt: new Date(),
-			steamName: '[deleted player]',
-			discordIdHash: null,
-			discordUsername: null,
-			useDiscordName: false,
-			updatedAt: new Date(),
-		})
-		.where(eq(players.id, playerId))
-}
+export { anonymizePlayer } from './player-anonymization.gateway.js'
 
 // Clears deletedAt on re-signin with the same Steam identity. A cheap no-op
 // if the account was never deleted.

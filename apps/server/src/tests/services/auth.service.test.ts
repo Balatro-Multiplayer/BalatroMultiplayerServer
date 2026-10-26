@@ -51,14 +51,17 @@ function makeMockPlayerRepository(): IPlayerRepository {
 		updateSteamName: vi.fn().mockResolvedValue(undefined),
 		recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 		updateChatStatus: vi.fn().mockResolvedValue(undefined),
-		softDeletePlayer: vi.fn().mockResolvedValue(undefined),
+		anonymizePlayer: vi.fn().mockResolvedValue(undefined),
 		reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
 	}
 }
 
 function makeAuthService() {
 	const playerRepository = makeMockPlayerRepository()
-	const service = createAuthService({ playerRepository })
+	const service = createAuthService({
+		playerRepository,
+		nakamaAccounts: { delete: vi.fn().mockResolvedValue('no_account' as const) },
+	})
 	return { service, playerRepository }
 }
 

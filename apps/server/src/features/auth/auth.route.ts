@@ -11,7 +11,6 @@ import {
 	setNakamaAvatar,
 } from '../../infrastructure/nakama/avatar-sync.js'
 import {
-	deleteNakamaAccount,
 	editNakamaProfile,
 	linkNakamaDiscord,
 } from '../../infrastructure/nakama/profile-sync.js'
@@ -384,7 +383,6 @@ export function createAuthRouter(service: AuthService): Router {
 			const playerId = req.player!.playerId
 
 			await service.deleteAccount(playerId)
-			await deleteNakamaAccount(playerId)
 			removeSession(playerId)
 
 			res.json({ ok: true })

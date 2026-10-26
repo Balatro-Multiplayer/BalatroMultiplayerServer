@@ -130,7 +130,7 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	updatePreferredJoker: vi.fn().mockResolvedValue(undefined),
 	recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 	updateChatStatus: vi.fn().mockResolvedValue(undefined),
-	softDeletePlayer: vi.fn().mockResolvedValue(undefined),
+	anonymizePlayer: vi.fn().mockResolvedValue(undefined),
 	reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
 	purgeExpiredDeletedPlayerHashes: vi.fn().mockResolvedValue(0),
 }))
@@ -165,7 +165,7 @@ beforeEach(async () => {
 	vi.mocked(playerDb.updateDiscordUsername).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updateUseDiscordName).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updatePreferredJoker).mockResolvedValue(undefined)
-	vi.mocked(playerDb.softDeletePlayer).mockResolvedValue(undefined)
+	vi.mocked(playerDb.anonymizePlayer).mockResolvedValue(undefined)
 	vi.mocked(playerDb.reactivateIfDeleted).mockResolvedValue(undefined)
 
 	// Re-apply ban gateway defaults (cleared by vi.clearAllMocks above)
