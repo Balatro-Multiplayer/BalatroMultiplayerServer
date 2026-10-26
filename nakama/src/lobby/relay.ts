@@ -7,6 +7,7 @@
 // rule doesn't allow (sender_guard.ts) is dropped, and the step says so.
 import {
 	type ActionContext,
+	LOG_EVENTS_KEY,
 	LOG_EVENT_KEY,
 	authoritativeAction,
 } from '../actions/registry'
@@ -39,8 +40,11 @@ export const RATE_PER_SECOND = 40
 export const BURST = 100
 // mpapi_log_event has a bucket of its own, so a busy replay stream (dozens
 // of events after a scored hand) never starves a player's other actions.
+// A batch of events (mpapi_log_events) spends one token per event, so batching
+// does not make the stream cheaper. The burst holds a whole backlog flushed
+// after a drop (the player's log cap, MAX_LOG_EVENTS, bounds what is kept).
 export const LOG_RATE_PER_SECOND = 20
-export const LOG_BURST = 200
+export const LOG_BURST = 1024
 
 function reject(to: string, rejection: ActionRejection): Outbound {
 	return {
@@ -51,14 +55,16 @@ function reject(to: string, rejection: ActionRejection): Outbound {
 	}
 }
 
-// Spends one token from the bucket for this action; null when it's empty.
+// Spends `cost` tokens (one per replay event) from the bucket for this action;
+// null when it holds fewer.
 function spend(
 	lobby: Lobby,
 	userId: string,
 	key: string,
 	now: number,
+	cost = 1,
 ): Lobby | null {
-	const isLog = key === LOG_EVENT_KEY
+	const isLog = key === LOG_EVENT_KEY || key === LOG_EVENTS_KEY
 	const budgetKey = isLog ? logBudgetKey(userId) : userId
 	const burst = isLog ? LOG_BURST : BURST
 	const rate = isLog ? LOG_RATE_PER_SECOND : RATE_PER_SECOND
@@ -67,14 +73,21 @@ function spend(
 		burst,
 		bucket.tokens + ((now - bucket.at) / 1000) * rate,
 	)
-	if (refilled < 1) return null
+	if (refilled < cost) return null
 	return {
 		...lobby,
 		actionBudget: {
 			...lobby.actionBudget,
-			[budgetKey]: { tokens: refilled - 1, at: now },
+			[budgetKey]: { tokens: refilled - cost, at: now },
 		},
 	}
+}
+
+// Tokens an action costs: one, or one per event in a batch of replay events.
+function spendCost(key: string, params: unknown): number {
+	if (key !== LOG_EVENTS_KEY) return 1
+	const events = (params as { events?: unknown } | null)?.events
+	return Array.isArray(events) ? Math.max(1, events.length) : 1
 }
 
 function stringField(data: { [key: string]: unknown }, key: string): string {
@@ -86,6 +99,9 @@ function stringField(data: { [key: string]: unknown }, key: string): string {
 // the caller can log (and later record) it.
 export interface RelayStep extends Step {
 	dropped?: SenderRefusal
+	// Set when the action was refused (the sender hears the reason), so the
+	// caller can log it with the match and the sender.
+	refused?: { key: string; reason: string }
 }
 
 // An action from a player marked away proves their socket is back (a short
@@ -128,9 +144,10 @@ function relayAction(
 	const cid = stringField(data, 'cid').slice(0, MAX_CID_LENGTH)
 	const key = stringField(data, 'action')
 	const to = stringField(data, 'to')
-	const refuse = (reason: string): Step => ({
+	const refuse = (reason: string): RelayStep => ({
 		lobby,
 		out: [reject(senderId, { cid, action: key, reason })],
+		refused: { key, reason },
 	})
 
 	const sender = findPlayer(lobby, senderId)
@@ -140,7 +157,7 @@ function relayAction(
 	if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
 		return refuse('too_large')
 
-	const budgeted = spend(lobby, senderId, key, ctx.now)
+	const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params))
 	if (!budgeted) return refuse('rate_limited')
 
 	const authoritative = authoritativeAction(key)
@@ -176,6 +193,8 @@ function relayAction(
 		if (result.out) out.push(...result.out)
 		if (key === LOG_EVENT_KEY && audience !== 'none' && result.params)
 			out.push(...spectateEvent(next, result.params as SpectateEvent))
+		if (key === LOG_EVENTS_KEY && result.spectate)
+			for (const event of result.spectate) out.push(...spectateEvent(next, event))
 		// A report may have been the last one the game was waiting for.
 		const settled = settle(next, ctx.now)
 		return { lobby: settled.lobby, out: out.concat(settled.out) }

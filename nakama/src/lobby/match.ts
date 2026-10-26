@@ -711,6 +711,15 @@ export function lobbyMatchLoop(
 			)
 			continue
 		}
+		if (step.refused) {
+			logger.warn(
+				'Lobby %s: refused %s from %s (%s)',
+				current.lobby.code,
+				step.refused.key,
+				message.sender.userId,
+				step.refused.reason,
+			)
+		}
 		if (step.dropped) {
 			const d = step.dropped
 			logger.warn(

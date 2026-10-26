@@ -28,6 +28,13 @@ socket:
   # src/socket_limit.test.ts checks this against both configs.
   max_message_size_bytes: 32768
 
+match:
+  # Messages a match reads per tick. Nakama's default (128) silently drops the
+  # rest ("Match handler data processing too slow"); a replay burst after a
+  # scored hand or a flush after a drop can pass 128.
+  # src/socket_limit.test.ts checks this against both configs.
+  input_queue_size: 1024
+
 runtime:
   # modules/index.js, built from ./src by build.mjs.
   path: /nakama/data/modules
