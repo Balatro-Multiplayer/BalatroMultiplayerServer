@@ -16,6 +16,7 @@ import {
 	type ActionRejection,
 	BROADCAST_TARGET,
 	SERVER_TARGET,
+	type LobbyEventMessage,
 	ServerOp,
 	type SpectateEvent,
 } from './protocol'
@@ -87,7 +88,38 @@ export interface RelayStep extends Step {
 	dropped?: SenderRefusal
 }
 
+// An action from a player marked away proves their socket is back (a short
+// drop that the grace period covered). It is relayed, and the player is marked
+// back, so the others do not miss moves played while the seat looked empty.
 export function action(
+	lobby: Lobby,
+	senderId: string,
+	data: { [key: string]: unknown },
+	ctx: Omit<ActionContext, 'from'>,
+): RelayStep {
+	const sender = findPlayer(lobby, senderId)
+	if (!sender || sender.awaySince === null) return relayAction(lobby, senderId, data, ctx)
+	const back: Lobby = {
+		...lobby,
+		players: lobby.players.map((p) => (p.id === senderId ? { ...p, awaySince: null } : p)),
+	}
+	const payload: LobbyEventMessage = {
+		type: 'player_reconnected',
+		lobbyCode: lobby.code,
+		playerId: senderId,
+		displayName: sender.info.displayName,
+	}
+	const announce: Outbound = {
+		kind: 'send',
+		op: ServerOp.EVENT,
+		payload,
+		to: back.players.map((p) => p.id).filter((id) => id !== senderId),
+	}
+	const step = relayAction(back, senderId, data, ctx)
+	return { ...step, out: [announce, ...step.out] }
+}
+
+function relayAction(
 	lobby: Lobby,
 	senderId: string,
 	data: { [key: string]: unknown },
@@ -102,7 +134,7 @@ export function action(
 	})
 
 	const sender = findPlayer(lobby, senderId)
-	if (!sender || sender.awaySince !== null) return { lobby, out: [] }
+	if (!sender) return { lobby, out: [] }
 	if (!ACTION_KEY_PATTERN.test(key)) return refuse('bad_action')
 	const params = data.params === undefined ? null : data.params
 	if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
