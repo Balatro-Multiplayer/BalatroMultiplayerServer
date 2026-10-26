@@ -14,16 +14,19 @@ import {
 	linkOfBan,
 	linkOfItem,
 } from '../../features/retention/limits.js'
+import { integritySourceId } from '../../features/service-queue/integrity-flag.js'
 import { antiCheatSourceId } from '../../features/service-queue/source-ids.js'
 import type { ItemType } from '../../features/service-queue/types.js'
 import { db } from '../db/index.js'
 import {
 	chatLogs,
 	flaggedMessages,
+	launcherIntegrityEvents,
 	lobbyRuns,
 	matchResultConflicts,
 	matchRunLogs,
 	playerBans,
+	playerWarnings,
 	reports,
 	serviceQueueItemEvents,
 	serviceQueueItems,
@@ -47,47 +50,28 @@ interface ItemKey {
 
 const keyOf = (k: ItemKey) => `${k.itemType}|${k.sourceId}`
 
-// The links of each candidate, from the items each one is used by.
-async function linksOf(
-	itemsOf: Map<string, ItemKey[]>,
+interface ItemRow {
+	id: number
+	itemType: string
+	sourceId: string
+	status: string
+	resolvedAt: Date | null
+}
+
+const itemColumns = {
+	id: serviceQueueItems.id,
+	itemType: serviceQueueItems.itemType,
+	sourceId: serviceQueueItems.sourceId,
+	status: serviceQueueItems.status,
+	resolvedAt: serviceQueueItems.resolvedAt,
+}
+
+// The links of each item, by item id: the item itself, and the bans its
+// actions issued (dispatcher.ts records detail.banId).
+async function linksOfItems(
+	items: ItemRow[],
 	now: Date,
-): Promise<Map<string, EvidenceLink[]>> {
-	const wanted = new Map<string, ItemKey>()
-	for (const keys of itemsOf.values())
-		for (const k of keys) wanted.set(keyOf(k), k)
-
-	const linksOfItem = new Map<string, EvidenceLink[]>()
-	const byType = new Map<ItemType, string[]>()
-	for (const k of wanted.values())
-		byType.set(k.itemType, [...(byType.get(k.itemType) ?? []), k.sourceId])
-	const items: {
-		id: number
-		itemType: string
-		sourceId: string
-		status: string
-		resolvedAt: Date | null
-	}[] = []
-	for (const [itemType, sourceIds] of byType)
-		for (const part of chunks(sourceIds))
-			items.push(
-				...(await db
-					.select({
-						id: serviceQueueItems.id,
-						itemType: serviceQueueItems.itemType,
-						sourceId: serviceQueueItems.sourceId,
-						status: serviceQueueItems.status,
-						resolvedAt: serviceQueueItems.resolvedAt,
-					})
-					.from(serviceQueueItems)
-					.where(
-						and(
-							eq(serviceQueueItems.itemType, itemType),
-							inArray(serviceQueueItems.sourceId, part),
-						),
-					)),
-			)
-
-	// The bans an item's actions issued (dispatcher.ts records detail.banId).
+): Promise<Map<number, EvidenceLink[]>> {
 	const bansOfItem = new Map<number, string[]>()
 	for (const part of chunks(items.map((i) => i.id))) {
 		const events = await db
@@ -121,14 +105,49 @@ async function linksOf(
 		for (const ban of bans) banLink.set(ban.id, linkOfBan(ban, now))
 	}
 
+	const out = new Map<number, EvidenceLink[]>()
 	for (const item of items) {
 		const links = [linkOfItem(item)]
 		for (const banId of bansOfItem.get(item.id) ?? []) {
 			const link = banLink.get(banId)
 			if (link) links.push(link)
 		}
-		linksOfItem.set(`${item.itemType}|${item.sourceId}`, links)
+		out.set(item.id, links)
 	}
+	return out
+}
+
+// The links of each candidate, from the items each one is used by.
+async function linksOf(
+	itemsOf: Map<string, ItemKey[]>,
+	now: Date,
+): Promise<Map<string, EvidenceLink[]>> {
+	const wanted = new Map<string, ItemKey>()
+	for (const keys of itemsOf.values())
+		for (const k of keys) wanted.set(keyOf(k), k)
+
+	const byType = new Map<ItemType, string[]>()
+	for (const k of wanted.values())
+		byType.set(k.itemType, [...(byType.get(k.itemType) ?? []), k.sourceId])
+	const items: ItemRow[] = []
+	for (const [itemType, sourceIds] of byType)
+		for (const part of chunks(sourceIds))
+			items.push(
+				...(await db
+					.select(itemColumns)
+					.from(serviceQueueItems)
+					.where(
+						and(
+							eq(serviceQueueItems.itemType, itemType),
+							inArray(serviceQueueItems.sourceId, part),
+						),
+					)),
+			)
+
+	const byId = await linksOfItems(items, now)
+	const linksOfItem = new Map<string, EvidenceLink[]>()
+	for (const item of items)
+		linksOfItem.set(`${item.itemType}|${item.sourceId}`, byId.get(item.id) ?? [])
 
 	const out = new Map<string, EvidenceLink[]>()
 	for (const [candidate, keys] of itemsOf)
@@ -137,6 +156,16 @@ async function linksOf(
 			keys.flatMap((k) => linksOfItem.get(keyOf(k)) ?? []),
 		)
 	return out
+}
+
+// Deletes rows of a table by id, a chunk at a time. Returns how many went.
+async function deleteByIds<T extends string | number>(
+	ids: T[],
+	remove: (part: T[]) => Promise<{ rowCount: number | null }>,
+): Promise<number> {
+	let deleted = 0
+	for (const part of chunks(ids)) deleted += (await remove(part)).rowCount ?? 0
+	return deleted
 }
 
 // Report ids per lobby instance.
@@ -338,6 +367,131 @@ export const retentionRepository: IRetentionRepository = {
 				.where(inArray(matchRunLogs.runId, part))
 			deleted += result.rowCount ?? 0
 		}
+		return deleted
+	},
+
+	async warningCandidates(now) {
+		const rows = await db
+			.select({
+				id: playerWarnings.id,
+				madeAt: playerWarnings.issuedAt,
+				itemId: playerWarnings.itemId,
+			})
+			.from(playerWarnings)
+			.where(lt(playerWarnings.issuedAt, sql`${now}::timestamptz - ${EVIDENCE_DAYS}`))
+		const itemIds = [
+			...new Set(rows.flatMap((r) => (r.itemId === null ? [] : [r.itemId]))),
+		]
+		const items: ItemRow[] = []
+		for (const part of chunks(itemIds))
+			items.push(
+				...(await db
+					.select(itemColumns)
+					.from(serviceQueueItems)
+					.where(inArray(serviceQueueItems.id, part))),
+			)
+		const links = await linksOfItems(items, now)
+		return rows.map((r) => ({
+			id: r.id,
+			madeAt: r.madeAt,
+			links: r.itemId === null ? [] : (links.get(r.itemId) ?? []),
+		}))
+	},
+
+	deleteWarnings(ids) {
+		return deleteByIds(ids, (part) =>
+			db.delete(playerWarnings).where(inArray(playerWarnings.id, part)),
+		)
+	},
+
+	async integrityEventCandidates(now) {
+		const rows = await db
+			.select({
+				id: launcherIntegrityEvents.id,
+				playerId: launcherIntegrityEvents.playerId,
+				madeAt: launcherIntegrityEvents.occurredAt,
+			})
+			.from(launcherIntegrityEvents)
+			.where(
+				lt(
+					launcherIntegrityEvents.occurredAt,
+					sql`${now}::timestamptz - ${EVIDENCE_DAYS}`,
+				),
+			)
+		const itemsOf = new Map<string, ItemKey[]>(
+			rows.map((r) => [
+				String(r.id),
+				[
+					{
+						itemType: 'integrity',
+						sourceId: integritySourceId(r.playerId, r.madeAt),
+					},
+				],
+			]),
+		)
+		const links = await linksOf(itemsOf, now)
+		return rows.map((r) => ({
+			id: String(r.id),
+			madeAt: r.madeAt,
+			links: links.get(String(r.id)) ?? [],
+		}))
+	},
+
+	deleteIntegrityEvents(ids) {
+		return deleteByIds(ids.map(Number), (part) =>
+			db
+				.delete(launcherIntegrityEvents)
+				.where(inArray(launcherIntegrityEvents.id, part)),
+		)
+	},
+
+	async moderationItemCandidates(now) {
+		const items = await db
+			.select({ ...itemColumns, madeAt: serviceQueueItems.createdAt })
+			.from(serviceQueueItems)
+			.where(
+				and(
+					sql`${serviceQueueItems.status} <> 'open'`,
+					lt(
+						serviceQueueItems.resolvedAt,
+						sql`${now}::timestamptz - ${EVIDENCE_DAYS}`,
+					),
+				),
+			)
+		const links = await linksOfItems(items, now)
+		return items.map((i) => ({
+			id: String(i.id),
+			madeAt: i.madeAt,
+			links: links.get(i.id) ?? [],
+		}))
+	},
+
+	// A report item takes its report with it; the events go by cascade and a
+	// warning keeps its row without the item (on delete set null).
+	async deleteModerationItems(ids) {
+		let deleted = 0
+		for (const part of chunks(ids.map(Number)))
+			await db.transaction(async (tx) => {
+				const reportIds = (
+					await tx
+						.select({ sourceId: serviceQueueItems.sourceId })
+						.from(serviceQueueItems)
+						.where(
+							and(
+								inArray(serviceQueueItems.id, part),
+								eq(serviceQueueItems.itemType, 'report'),
+							),
+						)
+				)
+					.map((r) => Number(r.sourceId))
+					.filter((id) => Number.isInteger(id))
+				if (reportIds.length > 0)
+					await tx.delete(reports).where(inArray(reports.id, reportIds))
+				const result = await tx
+					.delete(serviceQueueItems)
+					.where(inArray(serviceQueueItems.id, part))
+				deleted += result.rowCount ?? 0
+			})
 		return deleted
 	},
 

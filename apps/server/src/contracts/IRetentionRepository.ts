@@ -29,6 +29,18 @@ export interface IRetentionRepository {
 	runLinks(runIds: string[], now: Date): Promise<Map<string, EvidenceLink[]>>
 	// Deletes every log of the runs. Returns how many logs went.
 	deleteRunLogs(runIds: string[]): Promise<number>
+	// Moderation records, under the evidence rule. Each candidate's links are
+	// its service queue item (open until resolved) and the bans it issued.
+	// player_warnings rows, by id.
+	warningCandidates(now: Date): Promise<EvidenceCandidate[]>
+	deleteWarnings(ids: string[]): Promise<number>
+	// launcher_integrity_events rows, by id (their item: the player's day).
+	integrityEventCandidates(now: Date): Promise<EvidenceCandidate[]>
+	deleteIntegrityEvents(ids: string[]): Promise<number>
+	// Resolved service queue items, by id. Deleting one also deletes its
+	// events, and for a report item the report.
+	moderationItemCandidates(now: Date): Promise<EvidenceCandidate[]>
+	deleteModerationItems(ids: string[]): Promise<number>
 	// Ban records that ran out.
 	banRecordCandidates(now: Date): Promise<BanRecordCandidate[]>
 	deleteBanRecords(ids: string[]): Promise<number>

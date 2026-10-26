@@ -55,6 +55,13 @@ function repo(
 			{ id: 'b-recent', expiresAt: new Date('2026-01-01T00:00:00Z') },
 		]),
 		deleteBanRecords: vi.fn(async (ids: string[]) => ids.length),
+		runLinks: vi.fn(async () => new Map()),
+		warningCandidates: vi.fn(async () => [old('w1'), openCase('w2')]),
+		deleteWarnings: vi.fn(async (ids: string[]) => ids.length),
+		integrityEventCandidates: vi.fn(async () => [recentlyClosed('i1'), longClosed('i2')]),
+		deleteIntegrityEvents: vi.fn(async (ids: string[]) => ids.length),
+		moderationItemCandidates: vi.fn(async () => [old('q1'), openCase('q2'), longClosed('q3')]),
+		deleteModerationItems: vi.fn(async (ids: string[]) => ids.length),
 		...overrides,
 	}
 }
@@ -80,6 +87,9 @@ describe('sweepRetention', () => {
 		expect(purgeNakama).toHaveBeenCalledWith(['r1', 'r3'])
 		expect(r.deleteRunLogs).toHaveBeenCalledWith(['r1', 'r3'])
 		expect(r.deleteBanRecords).toHaveBeenCalledWith(['b-old'])
+		expect(r.deleteWarnings).toHaveBeenCalledWith(['w1'])
+		expect(r.deleteIntegrityEvents).toHaveBeenCalledWith(['i2'])
+		expect(r.deleteModerationItems).toHaveBeenCalledWith(['q1', 'q3'])
 		expect(counts).toEqual({
 			chat: 7,
 			flaggedChat: 2,
@@ -87,7 +97,22 @@ describe('sweepRetention', () => {
 			runs: 2,
 			runLogs: 4,
 			banRecords: 1,
+			warnings: 1,
+			integrityEvents: 1,
+			moderationItems: 2,
 		})
+	})
+
+	it('deletes moderation records (reports, queue items) last, after the evidence and warnings that read their links', async () => {
+		const order: string[] = []
+		const r = repo({
+			deleteFlaggedChatLines: vi.fn(async (ids: string[]) => (order.push('chat'), ids.length)),
+			deleteWarnings: vi.fn(async (ids: string[]) => (order.push('warnings'), ids.length)),
+			deleteIntegrityEvents: vi.fn(async (ids: string[]) => (order.push('integrity'), ids.length)),
+			deleteModerationItems: vi.fn(async (ids: string[]) => (order.push('items'), ids.length)),
+		})
+		await sweepRetention({ repo: r, purgeNamedRuns: nakamaOk() }, NOW)
+		expect(order[order.length - 1]).toBe('items')
 	})
 
 	it('deletes nothing when nothing is past its limit', async () => {
@@ -106,6 +131,18 @@ describe('sweepRetention', () => {
 		expect(purgeNakama).not.toHaveBeenCalled()
 		expect(r.deleteRunLogs).not.toHaveBeenCalled()
 		expect(r.deleteBanRecords).not.toHaveBeenCalled()
+	})
+
+	it('keeps moderation records while their case is open or a ban from it is in force, then 180 days', async () => {
+		const r = repo({
+			warningCandidates: vi.fn(async () => [openCase('w'), recentlyClosed('w2')]),
+			integrityEventCandidates: vi.fn(async () => [openCase('i')]),
+			moderationItemCandidates: vi.fn(async () => [recentlyClosed('q')]),
+		})
+		await sweepRetention({ repo: r, purgeNamedRuns: nakamaOk() }, NOW)
+		expect(r.deleteWarnings).not.toHaveBeenCalled()
+		expect(r.deleteIntegrityEvents).not.toHaveBeenCalled()
+		expect(r.deleteModerationItems).not.toHaveBeenCalled()
 	})
 
 	it("keeps a run's logs when Nakama could not delete the run, so the next sweep tries again", async () => {

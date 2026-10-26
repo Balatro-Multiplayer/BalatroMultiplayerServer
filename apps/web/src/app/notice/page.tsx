@@ -122,8 +122,8 @@ export default function NoticePage() {
             <li><strong className='text-foreground'>Gameplay logs:</strong> 180 days from the end of the match. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Chat saved with a report:</strong> kept while a report about that lobby is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Ban records:</strong> the length of the ban plus 12 months. For permanent bans: retained indefinitely.</li>
-            <li><strong className='text-foreground'>Reports, warnings, moderation decisions and failed launcher checks:</strong> kept as moderation records. They have no fixed time limit yet.</li>
-            <li><strong className='text-foreground'>Match results, ratings and season standings:</strong> kept, because leaderboards and other players' match history depend on them.</li>
+            <li><strong className='text-foreground'>Reports, warnings, moderation decisions and failed launcher checks:</strong> 180 days from when they were made. While the report or moderation case is open, or while a ban from it is in force, we keep them, then 180 more days.</li>
+            <li><strong className='text-foreground'>Match results, ratings and season standings:</strong> kept for the life of your account, because leaderboards and other players' match history depend on them. If you delete your account, they stay under the random ID (see Account deletion).</li>
           </ul>
 
           <Hr />

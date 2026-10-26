@@ -6,8 +6,11 @@ import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js
 import type { Result } from '../../shared/utils/result.js'
 import { banRecordPurgeable, evidencePurgeable } from './limits.js'
 
-// The hourly retention sweep: deletes chat, evidence and ban records past
-// their limit (limits.ts) and nothing else. A run is deleted in Nakama first
+// The hourly retention sweep: deletes chat, evidence, moderation records and
+// ban records past their limit (limits.ts) and nothing else. Moderation
+// records (warnings, failed launcher checks, and last the service queue items
+// with their reports) follow the evidence rule. Queue items go last: the
+// other candidates read their links from them. A run is deleted in Nakama first
 // (admin_runs_purge_named), then its logs here, so a failed Nakama call
 // leaves the logs for the next sweep to try again.
 
@@ -28,6 +31,9 @@ export interface RetentionSweepCounts {
 	runs: number
 	runLogs: number
 	banRecords: number
+	warnings: number
+	integrityEvents: number
+	moderationItems: number
 }
 
 export async function sweepRetention(
@@ -67,5 +73,27 @@ export async function sweepRetention(
 		.map((b) => b.id)
 	const banRecords = bans.length > 0 ? await repo.deleteBanRecords(bans) : 0
 
-	return { chat, flaggedChat, flaggedMessages, runs, runLogs, banRecords }
+	const warningIds = await purgeable(repo.warningCandidates(now))
+	const warnings =
+		warningIds.length > 0 ? await repo.deleteWarnings(warningIds) : 0
+
+	const eventIds = await purgeable(repo.integrityEventCandidates(now))
+	const integrityEvents =
+		eventIds.length > 0 ? await repo.deleteIntegrityEvents(eventIds) : 0
+
+	const itemIds = await purgeable(repo.moderationItemCandidates(now))
+	const moderationItems =
+		itemIds.length > 0 ? await repo.deleteModerationItems(itemIds) : 0
+
+	return {
+		chat,
+		flaggedChat,
+		flaggedMessages,
+		runs,
+		runLogs,
+		banRecords,
+		warnings,
+		integrityEvents,
+		moderationItems,
+	}
 }
