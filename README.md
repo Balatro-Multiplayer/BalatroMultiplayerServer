@@ -40,7 +40,7 @@ apps/web/          Next.js website: leaderboards, stats, match history, admin UI
 apps/moderation/   Stateless chat-moderation verdict service (local classifier)
 packages/types/    @bmp/types, shared types for server/web/internal
 packages/internal/ Public stub for private, deploy-time-only features
-nginx/             Reverse-proxy config (prod, local, blue/green upstream)
+nginx/             Reverse-proxy config for the Official server (prod, blue/green upstream)
 scripts/           deploy-color-swap.sh (blue/green API deploy)
 ```
 
@@ -49,8 +49,8 @@ scripts/           deploy-color-swap.sh (blue/green API deploy)
 Bundled by esbuild from `nakama/src` into `nakama/modules/index.js`, which the
 Nakama container loads. It owns everything live:
 
-- **Login**: Steam session tickets via a custom-auth hook; device login for
-  local development only.
+- **Login**: Steam session tickets via a custom-auth hook on the Official
+  server; Device login on Community and Dev servers.
 - **Lobbies**: an authoritative `bmp_lobby` match that relays gameplay actions,
   referees ready/start and result reporting, handles spectating, forfeits,
   rejoin and checkpoint/restore across restarts.
@@ -94,72 +94,84 @@ A public stub. Some features (for example the launcher-integrity challenge
 strategy) have private implementations that replace this package at deploy
 time. Without them the feature is simply disabled.
 
-## Local development
+## Run your own server
 
-Requirements: Node 22, pnpm (version pinned in `package.json`), Docker with
-Compose.
+[`compose.local.yml`](compose.local.yml) runs a server on your own machine
+with plain `docker compose` commands. It does not use `docker-compose.yml`
+(the Official server's file). You need Docker with Compose and a clone of this
+repo; the server uses the committed Nakama bundle, so you need no Node or pnpm.
 
-```sh
-pnpm install
-```
+There are two kinds of local server (`BMP_SERVER_KIND`):
 
-### Environment files
+- A **Community server** (the default): Postgres and Nakama. Players log in
+  with Device login, so the server needs no Steam Web API key. Casual, Ranked
+  and private lobbies work; ratings stay on this server.
+- A **Dev server**: the same, plus the API, the website, a Nakama bundle that
+  rebuilds on save, and every dev flag allowed. For contributors.
 
-There are two `.env` files, both git-ignored:
-
-- **`apps/server/.env`**: read by the API containers. Copy
-  [`apps/server/.env.example`](apps/server/.env.example) and fill it in. The API
-  refuses to start without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`,
-  `ADMIN_SECRET` and `NAKAMA_URL` (`STEAM_WEB_API_KEY` too, in production).
-  The rest are optional integrations (Discord OAuth, GitHub releases, mod index
-  sync) or dev flags such as `DEV_AUTO_VERIFY_LAUNCHER`. `BMP_SERVER_KIND`
-  (`official`, `community` or `dev`; unset means `official`) decides which dev
-  flags are allowed: the API and Nakama refuse to start as `official` with any
-  of them on.
-- **root `.env`**: read by Docker Compose. Locally it typically sets
-  `COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml` and, if you want
-  real Steam login, `STEAM_WEB_API_KEY` and `PLAYER_ID_SALT` (the same salt as
-  the API). A deployed stack also needs `NAKAMA_SESSION_KEY`,
-  `NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
-  `NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; the Nakama container
-  refuses to start without them.
-
-Chat, ranked, casual queue and lobby creation are toggled at runtime from the
-admin config page (stored in Postgres), not through env vars.
-
-### Running the stack
-
-[`docker-compose.yml`](docker-compose.yml) is the production-shaped stack
-(Postgres, Nakama, blue/green API, moderation replicas, nginx, web).
-[`docker-compose.local.yml`](docker-compose.local.yml) is the local overlay:
-plain HTTP, public placeholder keys, Nakama on `127.0.0.1:7350` (console on
-7351), the API on `127.0.0.1:8788`, the website on `127.0.0.1:3000`, device
-login enabled, and a single moderation replica.
+### Community server
 
 ```sh
-export COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml   # or set it in the root .env
-docker compose up -d --build
-docker compose logs -f nakama
-docker compose down            # add -v to wipe the database volume
+docker compose -f compose.local.yml up -d
+docker compose -f compose.local.yml logs -f nakama
+docker compose -f compose.local.yml down        # add -v to delete all data
 ```
 
-The API runs its migrations as part of a deploy (see below); on a fresh local
-database run them once:
+Nakama listens on `127.0.0.1:7350` (console on `127.0.0.1:7351`). Players set
+`use_custom_server` and the `server_*` keys in MPAPI's config to join.
+
+Profiles add services:
 
 ```sh
-docker compose run --rm --no-deps api-blue sh -c "pnpm --filter balatro-multiplayer-api-server migrate"
+docker compose -f compose.local.yml --profile api up -d          # the API on 127.0.0.1:8788 (bans, reports)
+docker compose -f compose.local.yml --profile web up -d          # the website on 127.0.0.1:3000 (starts the API too)
+docker compose -f compose.local.yml --profile moderation up -d   # the chat model
 ```
 
-After changing anything under `nakama/src`, rebuild the bundle and restart
-Nakama:
+A one-shot `migrate` service applies the API's migrations before the API
+starts. Chat uses the local word filter unless you start the `moderation`
+profile and set `MODERATION_REMOTE=on`; the model is not in the image (see
+[`apps/moderation/README.md`](apps/moderation/README.md)).
+
+Every key has a public placeholder default. To let other machines in, copy
+[`.env.example`](.env.example) to `.env`, set `NAKAMA_BIND_ADDRESS=0.0.0.0` and
+replace every placeholder key with your own value.
+
+### Dev server
+
+In `.env` (copied from [`.env.example`](.env.example)), set:
 
 ```sh
-pnpm --filter bmp-nakama-modules build
-docker compose restart nakama
+BMP_SERVER_KIND=dev
+COMPOSE_PROFILES=dev
 ```
 
-To work on the API or website outside Docker, `pnpm dev` runs every package's
-watch mode through Turbo.
+Then:
+
+```sh
+docker compose -f compose.local.yml up --watch
+```
+
+This starts Postgres, Nakama, the migrated API on `127.0.0.1:8788`, the
+website on `127.0.0.1:3000` and `nakama-bundle`, which rebuilds
+`nakama/modules/index.js` on every save in `nakama/src`. `--watch` restarts
+Nakama after each rebuild. Commit the rebuilt bundle with your `nakama/src`
+change: it is what the container runs.
+
+To work on the API or website outside Docker, `pnpm install` and `pnpm dev`
+run every package's watch mode through Turbo.
+
+### Test data
+
+```sh
+docker compose -f compose.local.yml run --rm seed    # test players and a web admin login
+docker compose -f compose.local.yml run --rm reset   # empty both databases
+docker compose -f compose.local.yml restart          # after a reset
+```
+
+`seed` makes the Nakama accounts `TestPlayer1` to `TestPlayer4` and prints a
+link that logs the website in as the admin `LocalAdmin`. Run it again for a new
+link. Both refuse to run on the Official server.
 
 ### Running several local game clients
 
@@ -206,6 +218,16 @@ inactive API color, runs migrations, health-checks it, switches
 Nakama, the website and the moderation replicas are rebuilt and restarted with
 `docker compose up -d`. Nakama gets a shutdown grace period so open lobbies
 checkpoint themselves and resume after a restart.
+
+The Official server (`docker-compose.yml`, `BMP_SERVER_KIND=official`)
+reads two git-ignored `.env` files. `apps/server/.env` is for the API (copy
+[`apps/server/.env.example`](apps/server/.env.example)); it refuses to start
+without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`, `ADMIN_SECRET`,
+`NAKAMA_URL` and `STEAM_WEB_API_KEY`. The root `.env` is for Compose and must
+set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `NAKAMA_SESSION_KEY`,
+`NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
+`NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; Nakama refuses to start
+without them. Nakama and the API also refuse to start with any dev flag on.
 
 Use the base compose file alone for a dedicated host, or add a host-specific
 overlay with `COMPOSE_OVERLAY=<file>` when sharing a host with other services.

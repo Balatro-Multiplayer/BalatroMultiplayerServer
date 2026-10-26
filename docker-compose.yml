@@ -22,7 +22,7 @@ services:
   # compose network. Its data lives in a separate "nakama" database on the
   # shared Postgres server; `migrate up` creates it on first start. Secrets
   # come from the root .env -- the entrypoint refuses to start without them.
-  # docker-compose.local.yml swaps in local.yml and dev placeholders.
+  # compose.local.yml (Community and Dev servers) runs it with local.yml.
   nakama:
     image: heroiclabs/nakama:3.41.0
     container_name: bmp-nakama
@@ -106,8 +106,7 @@ services:
   # api-blue/api-green: the blue-green pair (scripts/deploy-color-swap.sh).
   # Neither publishes a host port or is reachable as plain "api" on the bmp
   # network -- the `nginx` service below is the only stable address, for
-  # external traffic (published 80/443 in prod, 127.0.0.1:8788 for local dev
-  # -- see docker-compose.local.yml), web's server-side calls and Nakama's
+  # external traffic (published 80/443), web's server-side calls and Nakama's
   # /internal/nakama/* calls, all through the "api" network alias.
   api-blue: &api-color
     build:
@@ -229,10 +228,9 @@ services:
   # (/etc/nginx/sites-available/bmp), so all server config, TLS included,
   # lives in this repo/compose file instead of split across two places.
   # nginx/prod/server.conf is the prod-realistic default (TLS, Cloudflare,
-  # web/api routing, matching the old host config exactly);
-  # docker-compose.local.yml swaps in nginx/local/server.conf (plain HTTP,
-  # no domain) for local dev. nginx/upstream.conf is the one file
-  # scripts/deploy-color-swap.sh ever rewrites, in either environment.
+  # web/api routing, matching the old host config exactly).
+  # nginx/upstream.conf is the one file scripts/deploy-color-swap.sh ever
+  # rewrites.
   nginx:
     image: nginx:1.27-alpine
     container_name: bmp-nginx

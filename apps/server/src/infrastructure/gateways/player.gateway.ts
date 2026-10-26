@@ -76,6 +76,32 @@ export async function createPlayer(data: {
 	return row
 }
 
+// The seeded web admin of a Community or Dev server (features/local-server/
+// seed.ts). Upserted, so seeding twice keeps one row and restores the
+// privilege if someone removed it.
+export async function upsertAdminPlayer(data: {
+	id: string
+	steamName: string
+}): Promise<void> {
+	await db
+		.insert(players)
+		.values({
+			id: data.id,
+			steamName: data.steamName,
+			privileges: ['admin'],
+			tosAcceptedVersion: 1,
+		})
+		.onConflictDoUpdate({
+			target: players.id,
+			set: {
+				steamName: data.steamName,
+				privileges: ['admin'],
+				deletedAt: null,
+				updatedAt: new Date(),
+			},
+		})
+}
+
 export async function linkSteam(
 	playerId: string,
 	steamIdHash: string,

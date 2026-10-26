@@ -1,0 +1,14 @@
+# compose.local.yml's nakama-bundle (dev profile): esbuild in watch mode over
+# nakama/src, writing nakama/modules/index.js. The sources are bind-mounted;
+# only the dependencies live in the image.
+FROM node:22-alpine
+WORKDIR /app
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY nakama/package.json ./nakama/
+RUN pnpm install --frozen-lockfile --filter bmp-nakama-modules
+
+WORKDIR /app/nakama
+CMD ["node", "build.mjs", "--watch"]
