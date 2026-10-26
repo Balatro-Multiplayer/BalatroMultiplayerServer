@@ -35,6 +35,43 @@ export async function liftBanInNakama(playerId: string, banId: string): Promise<
 	return result.ok
 }
 
+// A network ban (ADR 0005) as the admin panel shows it. own: it came from this
+// player's own permanent account ban; otherwise it covers a network this
+// player logged in from.
+export interface NetworkBanSummary {
+	banId: string
+	own: boolean
+	networks: number
+	bannedAt: number
+	liftedAt: number | null
+}
+
+// The network bans that touch a player, or null when Nakama cannot answer.
+// Only the Official server has network bans; elsewhere the list is empty.
+export async function networkBansInNakama(playerId: string): Promise<NetworkBanSummary[] | null> {
+	const userId = await nakamaUserIdOf(playerId)
+	if (!userId) return isNakamaAdminEnabled() ? [] : null
+	const result = await callNakamaRpc<{
+		networkBans: { banId: string; userId: string; networks: number; bannedAt: number; liftedAt: number | null }[]
+	}>('admin_network_bans', { userId })
+	if (!result.ok) return null
+	return result.value.networkBans.map((b) => ({
+		banId: b.banId,
+		own: b.userId === userId,
+		networks: b.networks,
+		bannedAt: b.bannedAt,
+		liftedAt: b.liftedAt,
+	}))
+}
+
+export type NetworkBanLift = 'lifted' | 'not_found' | 'unavailable'
+
+export async function liftNetworkBanInNakama(banId: string): Promise<NetworkBanLift> {
+	const result = await callNakamaRpc<{ lifted: boolean }>('admin_network_ban_lift', { banId })
+	if (!result.ok) return 'unavailable'
+	return result.value.lifted ? 'lifted' : 'not_found'
+}
+
 export interface NakamaLobbySummary {
 	code: string
 	modId: string

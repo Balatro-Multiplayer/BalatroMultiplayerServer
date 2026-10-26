@@ -45,3 +45,8 @@ export function banMessage(what: string, ban: Ban): string {
 }
 
 export const ACCOUNT_BANNED = 'Account banned'
+
+// A network-ban login refusal (moderation/network.ts). It never names the
+// account that caused the ban. The appeal contact is the Notice's.
+export const NETWORK_BANNED = 'Your network is banned from online play.'
+export const NETWORK_BAN_MESSAGE = NETWORK_BANNED + ' To appeal, email bmp@virtualized.dev'

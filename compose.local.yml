@@ -85,6 +85,7 @@ services:
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY" \
           --runtime.env "PLAYER_ID_SALT=$$PLAYER_ID_SALT" \
+          --runtime.env "IP_HASH_SALT=$$IP_HASH_SALT" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
           --runtime.env "LOBBY_CATCH_UP_LIMIT_SECONDS=$$LOBBY_CATCH_UP_LIMIT_SECONDS" \
@@ -112,6 +113,8 @@ services:
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
       PLAYER_ID_SALT: ${PLAYER_ID_SALT:-local-dev-player-id-salt}
+      # Network bans: only BMP_SERVER_KIND=official uses it (and needs it).
+      IP_HASH_SALT: ${IP_HASH_SALT:-local-dev-ip-hash-salt}
       # Empty = 120s grace after a disconnect, 60s wait for results.
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
       RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}

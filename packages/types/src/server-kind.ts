@@ -4,7 +4,7 @@
 // reach the Official server.
 //
 // - official: Steam login only; every dev flag is refused; a mod report must
-//   list only allowed mods. An unset kind is official, so forgetting the
+//   list only allowed mods; permanent account bans also ban networks. An unset kind is official, so forgetting the
 //   setting fails safe.
 // - community: Device login on; the dev-only flags are refused; chat is
 //   judged by the local word filter unless MODERATION_REMOTE=on; any mod may
@@ -34,6 +34,9 @@ export interface ServerSettings {
 	testingRpcs: boolean
 	// Whether a mod report may list only the allowed mods (standing/).
 	allowedModsChecked: boolean
+	// Whether logins record network hashes and permanent account bans ban
+	// networks (ADR 0005). Needs IP_HASH_SALT.
+	networkBans: boolean
 }
 
 export type ServerKindError =
@@ -102,6 +105,7 @@ export function serverSettings(env: Env): ServerSettingsResult {
 				moderationRemote,
 				testingRpcs: true,
 				allowedModsChecked: false,
+				networkBans: false,
 			},
 		}
 	}
@@ -116,6 +120,7 @@ export function serverSettings(env: Env): ServerSettingsResult {
 			moderationRemote,
 			testingRpcs: false,
 			allowedModsChecked: kind === 'official',
+			networkBans: kind === 'official',
 		},
 	}
 }

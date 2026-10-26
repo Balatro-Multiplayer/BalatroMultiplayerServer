@@ -1794,6 +1794,8 @@ function banMessage(what, ban) {
   return text;
 }
 var ACCOUNT_BANNED = "Account banned";
+var NETWORK_BANNED = "Your network is banned from online play.";
+var NETWORK_BAN_MESSAGE = NETWORK_BANNED + " To appeal, email bmp@virtualized.dev";
 
 // src/shared/avatars/ids.ts
 var AVATAR_IDS = [
@@ -3883,7 +3885,8 @@ function serverSettings(env) {
         fakeLauncherStrategy: flag(env, "DEV_FAKE_LAUNCHER_STRATEGY") === true,
         moderationRemote,
         testingRpcs: true,
-        allowedModsChecked: false
+        allowedModsChecked: false,
+        networkBans: false
       }
     };
   }
@@ -3897,7 +3900,8 @@ function serverSettings(env) {
       fakeLauncherStrategy: false,
       moderationRemote,
       testingRpcs: false,
-      allowedModsChecked: kind === "official"
+      allowedModsChecked: kind === "official",
+      networkBans: kind === "official"
     }
   };
 }
@@ -4888,6 +4892,256 @@ function checkLoginBan(nk, logger, key, now) {
   logger.info("Account ban of %s expired; unbanned", entry.userId);
 }
 
+// src/moderation/network.ts
+var IP_HASHES_COLLECTION = "ip_hashes";
+var IP_HASHES_KEY = "networks";
+var NETWORK_BANS_COLLECTION = "network_bans";
+var NETWORK_BAN_INDEX_COLLECTION = "network_ban_index";
+var IP_HASH_DAYS = 30;
+var DAY_MS = 24 * 60 * 60 * 1e3;
+var LIST_PAGE2 = 100;
+var IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+var HEX_GROUP = /^[0-9a-f]{1,4}$/;
+function ipv4(text) {
+  const m = IPV4.exec(text);
+  if (!m) return null;
+  for (let i = 1; i <= 4; i++) if (Number(m[i]) > 255) return null;
+  return [m[1], m[2], m[3], m[4]].map(Number).join(".");
+}
+function ipv6Groups(text) {
+  let head = text.toLowerCase();
+  const tail = [];
+  const lastColon = head.lastIndexOf(":");
+  const v4 = ipv4(head.slice(lastColon + 1));
+  if (v4 !== null) {
+    const parts = v4.split(".").map(Number);
+    tail.push(parts[0] * 256 + parts[1], parts[2] * 256 + parts[3]);
+    head = head.slice(0, lastColon + 1);
+    if (!head.endsWith("::")) head = head.slice(0, -1);
+  }
+  const halves = head.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part) => {
+    if (part === "") return [];
+    const groups = part.split(":");
+    for (const g of groups) if (!HEX_GROUP.test(g)) return null;
+    return groups.map((g) => Number.parseInt(g, 16));
+  };
+  const left = parse(halves[0]);
+  const right = halves.length === 2 ? parse(halves[1]) : [];
+  if (!left || !right) return null;
+  const given = left.length + right.length + tail.length;
+  if (halves.length === 1) return given === 8 ? left.concat(tail) : null;
+  if (given > 7) return null;
+  const zeros = [];
+  for (let i = given; i < 8; i++) zeros.push(0);
+  return left.concat(zeros, right, tail);
+}
+function isIpv4Mapped(groups) {
+  for (let i = 0; i < 5; i++) if (groups[i] !== 0) return false;
+  return groups[5] === 65535;
+}
+function networkOf(ip) {
+  let text = ip.trim();
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(text);
+  if (bracketed) text = bracketed[1];
+  else if (/^[\d.]+:\d+$/.test(text)) text = text.slice(0, text.indexOf(":"));
+  const zone = text.indexOf("%");
+  if (zone !== -1) text = text.slice(0, zone);
+  if (text.indexOf(":") === -1) return ipv4(text);
+  const groups = ipv6Groups(text);
+  if (!groups) return null;
+  if (isIpv4Mapped(groups))
+    return [
+      groups[6] >> 8,
+      groups[6] & 255,
+      groups[7] >> 8,
+      groups[7] & 255
+    ].join(".");
+  return `${groups.slice(0, 4).map((g) => g.toString(16)).join(":")}::/64`;
+}
+function networkHash(sha256, salt, ip) {
+  const network = networkOf(ip);
+  return network === null ? null : sha256(`${salt}:${network}`);
+}
+function withoutStale(hashes, now) {
+  const cutoff = now - IP_HASH_DAYS * DAY_MS;
+  let changed2 = false;
+  const next = {};
+  for (const hash of Object.keys(hashes)) {
+    if (hashes[hash] > cutoff) next[hash] = hashes[hash];
+    else changed2 = true;
+  }
+  return changed2 ? next : hashes;
+}
+function viewOf2(ban) {
+  return {
+    banId: ban.banId,
+    userId: ban.userId,
+    networks: ban.hashes.length,
+    bannedAt: ban.bannedAt,
+    liftedAt: ban.liftedAt
+  };
+}
+var SERVER_ONLY = { permissionRead: 0, permissionWrite: 0 };
+function readIpHashes(nk, userId) {
+  const objects = nk.storageRead([
+    { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
+  ]);
+  return objects.length === 0 ? {} : objects[0].value;
+}
+function writeIpHashes(nk, userId, hashes) {
+  if (Object.keys(hashes).length === 0) {
+    nk.storageDelete([
+      { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
+    ]);
+    return;
+  }
+  nk.storageWrite([
+    __spreadValues({
+      collection: IP_HASHES_COLLECTION,
+      key: IP_HASHES_KEY,
+      userId,
+      value: hashes
+    }, SERVER_ONLY)
+  ]);
+}
+function readNetworkBan(nk, banId) {
+  const objects = nk.storageRead([
+    { collection: NETWORK_BANS_COLLECTION, key: banId, userId: SYSTEM_USER_ID }
+  ]);
+  return objects.length === 0 ? null : objects[0].value;
+}
+function writeNetworkBan(nk, ban) {
+  nk.storageWrite([
+    __spreadValues({
+      collection: NETWORK_BANS_COLLECTION,
+      key: ban.banId,
+      userId: SYSTEM_USER_ID,
+      value: ban
+    }, SERVER_ONLY)
+  ]);
+}
+function readIndex(nk, hash) {
+  const objects = nk.storageRead([
+    {
+      collection: NETWORK_BAN_INDEX_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID
+    }
+  ]);
+  return objects.length === 0 ? [] : objects[0].value.banIds || [];
+}
+function writeIndex2(nk, hash, banIds) {
+  if (banIds.length === 0) {
+    nk.storageDelete([
+      {
+        collection: NETWORK_BAN_INDEX_COLLECTION,
+        key: hash,
+        userId: SYSTEM_USER_ID
+      }
+    ]);
+    return;
+  }
+  const value = { banIds };
+  nk.storageWrite([
+    __spreadValues({
+      collection: NETWORK_BAN_INDEX_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID,
+      value
+    }, SERVER_ONLY)
+  ]);
+}
+function clientNetworkHash(ctx, nk, settings) {
+  const salt = ctx.env.IP_HASH_SALT;
+  if (!settings.networkBans || !salt || !ctx.clientIp) return null;
+  return networkHash((input) => nk.sha256Hash(input), salt, ctx.clientIp);
+}
+function recordNetworkLogin(nk, userId, hash, now) {
+  const hashes = __spreadValues({}, withoutStale(readIpHashes(nk, userId), now));
+  hashes[hash] = now;
+  writeIpHashes(nk, userId, hashes);
+}
+function isNetworkBanned(nk, hash) {
+  return readIndex(nk, hash).length > 0;
+}
+function banNetworks(nk, settings, userId, ban, now) {
+  if (!settings.networkBans || ban.expiresAt !== null) return false;
+  if (readNetworkBan(nk, ban.banId)) return false;
+  const hashes = Object.keys(withoutStale(readIpHashes(nk, userId), now));
+  writeNetworkBan(nk, {
+    banId: ban.banId,
+    userId,
+    hashes,
+    bannedAt: now,
+    liftedAt: null
+  });
+  for (const hash of hashes) {
+    const banIds = readIndex(nk, hash);
+    if (banIds.indexOf(ban.banId) === -1)
+      writeIndex2(nk, hash, banIds.concat([ban.banId]));
+  }
+  return true;
+}
+function liftNetworkBan(nk, banId, now) {
+  const ban = readNetworkBan(nk, banId);
+  if (!ban || ban.liftedAt !== null) return false;
+  for (const hash of ban.hashes)
+    writeIndex2(
+      nk,
+      hash,
+      readIndex(nk, hash).filter((id) => id !== banId)
+    );
+  writeNetworkBan(nk, __spreadProps(__spreadValues({}, ban), { hashes: [], liftedAt: now }));
+  return true;
+}
+function listNetworkBans(nk) {
+  const bans = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(
+      SYSTEM_USER_ID,
+      NETWORK_BANS_COLLECTION,
+      LIST_PAGE2,
+      cursor
+    );
+    for (const o of page.objects || [])
+      bans.push(o.value);
+    cursor = page.cursor || "";
+  } while (cursor);
+  return bans;
+}
+function networkBansFor(nk, userId) {
+  const own = readIpHashes(nk, userId);
+  return listNetworkBans(nk).filter(
+    (ban) => ban.userId === userId || ban.hashes.some((hash) => hash in own)
+  ).map(viewOf2);
+}
+function purgeIpHashes(nk, now, max) {
+  let deleted = 0;
+  let seen = 0;
+  let cursor = "";
+  do {
+    const page = nk.storageList(null, IP_HASHES_COLLECTION, LIST_PAGE2, cursor);
+    for (const o of page.objects || []) {
+      if (seen >= max) return { deleted, more: true };
+      seen++;
+      const before = o.value;
+      const after = withoutStale(before, now);
+      if (after === before) continue;
+      deleted += Object.keys(before).length - Object.keys(after).length;
+      writeIpHashes(nk, o.userId, after);
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  return { deleted, more: false };
+}
+function requireIpHashSalt(settings, env) {
+  if (settings.networkBans && !env.IP_HASH_SALT)
+    throw new Error("IP_HASH_SALT must be set on the Official server");
+}
+
 // src/player/session.ts
 function isPlayerSync(value) {
   return typeof value.playerId === "string" && Array.isArray(value.bans);
@@ -4968,6 +5222,7 @@ function rpcSessionInit(ctx, logger, nk, payload) {
   const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
   if (accountBan) {
     enforceAccountBan(nk, userId, accountBan);
+    banNetworks(nk, settingsOf(ctx), userId, accountBan, Date.now());
     throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
   }
   syncDisplayName(nk, userId, profile);
@@ -5291,7 +5546,7 @@ function catalogView(progress, holdings, selected, enabled) {
     enabled
   };
 }
-function viewOf2(nk, userId, fallbackName) {
+function viewOf3(nk, userId, fallbackName) {
   const profile = profileFor(nk, userId, fallbackName);
   const progress = progressFor(nk, userId);
   const holdings = { privileges: profile.privileges, unlocked: progress.unlocked };
@@ -5299,7 +5554,7 @@ function viewOf2(nk, userId, fallbackName) {
 }
 function rpcAvatarCatalog(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  return JSON.stringify(viewOf2(nk, userId, ctx.username));
+  return JSON.stringify(viewOf3(nk, userId, ctx.username));
 }
 function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -5308,7 +5563,7 @@ function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   if (input.userId !== void 0) {
     if (typeof input.userId !== "string" || !USER_ID2.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
     if (!readProfile(nk, input.userId)) throw runtimeError(NOT_FOUND, "No such player");
-    view = viewOf2(nk, input.userId, "");
+    view = viewOf3(nk, input.userId, "");
   } else {
     const privileges = input.privileges;
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
@@ -5629,7 +5884,7 @@ function partitionTeams(groups) {
 // src/matchmaking/queue.ts
 var QUEUE_COLLECTION = "queue_presence";
 var QUEUE_STALE_MS = 30 * 6e4;
-var LIST_PAGE2 = 100;
+var LIST_PAGE3 = 100;
 var MATCH_LIST_LIMIT = 100;
 var NOTIFICATIONS_STREAM = 0;
 var TOMBSTONE_MS = 6e4;
@@ -5680,7 +5935,7 @@ function ownRecords(nk, userId) {
   const out = [];
   let cursor = "";
   do {
-    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE2, cursor);
+    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE3, cursor);
     for (const o of page.objects || []) out.push(o);
     cursor = page.cursor || "";
   } while (cursor);
@@ -5766,7 +6021,7 @@ function liveQueuedPlayers(nk, modId, now) {
   const byUser = {};
   let cursor = "";
   do {
-    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE2, cursor);
+    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE3, cursor);
     for (const o of page.objects || []) {
       if (!isRecord(o)) {
         if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
@@ -6377,6 +6632,8 @@ function rpcAdminBanApply(ctx, logger, nk, payload) {
   if (expiresAt === void 0) throw runtimeError(INVALID_ARGUMENT, "expiresAt must be a time or null");
   const reason = typeof input.reason === "string" ? input.reason : "";
   const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason });
+  if (bans.account && banNetworks(nk, settingsOf(ctx), userId, bans.account, Date.now()))
+    logger.info("Network ban %s from %s", bans.account.banId, userId);
   return JSON.stringify({ bans });
 }
 function rpcAdminBanLift(ctx, logger, nk, payload) {
@@ -6659,7 +6916,7 @@ function nextSeasonBest(modId, reported, current) {
 var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
 var DECAY_RATE_PER_DAY = 5;
 var DECAY_FLOOR = 1200;
-var DAY_MS = 24 * 60 * 60 * 1e3;
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var bootSeason = 1;
 function currentSeason(nk) {
   const pushed = readConfig(nk).season;
@@ -6672,7 +6929,7 @@ function configureSeason(value) {
 function decayedRating(record, now) {
   if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
   if (record.rating <= DECAY_FLOOR) return record.rating;
-  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
+  const inactiveDays = (now - record.lastMatchAt) / DAY_MS2;
   if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
   const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
   return Math.max(DECAY_FLOOR, record.rating - loss);
@@ -6996,6 +7253,7 @@ function beforeAuthenticateCustom(ctx, logger, nk, data) {
       "Custom login needs a Steam ticket in vars.steam_ticket"
     );
   }
+  refuseBannedNetwork(ctx, nk);
   const salt = playerIdSalt(ctx, logger);
   const steamId = verifySteamTicket(ctx, logger, nk, ticket);
   account.id = STEAM_HASH_CUSTOM_ID_PREFIX + steamIdHash(nk, salt, steamId);
@@ -7039,8 +7297,24 @@ function moveRawDeviceAccount(nk, logger, rawId, hashedId) {
   moveLoginKey(nk, "device:" + rawId, "device:" + hashedId);
   logger.info("Moved the Device login of %s to its Steam id hash", userId);
 }
+function refuseBannedNetwork(ctx, nk) {
+  const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));
+  if (hash !== null && isNetworkBanned(nk, hash))
+    throw runtimeError(PERMISSION_DENIED, NETWORK_BAN_MESSAGE);
+}
 function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
   claimLegacyRatingsAtLogin(ctx, logger, nk);
+  try {
+    const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));
+    if (hash !== null && ctx.userId)
+      recordNetworkLogin(nk, ctx.userId, hash, Date.now());
+  } catch (e) {
+    logger.error("Recording the login network failed: %v", e);
+  }
+}
+function beforeSessionRefresh(ctx, logger, nk, data) {
+  refuseBannedNetwork(ctx, nk);
+  return data;
 }
 
 // src/actions/results.ts
@@ -8846,7 +9120,7 @@ function boardEntries(records, stored, now) {
 }
 
 // src/lobby/checkpoint_sweep.ts
-var LIST_PAGE3 = 100;
+var LIST_PAGE4 = 100;
 var SWEEP_MAX = 200;
 function isSweepable(checkpoint, now, ttlMs) {
   const expired = ttlMs === void 0 ? isExpired(checkpoint, now) : now >= checkpoint.at + ttlMs;
@@ -8876,7 +9150,7 @@ function sweepCheckpoints(nk, logger, now, max, ttlMs) {
   const result = { deleted: 0, noContest: 0, more: false };
   let cursor = "";
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, LOBBY_CHECKPOINT_COLLECTION, LIST_PAGE3, cursor);
+    const page = nk.storageList(SYSTEM_USER_ID, LOBBY_CHECKPOINT_COLLECTION, LIST_PAGE4, cursor);
     for (const o of page.objects || []) {
       const checkpoint = o.value;
       if (!isSweepable(checkpoint, now, ttlMs)) continue;
@@ -8915,8 +9189,8 @@ function rpcAdminCheckpointsSweep(ctx, logger, nk, payload) {
 
 // src/lobby/retention.ts
 var RUN_RETENTION_DAYS = 180;
-var DAY_MS2 = 24 * 60 * 60 * 1e3;
-var LIST_PAGE4 = 100;
+var DAY_MS3 = 24 * 60 * 60 * 1e3;
+var LIST_PAGE5 = 100;
 var PURGE_MAX = 500;
 function isKept(run) {
   return Object.keys(run.flags || {}).length > 0 || run.status === "disputed";
@@ -8938,7 +9212,7 @@ function purgeRuns(nk, cutoff, max) {
   let deleted = 0;
   let cursor = "";
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE4, cursor);
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE5, cursor);
     for (const o of page.objects || []) {
       const run = o.value;
       if (!isPurgeable(run, cutoff)) continue;
@@ -8956,7 +9230,7 @@ function rpcAdminRunsPurge(ctx, logger, nk, payload) {
   const days = (_a = parsePayload(payload).olderThanDays) != null ? _a : RUN_RETENTION_DAYS;
   if (typeof days !== "number" || !Number.isInteger(days) || days < 1)
     throw runtimeError(INVALID_ARGUMENT, "olderThanDays must be a positive whole number");
-  const result = purgeRuns(nk, Date.now() - days * DAY_MS2, PURGE_MAX);
+  const result = purgeRuns(nk, Date.now() - days * DAY_MS3, PURGE_MAX);
   if (result.deleted > 0) logger.info("Purged %d runs older than %d days", result.deleted, days);
   return JSON.stringify(result);
 }
@@ -9294,9 +9568,34 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   return JSON.stringify({ ok: true, reportId: reply.body.reportId });
 }
 
+// src/moderation/network_admin.ts
+var IP_HASH_PURGE_MAX = 500;
+function rpcAdminNetworkBans(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const userId = requireUserId2(nk, parsePayload(payload));
+  return JSON.stringify({ networkBans: networkBansFor(nk, userId) });
+}
+function rpcAdminNetworkBanLift(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const banId = parsePayload(payload).banId;
+  if (typeof banId !== "string" || !banId)
+    throw runtimeError(INVALID_ARGUMENT, "banId is required");
+  const lifted = liftNetworkBan(nk, banId, Date.now());
+  if (lifted) logger.info("Lifted network ban %s", banId);
+  return JSON.stringify({ lifted });
+}
+function rpcAdminIpHashesPurge(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const result = purgeIpHashes(nk, Date.now(), IP_HASH_PURGE_MAX);
+  if (result.deleted > 0)
+    logger.info("Purged %d login network hashes", result.deleted);
+  return JSON.stringify(result);
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
-  checkServerKind(ctx.env, logger);
+  const settings = checkServerKind(ctx.env, logger);
+  requireIpHashSalt(settings, ctx.env);
   configureSeason(ctx.env["RATING_SEASON"]);
   seedAllowedModIdsExtra(nk, logger, ctx.env);
   initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom);
@@ -9304,6 +9603,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerBeforeLinkCustom(refuseCustomIdChange);
   initializer.registerBeforeUnlinkCustom(refuseCustomIdChange);
   initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice);
+  initializer.registerBeforeSessionRefresh(beforeSessionRefresh);
   logger.info("BMP Steam login module loaded");
   initializer.registerMatch("bmp_lobby", {
     matchInit: lobbyMatchInit,
@@ -9360,6 +9660,9 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);
   initializer.registerRpc("admin_ban_lift", rpcAdminBanLift);
+  initializer.registerRpc("admin_network_bans", rpcAdminNetworkBans);
+  initializer.registerRpc("admin_network_ban_lift", rpcAdminNetworkBanLift);
+  initializer.registerRpc("admin_ip_hashes_purge", rpcAdminIpHashesPurge);
   initializer.registerRpc("admin_lobby_list", rpcAdminLobbyList);
   initializer.registerRpc("admin_lobby_get", rpcAdminLobbyGet);
   initializer.registerRpc("admin_lobby_kick", rpcAdminLobbyKick);

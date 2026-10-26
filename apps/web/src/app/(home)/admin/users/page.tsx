@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/auth'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BanList } from './components/ban-list'
 import { IssueBanForm } from './components/issue-ban-form'
+import { type NetworkBan, NetworkBanList } from './components/network-ban-list'
 import { PlayerList } from './components/player-list'
 import { PrivilegeManager } from './components/privilege-manager'
 
@@ -88,8 +89,16 @@ export default function AdminUsersPage() {
   })
   const detail = detailResp ? { ...detailResp.player, bans: detailResp.bans } : null
 
+  const networkBansQuery = useQuery<{ networkBans: NetworkBan[] }>({
+    queryKey: ['admin-player-network-bans', selectedId],
+    queryFn: () => apiFetch(`/webadmin/players/${selectedId}/network-bans`),
+    enabled: !!selectedId,
+    retry: false,
+  })
+
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['admin-player-detail', selectedId] })
+    qc.invalidateQueries({ queryKey: ['admin-player-network-bans', selectedId] })
     qc.invalidateQueries({ queryKey: ['admin-players'] })
   }
 
@@ -109,6 +118,12 @@ export default function AdminUsersPage() {
   const liftBanMutation = useMutation({
     mutationFn: (vars: { playerId: string; banId: number }) =>
       apiFetch(`/webadmin/players/${vars.playerId}/bans/${vars.banId}`, { method: 'DELETE' }),
+    onSuccess: refresh,
+  })
+
+  const liftNetworkBanMutation = useMutation({
+    mutationFn: (vars: { playerId: string; banId: string }) =>
+      apiFetch(`/webadmin/players/${vars.playerId}/network-bans/${vars.banId}`, { method: 'DELETE' }),
     onSuccess: refresh,
   })
 
@@ -187,6 +202,22 @@ export default function AdminUsersPage() {
                         expiresAt: banExpiry ? new Date(banExpiry).toISOString() : null,
                       })
                     }
+                  />
+                </CardContent>
+              </Card>
+
+              {/* Lifting a network ban is admin-only, like lifting an account ban. */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className='text-base'>Network bans</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <NetworkBanList
+                    networkBans={networkBansQuery.data?.networkBans ?? []}
+                    unavailable={networkBansQuery.isError}
+                    canLift={isAdmin}
+                    liftPending={liftNetworkBanMutation.isPending}
+                    onLift={(banId) => liftNetworkBanMutation.mutate({ playerId: detail.id, banId })}
                   />
                 </CardContent>
               </Card>

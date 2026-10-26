@@ -22,7 +22,13 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from './errors'
+import { NETWORK_BAN_MESSAGE } from './moderation/access'
 import { checkLoginBan, moveLoginKey } from './moderation/enforce'
+import {
+	clientNetworkHash,
+	isNetworkBanned,
+	recordNetworkLogin,
+} from './moderation/network'
 import {
 	STEAM_HASH_CUSTOM_ID_PREFIX,
 	STEAM_HASH_DEVICE_ID_PREFIX,
@@ -114,6 +120,7 @@ export function beforeAuthenticateCustom(
 		)
 	}
 
+	refuseBannedNetwork(ctx, nk)
 	const salt = playerIdSalt(ctx, logger)
 	const steamId = verifySteamTicket(ctx, logger, nk, ticket)
 	account.id = STEAM_HASH_CUSTOM_ID_PREFIX + steamIdHash(nk, salt, steamId)
@@ -181,6 +188,14 @@ function moveRawDeviceAccount(nk: nkruntime.Nakama, logger: nkruntime.Logger, ra
 	logger.info('Moved the Device login of %s to its Steam id hash', userId)
 }
 
+// Network bans (moderation/network.ts): every login and session refresh from
+// a banned network is refused, whatever the account.
+function refuseBannedNetwork(ctx: nkruntime.Context, nk: nkruntime.Nakama) {
+	const hash = clientNetworkHash(ctx, nk, settingsOf(ctx))
+	if (hash !== null && isNetworkBanned(nk, hash))
+		throw runtimeError(PERMISSION_DENIED, NETWORK_BAN_MESSAGE)
+}
+
 // After every Steam login (Nakama allows one after-hook per message, so all
 // login-time work hangs off this one). Never fails the login.
 export function afterAuthenticateCustom(
@@ -191,4 +206,21 @@ export function afterAuthenticateCustom(
 	_request: nkruntime.AuthenticateCustomRequest,
 ) {
 	claimLegacyRatingsAtLogin(ctx, logger, nk)
+	try {
+		const hash = clientNetworkHash(ctx, nk, settingsOf(ctx))
+		if (hash !== null && ctx.userId)
+			recordNetworkLogin(nk, ctx.userId, hash, Date.now())
+	} catch (e) {
+		logger.error('Recording the login network failed: %v', e)
+	}
+}
+
+export function beforeSessionRefresh(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	data: { token?: string; vars?: { [key: string]: string } },
+) {
+	refuseBannedNetwork(ctx, nk)
+	return data
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
+import { purgeNakamaIpHashes, purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
 describe('purgeNakamaRuns', () => {
 	it('keeps calling while Nakama says there is more, and totals what went', async () => {
@@ -47,6 +47,26 @@ describe('sweepNakamaCheckpoints', () => {
 		const rpc = vi.fn(async () => ({ ok: false, error: 'unreachable' }))
 		expect(await sweepNakamaCheckpoints(rpc as never)).toEqual({ deleted: 0, noContest: 0 })
 		expect(warn).toHaveBeenCalledTimes(1)
+		warn.mockRestore()
+	})
+})
+
+describe('purgeNakamaIpHashes', () => {
+	it('keeps calling while Nakama says there is more, and totals what went', async () => {
+		const replies = [
+			{ ok: true, value: { deleted: 40, more: true } },
+			{ ok: true, value: { deleted: 2, more: false } },
+		]
+		const rpc = vi.fn(async () => replies.shift())
+		expect(await purgeNakamaIpHashes(rpc as never)).toBe(42)
+		expect(rpc).toHaveBeenCalledWith('admin_ip_hashes_purge', {})
+	})
+
+	it('stops quietly when Nakama is off', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const rpc = vi.fn(async () => ({ ok: false, error: 'disabled' }))
+		expect(await purgeNakamaIpHashes(rpc as never)).toBe(0)
+		expect(warn).not.toHaveBeenCalled()
 		warn.mockRestore()
 	})
 })
