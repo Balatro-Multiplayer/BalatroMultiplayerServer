@@ -46,10 +46,19 @@ describe('the mirror outbox', () => {
 		expect(entries[0].logs).toEqual({ a: { events: [[1, 'x', null]] } })
 		expect(entries[0].ratings).toEqual({ a: { rating: 640 } })
 		expect(players).toEqual({
-			a: { steamId: '76561198000000001', legacyPlayerId: null, displayName: '' },
-			b: { steamId: null, legacyPlayerId: 'pg-b', displayName: 'Bee' },
+			a: { steamId: '76561198000000001', legacyPlayerId: null, displayName: '', deleted: false },
+			b: { steamId: null, legacyPlayerId: 'pg-b', displayName: 'Bee', deleted: false },
 		})
 		expect(pull(nk, { limit: 1 }).entries).toHaveLength(1)
+	})
+
+	it('says when a player\'s account is gone', () => {
+		const nk = nakama()
+		nk.accountGetId = () => {
+			throw new Error('not found')
+		}
+		enqueue(nk, { kind: 'notice', at: 10, userId: 'x', version: 2 })
+		expect(pull(nk).players).toEqual({ x: { steamId: null, legacyPlayerId: null, displayName: '', deleted: true } })
 	})
 
 	it('keeps an entry until it is acked', () => {

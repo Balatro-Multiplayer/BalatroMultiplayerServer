@@ -9,6 +9,7 @@ import { parsePayload, requireServer } from '../rpc'
 import { progressFor } from '../achievements/storage'
 import { DEFAULT_AVATAR } from '../shared/avatars/ids'
 import { isSelectable } from '../shared/avatars/unlocked'
+import { anonymizeAccount } from './anonymize'
 import { releaseDiscord, withoutDiscord } from './discord'
 import { playerView, profileFor, updateProfile, type Profile } from './profile'
 import { profileChanged } from './rpc'
@@ -105,9 +106,10 @@ export function rpcAdminProfileSet(
 	return JSON.stringify({ player: playerView(userId, profile) })
 }
 
-// {userId} -> {deleted: true}: the account deleted from the website. The
-// player leaves their lobby, and the account and everything it owns is
-// deleted. Its refresh tokens are revoked first ('' tokens: all of them); an
+// {userId, anonymousId} -> {deleted: true}: the account deleted from the
+// website. The player leaves their lobby, everything system-owned that names
+// them is rewritten to name anonymousId (player/anonymize.ts), and the
+// account and everything it owns is deleted. Its refresh tokens are revoked first ('' tokens: all of them); an
 // already-issued session token can't be revoked in Nakama and lives out its
 // expiry (session.token_expiry_sec), but its account is gone so it owns no
 // storage. Bans outlive the account: they are indexed by login id
@@ -120,7 +122,10 @@ export function rpcAdminAccountDelete(
 	payload: string,
 ) {
 	requireServer(ctx)
-	const userId = requireAccount(nk, parsePayload(payload).userId)
+	const input = parsePayload(payload)
+	const userId = requireAccount(nk, input.userId)
+	if (typeof input.anonymousId !== 'string' || !USER_ID.test(input.anonymousId) || input.anonymousId === userId)
+		throw runtimeError(INVALID_ARGUMENT, 'anonymousId is required')
 	const lobby = currentLobby(nk, userId)
 	if (lobby) {
 		const signal: LobbySignal = { type: 'admin_remove', userId, reason: 'account_deleted', onlyIfStarted: false }
@@ -128,6 +133,7 @@ export function rpcAdminAccountDelete(
 	}
 	releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash)
 	nk.sessionLogout(userId, '', '')
+	anonymizeAccount(nk, userId, input.anonymousId)
 	nk.accountDeleteId(userId, false)
 	logger.info('Deleted account %s', userId)
 	return JSON.stringify({ deleted: true })

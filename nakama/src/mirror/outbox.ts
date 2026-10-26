@@ -83,6 +83,8 @@ export interface MirrorPlayer {
 	steamId: string | null
 	legacyPlayerId: string | null
 	displayName: string
+	// The account was deleted: the API must not link this id to a row.
+	deleted: boolean
 }
 
 export interface PulledRun {
@@ -146,10 +148,12 @@ function expandRun(nk: nkruntime.Nakama, key: string, entry: Extract<MirrorEntry
 
 function mirrorPlayer(nk: nkruntime.Nakama, userId: string): MirrorPlayer {
 	let steamId: string | null = null
+	let deleted = false
 	try {
 		steamId = steamIdOf(nk, userId)
 	} catch (e) {
 		// The account is gone; the API keeps whatever row it already has.
+		deleted = true
 	}
 	const stored = readProfile(nk, userId)
 	const profile = stored ? stored.profile : null
@@ -157,6 +161,7 @@ function mirrorPlayer(nk: nkruntime.Nakama, userId: string): MirrorPlayer {
 		steamId,
 		legacyPlayerId: profile ? profile.legacyPlayerId : null,
 		displayName: profile ? profile.steamName : '',
+		deleted,
 	}
 }
 

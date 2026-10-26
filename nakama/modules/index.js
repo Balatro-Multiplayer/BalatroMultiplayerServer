@@ -3957,16 +3957,19 @@ function expandRun(nk, key, entry) {
 }
 function mirrorPlayer(nk, userId) {
   let steamId = null;
+  let deleted = false;
   try {
     steamId = steamIdOf(nk, userId);
   } catch (e) {
+    deleted = true;
   }
   const stored = readProfile(nk, userId);
   const profile = stored ? stored.profile : null;
   return {
     steamId,
     legacyPlayerId: profile ? profile.legacyPlayerId : null,
-    displayName: profile ? profile.steamName : ""
+    displayName: profile ? profile.steamName : "",
+    deleted
   };
 }
 function pullEntries(nk, limit) {
@@ -9288,6 +9291,130 @@ function seedAllowedModIdsExtra(nk, logger, env) {
   logger.info("Seeded queueAllowedModIdsExtra from %s: %v", EXTRA_SEED_ENV, JSON.stringify(extra));
 }
 
+// src/player/anonymize.ts
+var DELETED_PLAYER_NAME = "[deleted player]";
+var LIST_PAGE6 = 100;
+function replaceId(value, from, to) {
+  if (value === from) return to;
+  if (Array.isArray(value))
+    return value.map((v) => replaceId(v, from, to));
+  if (value !== null && typeof value === "object") {
+    const next = {};
+    for (const key of Object.keys(value))
+      next[key === from ? to : key] = replaceId(
+        value[key],
+        from,
+        to
+      );
+    return next;
+  }
+  return value;
+}
+function anonymizedRun(run, userId, anonymousId) {
+  const next = replaceId(run, userId, anonymousId);
+  return __spreadProps(__spreadValues({}, next), {
+    players: next.players.map(
+      (p) => p.id === anonymousId ? __spreadProps(__spreadValues({}, p), { displayName: DELETED_PLAYER_NAME }) : p
+    )
+  });
+}
+var SERVER_ONLY2 = { permissionRead: 0, permissionWrite: 0 };
+function listAll(nk, owner, collection) {
+  const all = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(owner, collection, LIST_PAGE6, cursor);
+    for (const o of page.objects || []) all.push(o);
+    cursor = page.cursor || "";
+  } while (cursor);
+  return all;
+}
+function anonymizeRuns(nk, userId, anonymousId) {
+  for (const pointer of listAll(nk, userId, MY_RUNS_COLLECTION)) {
+    const runId = pointer.value.runId;
+    if (typeof runId !== "string") continue;
+    const [object] = nk.storageRead([
+      { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
+    ]);
+    if (!object) continue;
+    const run = object.value;
+    const writes = [
+      {
+        collection: RUNS_COLLECTION,
+        key: runId,
+        userId: SYSTEM_USER_ID,
+        value: anonymizedRun(run, userId, anonymousId),
+        permissionRead: 2,
+        permissionWrite: 0
+      }
+    ];
+    const [log] = nk.storageRead([
+      {
+        collection: LOGS_COLLECTION,
+        key: logKey(runId, userId),
+        userId: SYSTEM_USER_ID
+      }
+    ]);
+    if (log)
+      writes.push(__spreadValues({
+        collection: LOGS_COLLECTION,
+        key: logKey(runId, anonymousId),
+        userId: SYSTEM_USER_ID,
+        value: log.value
+      }, SERVER_ONLY2));
+    nk.storageWrite(writes);
+    if (log)
+      nk.storageDelete([
+        {
+          collection: LOGS_COLLECTION,
+          key: logKey(runId, userId),
+          userId: SYSTEM_USER_ID
+        }
+      ]);
+  }
+}
+function rewriteSystemObjects(nk, collection, userId, anonymousId) {
+  const writes = [];
+  for (const o of listAll(nk, SYSTEM_USER_ID, collection)) {
+    const next = replaceId(o.value, userId, anonymousId);
+    if (JSON.stringify(next) === JSON.stringify(o.value)) continue;
+    writes.push(__spreadValues({
+      collection,
+      key: o.key,
+      userId: SYSTEM_USER_ID,
+      value: next
+    }, SERVER_ONLY2));
+  }
+  if (writes.length > 0) nk.storageWrite(writes);
+}
+function anonymizeBanIndex(nk, userId, anonymousId) {
+  const objects = nk.storageRead(
+    loginKeys(nk, userId).map((key) => ({
+      collection: BAN_INDEX_COLLECTION,
+      key,
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  if (objects.length === 0) return;
+  nk.storageWrite(
+    objects.map((o) => __spreadValues({
+      collection: BAN_INDEX_COLLECTION,
+      key: o.key,
+      userId: SYSTEM_USER_ID,
+      value: replaceId(o.value, userId, anonymousId)
+    }, SERVER_ONLY2))
+  );
+}
+function anonymizeAccount(nk, userId, anonymousId) {
+  anonymizeRuns(nk, userId, anonymousId);
+  rewriteSystemObjects(nk, MIRROR_COLLECTION, userId, anonymousId);
+  rewriteSystemObjects(nk, NETWORK_BANS_COLLECTION, userId, anonymousId);
+  anonymizeBanIndex(nk, userId, anonymousId);
+  nk.storageDelete([
+    { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
+  ]);
+}
+
 // src/player/discord.ts
 var DISCORD_INDEX_COLLECTION = "discord_index";
 var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -9435,7 +9562,10 @@ function rpcAdminProfileSet(ctx, logger, nk, payload) {
 }
 function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   requireServer(ctx);
-  const userId = requireAccount(nk, parsePayload(payload).userId);
+  const input = parsePayload(payload);
+  const userId = requireAccount(nk, input.userId);
+  if (typeof input.anonymousId !== "string" || !USER_ID4.test(input.anonymousId) || input.anonymousId === userId)
+    throw runtimeError(INVALID_ARGUMENT, "anonymousId is required");
   const lobby = currentLobby(nk, userId);
   if (lobby) {
     const signal2 = { type: "admin_remove", userId, reason: "account_deleted", onlyIfStarted: false };
@@ -9443,6 +9573,7 @@ function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   }
   releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash);
   nk.sessionLogout(userId, "", "");
+  anonymizeAccount(nk, userId, input.anonymousId);
   nk.accountDeleteId(userId, false);
   logger.info("Deleted account %s", userId);
   return JSON.stringify({ deleted: true });

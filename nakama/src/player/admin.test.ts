@@ -82,10 +82,10 @@ describe('admin_account_delete', () => {
 	it('ends the sessions, frees the Discord link and deletes the account', () => {
 		const { nk, deleted } = setup()
 		rpcAdminDiscordSet(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, discordIdHash: HASH }))
-		const res = JSON.parse(rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE })))
+		const res = JSON.parse(rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, anonymousId: '99999999-9999-4999-8999-999999999999' })))
 		expect(res).toEqual({ deleted: true })
 		expect(deleted).toEqual([`logout:${ALICE}:`, ALICE])
 		expect(discordOwner(nk as any, HASH)).toBeNull()
-		expect(() => rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE }))).toThrow(/No such user/)
+		expect(() => rpcAdminAccountDelete(serverCtx(), fakeLogger, nk as any, JSON.stringify({ userId: ALICE, anonymousId: '99999999-9999-4999-8999-999999999999' }))).toThrow(/No such user/)
 	})
 })
