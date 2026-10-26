@@ -1,6 +1,7 @@
 // What chat_send does before (or instead of) the moderation service: messages
 // on the webadmin allowlist skip moderation entirely, and with the service
-// switched off (MODERATION_REMOTE=off) a local word list judges instead.
+// switched off (server_kind.ts: moderationRemote) a local word list judges
+// instead.
 import { RegExpMatcher, englishDataset, englishRecommendedTransformers } from 'obscenity'
 
 // The allowlist key for a message: trimmed, lowercased, one trailing . ! or ?
@@ -35,8 +36,4 @@ export function obscenityMatches(message: string): ObscenityMatch[] {
 		const metadata = englishDataset.getPayloadWithPhraseMetadata(m).phraseMetadata
 		return { word: (metadata && metadata.originalWord) || '', startIndex: m.startIndex, endIndex: m.endIndex }
 	})
-}
-
-export function remoteModerationEnabled(env: { [key: string]: string }): boolean {
-	return env.MODERATION_REMOTE !== 'off'
 }

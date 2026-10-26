@@ -8,9 +8,12 @@
 // (apps/server/src/features/auth/nakama.ts), so every other way of setting a
 // custom id is refused.
 //
-// Device login is for local multi-instance testing only (impersonated
-// ClaudeControl instances have no Steam ticket): refused unless the runtime
-// env sets ALLOW_DEVICE_AUTH=true, which only docker-compose.local.yml does.
+// Device login (no Steam proof) depends on the server kind (server_kind.ts):
+// never on the Official server, always on a Community server, and on a Dev
+// server unless ALLOW_DEVICE_AUTH=false. On a Community server the normal
+// client logs in with its raw SteamID64 as the device id, so the same Steam
+// id is always the same account; its Steam name reaches the profile and the
+// display name through session_init, as with Steam login.
 import {
 	INVALID_ARGUMENT,
 	PERMISSION_DENIED,
@@ -20,12 +23,14 @@ import {
 } from './errors'
 import { checkLoginBan } from './moderation/enforce'
 import { claimLegacyRatingsAtLogin } from './rating/legacy'
+import { settingsOf } from './server_kind'
 
 const STEAM_AUTH_URL =
 	'https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/'
 const STEAM_CUSTOM_ID_PREFIX = 'steam:'
 const STEAM_TICKET_PATTERN = /^[0-9a-fA-F]{16,4096}$/
 const STEAM_TIMEOUT_MS = 10000
+const STEAM_ID64_PATTERN = /^7656119\d{10}$/
 
 // Returns the Steam ID the ticket belongs to, or throws a runtime error. The
 // URL carries the key, so it is never logged.
@@ -123,10 +128,16 @@ export function beforeAuthenticateDevice(
 	nk: nkruntime.Nakama,
 	data: nkruntime.AuthenticateDeviceRequest,
 ) {
-	if (ctx.env.ALLOW_DEVICE_AUTH !== 'true') {
+	if (!settingsOf(ctx).deviceLogin) {
 		throw runtimeError(PERMISSION_DENIED, 'Device login is disabled')
 	}
-	if (data.account && data.account.id) checkLoginBan(nk, logger, 'device:' + data.account.id, Date.now())
+	const deviceId = data.account && data.account.id
+	if (deviceId) checkLoginBan(nk, logger, 'device:' + deviceId, Date.now())
+	// Nakama usernames are unique and Steam names are not: a Steam-id login
+	// lets Nakama pick the username, and the Steam name becomes the display
+	// name instead.
+	// biome-ignore lint/performance/noDelete: the key must be gone, not undefined -- the request becomes a Go struct
+	if (deviceId && STEAM_ID64_PATTERN.test(deviceId)) delete data.username
 	return data
 }
 

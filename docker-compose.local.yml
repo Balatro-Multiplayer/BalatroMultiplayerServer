@@ -51,6 +51,7 @@ services:
     environment:
       NAKAMA_HTTP_KEY: local-dev-http-key
       INTERNAL_API_KEY: local-dev-internal-key
+      BMP_SERVER_KIND: dev
       DEV_FAKE_LAUNCHER_STRATEGY: ${DEV_FAKE_LAUNCHER_STRATEGY:-false}
 
   api-green: *api-local
@@ -75,6 +76,7 @@ services:
         /nakama/nakama migrate up --database.address postgres:postgres@postgres:5432/nakama
         exec /nakama/nakama --config /nakama/data/local.yml \
           --database.address postgres:postgres@postgres:5432/nakama \
+          --runtime.env "BMP_SERVER_KIND=$$BMP_SERVER_KIND" \
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$$STEAM_WEB_API_KEY" \
           --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
@@ -87,11 +89,13 @@ services:
           --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
           --runtime.env "EXPRESS_INTERNAL_KEY=local-dev-internal-key"
     environment:
+      # A Dev server: every dev flag is allowed (packages/types/src/server-kind.ts).
+      BMP_SERVER_KIND: dev
       # Device login lets impersonated ClaudeControl instances (no Steam
-      # ticket) into Nakama. Local dev only -- never set it on a real server.
+      # ticket) into Nakama.
       ALLOW_DEVICE_AUTH: "true"
-      # Lets a client create a ranked lobby directly (rankedMode). Local dev
-      # only; on a real server ranked lobbies come from the matchmaker.
+      # Lets a client create a ranked lobby directly (rankedMode). Dev server
+      # only; elsewhere ranked lobbies come from the matchmaker.
       ALLOW_RANKED_LOBBIES: "true"
       # Lobby grace period after a disconnect; empty = the 120s default.
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}

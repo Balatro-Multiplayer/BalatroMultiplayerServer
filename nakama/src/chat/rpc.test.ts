@@ -118,4 +118,12 @@ describe('chat_send moderation', () => {
 		const [, blocked] = logged(nk)
 		expect(blocked.verdict).toEqual({ source: 'local', matches: [{ word: 'fuck', startIndex: 9, endIndex: 12 }] })
 	})
+
+	it('works on a Community server without the moderation service', () => {
+		const nk = seated({ verdict: 'reject', band: 'guard_unavailable' })
+		const community = { BMP_SERVER_KIND: 'community' }
+		expect(say(nk, 'nice hand', community)).toEqual({ text: 'nice hand' })
+		expect(() => say(nk, 'what the fuck', community)).toThrow(/blocked/)
+		expect(nk.http).toEqual([])
+	})
 })

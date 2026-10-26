@@ -43,6 +43,9 @@ services:
           --console.username admin \
           --console.password "$${NAKAMA_CONSOLE_PASSWORD:?}" \
           --console.signing_key "$${NAKAMA_CONSOLE_SIGNING_KEY:?}" \
+          --runtime.env "BMP_SERVER_KIND=$$BMP_SERVER_KIND" \
+          --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
+          --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$${STEAM_WEB_API_KEY:?}" \
           --runtime.env "PLAYER_ID_SALT=$${PLAYER_ID_SALT:?}" \
@@ -51,6 +54,12 @@ services:
           --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
           --runtime.env "EXPRESS_INTERNAL_KEY=$${INTERNAL_API_KEY:?}"
     environment:
+      # This is the Official server: Steam login only. Nakama refuses to
+      # start if a dev flag (passed through below so a stray one is seen)
+      # is on. See packages/types/src/server-kind.ts.
+      BMP_SERVER_KIND: official
+      ALLOW_DEVICE_AUTH: ${ALLOW_DEVICE_AUTH:-}
+      ALLOW_RANKED_LOBBIES: ${ALLOW_RANKED_LOBBIES:-}
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
       # Same salt as the API's, so a login's Steam id hashes to the key the
@@ -107,6 +116,8 @@ services:
     container_name: bmp-api-blue
     env_file: ./apps/server/.env
     environment:
+      # The Official server: the API refuses to start with a dev flag on.
+      BMP_SERVER_KIND: official
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/bmp
       WEB_BASE_URL: ${WEB_BASE_URL:-https://new.balatromp.com}
       # The API mirrors Nakama's games into Postgres and drives it through

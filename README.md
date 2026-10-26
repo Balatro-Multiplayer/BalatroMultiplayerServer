@@ -112,7 +112,10 @@ There are two `.env` files, both git-ignored:
   refuses to start without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`,
   `ADMIN_SECRET` and `NAKAMA_URL` (`STEAM_WEB_API_KEY` too, in production).
   The rest are optional integrations (Discord OAuth, GitHub releases, mod index
-  sync) or dev flags such as `DEV_AUTO_VERIFY_LAUNCHER`.
+  sync) or dev flags such as `DEV_AUTO_VERIFY_LAUNCHER`. `BMP_SERVER_KIND`
+  (`official`, `community` or `dev`; unset means `official`) decides which dev
+  flags are allowed: the API and Nakama refuse to start as `official` with any
+  of them on.
 - **root `.env`**: read by Docker Compose. Locally it typically sets
   `COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml` and, if you want
   real Steam login, `STEAM_WEB_API_KEY` and `PLAYER_ID_SALT` (the same salt as
