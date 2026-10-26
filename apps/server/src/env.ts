@@ -1,3 +1,5 @@
+import { serverKindErrorMessage, serverSettings } from '@bmp/types'
+
 function required(key: string): string {
 	const value = process.env[key]
 	if (!value) {
@@ -36,6 +38,12 @@ function requiredInProduction(key: string, defaultValue: string): string {
 	return optional(key, defaultValue)
 }
 
+const SERVER = (() => {
+	const result = serverSettings(process.env)
+	if (!result.ok) throw new Error(`Refusing to start: ${serverKindErrorMessage(result.error)}`)
+	return result.value
+})()
+
 export const env = {
 	PORT: Number(optional('PORT', '8788')),
 	NODE_ENV,
@@ -65,21 +73,22 @@ export const env = {
 	// queue for matches. Everyone else is rejected. Off by default.
 	TESTING_MODE: optionalBool('TESTING_MODE', false),
 
+	// The server kind (packages/types/src/server-kind.ts). Startup fails
+	// above on the Official server with any dev flag on.
+	BMP_SERVER_KIND: SERVER.kind,
+
 	// Dev-only escape hatch for local Ranked testing without a real BET launcher
 	// (e.g. ClaudeControl-driven clients, which can never answer the launcher-
 	// integrity HMAC challenge -- see launcher-integrity.service.ts). When true,
 	// every player is marked launcher-verified on connect and never issued a
-	// challenge at all, rather than needing to actually pass one. Forced off
-	// outside development regardless of the raw env value, so a stray .env
-	// setting can never enable this in production.
-	DEV_AUTO_VERIFY_LAUNCHER:
-		!IS_PRODUCTION && optionalBool('DEV_AUTO_VERIFY_LAUNCHER', false),
+	// challenge at all, rather than needing to actually pass one. Only a Dev
+	// server (BMP_SERVER_KIND=dev) accepts it.
+	DEV_AUTO_VERIFY_LAUNCHER: SERVER.autoVerifyLauncher,
 	// Dev-only stand-in for the private launcher-integrity strategy
 	// (features/launcher-integrity/dev-strategy.ts), so the challenge round
-	// trip runs locally. Only used when no private strategy registered;
-	// forced off in production like DEV_AUTO_VERIFY_LAUNCHER.
-	DEV_FAKE_LAUNCHER_STRATEGY:
-		!IS_PRODUCTION && optionalBool('DEV_FAKE_LAUNCHER_STRATEGY', false),
+	// trip runs locally. Only used when no private strategy registered; only
+	// a Dev server accepts it.
+	DEV_FAKE_LAUNCHER_STRATEGY: SERVER.fakeLauncherStrategy,
 
 	// On/off switch for the hourly mod-registry sync (features/mods/mods-sync.service.ts,
 	// which fetches https://thunderstore.io/c/balatro/api/v1/package/ directly

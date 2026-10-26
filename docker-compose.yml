@@ -22,7 +22,7 @@ services:
   # compose network. Its data lives in a separate "nakama" database on the
   # shared Postgres server; `migrate up` creates it on first start. Secrets
   # come from the root .env -- the entrypoint refuses to start without them.
-  # docker-compose.local.yml swaps in local.yml and dev placeholders.
+  # compose.local.yml (Community and Dev servers) runs it with local.yml.
   nakama:
     image: heroiclabs/nakama:3.41.0
     container_name: bmp-nakama
@@ -43,6 +43,9 @@ services:
           --console.username admin \
           --console.password "$${NAKAMA_CONSOLE_PASSWORD:?}" \
           --console.signing_key "$${NAKAMA_CONSOLE_SIGNING_KEY:?}" \
+          --runtime.env "BMP_SERVER_KIND=$$BMP_SERVER_KIND" \
+          --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
+          --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$${STEAM_WEB_API_KEY:?}" \
           --runtime.env "PLAYER_ID_SALT=$${PLAYER_ID_SALT:?}" \
@@ -51,6 +54,12 @@ services:
           --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
           --runtime.env "EXPRESS_INTERNAL_KEY=$${INTERNAL_API_KEY:?}"
     environment:
+      # This is the Official server: Steam login only. Nakama refuses to
+      # start if a dev flag (passed through below so a stray one is seen)
+      # is on. See packages/types/src/server-kind.ts.
+      BMP_SERVER_KIND: official
+      ALLOW_DEVICE_AUTH: ${ALLOW_DEVICE_AUTH:-}
+      ALLOW_RANKED_LOBBIES: ${ALLOW_RANKED_LOBBIES:-}
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
       # Same salt as the API's, so a login's Steam id hashes to the key the
@@ -97,8 +106,7 @@ services:
   # api-blue/api-green: the blue-green pair (scripts/deploy-color-swap.sh).
   # Neither publishes a host port or is reachable as plain "api" on the bmp
   # network -- the `nginx` service below is the only stable address, for
-  # external traffic (published 80/443 in prod, 127.0.0.1:8788 for local dev
-  # -- see docker-compose.local.yml), web's server-side calls and Nakama's
+  # external traffic (published 80/443), web's server-side calls and Nakama's
   # /internal/nakama/* calls, all through the "api" network alias.
   api-blue: &api-color
     build:
@@ -107,6 +115,8 @@ services:
     container_name: bmp-api-blue
     env_file: ./apps/server/.env
     environment:
+      # The Official server: the API refuses to start with a dev flag on.
+      BMP_SERVER_KIND: official
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/bmp
       WEB_BASE_URL: ${WEB_BASE_URL:-https://new.balatromp.com}
       # The API mirrors Nakama's games into Postgres and drives it through
@@ -218,10 +228,9 @@ services:
   # (/etc/nginx/sites-available/bmp), so all server config, TLS included,
   # lives in this repo/compose file instead of split across two places.
   # nginx/prod/server.conf is the prod-realistic default (TLS, Cloudflare,
-  # web/api routing, matching the old host config exactly);
-  # docker-compose.local.yml swaps in nginx/local/server.conf (plain HTTP,
-  # no domain) for local dev. nginx/upstream.conf is the one file
-  # scripts/deploy-color-swap.sh ever rewrites, in either environment.
+  # web/api routing, matching the old host config exactly).
+  # nginx/upstream.conf is the one file scripts/deploy-color-swap.sh ever
+  # rewrites.
   nginx:
     image: nginx:1.27-alpine
     container_name: bmp-nginx

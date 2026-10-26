@@ -40,7 +40,7 @@ apps/web/          Next.js website: leaderboards, stats, match history, admin UI
 apps/moderation/   Stateless chat-moderation verdict service (local classifier)
 packages/types/    @bmp/types, shared types for server/web/internal
 packages/internal/ Public stub for private, deploy-time-only features
-nginx/             Reverse-proxy config (prod, local, blue/green upstream)
+nginx/             Reverse-proxy config for the Official server (prod, blue/green upstream)
 scripts/           deploy-color-swap.sh (blue/green API deploy)
 ```
 
@@ -49,8 +49,8 @@ scripts/           deploy-color-swap.sh (blue/green API deploy)
 Bundled by esbuild from `nakama/src` into `nakama/modules/index.js`, which the
 Nakama container loads. It owns everything live:
 
-- **Login**: Steam session tickets via a custom-auth hook; device login for
-  local development only.
+- **Login**: Steam session tickets via a custom-auth hook on the Official
+  server; Device login on Community and Dev servers.
 - **Lobbies**: an authoritative `bmp_lobby` match that relays gameplay actions,
   referees ready/start and result reporting, handles spectating, forfeits,
   rejoin and checkpoint/restore across restarts.
@@ -94,82 +94,191 @@ A public stub. Some features (for example the launcher-integrity challenge
 strategy) have private implementations that replace this package at deploy
 time. Without them the feature is simply disabled.
 
-## Local development
+## Run your own server
 
-Requirements: Node 22, pnpm (version pinned in `package.json`), Docker with
-Compose.
+[`compose.local.yml`](compose.local.yml) runs a server on your own machine
+with plain `docker compose` commands. It does not use `docker-compose.yml`
+(the Official server's file). You need Docker with Compose and a clone of this
+repo; the server uses the committed Nakama bundle, so you need no Node or pnpm.
 
-```sh
-pnpm install
-```
+You can run two kinds of server (`BMP_SERVER_KIND`):
 
-### Environment files
+- A **Community server** (the default): Postgres and Nakama. Players log in
+  with Device login, so the server needs no Steam Web API key. Casual, Ranked
+  and private lobbies work; ratings stay on this server.
+- A **Dev server**: the same, plus the API, the website, a Nakama bundle that
+  rebuilds on save, and every dev flag allowed. For contributors.
 
-There are two `.env` files, both git-ignored:
+### Run a Community server
 
-- **`apps/server/.env`**: read by the API containers. Copy
-  [`apps/server/.env.example`](apps/server/.env.example) and fill it in. The API
-  refuses to start without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`,
-  `ADMIN_SECRET` and `NAKAMA_URL` (`STEAM_WEB_API_KEY` too, in production).
-  The rest are optional integrations (Discord OAuth, GitHub releases, mod index
-  sync) or dev flags such as `DEV_AUTO_VERIFY_LAUNCHER`.
-- **root `.env`**: read by Docker Compose. Locally it typically sets
-  `COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml` and, if you want
-  real Steam login, `STEAM_WEB_API_KEY` and `PLAYER_ID_SALT` (the same salt as
-  the API). A deployed stack also needs `NAKAMA_SESSION_KEY`,
-  `NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
-  `NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; the Nakama container
-  refuses to start without them.
+You need Docker with Compose (Docker Desktop, or Docker Engine with the
+Compose plugin) and `git`.
 
-Chat, ranked, casual queue and lobby creation are toggled at runtime from the
-admin config page (stored in Postgres), not through env vars.
+1. Get this repo:
 
-### Running the stack
+   ```sh
+   git clone https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer.git
+   cd BalatroMultiplayerServer
+   ```
 
-[`docker-compose.yml`](docker-compose.yml) is the production-shaped stack
-(Postgres, Nakama, blue/green API, moderation replicas, nginx, web).
-[`docker-compose.local.yml`](docker-compose.local.yml) is the local overlay:
-plain HTTP, public placeholder keys, Nakama on `127.0.0.1:7350` (console on
-7351), the API on `127.0.0.1:8788`, the website on `127.0.0.1:3000`, device
-login enabled, and a single moderation replica.
+2. Start the server:
 
-```sh
-export COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml   # or set it in the root .env
-docker compose up -d --build
-docker compose logs -f nakama
-docker compose down            # add -v to wipe the database volume
-```
+   ```sh
+   docker compose -f compose.local.yml up -d
+   ```
 
-The API runs its migrations as part of a deploy (see below); on a fresh local
-database run them once:
+3. Wait until `bmp-nakama` shows `(healthy)`:
 
-```sh
-docker compose run --rm --no-deps api-blue sh -c "pnpm --filter balatro-multiplayer-api-server migrate"
-```
+   ```sh
+   docker compose -f compose.local.yml ps
+   ```
 
-After changing anything under `nakama/src`, rebuild the bundle and restart
-Nakama:
+4. Join it from a game. Each player follows "Join a Community server" in the
+   [MPAPI README](https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI#join-a-community-server).
+   On the machine that runs the server, the address is `127.0.0.1`, port
+   `7350`.
+
+Nakama now listens on `127.0.0.1:7350` for game clients. Its console is on
+`http://127.0.0.1:7351` (user `admin`, password `localdevpassword` unless you
+set `NAKAMA_CONSOLE_PASSWORD`).
+
+Other commands:
 
 ```sh
-pnpm --filter bmp-nakama-modules build
-docker compose restart nakama
+docker compose -f compose.local.yml logs -f nakama   # follow the server log
+docker compose -f compose.local.yml down             # stop; add -v to delete all data
+git pull && docker compose -f compose.local.yml up -d   # update
 ```
 
-To work on the API or website outside Docker, `pnpm dev` runs every package's
-watch mode through Turbo.
+#### Let other machines join
 
-### Running several local game clients
+By default only the machine that runs the server can join. To let other
+machines join:
 
-The local Nakama accepts device login, so a game client can sign in as any
-test account without a Steam ticket. The client mod's dev overrides (in
-BalatroMultiplayerAPI's `dev/init.lua`) read two environment variables at
-launch:
+1. Copy [`.env.example`](.env.example) to `.env` in the repo folder.
+2. In `.env`, set `NAKAMA_BIND_ADDRESS=0.0.0.0`.
+3. In `.env`, give every key in the "Community server" block a long random
+   value of your own (`NAKAMA_HTTP_KEY`, `NAKAMA_SESSION_KEY`,
+   `NAKAMA_REFRESH_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
+   `NAKAMA_CONSOLE_SIGNING_KEY`, `INTERNAL_API_KEY`, `JWT_SECRET`,
+   `ADMIN_SECRET`, `PLAYER_ID_SALT`). The defaults are public. Set
+   `PLAYER_ID_SALT` once and never change it. Do not change
+   `NAKAMA_SERVER_KEY`: the game sends `defaultkey`.
+4. Run `docker compose -f compose.local.yml up -d` again.
+5. Let TCP port `7350` through your firewall (and your router, for players
+   outside your network).
 
-- `BMP_IMPERSONATE_NAME=<name>`: any name; the same name is the same account
-- `BMP_IMPERSONATE_ID=<id>`: exact id (takes precedence)
+Players then use your machine's address as `server_host`. The connection is
+plain, not TLS, so set `server_secure = false`. The console (port `7351`)
+stays on your machine.
 
-Start one game instance per player, each with a different value. Leave both
-unset on an instance that should sign in through real Steam.
+#### Allowed mods
+
+On a Community server, players with any mods may join every queue. Only the
+Official server checks that a player's mods are all Allowed mods. You have
+nothing to set.
+
+#### Player names are not proven
+
+Players log in with Device login: the game sends a Steam id and name, and the
+server cannot check them. Someone can pretend to be another player. Accounts
+and ratings exist only on your server. Play with people you trust.
+
+#### What works without the API
+
+Without the API: login, Casual, Ranked, private lobbies, chat (with the local
+word filter) and ratings work. Ranked does not need the launcher. These do
+not work:
+
+- Reports: the game says reports are unavailable.
+- Discord linking.
+- Bans from the web admin panel. To keep a player out, ban the account in the
+  Nakama console (Accounts).
+- Match logs and player pages on a website. Links in the game open the
+  `web_url` that each player set (the Official website by default).
+
+#### Add the API and the website
+
+The API stores reports. The website has the web admin panel, where you read
+them. Turn them on with `COMPOSE_PROFILES` in `.env`, then run `up -d` again:
+
+```sh
+COMPOSE_PROFILES=api        # the API on 127.0.0.1:8788
+COMPOSE_PROFILES=api,web    # the API, and the website on 127.0.0.1:3000
+```
+
+A one-shot `migrate` service applies the API's migrations before the API
+starts. To log in to the web admin panel, run
+`docker compose -f compose.local.yml run --rm seed` and open the link it
+prints (see [Test data](#test-data); it also makes four test accounts). The
+API and the website listen only on your machine.
+
+The API cannot ban a Device login player yet: those accounts have no player
+record in the API. Use the Nakama console for bans.
+
+#### Chat moderation
+
+Chat uses the local word filter. For the chat model instead, put the model in
+place (see [`apps/moderation/README.md`](apps/moderation/README.md)), add
+`moderation` to `COMPOSE_PROFILES` and set `MODERATION_REMOTE=on` in `.env`.
+
+### Dev server
+
+In `.env` (copied from [`.env.example`](.env.example)), set:
+
+```sh
+BMP_SERVER_KIND=dev
+COMPOSE_PROFILES=dev
+```
+
+Then:
+
+```sh
+docker compose -f compose.local.yml up --watch
+```
+
+This starts Postgres, Nakama, the migrated API on `127.0.0.1:8788`, the
+website on `127.0.0.1:3000` and `nakama-bundle`, which rebuilds
+`nakama/modules/index.js` on every save in `nakama/src`. `--watch` restarts
+Nakama after each rebuild. Commit the rebuilt bundle with your `nakama/src`
+change: it is what the container runs.
+
+To work on the API or website outside Docker, `pnpm install` and `pnpm dev`
+run every package's watch mode through Turbo.
+
+### Test data
+
+```sh
+docker compose -f compose.local.yml run --rm seed    # test players and a web admin login
+docker compose -f compose.local.yml run --rm reset   # empty both databases
+docker compose -f compose.local.yml restart          # after a reset
+```
+
+`seed` makes the Nakama accounts `TestPlayer1` to `TestPlayer4` and prints a
+link that logs the website in as the admin `LocalAdmin`. Run it again for a new
+link. Both refuse to run on the Official server.
+
+### Dev mod
+
+The Dev mod is a client mod for contributors, in [`dev/client/`](dev/client).
+It points the game at a Dev server and lets one game log in as a chosen test
+account. Players never install it.
+
+Install it next to MPAPI: copy or symlink `dev/client` into Balatro's `Mods/`
+folder (any folder name, for example `Mods/MultiplayerDev`). It needs an MPAPI
+with `MPAPI.dev`. It reads these environment variables when the game starts:
+
+| Variable | Effect |
+|---|---|
+| none | Use the Dev server at `127.0.0.1:7350` (plain, not TLS) and Device login with your Steam id |
+| `BMP_SERVER_HOST`, `BMP_SERVER_PORT` | Use this host and port instead |
+| `BMP_IMPERSONATE_NAME=<name>` | Log in as that test account (the same name is the same account) |
+| `BMP_IMPERSONATE_ID=<id>` | Log in as that exact account (wins over the name) |
+| `BMP_DEV_STEAM_LOGIN=1` | Log in with Steam instead (wins over the two above). The server needs `STEAM_WEB_API_KEY` in `.env`. |
+
+To run several game clients on one Steam account, start each one with a
+different `BMP_IMPERSONATE_NAME`. The `seed` accounts are `TestPlayer1` to
+`TestPlayer4`.
 
 ## Tests, typecheck and lint
 
@@ -203,6 +312,16 @@ inactive API color, runs migrations, health-checks it, switches
 Nakama, the website and the moderation replicas are rebuilt and restarted with
 `docker compose up -d`. Nakama gets a shutdown grace period so open lobbies
 checkpoint themselves and resume after a restart.
+
+The Official server (`docker-compose.yml`, `BMP_SERVER_KIND=official`)
+reads two git-ignored `.env` files. `apps/server/.env` is for the API (copy
+[`apps/server/.env.example`](apps/server/.env.example)); it refuses to start
+without `DATABASE_URL`, `JWT_SECRET`, `PLAYER_ID_SALT`, `ADMIN_SECRET`,
+`NAKAMA_URL` and `STEAM_WEB_API_KEY`. The root `.env` is for Compose and must
+set `STEAM_WEB_API_KEY`, `PLAYER_ID_SALT`, `NAKAMA_SESSION_KEY`,
+`NAKAMA_REFRESH_KEY`, `NAKAMA_HTTP_KEY`, `NAKAMA_CONSOLE_PASSWORD`,
+`NAKAMA_CONSOLE_SIGNING_KEY` and `INTERNAL_API_KEY`; Nakama refuses to start
+without them. Nakama and the API also refuse to start with any dev flag on.
 
 Use the base compose file alone for a dedicated host, or add a host-specific
 overlay with `COMPOSE_OVERLAY=<file>` when sharing a host with other services.

@@ -17,7 +17,7 @@ data
 # Editor
 .vs/
 *.local*
-!docker-compose.local.yml
+!compose.local.yml
 .claude
 
 # OS

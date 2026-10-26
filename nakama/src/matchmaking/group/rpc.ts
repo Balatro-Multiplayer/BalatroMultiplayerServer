@@ -17,6 +17,7 @@ import {
 	type GroupHomeFacts,
 	type GroupRefusal,
 } from './refusal'
+import { settingsOf } from '../../server_kind'
 
 type RpcReply = { groupQueue: GroupQueueView | null } | { refused: GroupRefusal & { message: string } }
 
@@ -64,7 +65,7 @@ export function rpcGroupQueueOpen(
 		homeRefusal(home, userId, readConfig(nk)) ||
 		(readBinding(nk, request.partyId) ? { code: 'party_in_use' as const } : null) ||
 		partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) ||
-		memberRefusal(memberIds, memberFactsOf(nk, memberIds, null, Date.now()))
+		memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()))
 	if (refused) return refusedReply(refused)
 	const reply = signal(nk, seat.matchId, {
 		type: 'group_open',

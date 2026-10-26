@@ -82,10 +82,15 @@ IPs, personal paths and player data out of commits, comments and fixtures.
 - Migrations do not run on API boot (blue/green would race them). Run
   `pnpm migrate` explicitly; new schema goes through `pnpm generate`.
 - Chat calls `moderation-lb`; if it is down chat fails closed unless
-  `MODERATION_REMOTE=off`, which uses the local word filter.
-- Local-only switches: `ALLOW_DEVICE_AUTH`, `ALLOW_RANKED_LOBBIES`,
-  `DEV_AUTO_VERIFY_LAUNCHER`, `DEV_FAKE_LAUNCHER_STRATEGY`. Keep them out of
-  any deployed config.
+  `MODERATION_REMOTE=off`, which uses the local word filter (the default on
+  Community and Dev servers).
+- `BMP_SERVER_KIND=official|community|dev` (unset = `official`), read by
+  Nakama and the API through `packages/types/src/server-kind.ts`. The dev
+  flags `ALLOW_DEVICE_AUTH`, `ALLOW_RANKED_LOBBIES`,
+  `DEV_AUTO_VERIFY_LAUNCHER`, `DEV_FAKE_LAUNCHER_STRATEGY` stop startup on the
+  Official server; a Community server has Device login on and refuses the
+  other three; a Dev server allows all. Read the settings (`settingsOf` in
+  Nakama, `env` in the API), never the raw flags.
 - To isolate recent work, use `git log` on `main`; the `legacy` branch is the
   frozen MQTT-era server.
 

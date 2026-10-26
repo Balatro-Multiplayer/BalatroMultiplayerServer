@@ -17,16 +17,23 @@ import type { RefusedMember } from '../lobby/protocol'
 import type { MatchPlan } from './matched'
 import { isStandingRefusal, queueRefusalMessage, refusedMods, standingRefusal, type QueueRefusal } from './queue_refusal'
 import { TICKET_QUERY_MESSAGES, ticketQueryRefusal } from './ticket_query'
+import { settingsOf, type ServerSettings } from '../server_kind'
 
 // Ranked while integrityEnforced needs a verdict, which also passes any mods
 // (a verified account skips the mod check); otherwise the standing must be
 // valid.
-export function queueRefusalFor(nk: nkruntime.Nakama, userId: string, ranked: boolean, now: number): QueueRefusal | null {
+export function queueRefusalFor(
+	nk: nkruntime.Nakama,
+	settings: ServerSettings,
+	userId: string,
+	ranked: boolean,
+	now: number,
+): QueueRefusal | null {
 	const config = readConfig(nk)
 	const access = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now)
 	if (access) return { code: 'access_denied', message: access }
 	if (ranked && integrityRefusal(config, readIntegrity(nk, userId), now)) return { code: 'integrity_required' }
-	return standingRefusal(standingFor(nk, userId, now, config))
+	return standingRefusal(standingFor(nk, settings, userId, now, config))
 }
 
 function matchmakerAdd(envelope: nkruntime.Envelope): { [key: string]: unknown } {
@@ -55,7 +62,7 @@ export function beforeMatchmakerAdd(
 	const unpinned = ticketQueryRefusal(matchmakerAdd(envelope).query, props)
 	if (unpinned) throw runtimeError(INVALID_ARGUMENT, TICKET_QUERY_MESSAGES[unpinned])
 	const ranked = props.kind === 'ranked'
-	const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now())
+	const refused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, ranked, Date.now())
 	if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused))
 	const group = groupOf(nk, ctx.userId)
 	if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE)
@@ -74,12 +81,12 @@ export function refusedMemberOf(player: RefusedPlayer): RefusedMember {
 }
 
 // The matched players who may no longer queue, and why.
-export function refusedPlayers(nk: nkruntime.Nakama, plan: MatchPlan): RefusedPlayer[] {
+export function refusedPlayers(nk: nkruntime.Nakama, settings: ServerSettings, plan: MatchPlan): RefusedPlayer[] {
 	const now = Date.now()
 	const ranked = plan.rankedMode !== ''
 	const out: RefusedPlayer[] = []
 	for (const userId of plan.playerIds) {
-		const refusal = queueRefusalFor(nk, userId, ranked, now)
+		const refusal = queueRefusalFor(nk, settings, userId, ranked, now)
 		if (refusal) out.push({ userId, refusal })
 	}
 	return out
@@ -124,8 +131,13 @@ export function requeueSolos(nk: nkruntime.Nakama, plan: MatchPlan, refused: Ref
 
 // When any matched player may no longer queue, the match is refused and the
 // others are told to queue again.
-export function refuseMatchedGroup(nk: nkruntime.Nakama, logger: nkruntime.Logger, plan: MatchPlan): boolean {
-	const refused = refusedPlayers(nk, plan)
+export function refuseMatchedGroup(
+	nk: nkruntime.Nakama,
+	settings: ServerSettings,
+	logger: nkruntime.Logger,
+	plan: MatchPlan,
+): boolean {
+	const refused = refusedPlayers(nk, settings, plan)
 	if (refused.length === 0) return false
 	requeueSolos(nk, plan, refused)
 	logger.warn('Matched group refused: %d player(s) may not queue', refused.length)

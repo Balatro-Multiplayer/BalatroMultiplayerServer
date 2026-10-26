@@ -16,6 +16,7 @@ import { isNotifyCode, notify } from './notify'
 import { parsePayload, requireServer } from './rpc'
 import { ackEntries, pullEntries } from './mirror/outbox'
 import { moderationContextOf } from './review/rpc'
+import { settingsOf } from './server_kind'
 
 const USER_ID_PATTERN = /^[0-9a-f-]{36}$/
 
@@ -81,7 +82,7 @@ export function rpcAdminConfigSet(
 	const config = mergeConfig(before, parsePayload(payload))
 	writeConfig(nk, config)
 	logger.info('Server config updated: %v', JSON.stringify(config))
-	if (standingInputsChanged(before, config)) standingInputsUpdated(nk, logger, Date.now())
+	if (standingInputsChanged(before, config)) standingInputsUpdated(nk, settingsOf(ctx), logger, Date.now())
 	return JSON.stringify(config)
 }
 
@@ -256,7 +257,7 @@ export function rpcAdminPlayerGet(
 		bans: readBans(nk, userId),
 		lobby: currentLobby(nk, userId),
 		online,
-		...moderationContextOf(nk, userId, Date.now()),
+		...moderationContextOf(nk, settingsOf(ctx), userId, Date.now()),
 	})
 }
 

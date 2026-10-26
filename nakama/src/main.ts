@@ -78,6 +78,7 @@ import {
 	rpcLauncherChallengeAnswer,
 	rpcLauncherSessionStart,
 } from './integrity'
+import { checkServerKind } from './server_kind'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -85,6 +86,8 @@ function InitModule(
 	nk: nkruntime.Nakama,
 	initializer: nkruntime.Initializer,
 ) {
+	// Throws on a bad BMP_SERVER_KIND or a refused dev flag, so Nakama stops.
+	checkServerKind(ctx.env, logger)
 	configureSeason(ctx.env['RATING_SEASON'])
 	seedAllowedModIdsExtra(nk, logger, ctx.env)
 	initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom)

@@ -68,6 +68,7 @@ import { logChecksOf, saveRun } from './storage'
 import { standingFor } from '../standing/current'
 import { rejoinRefusal, rejoinRejectMessage } from '../standing/rejoin'
 import type { RequiredStanding } from '../standing/standing'
+import { settingsOf, type ServerSettings } from '../server_kind'
 
 const TICK_RATE = 5
 const MAX_MESSAGE_BYTES = 64 * 1024
@@ -416,12 +417,13 @@ function parseMods(raw: string | undefined): unknown {
 // mods.
 export function joinInfoOf(
 	nk: nkruntime.Nakama,
+	settings: ServerSettings,
 	presence: nkruntime.Presence,
 	meta: { [key: string]: string },
 ): PlayerInfo {
 	const sentMods = parseMods(meta.mods)
 	// Never the client's word for it (a standing in meta is ignored).
-	const standing = standingFor(nk, presence.userId, Date.now()).standing
+	const standing = standingFor(nk, settings, presence.userId, Date.now()).standing
 	const stored = readProfile(nk, presence.userId, presence.username)
 	// The joker is never taken from the join metadata: only the stored pick,
 	// if the player may still show it.
@@ -512,7 +514,7 @@ export function lobbyMatchJoinAttempt(
 	if (rejection) {
 		return { state, accept: false, rejectMessage: rejection }
 	}
-	const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, presence.userId, Date.now()))
+	const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, settingsOf(ctx), presence.userId, Date.now()))
 	if (standingRefused) {
 		// The seat stays: a returning player's grace period keeps running, so
 		// they can fix their mods (or wait for the verdict) and come back.
@@ -528,7 +530,7 @@ export function lobbyMatchJoinAttempt(
 		}
 	}
 
-	const info = joinInfoOf(nk, presence, meta)
+	const info = joinInfoOf(nk, settingsOf(ctx), presence, meta)
 	return {
 		state: {
 			...state,

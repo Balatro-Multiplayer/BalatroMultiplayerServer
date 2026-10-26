@@ -11,7 +11,7 @@
 //  4. Host transfer: the host's socket drops, the next player is made host and
 //     its referee messages pass; the old host, back as a guest, is refused.
 //  5. The Nakama log has a "dropped ... not_host" line for a forgery.
-// Needs ALLOW_RANKED_LOBBIES=true (docker-compose.local.yml has it); without
+// Needs ranked lobbies (on by default on a Dev server); without
 // it the rating checks are skipped and the result checks run unranked.
 // Run: node nakama/scripts/live/sender-guard.live.mjs
 import {

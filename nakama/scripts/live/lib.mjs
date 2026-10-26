@@ -1,10 +1,10 @@
-// Zero-dependency live harness for the LOCAL BMP stack (docker-compose.local.yml):
+// Zero-dependency live harness for a local Dev server (compose.local.yml, dev profile):
 // throwaway device-auth players over Nakama's REST API and realtime socket
 // (Node's built-in fetch and WebSocket), admin RPCs with the local http key,
 // Express HTTP routes, and psql through `docker exec bmp-postgres`.
 //
-// Local dev only: it relies on ALLOW_DEVICE_AUTH=true and the public
-// placeholder keys from nakama/local.yml / docker-compose.local.yml. Every
+// Dev server only: it relies on Device login and the public placeholder keys
+// from nakama/local.yml / compose.local.yml. Every
 // account it makes is prefixed (PREFIX) so it can be found and cleaned up.
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash, createHmac, randomUUID } from 'node:crypto'

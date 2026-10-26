@@ -3,6 +3,7 @@
 // view (player/rpc.ts), so a client needs this only after a 105 or 108.
 import { requireUser } from '../rpc'
 import { standingFor } from './current'
+import { settingsOf } from '../server_kind'
 
 export function rpcAccountStanding(
 	ctx: nkruntime.Context,
@@ -11,5 +12,5 @@ export function rpcAccountStanding(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	return JSON.stringify(standingFor(nk, userId, Date.now()))
+	return JSON.stringify(standingFor(nk, settingsOf(ctx), userId, Date.now()))
 }

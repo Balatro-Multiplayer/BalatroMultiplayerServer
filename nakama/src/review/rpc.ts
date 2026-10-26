@@ -13,6 +13,7 @@ import { standingFor } from '../standing/current'
 import { readModReport } from '../standing/storage'
 import { rankedContextOf } from './ranked'
 import { overturnRun, parseResultPlacements } from './result'
+import type { ServerSettings } from '../server_kind'
 
 interface StoredLog {
 	events?: unknown[]
@@ -111,12 +112,12 @@ export function rpcAdminRunSetResult(
 
 // What admin_player_get adds for a moderator: the last mod report, standing,
 // the launcher verdict and whether they are in ranked play right now.
-export function moderationContextOf(nk: nkruntime.Nakama, userId: string, now: number) {
+export function moderationContextOf(nk: nkruntime.Nakama, settings: ServerSettings, userId: string, now: number) {
 	const seat = currentLobby(nk, userId)
 	const match = seat ? nk.matchGet(seat.matchId) : null
 	return {
 		mods: readModReport(nk, userId),
-		standing: standingFor(nk, userId, now),
+		standing: standingFor(nk, settings, userId, now),
 		integrity: readIntegrity(nk, userId),
 		ranked: rankedContextOf(liveRecordsOf(nk, userId, now), match ? match.label : null),
 	}

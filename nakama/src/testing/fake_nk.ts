@@ -2,6 +2,9 @@
 // storage with Nakama's version rules ('*' = must not exist, otherwise the
 // versions must match), recorded notifications and http calls. Pass
 // overrides for anything a test needs to script.
+import type { ServerKind } from '../../../packages/types/src/server-kind'
+import { settingsOf, type ServerSettings } from '../server_kind'
+
 export interface FakeNk {
 	objects: Map<string, { value: any; version: number }>
 	notifications: { userId: string; subject: string; content: any; code: number; persistent: boolean }[]
@@ -72,3 +75,7 @@ export const serverCtx = (env: { [key: string]: string } = {}) =>
 
 export const playerCtx = (userId: string, env: { [key: string]: string } = {}) =>
 	({ userId, username: userId, matchId: '', env }) as nkruntime.Context
+
+// The settings of a server of this kind (BMP_SERVER_KIND), for the functions
+// that take them instead of a ctx.
+export const settingsFor = (kind: ServerKind = 'official'): ServerSettings => settingsOf(serverCtx({ BMP_SERVER_KIND: kind }))

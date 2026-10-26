@@ -1,7 +1,8 @@
 // An account's standing: what it may queue for. Pure.
 //  - verified: the BET launcher vouched for the client (integrity.ts); may
 //    queue anything, whatever its mods.
-//  - valid: this session's mod report lists only allowed mods; casual only.
+//  - valid: this session's mod report lists only allowed mods (any mods off
+//    the Official server); casual only.
 //  - none: no report this session, or a mod that isn't allowed.
 import { disallowedMods, type ModReport } from './mod_report'
 
@@ -14,7 +15,8 @@ export type RequiredStanding = 'valid' | 'verified'
 export interface StandingInput {
 	verified: boolean
 	report: ModReport | null
-	allowedIds: string[]
+	// 'any' off the Official server: every mod is allowed there.
+	allowedIds: string[] | 'any'
 }
 
 export interface StandingResult {
@@ -30,6 +32,7 @@ const VALID: StandingResult = { standing: 'valid', disallowed: [], reason: null 
 export function standingOf(input: StandingInput): StandingResult {
 	if (input.verified) return VERIFIED
 	if (!input.report) return { standing: 'none', disallowed: [], reason: 'unreported' }
+	if (input.allowedIds === 'any') return VALID
 	const disallowed = disallowedMods(input.report.mods, input.allowedIds)
 	if (disallowed.length > 0) return { standing: 'none', disallowed, reason: 'mods_not_allowed' }
 	return VALID

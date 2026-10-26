@@ -20,7 +20,8 @@ import {
 	callModeration,
 	decideModerationOutcome,
 } from './moderation'
-import { isAllowlisted, obscenityMatches, remoteModerationEnabled } from './filter'
+import { isAllowlisted, obscenityMatches } from './filter'
+import { settingsOf } from '../server_kind'
 import { type ChatLogLine, type ChatVerdict, enqueue } from '../mirror/outbox'
 import { lobbyKindOfLabel } from '../review/ranked'
 
@@ -55,8 +56,8 @@ export function rpcChatEnable(
 // {message} -> {} once it has been posted to the caller's lobby, or an error:
 // PERMISSION_DENIED for a message moderation blocked (or chat not enabled),
 // UNAVAILABLE when it cannot be judged (fails closed). A message on the
-// allowlist skips moderation; with the service switched off
-// (MODERATION_REMOTE=off) the local word filter judges instead.
+// allowlist skips moderation; with the service switched off (MODERATION_REMOTE
+// =off, the Community and Dev default) the local word filter judges instead.
 export function rpcChatSend(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -95,7 +96,7 @@ export function rpcChatSend(
 
 	let text = message
 	if (!isAllowlisted(message, config.chatAllowlist)) {
-		if (remoteModerationEnabled(ctx.env)) {
+		if (settingsOf(ctx).moderationRemote) {
 			const outcome = decideModerationOutcome(
 				callModeration(nk, logger, ctx.env, {
 					playerId: userId,
