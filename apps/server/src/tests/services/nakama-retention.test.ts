@@ -1,6 +1,6 @@
 import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
 import { describe, expect, it, vi } from 'vitest'
-import { purgeNakamaBanIndex, purgeNakamaIpHashes, purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
+import { purgeNakamaBanIndex, purgeNakamaIpHashes, purgeNakamaRuns, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
 describe('purgeNakamaRuns', () => {
 	const DAY = 24 * 60 * 60 * 1000
@@ -43,7 +43,6 @@ describe('purgeNakamaRuns', () => {
 		expect(named.flat()).toEqual(['free', 'closed-long-ago'])
 		expect(rpc).toHaveBeenCalledWith('admin_runs_expired', { olderThanDays: 180, cursor: '' })
 		expect(rpc).toHaveBeenCalledWith('admin_runs_expired', { olderThanDays: 180, cursor: 'c1' })
-		expect(RUN_RETENTION_DAYS).toBe(180)
 	})
 
 	it('stops at a failed call, and quietly when Nakama is off', async () => {

@@ -8,6 +8,8 @@
 // hashes, so the same account ban applied again does not bring it back.
 import { SYSTEM_USER_ID } from '../lobby/protocol'
 import type { ServerSettings } from '../server_kind'
+import { forEachStored } from '../shared/storage'
+import { DAY_MS } from '../shared/time'
 import type { Ban } from './bans'
 
 export const IP_HASHES_COLLECTION = 'ip_hashes'
@@ -15,8 +17,6 @@ export const IP_HASHES_KEY = 'networks'
 export const NETWORK_BANS_COLLECTION = 'network_bans'
 export const NETWORK_BAN_INDEX_COLLECTION = 'network_ban_index'
 export const IP_HASH_DAYS = 30
-const DAY_MS = 24 * 60 * 60 * 1000
-const LIST_PAGE = 100
 
 // hash -> epoch ms of the last login from that network.
 export type IpHashes = { [hash: string]: number }
@@ -325,18 +325,9 @@ export function liftNetworkBan(
 
 function listNetworkBans(nk: nkruntime.Nakama): NetworkBan[] {
 	const bans: NetworkBan[] = []
-	let cursor = ''
-	do {
-		const page = nk.storageList(
-			SYSTEM_USER_ID,
-			NETWORK_BANS_COLLECTION,
-			LIST_PAGE,
-			cursor,
-		)
-		for (const o of page.objects || [])
-			bans.push(o.value as unknown as NetworkBan)
-		cursor = page.cursor || ''
-	} while (cursor)
+	forEachStored(nk, SYSTEM_USER_ID, NETWORK_BANS_COLLECTION, (o) => {
+		bans.push(o.value as unknown as NetworkBan)
+	})
 	return bans
 }
 
@@ -364,21 +355,16 @@ export function purgeIpHashes(
 ): { deleted: number; more: boolean } {
 	let deleted = 0
 	let seen = 0
-	let cursor = ''
-	do {
-		const page = nk.storageList(null, IP_HASHES_COLLECTION, LIST_PAGE, cursor)
-		for (const o of page.objects || []) {
-			if (seen >= max) return { deleted, more: true }
-			seen++
-			const before = o.value as IpHashes
-			const after = withoutStale(before, now)
-			if (after === before) continue
-			deleted += Object.keys(before).length - Object.keys(after).length
-			writeIpHashes(nk, o.userId, after)
-		}
-		cursor = page.cursor || ''
-	} while (cursor)
-	return { deleted, more: false }
+	const more = forEachStored(nk, null, IP_HASHES_COLLECTION, (o) => {
+		if (seen >= max) return 'stop'
+		seen++
+		const before = o.value as IpHashes
+		const after = withoutStale(before, now)
+		if (after === before) return
+		deleted += Object.keys(before).length - Object.keys(after).length
+		writeIpHashes(nk, o.userId, after)
+	})
+	return { deleted, more }
 }
 
 // For InitModule: a server with network bans refuses to start without

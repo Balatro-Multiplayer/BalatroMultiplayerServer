@@ -22,10 +22,10 @@ import {
 	NETWORK_BANS_COLLECTION,
 } from '../moderation/network'
 import { LEGACY_RATINGS_COLLECTION, type LegacyPlayer } from '../rating/legacy'
+import { forEachStored } from '../shared/storage'
 import { steamIdHashOf } from './steam_id'
 
 export const DELETED_PLAYER_NAME = '[deleted player]'
-const LIST_PAGE = 100
 
 // value with every string equal to `from`, and every object key equal to it,
 // replaced by `to`. Pure.
@@ -88,12 +88,9 @@ function listAll(
 	collection: string,
 ): nkruntime.StorageObject[] {
 	const all: nkruntime.StorageObject[] = []
-	let cursor = ''
-	do {
-		const page = nk.storageList(owner, collection, LIST_PAGE, cursor)
-		for (const o of page.objects || []) all.push(o)
-		cursor = page.cursor || ''
-	} while (cursor)
+	forEachStored(nk, owner, collection, (o) => {
+		all.push(o)
+	})
 	return all
 }
 

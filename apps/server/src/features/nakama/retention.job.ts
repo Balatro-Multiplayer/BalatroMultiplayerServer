@@ -1,16 +1,16 @@
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
 import { retentionRepository } from '../../infrastructure/gateways/retention.gateway.js'
+import { EVIDENCE_KEEP_DAYS } from '../../shared/retention-periods.js'
 import type { Result } from '../../shared/utils/result.js'
 import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
 import { storedEvidencePurgeable } from '../retention/limits.js'
 import { NAMED_RUNS_PER_CALL } from '../retention/sweep.js'
-import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
 // (The same hourly job also sweeps expired lobby checkpoints, login network
 // hashes and the ban index entries of deleted accounts: see below.)
 // Nakama keeps a finished run's record and replay logs for as long as
-// match_run_logs keeps them here (RUN_LOG_TTL_MS): every hour, list the
+// match_run_logs keeps them here (EVIDENCE_KEEP_DAYS): every hour, list the
 // older ones (admin_runs_expired), keep each a report or ban still uses (the
 // evidence rule, features/retention/limits.ts) and delete the rest
 // (admin_runs_purge_named). Nakama does not list flagged and disputed runs,
@@ -19,7 +19,6 @@ import { RUN_LOG_TTL_MS } from './mirror.service.js'
 // rather than daily so a sweep missed while Nakama is still booting (or
 // restarting) is retried soon; a sweep with nothing to delete is one call.
 
-export const RUN_RETENTION_DAYS = RUN_LOG_TTL_MS / (24 * 60 * 60 * 1000)
 export const RETENTION_INTERVAL_MS = 60 * 60 * 1000
 // Calls per sweep at most, each deleting up to Nakama's own cap.
 const MAX_CALLS = 50
@@ -40,7 +39,7 @@ export async function purgeNakamaRuns(deps: RunPurgeDeps, now: Date): Promise<nu
 	for (let call = 0; call < MAX_CALLS; call++) {
 		const page = await deps.rpc<{ runs: { runId: string; endedAt: number }[]; cursor: string }>(
 			'admin_runs_expired',
-			{ olderThanDays: RUN_RETENTION_DAYS, cursor },
+			{ olderThanDays: EVIDENCE_KEEP_DAYS, cursor },
 		)
 		if (!page.ok) {
 			if (page.error !== 'disabled') console.warn(`[retention] run listing failed: ${page.error}`)

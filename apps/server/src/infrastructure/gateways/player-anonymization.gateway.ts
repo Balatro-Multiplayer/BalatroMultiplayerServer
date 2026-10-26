@@ -1,5 +1,5 @@
 import { type SQL, sql } from 'drizzle-orm'
-import { DELETED_PLAYER_NAME } from '../../contracts/IPlayerRepository.js'
+import { DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
 import { db } from '../db/index.js'
 
 // Account deletion (Notice decision 17): the player id is replaced by a

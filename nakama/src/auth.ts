@@ -24,7 +24,7 @@ import {
 	runtimeError,
 } from './errors'
 import { NETWORK_BAN_MESSAGE } from './moderation/access'
-import { checkLoginBan, moveLoginKey } from './moderation/enforce'
+import { BAN_INDEX_CUSTOM_PREFIX, checkLoginBan, moveLoginKey } from './moderation/enforce'
 import {
 	clientNetworkHash,
 	isNetworkBanned,
@@ -125,7 +125,7 @@ export function beforeAuthenticateCustom(
 	const salt = playerIdSalt(ctx, logger)
 	const steamId = verifySteamTicket(ctx, logger, nk, ticket)
 	account.id = STEAM_HASH_CUSTOM_ID_PREFIX + steamIdHash(nk, salt, steamId)
-	checkLoginBan(nk, logger, 'custom:' + account.id, Date.now())
+	checkLoginBan(nk, logger, BAN_INDEX_CUSTOM_PREFIX + account.id, Date.now())
 	// vars end up inside the session token; the ticket has no business there.
 	// biome-ignore lint/performance/noDelete: the key must be gone, not undefined -- vars becomes a Go map[string]string
 	delete vars.steam_ticket

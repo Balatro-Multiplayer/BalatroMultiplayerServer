@@ -12,11 +12,12 @@ import { replayLogService } from '../features/replay-log/replay-log.service.js'
 import { createReportsRouter } from '../features/reports/reports.route.js'
 import statsRouter from '../features/stats/stats.route.js'
 import webadminRouter from '../features/webadmin/webadmin.route.js'
+import { anonymizePlayer } from '../infrastructure/gateways/player-anonymization.gateway.js'
 import * as playerGateway from '../infrastructure/gateways/player.gateway.js'
 import { acceptNakamaNotice, deleteNakamaAccount } from '../infrastructure/nakama/profile-sync.js'
 
 export const authService = createAuthService({
-	playerRepository: playerGateway,
+	playerRepository: { ...playerGateway, anonymizePlayer },
 	nakamaAccounts: { delete: deleteNakamaAccount, acceptNotice: acceptNakamaNotice },
 })
 

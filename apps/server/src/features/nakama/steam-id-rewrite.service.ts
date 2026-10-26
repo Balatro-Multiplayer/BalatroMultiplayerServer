@@ -3,18 +3,16 @@
 // against Nakama's database while Nakama is stopped
 // (scripts/rewrite-steam-ids.ts); the deploy starts Nakama again only when
 // it reports no raw-id login left. Running it again moves nothing.
-//
-// The prefixes must match nakama/src/player/steam_id.ts and the ban index
-// keys of nakama/src/moderation/enforce.ts (loginKeys).
 import type {
 	INakamaAccountRepository,
 	RawSteamLogins,
 	SteamIdRewritePlan,
 } from '../../contracts/INakamaAccountRepository.js'
-
-const STEAM_HASH_CUSTOM_ID_PREFIX = 'steamhash:'
-const RAW_STEAM_CUSTOM_ID_PREFIX = 'steam:'
-const BAN_INDEX_CUSTOM_PREFIX = 'custom:'
+import {
+	BAN_INDEX_CUSTOM_PREFIX,
+	RAW_STEAM_CUSTOM_ID_PREFIX,
+	STEAM_HASH_CUSTOM_ID_PREFIX,
+} from '../../shared/nakama-login-ids.js'
 
 export interface SteamIdRewriteResult {
 	renamed: number

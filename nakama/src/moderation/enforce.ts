@@ -19,6 +19,7 @@ import { runtimeError, PERMISSION_DENIED } from '../errors'
 import { currentLobby } from '../lobby/rpc'
 import { SYSTEM_USER_ID, type LobbySignal } from '../lobby/protocol'
 import { notify, NotifyCode } from '../notify'
+import { forEachStored } from '../shared/storage'
 import { ACCOUNT_BANNED, banMessage } from './access'
 import {
 	activeBan,
@@ -33,6 +34,9 @@ import {
 } from './bans'
 
 export const BAN_INDEX_COLLECTION = 'ban_index'
+// A ban index key for a custom id login (the API's Steam id rewrite builds
+// the same keys).
+export const BAN_INDEX_CUSTOM_PREFIX = 'custom:'
 
 interface IndexEntry {
 	userId: string
@@ -44,7 +48,7 @@ interface IndexEntry {
 export function loginKeys(nk: nkruntime.Nakama, userId: string): string[] {
 	const account = nk.accountGetId(userId)
 	const keys: string[] = []
-	if (account.customId) keys.push('custom:' + account.customId)
+	if (account.customId) keys.push(BAN_INDEX_CUSTOM_PREFIX + account.customId)
 	for (const device of account.devices || []) keys.push('device:' + device.id)
 	return keys
 }
@@ -195,18 +199,13 @@ export function purgeDeletedBanIndex(
 	max: number,
 ): { deleted: number; more: boolean } {
 	let deleted = 0
-	let cursor = ''
-	do {
-		const page = nk.storageList(SYSTEM_USER_ID, BAN_INDEX_COLLECTION, 100, cursor)
-		for (const o of page.objects || []) {
-			const entry = o.value as unknown as IndexEntry
-			if (activeBan({ account: entry.ban }, 'account', now)) continue
-			if (accountExists(nk, entry.userId)) continue
-			if (deleted >= max) return { deleted, more: true }
-			deleteIndexKey(nk, o.key)
-			deleted++
-		}
-		cursor = page.cursor || ''
-	} while (cursor)
-	return { deleted, more: false }
+	const more = forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+		const entry = o.value as unknown as IndexEntry
+		if (activeBan({ account: entry.ban }, 'account', now)) return
+		if (accountExists(nk, entry.userId)) return
+		if (deleted >= max) return 'stop'
+		deleteIndexKey(nk, o.key)
+		deleted++
+	})
+	return { deleted, more }
 }

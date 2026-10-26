@@ -250,7 +250,6 @@ export async function updateChatStatus(
 		.where(eq(players.id, playerId))
 }
 
-export { anonymizePlayer } from './player-anonymization.gateway.js'
 
 // Clears deletedAt on re-signin with the same Steam identity. A cheap no-op
 // if the account was never deleted.

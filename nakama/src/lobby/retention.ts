@@ -7,11 +7,11 @@
 // evidence sweep names them once past their limit.
 import { INVALID_ARGUMENT, runtimeError } from '../errors'
 import { parsePayload, requireServer } from '../rpc'
+import { DAY_MS } from '../shared/time'
 import { LOGS_COLLECTION, MY_RUNS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from './protocol'
 import { logKey, myRunKey } from './storage'
 
 export const RUN_RETENTION_DAYS = 180
-const DAY_MS = 24 * 60 * 60 * 1000
 const LIST_PAGE = 100
 // Runs listed per admin_runs_expired call (at least; it ends a storage page).
 export const EXPIRED_MAX = 100

@@ -3,6 +3,7 @@ import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../../env.js'
 import { signJwt, signTosPendingToken } from '../../features/auth/jwt.js'
+import * as anonymizationGateway from '../../infrastructure/gateways/player-anonymization.gateway.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import * as adminClient from '../../infrastructure/nakama/admin-client.js'
 import { err, ok } from '../../shared/utils/result.js'
@@ -259,7 +260,7 @@ describe('DELETE /api/auth/account', () => {
 	const NAKAMA_ID = '22222222-2222-4222-8222-222222222222'
 	const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 	const rpc = () => vi.mocked(adminClient.callNakamaRpc)
-	const anonymize = () => vi.mocked(playerGateway.anonymizePlayer)
+	const anonymize = () => vi.mocked(anonymizationGateway.anonymizePlayer)
 
 	function signedIn(id: string, nakamaUserId: string | null) {
 		createSession('Alice', { id })

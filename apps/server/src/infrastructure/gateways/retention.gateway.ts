@@ -10,6 +10,10 @@ import type {
 	EvidenceUse,
 	IRetentionRepository,
 } from '../../contracts/IRetentionRepository.js'
+import {
+	BAN_RECORD_KEEP_MONTHS,
+	EVIDENCE_KEEP_DAYS,
+} from '../../shared/retention-periods.js'
 import type { ItemType } from '../../shared/service-queue/items.js'
 import {
 	antiCheatSourceId,
@@ -30,7 +34,8 @@ import {
 	serviceQueueItems,
 } from '../db/schema.js'
 
-const EVIDENCE_DAYS = sql`interval '180 days'`
+const EVIDENCE_DAYS = sql.raw(`interval '${EVIDENCE_KEEP_DAYS} days'`)
+const BAN_RECORD_MONTHS = sql.raw(`interval '${BAN_RECORD_KEEP_MONTHS} months'`)
 // Postgres takes at most 65535 parameters per query.
 const CHUNK = 1000
 
@@ -495,7 +500,7 @@ export const retentionRepository: IRetentionRepository = {
 		return db
 			.select({ id: playerBans.id, expiresAt: playerBans.expiresAt })
 			.from(playerBans)
-			.where(sql`${playerBans.expiresAt} + interval '12 months' < ${now}`)
+			.where(sql`${playerBans.expiresAt} + ${BAN_RECORD_MONTHS} < ${now}`)
 	},
 
 	async deleteBanRecords(ids) {

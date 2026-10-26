@@ -2686,7 +2686,7 @@ function spendLobbyCreate(nk, userId, now) {
 var STEAM_HASH_CUSTOM_ID_PREFIX = "steamhash:";
 var DEVICE_ID_HASH_PREFIX = "devicehash:";
 var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
-var STEAM_HASH_CUSTOM_ID = /^steamhash:([0-9a-f]{64})$/;
+var STEAM_HASH_CUSTOM_ID = new RegExp(`^${STEAM_HASH_CUSTOM_ID_PREFIX}([0-9a-f]{64})$`);
 function steamIdHash(nk, salt, steamId) {
   return nk.sha256Hash(steamId + salt);
 }
@@ -4799,12 +4799,25 @@ function callExpress(nk, logger, env, path, body) {
   return { status: response.code, body: parsed };
 }
 
+// src/shared/storage.ts
+var LIST_PAGE2 = 100;
+function forEachStored(nk, owner, collection, visit) {
+  let cursor = "";
+  do {
+    const page = nk.storageList(owner, collection, LIST_PAGE2, cursor);
+    for (const o of page.objects || []) if (visit(o) === "stop") return true;
+    cursor = page.cursor || "";
+  } while (cursor);
+  return false;
+}
+
 // src/moderation/enforce.ts
 var BAN_INDEX_COLLECTION = "ban_index";
+var BAN_INDEX_CUSTOM_PREFIX = "custom:";
 function loginKeys(nk, userId) {
   const account = nk.accountGetId(userId);
   const keys = [];
-  if (account.customId) keys.push("custom:" + account.customId);
+  if (account.customId) keys.push(BAN_INDEX_CUSTOM_PREFIX + account.customId);
   for (const device of account.devices || []) keys.push("device:" + device.id);
   return keys;
 }
@@ -4920,21 +4933,19 @@ function checkLoginBan(nk, logger, key, now) {
 }
 function purgeDeletedBanIndex(nk, now, max) {
   let deleted = 0;
-  let cursor = "";
-  do {
-    const page = nk.storageList(SYSTEM_USER_ID, BAN_INDEX_COLLECTION, 100, cursor);
-    for (const o of page.objects || []) {
-      const entry = o.value;
-      if (activeBan({ account: entry.ban }, "account", now)) continue;
-      if (accountExists(nk, entry.userId)) continue;
-      if (deleted >= max) return { deleted, more: true };
-      deleteIndexKey(nk, o.key);
-      deleted++;
-    }
-    cursor = page.cursor || "";
-  } while (cursor);
-  return { deleted, more: false };
+  const more = forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+    const entry = o.value;
+    if (activeBan({ account: entry.ban }, "account", now)) return;
+    if (accountExists(nk, entry.userId)) return;
+    if (deleted >= max) return "stop";
+    deleteIndexKey(nk, o.key);
+    deleted++;
+  });
+  return { deleted, more };
 }
+
+// src/shared/time.ts
+var DAY_MS = 24 * 60 * 60 * 1e3;
 
 // src/moderation/network.ts
 var IP_HASHES_COLLECTION = "ip_hashes";
@@ -4942,8 +4953,6 @@ var IP_HASHES_KEY = "networks";
 var NETWORK_BANS_COLLECTION = "network_bans";
 var NETWORK_BAN_INDEX_COLLECTION = "network_ban_index";
 var IP_HASH_DAYS = 30;
-var DAY_MS = 24 * 60 * 60 * 1e3;
-var LIST_PAGE2 = 100;
 var IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 var HEX_GROUP = /^[0-9a-f]{1,4}$/;
 function ipv4(text) {
@@ -5142,18 +5151,9 @@ function liftNetworkBan(nk, banId, now) {
 }
 function listNetworkBans(nk) {
   const bans = [];
-  let cursor = "";
-  do {
-    const page = nk.storageList(
-      SYSTEM_USER_ID,
-      NETWORK_BANS_COLLECTION,
-      LIST_PAGE2,
-      cursor
-    );
-    for (const o of page.objects || [])
-      bans.push(o.value);
-    cursor = page.cursor || "";
-  } while (cursor);
+  forEachStored(nk, SYSTEM_USER_ID, NETWORK_BANS_COLLECTION, (o) => {
+    bans.push(o.value);
+  });
   return bans;
 }
 function networkBansFor(nk, userId) {
@@ -5165,21 +5165,16 @@ function networkBansFor(nk, userId) {
 function purgeIpHashes(nk, now, max) {
   let deleted = 0;
   let seen = 0;
-  let cursor = "";
-  do {
-    const page = nk.storageList(null, IP_HASHES_COLLECTION, LIST_PAGE2, cursor);
-    for (const o of page.objects || []) {
-      if (seen >= max) return { deleted, more: true };
-      seen++;
-      const before = o.value;
-      const after = withoutStale(before, now);
-      if (after === before) continue;
-      deleted += Object.keys(before).length - Object.keys(after).length;
-      writeIpHashes(nk, o.userId, after);
-    }
-    cursor = page.cursor || "";
-  } while (cursor);
-  return { deleted, more: false };
+  const more = forEachStored(nk, null, IP_HASHES_COLLECTION, (o) => {
+    if (seen >= max) return "stop";
+    seen++;
+    const before = o.value;
+    const after = withoutStale(before, now);
+    if (after === before) return;
+    deleted += Object.keys(before).length - Object.keys(after).length;
+    writeIpHashes(nk, o.userId, after);
+  });
+  return { deleted, more };
 }
 function requireIpHashSalt(settings, env) {
   if (settings.networkBans && !env.IP_HASH_SALT)
@@ -6972,7 +6967,6 @@ function nextSeasonBest(modId, reported, current) {
 var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
 var DECAY_RATE_PER_DAY = 5;
 var DECAY_FLOOR = 1200;
-var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var bootSeason = 1;
 function currentSeason(nk) {
   const pushed = readConfig(nk).season;
@@ -6985,7 +6979,7 @@ function configureSeason(value) {
 function decayedRating(record, now) {
   if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
   if (record.rating <= DECAY_FLOOR) return record.rating;
-  const inactiveDays = (now - record.lastMatchAt) / DAY_MS2;
+  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
   if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
   const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
   return Math.max(DECAY_FLOOR, record.rating - loss);
@@ -7313,7 +7307,7 @@ function beforeAuthenticateCustom(ctx, logger, nk, data) {
   const salt = playerIdSalt(ctx, logger);
   const steamId = verifySteamTicket(ctx, logger, nk, ticket);
   account.id = STEAM_HASH_CUSTOM_ID_PREFIX + steamIdHash(nk, salt, steamId);
-  checkLoginBan(nk, logger, "custom:" + account.id, Date.now());
+  checkLoginBan(nk, logger, BAN_INDEX_CUSTOM_PREFIX + account.id, Date.now());
   delete vars.steam_ticket;
   account.vars = vars;
   data.account = account;
@@ -9246,7 +9240,6 @@ function rpcAdminCheckpointsSweep(ctx, logger, nk, payload) {
 
 // src/lobby/retention.ts
 var RUN_RETENTION_DAYS = 180;
-var DAY_MS3 = 24 * 60 * 60 * 1e3;
 var LIST_PAGE5 = 100;
 var EXPIRED_MAX = 100;
 function isKept(run) {
@@ -9303,7 +9296,7 @@ function rpcAdminRunsExpired(ctx, logger, nk, payload) {
     throw runtimeError(INVALID_ARGUMENT, "olderThanDays must be a positive whole number");
   const cursor = (_b = input.cursor) != null ? _b : "";
   if (typeof cursor !== "string") throw runtimeError(INVALID_ARGUMENT, "cursor must be a string");
-  return JSON.stringify(expiredRuns(nk, Date.now() - days * DAY_MS3, EXPIRED_MAX, cursor));
+  return JSON.stringify(expiredRuns(nk, Date.now() - days * DAY_MS, EXPIRED_MAX, cursor));
 }
 
 // src/rating/admin.ts
@@ -9406,7 +9399,6 @@ function seedAllowedModIdsExtra(nk, logger, env) {
 
 // src/player/anonymize.ts
 var DELETED_PLAYER_NAME = "[deleted player]";
-var LIST_PAGE6 = 100;
 function replaceId(value, from, to) {
   if (value === from) return to;
   if (Array.isArray(value))
@@ -9449,12 +9441,9 @@ function anonymizedRun(run, userId, anonymousId) {
 var SERVER_ONLY2 = { permissionRead: 0, permissionWrite: 0 };
 function listAll(nk, owner, collection) {
   const all = [];
-  let cursor = "";
-  do {
-    const page = nk.storageList(owner, collection, LIST_PAGE6, cursor);
-    for (const o of page.objects || []) all.push(o);
-    cursor = page.cursor || "";
-  } while (cursor);
+  forEachStored(nk, owner, collection, (o) => {
+    all.push(o);
+  });
   return all;
 }
 function anonymizeRuns(nk, userId, anonymousId) {

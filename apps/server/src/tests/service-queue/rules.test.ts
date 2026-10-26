@@ -1,3 +1,4 @@
+import { EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
 // The service queue's pure rules: the role table, request bodies, claims,
 // durations, priority, the integrity-flag decision, retention, source ids,
 // source transitions, targets and overturn plans.
@@ -14,7 +15,6 @@ import { planOverturn, ratedPlacements, samePlaces } from '../../features/servic
 import { allowedActionsFor, mayIssueBan, mayLiftBan, permissionFor } from '../../features/service-queue/permissions.js'
 import { BASE_PRIORITY, priorityOf } from '../../features/service-queue/priority.js'
 import {
-	REPORTED_CHAT_KEEP_MS,
 	reportedLobbyPurgeable,
 } from '../../features/service-queue/purge.js'
 import { httpOf } from '../../features/service-queue/refusals.js'
@@ -254,13 +254,13 @@ describe('the integrity flag', () => {
 
 describe('retention', () => {
 	it("keeps a reported lobby's chat while a report is open and for 180 days after the last resolution (the evidence rule)", () => {
-		expect(REPORTED_CHAT_KEEP_MS).toBe(180 * DAY)
+		expect(EVIDENCE_KEEP_MS).toBe(180 * DAY)
 		const withinEvidenceLimit = new Date(NOW.getTime() - 100 * DAY)
 		expect(
 			reportedLobbyPurgeable({ openReports: 0, lastResolvedAt: withinEvidenceLimit, latestExpiresAt: new Date(NOW.getTime() - DAY) }, NOW),
 		).toBe(false)
 		const expired = new Date(NOW.getTime() - DAY)
-		const longAgo = new Date(NOW.getTime() - REPORTED_CHAT_KEEP_MS - 1)
+		const longAgo = new Date(NOW.getTime() - EVIDENCE_KEEP_MS - 1)
 		const recently = new Date(NOW.getTime() - DAY)
 		expect(reportedLobbyPurgeable({ openReports: 1, lastResolvedAt: longAgo, latestExpiresAt: expired }, NOW)).toBe(false)
 		expect(reportedLobbyPurgeable({ openReports: 0, lastResolvedAt: recently, latestExpiresAt: expired }, NOW)).toBe(false)

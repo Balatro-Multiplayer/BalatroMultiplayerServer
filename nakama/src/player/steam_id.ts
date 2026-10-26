@@ -13,7 +13,7 @@
 export const STEAM_HASH_CUSTOM_ID_PREFIX = 'steamhash:'
 export const DEVICE_ID_HASH_PREFIX = 'devicehash:'
 export const STEAM_ID64_PATTERN = /^7656119\d{10}$/
-const STEAM_HASH_CUSTOM_ID = /^steamhash:([0-9a-f]{64})$/
+const STEAM_HASH_CUSTOM_ID = new RegExp(`^${STEAM_HASH_CUSTOM_ID_PREFIX}([0-9a-f]{64})$`)
 
 export function steamIdHash(
 	nk: nkruntime.Nakama,

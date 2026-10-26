@@ -8,13 +8,16 @@ import type {
 	RawSteamLogins,
 	SteamIdRewritePlan,
 } from '../../contracts/INakamaAccountRepository.js'
+import {
+	BAN_INDEX_CUSTOM_PREFIX,
+	RAW_STEAM_CUSTOM_ID_PREFIX,
+} from '../../shared/nakama-login-ids.js'
 
 const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000'
 const BAN_INDEX_COLLECTION = 'ban_index'
-const RAW_CUSTOM_ID_PREFIX = 'steam:'
-const RAW_BAN_KEY_PREFIX = 'custom:steam:'
-const RAW_CUSTOM_ID = '^steam:[0-9]+$'
-const RAW_BAN_KEY = '^custom:steam:[0-9]+$'
+const RAW_BAN_KEY_PREFIX = BAN_INDEX_CUSTOM_PREFIX + RAW_STEAM_CUSTOM_ID_PREFIX
+const RAW_CUSTOM_ID = `^${RAW_STEAM_CUSTOM_ID_PREFIX}[0-9]+$`
+const RAW_BAN_KEY = `^${RAW_BAN_KEY_PREFIX}[0-9]+$`
 const UPDATE_BATCH = 1000
 
 export function createNakamaAccountGateway(
@@ -32,7 +35,7 @@ export function createNakamaAccountGateway(
 		return {
 			accounts: users.rows.map((row) => ({
 				userId: row.id,
-				steamId: row.custom_id.slice(RAW_CUSTOM_ID_PREFIX.length),
+				steamId: row.custom_id.slice(RAW_STEAM_CUSTOM_ID_PREFIX.length),
 			})),
 			bannedSteamIds: bans.rows.map((row) =>
 				row.key.slice(RAW_BAN_KEY_PREFIX.length),

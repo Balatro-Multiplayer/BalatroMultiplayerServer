@@ -1,8 +1,5 @@
 import type { Privilege } from '../shared/types/index.js'
 
-// The name a deleted player's row and game records show.
-export const DELETED_PLAYER_NAME = '[deleted player]'
-
 export interface PlayerRecord {
 	id: string
 	steamIdHash: string | null

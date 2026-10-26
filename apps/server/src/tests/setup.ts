@@ -111,6 +111,11 @@ const mockPlayerRecord = {
 }
 
 // Mock player.gateway — no real DB calls in tests
+vi.mock('../infrastructure/gateways/player-anonymization.gateway.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../infrastructure/gateways/player-anonymization.gateway.js')>()),
+	anonymizePlayer: vi.fn().mockResolvedValue(undefined),
+}))
+
 vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	findPlayerBySteamIdHash: vi.fn().mockResolvedValue(null),
 	findPlayerByDiscordIdHash: vi.fn().mockResolvedValue(null),
@@ -130,7 +135,6 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	updatePreferredJoker: vi.fn().mockResolvedValue(undefined),
 	recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 	updateChatStatus: vi.fn().mockResolvedValue(undefined),
-	anonymizePlayer: vi.fn().mockResolvedValue(undefined),
 	reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
 	purgeExpiredDeletedPlayerHashes: vi.fn().mockResolvedValue(0),
 }))
@@ -165,7 +169,8 @@ beforeEach(async () => {
 	vi.mocked(playerDb.updateDiscordUsername).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updateUseDiscordName).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updatePreferredJoker).mockResolvedValue(undefined)
-	vi.mocked(playerDb.anonymizePlayer).mockResolvedValue(undefined)
+	const anonymization = await import('../infrastructure/gateways/player-anonymization.gateway.js')
+	vi.mocked(anonymization.anonymizePlayer).mockResolvedValue(undefined)
 	vi.mocked(playerDb.reactivateIfDeleted).mockResolvedValue(undefined)
 
 	// Re-apply ban gateway defaults (cleared by vi.clearAllMocks above)

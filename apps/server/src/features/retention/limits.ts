@@ -9,15 +9,14 @@
 
 import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
 import {
+	BAN_RECORD_KEEP_MONTHS,
+	EVIDENCE_KEEP_MS,
+} from '../../shared/retention-periods.js'
+import {
 	type ItemStatus,
 	isItemStatus,
 } from '../service-queue/types.js'
 
-const DAY_MS = 24 * 60 * 60 * 1000
-
-export const CHAT_KEEP_MS = 90 * DAY_MS
-export const EVIDENCE_KEEP_MS = 180 * DAY_MS
-export const BAN_RECORD_KEEP_MONTHS = 12
 
 // A report or ban that uses a piece of evidence: closedAt is null while it is
 // open.

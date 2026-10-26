@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { compressToBase64 } from '../../shared/utils/compression.js'
-import { DELETED_PLAYER_NAME } from '../../contracts/IPlayerRepository.js'
-import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../retention/limits.js'
+import { DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
+import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
 
 // The Nakama -> Postgres mirror (nakama/src/mirror/outbox.ts): Nakama keeps
 // an outbox of finished runs, chat lines, forfeits and Notice acceptances,
@@ -132,9 +132,6 @@ export interface MirrorPull {
 // expiresAt is the earliest a row may go (retention/limits.ts). A run's logs
 // and a flagged line are evidence: the sweep keeps them past it while a report
 // or ban that uses them is open, then 180 days. Normal chat goes at 90 days.
-export const RUN_LOG_TTL_MS = EVIDENCE_KEEP_MS
-export const CHAT_LOG_TTL_MS = CHAT_KEEP_MS
-export const FLAGGED_TTL_MS = EVIDENCE_KEEP_MS
 
 export interface RunRows {
 	lobbyKind: GameKind
@@ -308,7 +305,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			status: check === 'unavailable' ? 'partial' : 'complete',
 			flagReason,
 			finalizedAt,
-			expiresAt: new Date(run.endedAt + RUN_LOG_TTL_MS),
+			expiresAt: new Date(run.endedAt + EVIDENCE_KEEP_MS),
 		})
 	}
 
@@ -446,7 +443,7 @@ export function chatRowsOf(
 			flagged: line.flagged,
 			moderationVerdict: line.verdict ?? null,
 			sentAt,
-			expiresAt: new Date(entry.at + (line.flagged ? FLAGGED_TTL_MS : CHAT_LOG_TTL_MS)),
+			expiresAt: new Date(entry.at + (line.flagged ? EVIDENCE_KEEP_MS : CHAT_KEEP_MS)),
 			mirrorKey: entry.key,
 			lobbyId: line.lobbyId && UUID.test(line.lobbyId) ? line.lobbyId : null,
 		},
@@ -456,7 +453,7 @@ export function chatRowsOf(
 					playerId,
 					message: line.message,
 					matches: flagMatchesOf(line.verdict),
-					expiresAt: new Date(entry.at + FLAGGED_TTL_MS),
+					expiresAt: new Date(entry.at + EVIDENCE_KEEP_MS),
 					mirrorKey: entry.key,
 				}
 			: null,
