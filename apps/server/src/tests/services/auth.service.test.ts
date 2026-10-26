@@ -49,7 +49,7 @@ function makeMockPlayerRepository(): IPlayerRepository {
 		updateDiscordUsername: vi.fn().mockResolvedValue(undefined),
 		updatePreferredJoker: vi.fn().mockResolvedValue(undefined),
 		updateSteamName: vi.fn().mockResolvedValue(undefined),
-		updateTosAcceptedVersion: vi.fn().mockResolvedValue(undefined),
+		recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 		updateChatStatus: vi.fn().mockResolvedValue(undefined),
 		softDeletePlayer: vi.fn().mockResolvedValue(undefined),
 		reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),

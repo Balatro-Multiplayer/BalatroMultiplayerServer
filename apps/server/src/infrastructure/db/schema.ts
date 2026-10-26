@@ -32,6 +32,9 @@ export const players = pgTable(
 		chatEnabled: boolean('chat_enabled').notNull().default(false),
 		chatBlocked: boolean('chat_blocked').notNull().default(false),
 		tosAcceptedVersion: integer('tos_accepted_version').notNull().default(0),
+		// When the player accepted that Notice version; null before the first
+		// acceptance that recorded a time.
+		noticeAcceptedAt: timestamp('notice_accepted_at', { withTimezone: true }),
 		createdAt: timestamp('created_at', { withTimezone: true })
 			.notNull()
 			.defaultNow(),
@@ -129,6 +132,8 @@ export const actionLogs = pgTable('action_logs', {
 // table (the row with ended_at IS NULL). See getCurrentSeason().
 export const serverConfig = pgTable('server_config', {
 	id: integer('id').primaryKey().default(1),
+	// Unused: the Notice version is in code (@bmp/types notice.ts). Kept so a
+	// running older API color can still read the row; drop it in a later release.
 	tosVersion: integer('tos_version').notNull().default(1),
 	// Runtime-toggleable feature flags, admin-editable via
 	// webadmin/config.route.ts's PATCH /config/feature-flags. Previously

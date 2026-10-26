@@ -215,6 +215,7 @@ function deps() {
 		storeRun: vi.fn(async () => undefined),
 		storeChat: vi.fn(async () => undefined),
 		storeForfeit: vi.fn(async () => undefined),
+		storeNoticeAcceptance: vi.fn(async () => undefined),
 	}
 	const service = createMirrorService({ players, store, hashSteamId: (s) => `hash:${s}` })
 	return { players, store, service }
@@ -270,6 +271,18 @@ describe('a forfeit entry', () => {
 			forfeitedAt: new Date(T0),
 			reconnectedAt: new Date(T0 + 30_000),
 		}, null)
+	})
+})
+
+describe('a notice entry', () => {
+	it('records which Notice version the player accepted, and when', async () => {
+		const { store, service } = deps()
+		const result = await service.storePull({
+			entries: [{ key: 'k-n', kind: 'notice', at: T0, userId: 'na', version: 2 }],
+			players: { na: { steamId: null, legacyPlayerId: null, displayName: '' } },
+		})
+		expect(result.stored).toEqual(['k-n'])
+		expect(store.storeNoticeAcceptance).toHaveBeenCalledWith({ playerId: 'pg-a', version: 2, acceptedAt: new Date(T0) })
 	})
 })
 

@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { compressToBase64 } from '../../shared/utils/compression.js'
 
 // The Nakama -> Postgres mirror (nakama/src/mirror/outbox.ts): Nakama keeps
-// an outbox of finished runs and chat lines, and this pulls it, stores each
+// an outbox of finished runs, chat lines, forfeits and Notice acceptances,
+// and this pulls it, stores each
 // entry in the tables the website, webadmin and service queue already read,
 // and acks what it stored. Every write is idempotent (keyed by the run id or
 // the outbox key), so an entry pulled twice is stored once.
@@ -98,7 +99,16 @@ export interface PulledForfeit {
 	lobbyKind?: GameKind
 }
 
-export type PulledEntry = PulledRun | PulledChat | PulledForfeit
+// A player accepted a Notice version (nakama player/session.ts tos_accept).
+export interface PulledNotice {
+	key: string
+	kind: 'notice'
+	at: number
+	userId: string
+	version: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice
 
 export interface MirrorPlayer {
 	steamId: string | null
@@ -457,6 +467,12 @@ export function chatRowsOf(
 // Storing (effects injected)
 // ---------------------------------------------------------------------------
 
+export interface NoticeAcceptanceRow {
+	playerId: string
+	version: number
+	acceptedAt: Date
+}
+
 export interface MirrorDeps {
 	players: {
 		findPlayerIdsByNakamaUserIds(
@@ -476,6 +492,7 @@ export interface MirrorDeps {
 		storeRun(rows: RunRows): Promise<void>
 		storeChat(rows: ChatRows): Promise<void>
 		storeForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void>
+		storeNoticeAcceptance(row: NoticeAcceptanceRow): Promise<void>
 	}
 	hashSteamId(steamId: string): string
 }
@@ -536,6 +553,14 @@ export function createMirrorService(deps: MirrorDeps) {
 				} else if (entry.kind === 'forfeit') {
 					const playerId = ids.get(entry.userId)
 					if (playerId) await store.storeForfeit(forfeitRowOf(entry, playerId), entry.lobbyKind ?? null)
+				} else if (entry.kind === 'notice') {
+					const playerId = ids.get(entry.userId)
+					if (playerId)
+						await store.storeNoticeAcceptance({
+							playerId,
+							version: entry.version,
+							acceptedAt: new Date(entry.at),
+						})
 				} else {
 					const playerId = ids.get(entry.line.userId)
 					if (playerId) {

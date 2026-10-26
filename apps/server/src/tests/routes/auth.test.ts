@@ -1,3 +1,4 @@
+import { NOTICE_VERSION } from '@bmp/types'
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../../env.js'
@@ -46,8 +47,7 @@ describe('POST /api/auth/accept-tos', () => {
 		expect(res.status).toBe(401)
 	})
 
-	it('returns full auth payload after accepting ToS', async () => {
-		setConfig({ tosVersion: 1, mods: [], chatAllowlist: new Set() })
+	it('returns full auth payload after accepting the Notice, and records version and time', async () => {
 		createSession('Alice', { id: 'tos-p1', tosAcceptedVersion: 0 })
 		const pendingToken = signTosPendingToken('tos-p1')
 
@@ -58,6 +58,11 @@ describe('POST /api/auth/accept-tos', () => {
 		expect(res.status).toBe(200)
 		expect(res.body).toHaveProperty('token')
 		expect(res.body.player).toMatchObject({ id: 'tos-p1' })
+		expect(vi.mocked(playerGateway.recordNoticeAcceptance)).toHaveBeenCalledWith(
+			'tos-p1',
+			NOTICE_VERSION,
+			expect.any(Date),
+		)
 	})
 
 	it('returns 401 when session does not exist for the pending token player', async () => {
@@ -71,7 +76,6 @@ describe('POST /api/auth/accept-tos', () => {
 	})
 
 	it('permanently blocks chat for a chat-ineligible (13-15) account', async () => {
-		setConfig({ tosVersion: 1, mods: [], chatAllowlist: new Set() })
 		createSession('Alice', { id: 'tos-underage', tosAcceptedVersion: 0 })
 		const pendingToken = signTosPendingToken('tos-underage')
 
@@ -93,7 +97,6 @@ describe('POST /api/auth/accept-tos', () => {
 	})
 
 	it('enables chat for a chat-eligible (16+) account', async () => {
-		setConfig({ tosVersion: 1, mods: [], chatAllowlist: new Set() })
 		createSession('Alice', { id: 'tos-eligible', tosAcceptedVersion: 0 })
 		const pendingToken = signTosPendingToken('tos-eligible')
 

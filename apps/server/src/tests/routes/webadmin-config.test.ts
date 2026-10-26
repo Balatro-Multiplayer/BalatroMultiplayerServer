@@ -1,3 +1,4 @@
+import { NOTICE_DATE, NOTICE_VERSION } from '@bmp/types'
 import request from 'supertest'
 import { describe, expect, it, vi } from 'vitest'
 import { signJwt } from '../../features/auth/jwt.js'
@@ -34,7 +35,6 @@ describe('GET /api/webadmin/config', () => {
 	it('returns the current in-memory config, including chatEnabled/testingMode read-only', async () => {
 		const original = getConfig()
 		setConfig({
-			tosVersion: 3,
 			mods: [{ modId: 'MultiplayerPvP', displayName: 'PvP', version: '1.2.3', downloadUrl: 'https://example.com' }],
 			chatAllowlist: new Set(['gg', 'nice']),
 			chatEnabled: true,
@@ -51,7 +51,8 @@ describe('GET /api/webadmin/config', () => {
 		const res = await request(app).get('/api/webadmin/config').set('Authorization', token)
 
 		expect(res.status).toBe(200)
-		expect(res.body.tosVersion).toBe(3)
+		expect(res.body.noticeVersion).toBe(NOTICE_VERSION)
+		expect(res.body.noticeDate).toBe(NOTICE_DATE)
 		expect(res.body.mods).toEqual([
 			{ modId: 'MultiplayerPvP', displayName: 'PvP', version: '1.2.3', downloadUrl: 'https://example.com' },
 		])
@@ -70,47 +71,15 @@ describe('GET /api/webadmin/config', () => {
 	})
 })
 
-describe('PATCH /api/webadmin/config/tos-version', () => {
-	it('returns 403 for a moderator (admin-only, same shape as privilege-grant)', async () => {
-		const token = authAsModerator('mod-cfg-2', 'Mod2')
-		const res = await request(app)
-			.patch('/api/webadmin/config/tos-version')
-			.set('Authorization', token)
-			.send({ tosVersion: 2 })
-
-		expect(res.status).toBe(403)
-	})
-
-	it('returns 400 for a non-positive-integer tosVersion', async () => {
+describe('the Notice version', () => {
+	it('is set in code: there is no admin route to change it', async () => {
 		const token = authAsAdmin('admin-cfg-1', 'Admin')
-		const res = await request(app)
-			.patch('/api/webadmin/config/tos-version')
-			.set('Authorization', token)
-			.send({ tosVersion: 0 })
-
-		expect(res.status).toBe(400)
-	})
-
-	it('writes the new version and reloads config for an admin', async () => {
-		const token = authAsAdmin('admin-cfg-2', 'Admin2')
-		;(db as any).insert = vi.fn().mockReturnValue({
-			values: vi.fn().mockReturnValue({
-				onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
-			}),
-		})
-		vi.mocked(configGateway.loadConfigFromDb).mockResolvedValue({
-			tosVersion: 5,
-			mods: [],
-			chatAllowlist: new Set(),
-		} as any)
-
 		const res = await request(app)
 			.patch('/api/webadmin/config/tos-version')
 			.set('Authorization', token)
 			.send({ tosVersion: 5 })
 
-		expect(res.status).toBe(200)
-		expect(res.body.tosVersion).toBe(5)
+		expect(res.status).toBe(404)
 	})
 })
 
@@ -150,7 +119,6 @@ describe('PATCH /api/webadmin/config/feature-flags', () => {
 		const setMock = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) })
 		;(db as any).update = vi.fn().mockReturnValue({ set: setMock })
 		vi.mocked(configGateway.loadConfigFromDb).mockResolvedValue({
-			tosVersion: 1,
 			mods: [],
 			chatAllowlist: new Set(),
 			chatEnabled: false,
@@ -231,7 +199,6 @@ describe('PUT /api/webadmin/config/mods/:modId', () => {
 			}),
 		})
 		vi.mocked(configGateway.loadConfigFromDb).mockResolvedValue({
-			tosVersion: 1,
 			mods: [{ modId: 'MultiplayerPvP', displayName: 'PvP', version: '2.0.0', downloadUrl: 'https://example.com' }],
 			chatAllowlist: new Set(),
 		} as any)
@@ -267,7 +234,6 @@ describe('POST/DELETE /api/webadmin/config/chat-allowlist', () => {
 			}),
 		})
 		vi.mocked(configGateway.loadConfigFromDb).mockResolvedValue({
-			tosVersion: 1,
 			mods: [],
 			chatAllowlist: new Set(['gg']),
 		} as any)
