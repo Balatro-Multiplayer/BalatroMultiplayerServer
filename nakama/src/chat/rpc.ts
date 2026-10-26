@@ -18,6 +18,7 @@ import { parsePayload, requireUser } from '../rpc'
 import { type LobbySignal, lobbyIdOf } from '../lobby/protocol'
 import {
 	MAX_MESSAGE_LENGTH,
+	REVIEW_BAND,
 	callModeration,
 	decideModerationOutcome,
 } from './moderation'
@@ -100,6 +101,7 @@ export function rpcChatSend(
 		lobbyKind: lobbyKindOfLabel(match ? match.label : null),
 	}
 
+	let flag: ChatVerdict | null = null
 	if (!isAllowlisted(message, config.chatAllowlist)) {
 		if (settingsOf(ctx).moderationRemote) {
 			const outcome = decideModerationOutcome(
@@ -119,6 +121,8 @@ export function rpcChatSend(
 				}
 				throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
 			}
+			// Published, and flagged so a moderator sees it.
+			if (outcome.review) flag = { source: 'remote', band: REVIEW_BAND }
 		} else {
 			const matches = obscenityMatches(message)
 			if (matches.length > 0) {
@@ -132,25 +136,25 @@ export function rpcChatSend(
 		current.matchId,
 		JSON.stringify({ type: 'chat_post', userId, text: message } as LobbySignal),
 	)
-	logChat(nk, logger, lobby, userId, message, null)
+	logChat(nk, logger, lobby, userId, message, flag)
 	return JSON.stringify({ text: message })
 }
 
-// Queues a chat line for the API's chat log (mirror/outbox.ts). A blocked line
-// carries why. Never fails the send: losing a log line beats losing the chat.
+// Queues a chat line for the API's chat log (mirror/outbox.ts). A flagged line
+// (blocked, or published for review) carries why. Never fails the send: losing a log line beats losing the chat.
 function logChat(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
 	lobby: Pick<ChatLogLine, 'lobbyCode' | 'lobbyId' | 'lobbyKind'>,
 	userId: string,
 	message: string,
-	blocked: ChatVerdict | null,
+	flag: ChatVerdict | null,
 ) {
 	try {
 		enqueue(nk, {
 			kind: 'chat',
 			at: Date.now(),
-			line: { ...lobby, userId, message, flagged: blocked !== null, verdict: blocked },
+			line: { ...lobby, userId, message, flagged: flag !== null, verdict: flag },
 		})
 	} catch (e) {
 		logger.error('Could not queue a chat line for the API: %v', e)

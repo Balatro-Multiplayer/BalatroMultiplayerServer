@@ -5,8 +5,12 @@ export type ModerationAttempt = { status: number; body: unknown } | null
 
 export type ModerationBlockReason = 'moderated' | 'unavailable'
 
+// The band of an allowed message a moderator must still look at: the model
+// was unsure, or (in shadow mode) would have blocked it.
+export const REVIEW_BAND = 'review'
+
 export type ModerationOutcome =
-	| { allowed: true }
+	| { allowed: true; review: boolean }
 	| { allowed: false; reason: ModerationBlockReason; band?: string }
 
 // The relay's cap on a message.
@@ -25,7 +29,7 @@ export function decideModerationOutcome(attempt: ModerationAttempt): ModerationO
 	if (!body) return { allowed: false, reason: 'unavailable' }
 
 	// A message is published as typed or blocked, never rewritten.
-	if (body.verdict === 'allow') return { allowed: true }
+	if (body.verdict === 'allow') return { allowed: true, review: body.band === REVIEW_BAND }
 
 	const band = typeof body.band === 'string' ? body.band : undefined
 	// The service's own model being down is not the player's fault.

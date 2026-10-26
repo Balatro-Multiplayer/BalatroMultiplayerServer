@@ -49,7 +49,7 @@ export default function NoticePage() {
           <p>We ask your date of birth once. The game or the website works out your age on your device. Your date of birth is never sent to our servers. If you are under 13, you cannot accept this notice and nothing is sent. Otherwise only one answer is sent: whether you are 16 or older. We store that answer as your chat access.</p>
 
           <p><strong className='text-foreground'>Chat messages:</strong></p>
-          <p>If you are 16 or older and you turn chat on, you can type your own messages, up to 500 characters each. Other players in your lobby see them. Before a message is published, our systems check it: word lists and rules we wrote, and a moderation model that we run ourselves, on our own servers. No outside AI service sees your messages. The check also looks at the last few messages in the lobby. A message is published exactly as you typed it, or it is blocked. A message with a link to a website that is not on our approved list is blocked. We log every message, published or blocked, with your account identifier, the lobby and the time. Our moderators review blocked messages.</p>
+          <p>If you are 16 or older and you turn chat on, you can type your own messages, up to 500 characters each. Other players in your lobby see them. Before a message is published, our systems check it: word lists and rules we wrote, and a moderation model that we run ourselves, on our own servers. No outside AI service sees your messages. The check also looks at the last few messages in the lobby. A message is published exactly as you typed it, or it is blocked. A message with a link to a website that is not on our approved list is blocked. We log every message, published or blocked, with your account identifier, the lobby and the time. Our moderators review blocked messages, and published messages that the model marks for review (flagged messages).</p>
 
           <p><strong className='text-foreground'>Gameplay logs:</strong></p>
           <p>We record game action logs during matches. These contain in-game actions and your account identifier, no additional personal data. They are used for moderation, replay, and spectating features. We check them automatically for signs of cheating. A game that fails a check, or whose result the players dispute, goes to our moderators.</p>
@@ -113,12 +113,12 @@ export default function NoticePage() {
           <Hr />
 
           <H2>How long we keep it</H2>
-          <p>Evidence means blocked chat messages and gameplay logs. A report or ban that uses a piece of evidence is open while the report is not resolved, or while the ban is in force.</p>
+          <p>Evidence means blocked or flagged chat messages and gameplay logs. A report or ban that uses a piece of evidence is open while the report is not resolved, or while the ban is in force.</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
             <li><strong className='text-foreground'>Account data</strong> (Steam display name, Steam ID hash, Discord ID hash and display name, settings, chat access, installed-mod list, the notice version you accepted): kept while your account exists. See Account deletion.</li>
             <li><strong className='text-foreground'>Network hashes:</strong> 30 days after your last login from that network, then deleted. A hash that is part of a network ban is kept until an admin lifts the ban.</li>
             <li><strong className='text-foreground'>Chat messages:</strong> 90 days from the date sent, then permanently deleted.</li>
-            <li><strong className='text-foreground'>Blocked chat messages:</strong> 180 days from the date sent. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
+            <li><strong className='text-foreground'>Blocked or flagged chat messages:</strong> 180 days from the date sent. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Gameplay logs:</strong> 180 days from the end of the match. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Chat saved with a report:</strong> kept while a report about that lobby is open, then 30 more days.</li>
             <li><strong className='text-foreground'>Ban records:</strong> the length of the ban plus 12 months. For permanent bans: retained indefinitely.</li>

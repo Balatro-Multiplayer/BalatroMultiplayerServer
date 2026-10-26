@@ -122,6 +122,15 @@ describe('chat_send moderation', () => {
 		])
 	})
 
+	it('posts a message the service marks for review, and flags it so a moderator sees it', () => {
+		const nk = seated({ verdict: 'allow', band: 'review' })
+		expect(say(nk, 'borderline')).toEqual({ text: 'borderline' })
+		expect(nk.posted).toEqual(['borderline'])
+		expect(logged(nk)).toEqual([
+			{ lobbyCode: 'ABCDEF', lobbyId: 'm1', lobbyKind: null, userId: USER, message: 'borderline', flagged: true, verdict: { source: 'remote', band: 'review' } },
+		])
+	})
+
 	it('logs nothing it could not judge', () => {
 		const nk = seated({ verdict: 'reject', band: 'guard_unavailable' })
 		expect(() => say(nk, 'hello')).toThrow(/unavailable/)

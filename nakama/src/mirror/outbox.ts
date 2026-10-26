@@ -49,7 +49,8 @@ export interface ChatLogLine {
 	userId: string
 	message: string
 	flagged: boolean
-	// Why a flagged line was blocked; null for a posted one.
+	// Why a line was flagged (blocked, or published for review); null for a
+	// line posted with no flag.
 	verdict: ChatVerdict | null
 }
 

@@ -8741,6 +8741,7 @@ function lobbyMatchTerminate(ctx, logger, nk, dispatcher, tickNumber, state, gra
 }
 
 // src/chat/moderation.ts
+var REVIEW_BAND = "review";
 var MAX_MESSAGE_LENGTH = 500;
 function verdictOf(value) {
   if (typeof value !== "object" || value === null) return null;
@@ -8750,7 +8751,7 @@ function verdictOf(value) {
 function decideModerationOutcome(attempt) {
   const body = attempt && attempt.status === 200 ? verdictOf(attempt.body) : null;
   if (!body) return { allowed: false, reason: "unavailable" };
-  if (body.verdict === "allow") return { allowed: true };
+  if (body.verdict === "allow") return { allowed: true, review: body.band === REVIEW_BAND };
   const band = typeof body.band === "string" ? body.band : void 0;
   if (band === "guard_unavailable") return { allowed: false, reason: "unavailable" };
   return { allowed: false, reason: "moderated", band };
@@ -8887,6 +8888,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
     lobbyId: lobbyIdOf(current.matchId),
     lobbyKind: lobbyKindOfLabel(match ? match.label : null)
   };
+  let flag2 = null;
   if (!isAllowlisted(message, config.chatAllowlist)) {
     if (settingsOf(ctx).moderationRemote) {
       const outcome = decideModerationOutcome(
@@ -8904,6 +8906,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
         }
         throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
       }
+      if (outcome.review) flag2 = { source: "remote", band: REVIEW_BAND };
     } else {
       const matches = obscenityMatches(message);
       if (matches.length > 0) {
@@ -8916,15 +8919,15 @@ function rpcChatSend(ctx, logger, nk, payload) {
     current.matchId,
     JSON.stringify({ type: "chat_post", userId, text: message })
   );
-  logChat(nk, logger, lobby, userId, message, null);
+  logChat(nk, logger, lobby, userId, message, flag2);
   return JSON.stringify({ text: message });
 }
-function logChat(nk, logger, lobby, userId, message, blocked) {
+function logChat(nk, logger, lobby, userId, message, flag2) {
   try {
     enqueue(nk, {
       kind: "chat",
       at: Date.now(),
-      line: __spreadProps(__spreadValues({}, lobby), { userId, message, flagged: blocked !== null, verdict: blocked })
+      line: __spreadProps(__spreadValues({}, lobby), { userId, message, flagged: flag2 !== null, verdict: flag2 })
     });
   } catch (e) {
     logger.error("Could not queue a chat line for the API: %v", e);

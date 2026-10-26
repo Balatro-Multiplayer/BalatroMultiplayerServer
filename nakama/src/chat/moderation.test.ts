@@ -5,8 +5,8 @@ const ok = (body: unknown, status = 200) => ({ status, body })
 
 describe('decideModerationOutcome', () => {
 	it('allows an allow verdict, ignoring any publishText', () => {
-		expect(decideModerationOutcome(ok({ verdict: 'allow' }))).toEqual({ allowed: true })
-		expect(decideModerationOutcome(ok({ verdict: 'allow', publishText: 'gg' }))).toEqual({ allowed: true })
+		expect(decideModerationOutcome(ok({ verdict: 'allow' }))).toEqual({ allowed: true, review: false })
+		expect(decideModerationOutcome(ok({ verdict: 'allow', publishText: 'gg' }))).toEqual({ allowed: true, review: false })
 	})
 	it('blocks a reject as moderated, with its band', () => {
 		expect(decideModerationOutcome(ok({ verdict: 'reject', band: 'slur' }))).toEqual({
