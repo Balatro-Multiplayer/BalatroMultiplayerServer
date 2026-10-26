@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { ServerOp } from './protocol'
 import {
 	CREATOR_JOIN_TIMEOUT_MS,
+	FORFEITED_SEAT,
 	adminRemove,
 	adminView,
 	type Lobby,
@@ -285,6 +286,41 @@ describe('disconnect and grace period', () => {
 		const expired = tick(lobby, 1000 + GRACE)
 		expect(eventTypes(expired)).toEqual(['player_left'])
 		expect(expired.lobby.players.map((p) => p.id)).toEqual(['a'])
+	})
+
+	describe('a seat forfeited by the grace period', () => {
+		const running = () => {
+			const lobby = lobbyWith('a', 'b')
+			return {
+				...lobby,
+				game: { ...lobby.game, started: { runId: 'r1', players: [{ id: 'a' }, { id: 'b' }] } as any },
+			}
+		}
+		const forfeitB = (lobby: Lobby) => tick(disconnect(lobby, 'b', 'b-s1', 1000).lobby, 1000 + GRACE).lobby
+
+		it('refuses the player back with a forfeit reason while the game runs', () => {
+			const lobby = forfeitB(running())
+			expect(joinRejection(lobby, 'b', 'MultiplayerPvP')).toBe(FORFEITED_SEAT)
+		})
+
+		it('still refuses them once the game has ended and the lobby is a waiting room again', () => {
+			const lobby = forfeitB(running())
+			const ended = { ...lobby, game: { ...lobby.game, started: null } }
+			expect(joinRejection(ended, 'b', 'MultiplayerPvP')).toBe(FORFEITED_SEAT)
+		})
+
+		it('does not refuse a seat lost outside a game, or another player', () => {
+			const idle = forfeitB(lobbyWith('a', 'b'))
+			expect(joinRejection(idle, 'b', 'MultiplayerPvP')).toBeNull()
+			const lobby = forfeitB(running())
+			expect(joinRejection(lobby, 'a', 'MultiplayerPvP')).toBeNull()
+		})
+
+		it('forgets the forfeit when a new game has started', () => {
+			const lobby = forfeitB(running())
+			const next = { ...lobby, game: { ...lobby.game, started: { runId: 'r2', players: [{ id: 'a' }] } as any } }
+			expect(joinRejection(next, 'b', 'MultiplayerPvP')).toBe('The game has already started')
+		})
 	})
 
 	it('closes the lobby straight away once nobody is connected', () => {

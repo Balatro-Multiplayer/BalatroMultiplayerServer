@@ -309,3 +309,20 @@ describe('seedFromHex', () => {
 		expect(seed).toMatch(/^[1-9A-NP-Z]+$/)
 	})
 })
+
+describe('action from a player marked away', () => {
+	it('relays it, marks the sender back, and tells the others', () => {
+		const away = disconnect(lobbyWith('a', 'b'), 'a', 'a-s1', 500).lobby
+		const step = send(away, 'a', { cid: 'c1', action: 'spdrn_player_ready', to: '*', params: {} })
+		expect(delivered(step)).toHaveLength(1)
+		expect(step.lobby.players.find((p) => p.id === 'a')?.awaySince).toBeNull()
+		const events = sends(step, ServerOp.EVENT)
+		expect(events.map((e) => (e.payload as { type: string }).type)).toEqual(['player_reconnected'])
+		expect(events[0].to).toEqual(['b'])
+	})
+
+	it('still drops an action from a stranger', () => {
+		const step = send(lobbyWith('a', 'b'), 'x', { cid: 'c1', action: 'spdrn_player_ready', to: '*' })
+		expect(step.out).toEqual([])
+	})
+})
