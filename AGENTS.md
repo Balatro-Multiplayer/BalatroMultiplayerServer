@@ -123,7 +123,7 @@ Formatting is Biome: tabs, single quotes, no semicolons.
   `testing/fake_nk.ts`; API tests mock `db` in `src/tests/setup.ts`.
 - Types: `pnpm build`, plus `pnpm --filter bmp-nakama-modules typecheck` and
   `pnpm --filter balatro-multiplayer-web typecheck`.
-- Live, against the local stack (`docker-compose.local.yml`): rebuild the
+- Live, against the local stack (`compose.local.yml`): rebuild the
   bundle, restart Nakama, then run the relevant
   `node nakama/scripts/live/<area>.live.mjs`. These use throwaway device-auth
   players with a test prefix and query Postgres in the `bmp-postgres`

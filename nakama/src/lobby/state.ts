@@ -56,6 +56,9 @@ export interface LobbyPlayer {
 	sessionId: string
 	info: PlayerInfo
 	awaySince: number | null
+	// When the player said it was catching up (ClientOp.CATCHING_UP); null or
+	// absent when it is not. A join clears it: the new session reports again.
+	catchingUpSince?: number | null
 	ownState: unknown
 }
 
@@ -81,6 +84,9 @@ export interface Lobby {
 	kickedIds: string[]
 	createdAt: number
 	graceMs: number
+	// How long a seat may stay "catching up" before it is forfeited (lobby/catch_up.ts);
+	// null or absent: no limit.
+	catchUpLimitMs?: number | null
 	resultTimeoutMs: number
 	closed: boolean
 	// Owned by the authoritative actions (src/actions).
@@ -106,6 +112,10 @@ export interface Lobby {
 	// is planned, so a config change can't move the bar mid-game; absent on
 	// a private lobby (never gated) and on one made before standings existed.
 	requiredStanding?: RequiredStanding
+	// userId -> the runId of the game whose grace period forfeited their seat.
+	// The seat is gone, but the player must not be seated again as a fresh
+	// joiner (joinRejection), so the record stays after the game ends.
+	forfeitedSeats?: { [userId: string]: string }
 }
 
 export type Outbound =
@@ -140,6 +150,7 @@ export function newLobby(params: {
 	requiredStanding?: RequiredStanding
 	now: number
 	graceMs: number
+	catchUpLimitMs?: number | null
 	resultTimeoutMs?: number
 }): Lobby {
 	return {
@@ -156,6 +167,7 @@ export function newLobby(params: {
 		kickedIds: [],
 		createdAt: params.now,
 		graceMs: params.graceMs,
+		catchUpLimitMs: params.catchUpLimitMs ?? null,
 		resultTimeoutMs: params.resultTimeoutMs ?? DEFAULT_RESULT_TIMEOUT_MS,
 		closed: false,
 		game: emptyGame(),
@@ -248,6 +260,9 @@ function rejectOp(userId: string, message: string): Outbound {
 }
 
 export const DIFFERENT_MOD = 'Lobby is for a different mod'
+// The clients (api/lobby/nakama.lua) match this text to show the forfeit
+// dialog: change both together.
+export const FORFEITED_SEAT = 'You forfeited this match'
 
 // Why userId may not join, or null. A member rejoining (after a disconnect)
 // is let back in, but only from the lobby's own mod: one seat per user spans
@@ -264,6 +279,7 @@ export function joinRejection(
 		return 'You are spectating this lobby'
 	if (lobby.kickedIds.indexOf(userId) !== -1)
 		return 'You were kicked from this lobby'
+	if (forfeitedStill(lobby, userId)) return FORFEITED_SEAT
 	if (lobby.game.started) return 'The game has already started'
 	if (lobby.groupQueue) return 'This lobby is queueing as a group'
 	if (lobby.allowedIds) {
@@ -276,8 +292,21 @@ export function joinRejection(
 	return null
 }
 
-// `now` only times an open Setup step (its msLeft).
-export function snapshotFor(lobby: Lobby, userId: string, now = Date.now()): Snapshot {
+// Whether userId lost their seat to the grace period in the game that is
+// running or that has just ended. A newer game makes the record stale.
+function forfeitedStill(lobby: Lobby, userId: string): boolean {
+	const runId = (lobby.forfeitedSeats || {})[userId]
+	if (runId === undefined) return false
+	const started = lobby.game.started
+	return started === null || started.runId === runId
+}
+
+export function isCatchingUp(player: LobbyPlayer): boolean {
+	return typeof player.catchingUpSince === 'number'
+}
+
+// `now` times an open Setup step (its msLeft) and is the snapshot's serverNow.
+export function snapshotFor(lobby: Lobby, userId: string, now: number = Date.now()): Snapshot {
 	const self = findPlayer(lobby, userId)
 	return {
 		code: lobby.code,
@@ -293,6 +322,7 @@ export function snapshotFor(lobby: Lobby, userId: string, now = Date.now()): Sna
 			mods: p.info.mods,
 			standing: p.info.standing || null,
 			isAway: p.awaySince !== null,
+			catchingUp: isCatchingUp(p),
 		})),
 		ownState: self ? self.ownState : null,
 		game: {
@@ -303,6 +333,8 @@ export function snapshotFor(lobby: Lobby, userId: string, now = Date.now()): Sna
 		},
 		groupQueue: viewOf(lobby),
 		teamPlan: lobby.teamPlan || null,
+		graceSeconds: Math.ceil(lobby.graceMs / 1000),
+		serverNow: now,
 	}
 }
 
@@ -312,11 +344,13 @@ export function join(
 	userId: string,
 	sessionId: string,
 	info: PlayerInfo,
+	now: number = Date.now(),
 ): Step {
 	const existing = findPlayer(lobby, userId)
 	if (existing) {
 		const wasAway = existing.awaySince !== null
-		const back: LobbyPlayer = { ...existing, sessionId, awaySince: null }
+		const wasCatchingUp = isCatchingUp(existing)
+		const back: LobbyPlayer = { ...existing, sessionId, awaySince: null, catchingUpSince: null }
 		const next = {
 			...lobby,
 			players: lobby.players.map((p) => (p.id === userId ? back : p)),
@@ -328,7 +362,7 @@ export function join(
 			{
 				kind: 'send',
 				op: ServerOp.SNAPSHOT,
-				payload: snapshotFor(next, userId),
+				payload: snapshotFor(next, userId, now),
 				to: [userId],
 			},
 		]
@@ -345,6 +379,7 @@ export function join(
 			const tail = replayTailOf(next, userId)
 			if (tail) out.push({ kind: 'send', op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] })
 		}
+		if (wasCatchingUp) out.push(catchingUpEvent(next, userId, false))
 		return then({ lobby: next, out }, groupReturned)
 	}
 
@@ -370,7 +405,7 @@ export function join(
 			{
 				kind: 'send',
 				op: ServerOp.SNAPSHOT,
-				payload: snapshotFor(next, userId),
+				payload: snapshotFor(next, userId, now),
 				to: [userId],
 			},
 			event(
@@ -387,6 +422,29 @@ export function join(
 			},
 		],
 	}
+}
+
+function catchingUpEvent(lobby: Lobby, userId: string, catchingUp: boolean): Outbound {
+	const player = findPlayer(lobby, userId)
+	return event(
+		lobby,
+		'player_catching_up',
+		{ playerId: userId, displayName: player ? player.info.displayName : undefined, data: { catchingUp } },
+		othersThan(lobby, userId),
+	)
+}
+
+// The player says it is replaying its own run after a crash (it has joined, so
+// its seat is safe) or that it has caught up. Only the others are told, and
+// only on a change: a repeat keeps the first time.
+export function setCatchingUp(lobby: Lobby, userId: string, catchingUp: boolean, now: number): Step {
+	const player = findPlayer(lobby, userId)
+	if (!player || isCatchingUp(player) === catchingUp) return { lobby, out: [] }
+	const next = {
+		...lobby,
+		players: lobby.players.map((p) => (p.id === userId ? { ...p, catchingUpSince: catchingUp ? now : null } : p)),
+	}
+	return { lobby: next, out: [catchingUpEvent(next, userId, catchingUp)] }
 }
 
 // step, then f on its lobby: their effects in order.
@@ -658,7 +716,13 @@ export function setPlayerInfo(lobby: Lobby, userId: string, patch: Partial<Playe
 	}
 }
 
-// Time passing: expire grace periods, and close a lobby its creator never
+// Whether the seat has been catching up for as long as the lobby's mod allows.
+function catchUpLimitReached(lobby: Lobby, player: LobbyPlayer, now: number): boolean {
+	const limit = lobby.catchUpLimitMs
+	return typeof limit === 'number' && typeof player.catchingUpSince === 'number' && now - player.catchingUpSince >= limit
+}
+
+// Time passing: expire grace periods and catch-up limits, and close a lobby its creator never
 // joined.
 export function tick(lobby: Lobby, now: number): Step {
 	if (lobby.closed) return { lobby, out: [] }
@@ -673,15 +737,21 @@ export function tick(lobby: Lobby, now: number): Step {
 	for (const p of lobby.players) {
 		if (step.lobby.closed) break
 		const parked = isParked(step.lobby) && step.lobby.groupQueue!.memberIds.indexOf(p.id) !== -1
-		const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince
-		if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
+		const current = findPlayer(step.lobby, p.id) || p
+		const awaySince = current.awaySince
+		const graceRanOut = !parked && awaySince !== null && now - awaySince >= lobby.graceMs
+		if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
 			const started = step.lobby.game.started
 			const forfeited: Outbound[] =
 				started && started.players.some((q) => q.id === p.id)
 					? [{ kind: 'forfeited', userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }]
 					: []
 			const removed = remove(step.lobby, p.id, 'player_left', 'member_disconnected')
-			step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) }
+			const marked =
+				forfeited.length > 0 && started
+					? { ...removed.lobby, forfeitedSeats: { ...(removed.lobby.forfeitedSeats || {}), [p.id]: started.runId } }
+					: removed.lobby
+			step = { lobby: marked, out: step.out.concat(forfeited, removed.out) }
 		}
 	}
 	return step

@@ -24,6 +24,7 @@ import { clearMatched } from '../matchmaking/queue'
 import { hasPlayerAnswer, releaseGroups } from './group_queue'
 import { answerGroupSignal, isGroupSignal } from './group_signals'
 import { type RelayStep, action } from './relay'
+import { catchUpLimitMsFor } from './catch_up'
 import {
 	DEFAULT_GRACE_MS,
 	DEFAULT_RESULT_TIMEOUT_MS,
@@ -41,6 +42,7 @@ import {
 	leave,
 	newLobby,
 	setMetadata,
+	setCatchingUp,
 	setOwnState,
 	setPlayerInfo,
 	tick,
@@ -384,6 +386,7 @@ export function lobbyMatchInit(
 		requiredStanding: requiredStandingParam(params),
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
+		catchUpLimitMs: catchUpLimitMsFor(stringParam(params, 'modId'), Number(ctx.env.LOBBY_CATCH_UP_LIMIT_SECONDS) || undefined),
 		resultTimeoutMs: secondsFromEnv(
 			ctx,
 			'RESULT_TIMEOUT_SECONDS',
@@ -580,7 +583,7 @@ export function lobbyMatchJoin(
 			nk,
 			dispatcher,
 			attached,
-			join(attached.lobby, presence.userId, presence.sessionId, info),
+			join(attached.lobby, presence.userId, presence.sessionId, info, Date.now()),
 		)
 	}
 	return current ? { state: current } : null
@@ -673,6 +676,8 @@ function stepForMessage(
 				senderId,
 				data.state === undefined ? null : data.state,
 			)
+		case ClientOp.CATCHING_UP:
+			return setCatchingUp(lobby, senderId, data.catchingUp === true, Date.now())
 		default:
 			return null
 	}
@@ -714,6 +719,15 @@ export function lobbyMatchLoop(
 				message.sender.userId,
 			)
 			continue
+		}
+		if (step.refused) {
+			logger.warn(
+				'Lobby %s: refused %s from %s (%s)',
+				current.lobby.code,
+				step.refused.key,
+				message.sender.userId,
+				step.refused.reason,
+			)
 		}
 		if (step.dropped) {
 			const d = step.dropped

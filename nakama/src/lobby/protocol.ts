@@ -18,6 +18,9 @@ export const ClientOp = {
 	// ActionMessage -- a relayed action (to a player id or '*'), or an
 	// authoritative one (to 'server').
 	ACTION: 5,
+	// {catchingUp} -- the sender is (or is no longer) replaying its own run
+	// after a crash. The seat is safe either way: nothing waits for it.
+	CATCHING_UP: 6,
 } as const
 
 export const ServerOp = {
@@ -106,6 +109,10 @@ export interface StartedGame {
 	stake: number | null
 	options: unknown
 	startedAt: number
+	// When the first replay event of the game reached the server: the moment
+	// the racers' run began (a draft and countdown come between startedAt and
+	// it). Clients measure the race clock from it. Absent until that event.
+	raceStartedAt?: number
 	hostId: string
 	players: Participant[]
 }
@@ -355,6 +362,8 @@ export type LobbyEventType =
 	| 'player_kicked'
 	| 'player_disconnected'
 	| 'player_reconnected'
+	// data: {catchingUp} -- see ClientOp.CATCHING_UP.
+	| 'player_catching_up'
 	| 'metadata_changed'
 	| 'host_changed'
 	| 'lobby_closed'
@@ -381,6 +390,8 @@ export interface PlayerInfo {
 export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing'> {
 	id: string
 	isAway: boolean
+	// Replaying its own run after a crash (ClientOp.CATCHING_UP).
+	catchingUp: boolean
 	// null when the server never worked it out (see PlayerInfo).
 	standing: AccountStanding | null
 }
@@ -399,6 +410,13 @@ export interface Snapshot {
 	groupQueue: GroupQueueView | null
 	// A matchmade Teams game: the two teams, each group kept whole.
 	teamPlan: string[][] | null
+	// How long the server holds a dropped seat before it forfeits it. The
+	// client gives up reconnecting a little after this.
+	graceSeconds: number
+	// The server clock when this snapshot was made (ms), so a client can place
+	// game.started.raceStartedAt on its own clock without trusting the two
+	// clocks to agree.
+	serverNow: number
 }
 
 // A private lobby queueing as one group (matchmaking/group): forming while

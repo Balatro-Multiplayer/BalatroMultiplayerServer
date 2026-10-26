@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { purgeNakamaRuns, RUN_RETENTION_DAYS } from '../../features/nakama/retention.job.js'
+import { purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
 describe('purgeNakamaRuns', () => {
 	it('keeps calling while Nakama says there is more, and totals what went', async () => {
@@ -28,5 +28,25 @@ describe('purgeNakamaRuns', () => {
 	it('gives up after a bounded number of calls', async () => {
 		const rpc = vi.fn(async () => ({ ok: true, value: { deleted: 1, more: true } }))
 		expect(await purgeNakamaRuns(rpc as never)).toBe(50)
+	})
+})
+
+describe('sweepNakamaCheckpoints', () => {
+	it('keeps calling while Nakama says there is more, and totals the counts', async () => {
+		const replies = [
+			{ ok: true, value: { deleted: 200, noContest: 3, more: true } },
+			{ ok: true, value: { deleted: 5, noContest: 1, more: false } },
+		]
+		const rpc = vi.fn(async () => replies.shift())
+		expect(await sweepNakamaCheckpoints(rpc as never)).toEqual({ deleted: 205, noContest: 4 })
+		expect(rpc).toHaveBeenCalledWith('admin_checkpoints_sweep', {})
+	})
+
+	it('stops at a failed call', async () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+		const rpc = vi.fn(async () => ({ ok: false, error: 'unreachable' }))
+		expect(await sweepNakamaCheckpoints(rpc as never)).toEqual({ deleted: 0, noContest: 0 })
+		expect(warn).toHaveBeenCalledTimes(1)
+		warn.mockRestore()
 	})
 })

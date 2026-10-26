@@ -87,6 +87,7 @@ services:
           --runtime.env "PLAYER_ID_SALT=$$PLAYER_ID_SALT" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
+          --runtime.env "LOBBY_CATCH_UP_LIMIT_SECONDS=$$LOBBY_CATCH_UP_LIMIT_SECONDS" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
           --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
           --runtime.env "EXPRESS_INTERNAL_URL=http://api:8788" \
@@ -114,6 +115,8 @@ services:
       # Empty = 120s grace after a disconnect, 60s wait for results.
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
       RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
+      # Shortens the catch-up limit of a mod that has one (PvP: 180s); empty = the default.
+      LOBBY_CATCH_UP_LIMIT_SECONDS: ${LOBBY_CATCH_UP_LIMIT_SECONDS:-}
       # Empty = the local word filter judges chat. Set "on" with the
       # moderation profile.
       MODERATION_REMOTE: ${MODERATION_REMOTE:-}
