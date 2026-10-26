@@ -2,6 +2,6 @@
 // they play online. The website shows NOTICE_DATE; Nakama and the API gate
 // logins on NOTICE_VERSION. Raise NOTICE_VERSION in the same commit as any
 // change to the Notice text: every player then accepts again.
-export const NOTICE_VERSION = 1
+export const NOTICE_VERSION = 2
 // The "Last updated" date the Notice shows (ISO yyyy-mm-dd).
-export const NOTICE_DATE = '2026-06-13'
+export const NOTICE_DATE = '2026-10-26'

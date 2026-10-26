@@ -108,9 +108,9 @@ function TosContent() {
           <div className='space-y-2'>
             <p className='text-sm font-medium'>What you&apos;re agreeing to</p>
             <ul className='space-y-1 text-xs text-muted-foreground'>
-              <li>- We save your Steam display name, hashed identifiers, and match results.</li>
+              <li>- We save your Steam display name, hashed identifiers, match results and chat. Chat is checked by a model we run ourselves.</li>
               <li>- We don&apos;t sell your data or use it for ads. Ever.</li>
-              <li>- You can delete your account from the account overlay at any time.</li>
+              <li>- You can delete your account from your profile page at any time.</li>
             </ul>
           </div>
 

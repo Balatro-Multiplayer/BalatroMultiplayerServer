@@ -27,7 +27,7 @@ export default function NoticePage() {
 
         <div className='space-y-3.5 text-sm leading-relaxed text-muted-foreground'>
           <p>This notice explains how Balatro Multiplayer works, what data we collect, what we do with it, and your rights. It is written in plain language and constitutes the binding terms and privacy policy for the service.</p>
-          <p>Balatro Multiplayer is operated by Connor Mills (Virtualized), based in Alberta, Canada. The mod and server software are open source under GPLv3. This notice only covers <strong className='text-foreground'>our</strong> instance at <a href='https://balatromp.com' className='text-blue-400 hover:text-blue-300'>balatromp.com</a> and subdomains; third-party instances are governed by whoever runs them.</p>
+          <p>Balatro Multiplayer is operated by Connor Mills (Virtualized), based in Alberta, Canada. The mod and server software are open source under GPLv3. This notice only covers <strong className='text-foreground'>our</strong> Official server at <a href='https://balatromp.com' className='text-blue-400 hover:text-blue-300'>balatromp.com</a> and subdomains. Anyone can run their own server with our software. If you play on a server that someone else runs, this notice does not apply there: that server is governed by whoever runs it, and our server does not ask you to accept this notice for it.</p>
           <p>We are not affiliated with LocalThunk or Playstack.</p>
           <p>All user data is stored on servers located in Germany (Hetzner Online GmbH), within the European Economic Area.</p>
           <p>Contact: <a href='mailto:bmp@virtualized.dev' className='text-blue-400 hover:text-blue-300'>bmp@virtualized.dev</a></p>
@@ -38,32 +38,44 @@ export default function NoticePage() {
 
           <p><strong className='text-foreground'>Account identifiers:</strong></p>
           <ul className='pl-6 space-y-1.5 list-disc'>
-            <li><strong className='text-foreground'>A peppered hash of your Steam ID.</strong> When you authenticate through Steam, we receive your Steam ID from Valve. We immediately hash it with a pepper and discard the original. We do not access your friends list, game library, email, or any other Steam data.</li>
-            <li><strong className='text-foreground'>Your Steam display name.</strong> Pulled from your Steam profile and updated each time you log in.</li>
-            <li><strong className='text-foreground'>A salted hash of your IP address.</strong> Hashed on arrival; the plaintext IP is never stored. Used to enforce bans.</li>
-            <li><strong className='text-foreground'>Discord display name and user ID (optional).</strong> Only if you link your Discord account. Your display name is pulled from Discord and updated each time you log in. You can unlink at any time.</li>
-            <li><strong className='text-foreground'>Display name selection.</strong> You choose whether to show your Steam or Discord name. No custom display names are supported.</li>
+            <li><strong className='text-foreground'>A peppered hash of your Steam ID.</strong> When you log in, Steam (Valve) confirms your Steam ID to us. We hash it at once with a secret pepper. Your account is named by this hash. The plain Steam ID is only in memory during the login, and we never store it. We do not access your friends list, game library, email, or any other Steam data.</li>
+            <li><strong className='text-foreground'>Your Steam display name.</strong> Your game sends it each time you log in. When you log in to the website, we ask Steam for it.</li>
+            <li><strong className='text-foreground'>A salted hash of your network.</strong> Each time you log in, we hash your IP address with a secret salt. For an IPv6 address, we hash only the first half (the /64 network prefix). We store the hash and the time of your last login from that network. We do not store the IP address itself. We use these hashes only for network bans (see Bans).</li>
+            <li><strong className='text-foreground'>A peppered hash of your Discord user ID, and your Discord display name (optional).</strong> Only if you link your Discord account. We hash the Discord user ID at once and do not store it. We take your Discord display name when you link. You can unlink at any time.</li>
+            <li><strong className='text-foreground'>Your settings.</strong> Whether to show your Steam or Discord name (no custom display names are supported), the avatar you pick, and the players you mute.</li>
           </ul>
 
-          <p><strong className='text-foreground'>Age verification:</strong></p>
-          <p>We ask your date of birth once, on the client side only. Your date of birth is never transmitted to our servers. The client evaluates your age locally and sends one of three flags to the server: under 13 (account creation blocked), 13–15 (account created, chat disabled), or 16+ (full access including chat). Only the flag is transmitted, never the date itself.</p>
+          <p><strong className='text-foreground'>Age:</strong></p>
+          <p>We ask your date of birth once. The game or the website works out your age on your device. Your date of birth is never sent to our servers. If you are under 13, you cannot accept this notice and nothing is sent. Otherwise only one answer is sent: whether you are 16 or older. We store that answer as your chat access.</p>
 
           <p><strong className='text-foreground'>Chat messages:</strong></p>
-          <p>If you are age-verified (16+), you can send messages selected from a predefined set we created. These preset message selections are logged with your account identifier and a timestamp.</p>
+          <p>If you are 16 or older and you turn chat on, you can type your own messages, up to 500 characters each. Other players in your lobby see them. Before a message is published, our systems check it: word lists and rules we wrote, and a moderation model that we run ourselves, on our own servers. No outside AI service sees your messages. The check also looks at the last few messages in the lobby. A message is published exactly as you typed it, or it is blocked. A message with a link to a website that is not on our approved list is blocked. We log every message, published or blocked, with your account identifier, the lobby and the time. Our moderators review blocked messages.</p>
 
           <p><strong className='text-foreground'>Gameplay logs:</strong></p>
-          <p>We record game action logs during matches. These contain in-game actions and your account identifier, no additional personal data. They are used for moderation, replay, and spectating features.</p>
+          <p>We record game action logs during matches. These contain in-game actions and your account identifier, no additional personal data. They are used for moderation, replay, and spectating features. We check them automatically for signs of cheating. A game that fails a check, or whose result the players dispute, goes to our moderators.</p>
 
-          <p><strong className='text-foreground'>Cookies:</strong></p>
-          <p>We use a session cookie for Steam OAuth authentication. This cookie is strictly necessary for the service to function. We do not use tracking, analytics, or advertising cookies.</p>
+          <p><strong className='text-foreground'>Installed mods:</strong></p>
+          <p>Each time you log in, your game sends us the list of mods you have turned on, with their versions. We keep the latest list with your account. Other players in your lobby can see it. Matchmaking on our server accepts only approved mods.</p>
+
+          <p><strong className='text-foreground'>Launcher checks:</strong></p>
+          <p>Ranked matchmaking needs a game started by the official launcher. When you use it, our server sends your game checks, at login and from time to time while you play. If a check fails, times out or is refused, we record its type, the reason and the time.</p>
+
+          <p><strong className='text-foreground'>Player reports:</strong></p>
+          <p>You can report another player from your lobby. A report holds who sent it, who it is about, the reason, the text you write (up to 500 characters), the game it is about, and the recent chat in that lobby. Our moderators use reports, with the logs above, as evidence.</p>
+
+          <p><strong className='text-foreground'>Ratings, seasons and achievements:</strong></p>
+          <p>We keep your match results, your rating for each season, and your achievement progress. The website leaderboards and player pages are public. They show your display name, avatar, rating, rank, wins, losses and the date your account was made.</p>
+
+          <p><strong className='text-foreground'>Website login and browser storage:</strong></p>
+          <p>You log in to the website with Steam OpenID: Steam confirms your Steam ID, and we hash it as above. The website then keeps a login token in your browser's local storage. It may also keep your reduced-motion setting, and the reskin tool may keep the game file you choose; these stay on your device. The website does not use cookies for login, tracking, analytics, or advertising.</p>
 
           <Hr />
 
           <H2>Why we process your data</H2>
           <p>We process your data under the following legal bases (per GDPR Article 6(1)):</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
-            <li><strong className='text-foreground'>Contractual necessity (Art. 6(1)(b)):</strong> Account data and gameplay logs are necessary to provide the service you signed up for.</li>
-            <li><strong className='text-foreground'>Legitimate interest (Art. 6(1)(f)):</strong> Hashed IP addresses, hashed Steam IDs, and moderation records are processed to maintain the security and integrity of the service, prevent abuse, and enforce bans. You may object to processing under this basis (see Your Rights).</li>
+            <li><strong className='text-foreground'>Contractual necessity (Art. 6(1)(b)):</strong> Account data, gameplay logs, match results, ratings and achievements are necessary to provide the service you signed up for.</li>
+            <li><strong className='text-foreground'>Legitimate interest (Art. 6(1)(f)):</strong> Network hashes, hashed Steam IDs, chat checks, installed-mod lists, launcher checks, player reports and moderation records are processed to maintain the security and integrity of the service, prevent abuse, and enforce bans. You may object to processing under this basis (see Your Rights).</li>
             <li><strong className='text-foreground'>Legal obligation (Art. 6(1)(c)):</strong> We may process and retain data where required by law, including child safety reporting obligations.</li>
             <li><strong className='text-foreground'>Consent (Art. 6(1)(a)):</strong> Optional features such as Discord account linking are based on your consent, which you can withdraw at any time by unlinking.</li>
           </ul>
@@ -73,14 +85,17 @@ export default function NoticePage() {
           <H2>What we do with it</H2>
           <ul className='pl-6 space-y-1.5 list-disc'>
             <li>Operate the service and manage your account.</li>
-            <li>Moderate behavior using gameplay logs and chat records.</li>
+            <li>Check chat before it is published, and moderate behavior using gameplay logs, chat records and player reports.</li>
             <li>Enforce bans and prevent evasion using hashed identifiers.</li>
+            <li>Run ranked matchmaking, ratings, seasons, leaderboards and achievements.</li>
             <li>Provide replay and spectating features using gameplay logs.</li>
             <li>Comply with legal obligations, including child safety reporting.</li>
           </ul>
           <p>We do <strong className='text-foreground'>not</strong> sell your data. We do <strong className='text-foreground'>not</strong> use it for advertising. We do <strong className='text-foreground'>not</strong> share it with third parties except:</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
-            <li><strong className='text-foreground'>Valve Corporation (United States):</strong> Receives and responds to authentication requests during the Steam OAuth login flow. Governed by Valve's own privacy policy.</li>
+            <li><strong className='text-foreground'>Valve Corporation (United States):</strong> Confirms your Steam login (the game's login ticket, and Steam OpenID on the website) and gives us your Steam display name. Governed by Valve's own privacy policy.</li>
+            <li><strong className='text-foreground'>Discord Inc. (United States):</strong> Only if you link Discord. Discord confirms your Discord account and gives us your user ID and display name. We ask Discord only for this basic profile. Governed by Discord's own privacy policy.</li>
+            <li><strong className='text-foreground'>Cloudflare, Inc. (United States):</strong> Passes traffic between you and our servers, so it sees your IP address. Governed by Cloudflare's own privacy policy.</li>
             <li><strong className='text-foreground'>Hetzner Online GmbH (Germany):</strong> Hosts our infrastructure within the EEA. Acts as a data processor with access limited to infrastructure operation under their standard Data Processing Agreement.</li>
             <li><strong className='text-foreground'>Law enforcement or regulatory authorities:</strong> Only if legally compelled or required by mandatory reporting obligations.</li>
           </ul>
@@ -99,44 +114,57 @@ export default function NoticePage() {
           <Hr />
 
           <H2>How long we keep it</H2>
+          <p>Evidence means blocked chat messages and gameplay logs. A report or ban that uses a piece of evidence is open while the report is not resolved, or while the ban is in force.</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
-            <li><strong className='text-foreground'>Account data</strong> (Steam display name, Discord display name, hashed IP, Discord link, age flag): retained for the life of your account. Deleted within 30 days of account deletion.</li>
-            <li><strong className='text-foreground'>Peppered Steam ID hash:</strong> Retained after account deletion for the sole purpose of enforcing bans and preventing ban evasion. Reviewed and purged if no associated ban exists after 12 months post-deletion.</li>
-            <li><strong className='text-foreground'>Chat message logs:</strong> 90 days from the date sent, then permanently deleted.</li>
-            <li><strong className='text-foreground'>Gameplay logs:</strong> 180 days from the date of the match, then permanently deleted.</li>
-            <li><strong className='text-foreground'>Moderation records</strong> (bans, flags, evidence): Duration of the ban plus 12 months. For permanent bans: retained indefinitely.</li>
+            <li><strong className='text-foreground'>Account data</strong> (Steam display name, Steam ID hash, Discord ID hash and display name, settings, chat access, installed-mod list, the notice version you accepted): kept while your account exists. See Account deletion.</li>
+            <li><strong className='text-foreground'>Network hashes:</strong> 30 days after your last login from that network, then deleted. A hash that is part of a network ban is kept until an admin lifts the ban.</li>
+            <li><strong className='text-foreground'>Chat messages:</strong> 90 days from the date sent, then permanently deleted.</li>
+            <li><strong className='text-foreground'>Blocked chat messages:</strong> 180 days from the date sent. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
+            <li><strong className='text-foreground'>Gameplay logs:</strong> 180 days from the end of the match. If a report or ban uses one, we keep it while that report or ban is open, then 180 more days.</li>
+            <li><strong className='text-foreground'>Chat saved with a report:</strong> kept while a report about that lobby is open, then 30 more days.</li>
+            <li><strong className='text-foreground'>Ban records:</strong> the length of the ban plus 12 months. For permanent bans: retained indefinitely.</li>
+            <li><strong className='text-foreground'>Reports, warnings, moderation decisions and failed launcher checks:</strong> kept as moderation records. They have no fixed time limit yet.</li>
+            <li><strong className='text-foreground'>Match results, ratings and season standings:</strong> kept, because leaderboards and other players' match history depend on them.</li>
           </ul>
 
           <Hr />
 
           <H2>Account deletion</H2>
-          <p>You can delete your account via the account page at <a href='https://balatromp.com' className='text-blue-400 hover:text-blue-300'>balatromp.com</a> or by emailing <a href='mailto:bmp@virtualized.dev' className='text-blue-400 hover:text-blue-300'>bmp@virtualized.dev</a>.</p>
-          <p>When you delete your account:</p>
+          <p>You can delete your account via your profile page at <a href='https://balatromp.com' className='text-blue-400 hover:text-blue-300'>balatromp.com</a> or by emailing <a href='mailto:bmp@virtualized.dev' className='text-blue-400 hover:text-blue-300'>bmp@virtualized.dev</a>.</p>
+          <p>When you delete your account on the website, this happens at once:</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
-            <li>Your Steam display name, Discord display name, hashed IP address, Discord link, age verification flag, and chat logs are deleted or anonymized within 30 days.</li>
-            <li>Your peppered Steam ID hash is retained solely to enforce active bans and prevent ban evasion. This hash cannot be reversed to recover your Steam ID. If you have no active ban, this hash is purged within 12 months.</li>
-            <li>Anonymized, aggregate data (e.g., match statistics with no link to your identity) may be retained indefinitely.</li>
+            <li>Your Steam display name, Discord ID hash and display name, network hashes, settings, chat access and installed-mod list are deleted.</li>
+            <li>Everywhere we store your player ID, we replace it with a new random ID. Nothing links that random ID back to you. Your name in other players' games becomes "[deleted player]".</li>
+            <li>Chat messages, gameplay logs and reports that are still within their limits stay under the random ID until their normal limit above. Then they are permanently deleted. Match results and ratings stay under the random ID, so other players' history stays whole.</li>
+            <li>If you have no ban record, we delete your Steam ID hash too.</li>
+            <li>If you have a ban record, we keep your Steam ID hash with the anonymous record, so the ban still applies if you come back. This hash cannot be reversed to recover your Steam ID. When 12 months have passed since deletion and no ban is in force, we delete it. For a permanent ban we keep it.</li>
           </ul>
-          <p>Chat message logs and gameplay logs associated with your account that fall within their standard retention periods (90 days and 180 days respectively) will be anonymized at the time of account deletion. Anonymized logs may be retained for the remainder of their standard retention period. Once the retention period expires, they are permanently deleted.</p>
 
           <Hr />
 
           <H2>Security</H2>
-          <p>We use TLS for data in transit, peppered and salted hashing for all stored identifiers, and role-based access controls. All data is stored within the EEA (Hetzner, Germany).</p>
+          <p>We use TLS for data in transit, peppered and salted hashing for your Steam ID, Discord ID and network, and role-based access controls. All data is stored within the EEA (Hetzner, Germany).</p>
           <p>No system is perfectly secure. In the event of a data breach, we will notify the relevant supervisory authority in accordance with GDPR Article 33 without undue delay. Where the breach is likely to result in a high risk to your rights and freedoms, we will also notify affected users in accordance with GDPR Article 34.</p>
 
           <Hr />
 
           <H2>Age requirements</H2>
-          <p>You must be at least 13 years old to create an account. If the client-side age check determines you are under 13, account creation is blocked.</p>
-          <p>Users aged 13–15 may use the service but cannot access chat features. Chat, viewing and sending preset messages, is available only to users verified as 16 or older.</p>
+          <p>You must be at least 13 years old to use the service. If the age check on your device finds you are under 13, you cannot accept this notice and cannot play online.</p>
+          <p>Users aged 13 to 15 may use the service but cannot access chat. Chat, reading and sending messages, is available only to users who are 16 or older.</p>
           <p>If you are between 13 and the age of majority in your jurisdiction, your use of the service constitutes representation that you have the permission of a parent or legal guardian.</p>
 
           <Hr />
 
           <H2>International data transfers</H2>
           <p>We are based in Canada. All user data is stored in Germany, within the EEA. Canada holds an adequacy decision from the European Commission (pursuant to GDPR Article 45), meaning data transfers between Germany and Canada are permitted under GDPR.</p>
-          <p>Steam authentication involves communication with Valve Corporation in the United States. This is limited to the OAuth login flow and is governed by Valve's privacy policy and Steam's terms of service.</p>
+          <p>Some services we use are in the United States. Valve confirms your Steam login and gives us your Steam display name. Discord does the same for your Discord account, only if you link it. Cloudflare passes traffic to our servers. Each is governed by its own privacy policy and terms.</p>
+
+          <Hr />
+
+          <H2>Bans</H2>
+          <p>An admin can ban an account from chat, from matchmaking, or from all online play (an account ban). A ban can be timed or permanent.</p>
+          <p>A permanent account ban also bans the networks that the account logged in from in the last 30 days (a network ban). While a network ban is in force, no account can log in from those networks. A network ban stays until an admin lifts it. Lifting the account ban does not lift it. A timed ban never bans a network.</p>
+          <p>If your network is banned, you see "Your network is banned from online play" and how to appeal. You do not see which account caused it. To appeal any ban, email <a href='mailto:bmp@virtualized.dev' className='text-blue-400 hover:text-blue-300'>bmp@virtualized.dev</a>.</p>
 
           <Hr />
 
@@ -150,7 +178,7 @@ export default function NoticePage() {
           <p>Depending on your jurisdiction, you have the following rights regarding your personal data:</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
             <li><strong className='text-foreground'>Access:</strong> Request a copy of the personal data we hold about you.</li>
-            <li><strong className='text-foreground'>Rectification:</strong> Request correction of inaccurate data. Display names are sourced from Steam and Discord; update them there and they will sync on your next login.</li>
+            <li><strong className='text-foreground'>Rectification:</strong> Request correction of inaccurate data. Display names are sourced from Steam and Discord. Change your Steam name on Steam and it updates on your next login. Change your Discord name on Discord, then link Discord again.</li>
             <li><strong className='text-foreground'>Erasure:</strong> Request deletion of your account and associated data, subject to the retained Steam ID hash for ban enforcement as described above.</li>
             <li><strong className='text-foreground'>Restriction:</strong> Request that we limit how we process your data while a concern is being resolved.</li>
             <li><strong className='text-foreground'>Data portability:</strong> Request your data in a structured, machine-readable format.</li>
@@ -167,12 +195,12 @@ export default function NoticePage() {
           <Hr />
 
           <H2>Acceptance</H2>
-          <p>By creating an account, you confirm that you have read and agree to this notice. Your agreement is recorded at the time of account creation. If you do not agree, do not create an account.</p>
+          <p>Before you play online on our server, the game or the website asks you to accept this notice. We record which version you accepted and when. If you do not agree, do not accept: you cannot play online on our server. Your login still makes a basic account (your Steam ID hash and Steam display name), which you can delete as described above.</p>
 
           <Hr />
 
           <H2>Changes to this notice</H2>
-          <p>If we change this notice, we will update the date at the top and notify you in-app on your next login. Material changes, such as new data collection, new third-party sharing, or changes to your rights, will be clearly identified.</p>
+          <p>If we change this notice, we update the date at the top and give it a new version number. At your next login, the game or the website asks you to accept the new version before you play online. Material changes, such as new data collection, new third-party sharing, or changes to your rights, will be clearly identified.</p>
 
           <Hr />
 

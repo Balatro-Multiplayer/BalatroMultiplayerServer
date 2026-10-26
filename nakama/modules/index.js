@@ -4766,7 +4766,7 @@ function recordMilestone(nk, logger, userId, milestone, privileges) {
 }
 
 // ../packages/types/src/notice.ts
-var NOTICE_VERSION = 1;
+var NOTICE_VERSION = 2;
 
 // src/express.ts
 var TIMEOUT_MS = 3e3;
