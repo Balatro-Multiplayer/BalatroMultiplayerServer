@@ -4,7 +4,7 @@ import type {
 } from '../../contracts/IRetentionRepository.js'
 import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
 import type { Result } from '../../shared/utils/result.js'
-import { banRecordPurgeable, evidencePurgeable } from './limits.js'
+import { banRecordPurgeable, storedEvidencePurgeable } from './limits.js'
 
 // The hourly retention sweep: deletes chat, evidence, moderation records and
 // ban records past their limit (limits.ts) and nothing else. Moderation
@@ -42,7 +42,7 @@ export async function sweepRetention(
 ): Promise<RetentionSweepCounts> {
 	const { repo } = deps
 	const purgeable = async (candidates: Promise<EvidenceCandidate[]>) =>
-		(await candidates).filter((c) => evidencePurgeable(c, now)).map((c) => c.id)
+		(await candidates).filter((c) => storedEvidencePurgeable(c, now)).map((c) => c.id)
 
 	const chat = await repo.deleteExpiredChat(now)
 

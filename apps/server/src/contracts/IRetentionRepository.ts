@@ -1,11 +1,17 @@
-import type { EvidenceLink } from '../features/retention/limits.js'
+// A report or ban that uses a piece of evidence, as stored. The retention
+// rules (features/retention/limits.ts linkOf) say when it closed.
+//   item: a service queue item; status is the stored text.
+//   ban:  a ban one of those items issued.
+export type EvidenceUse =
+	| { kind: 'item'; status: string; resolvedAt: Date | null }
+	| { kind: 'ban'; expiresAt: Date | null; liftedAt: Date | null }
 
 // A piece of evidence whose stored limit has passed: the sweep deletes it
 // unless a report or ban that uses it says to keep it longer.
 export interface EvidenceCandidate {
 	id: string
 	madeAt: Date
-	links: EvidenceLink[]
+	links: EvidenceUse[]
 }
 
 export interface BanRecordCandidate {
@@ -26,7 +32,7 @@ export interface IRetentionRepository {
 	runCandidates(now: Date): Promise<EvidenceCandidate[]>
 	// The reports and bans that use each run (by run id; a run nothing uses
 	// has no entry).
-	runLinks(runIds: string[], now: Date): Promise<Map<string, EvidenceLink[]>>
+	runLinks(runIds: string[]): Promise<Map<string, EvidenceUse[]>>
 	// Deletes every log of the runs. Returns how many logs went.
 	deleteRunLogs(runIds: string[]): Promise<number>
 	// Moderation records, under the evidence rule. Each candidate's links are

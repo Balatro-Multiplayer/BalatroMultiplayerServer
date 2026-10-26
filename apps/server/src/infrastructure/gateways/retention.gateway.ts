@@ -1,5 +1,5 @@
 // The retention sweep's reads and deletes (features/retention/sweep.ts).
-// Each candidate comes with its links: the service queue items that use it
+// Each candidate comes with its links, as stored: the service queue items that use it
 // (a report in its lobby or on its run, its flag, its anti-cheat item, its
 // result conflict) and the bans those items issued. Which candidates go is
 // decided by features/retention/limits.ts.
@@ -7,19 +7,14 @@ import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 import type {
 	BanRecordCandidate,
 	EvidenceCandidate,
+	EvidenceUse,
 	IRetentionRepository,
 } from '../../contracts/IRetentionRepository.js'
+import type { ItemType } from '../../shared/service-queue/items.js'
 import {
-	type EvidenceLink,
-	linkOfBan,
-	linkOfItem,
-} from '../../features/retention/limits.js'
-import { integritySourceId } from '../../features/service-queue/integrity-flag.js'
-import { antiCheatSourceId } from '../../features/service-queue/source-ids.js'
-import {
-	type ItemType,
-	isItemStatus,
-} from '../../features/service-queue/types.js'
+	antiCheatSourceId,
+	integritySourceId,
+} from '../../shared/service-queue/source-ids.js'
 import { db } from '../db/index.js'
 import {
 	chatLogs,
@@ -73,8 +68,7 @@ const itemColumns = {
 // actions issued (dispatcher.ts records detail.banId).
 async function linksOfItems(
 	items: ItemRow[],
-	now: Date,
-): Promise<Map<number, EvidenceLink[]>> {
+): Promise<Map<number, EvidenceUse[]>> {
 	const bansOfItem = new Map<number, string[]>()
 	for (const part of chunks(items.map((i) => i.id))) {
 		const events = await db
@@ -95,7 +89,7 @@ async function linksOfItems(
 	const banIds = [...new Set([...bansOfItem.values()].flat())].filter((id) =>
 		/^[0-9a-f-]{36}$/i.test(id),
 	)
-	const banLink = new Map<string, EvidenceLink>()
+	const banLink = new Map<string, EvidenceUse>()
 	for (const part of chunks(banIds)) {
 		const bans = await db
 			.select({
@@ -105,14 +99,19 @@ async function linksOfItems(
 			})
 			.from(playerBans)
 			.where(inArray(playerBans.id, part))
-		for (const ban of bans) banLink.set(ban.id, linkOfBan(ban, now))
+		for (const ban of bans)
+			banLink.set(ban.id, {
+				kind: 'ban',
+				expiresAt: ban.expiresAt,
+				liftedAt: ban.liftedAt,
+			})
 	}
 
-	const out = new Map<number, EvidenceLink[]>()
+	const out = new Map<number, EvidenceUse[]>()
 	for (const item of items) {
-		// A status this code does not know is kept, as an open item.
-		const status = isItemStatus(item.status) ? item.status : 'open'
-		const links = [linkOfItem({ status, resolvedAt: item.resolvedAt })]
+		const links: EvidenceUse[] = [
+			{ kind: 'item', status: item.status, resolvedAt: item.resolvedAt },
+		]
 		for (const banId of bansOfItem.get(item.id) ?? []) {
 			const link = banLink.get(banId)
 			if (link) links.push(link)
@@ -125,8 +124,7 @@ async function linksOfItems(
 // The links of each candidate, from the items each one is used by.
 async function linksOf(
 	itemsOf: Map<string, ItemKey[]>,
-	now: Date,
-): Promise<Map<string, EvidenceLink[]>> {
+): Promise<Map<string, EvidenceUse[]>> {
 	const wanted = new Map<string, ItemKey>()
 	for (const keys of itemsOf.values())
 		for (const k of keys) wanted.set(keyOf(k), k)
@@ -149,12 +147,12 @@ async function linksOf(
 					)),
 			)
 
-	const byId = await linksOfItems(items, now)
-	const linksOfItem = new Map<string, EvidenceLink[]>()
+	const byId = await linksOfItems(items)
+	const linksOfItem = new Map<string, EvidenceUse[]>()
 	for (const item of items)
 		linksOfItem.set(`${item.itemType}|${item.sourceId}`, byId.get(item.id) ?? [])
 
-	const out = new Map<string, EvidenceLink[]>()
+	const out = new Map<string, EvidenceUse[]>()
 	for (const [candidate, keys] of itemsOf)
 		out.set(
 			candidate,
@@ -200,7 +198,6 @@ interface FlaggedChatFacts {
 // its flag item, and every report filed in its lobby, use both.
 async function flaggedChatCandidates(
 	rows: FlaggedChatFacts[],
-	now: Date,
 ): Promise<EvidenceCandidate[]> {
 	const lobbyReports = await reportsInLobbies(
 		rows.flatMap((r) => (r.lobbyId ? [r.lobbyId] : [])),
@@ -217,7 +214,7 @@ async function flaggedChatCandidates(
 			keys.push({ itemType: 'report', sourceId: reportId })
 		itemsOf.set(r.id, keys)
 	}
-	const links = await linksOf(itemsOf, now)
+	const links = await linksOf(itemsOf)
 	return rows.map((r) => ({
 		id: r.id,
 		madeAt: r.madeAt,
@@ -229,8 +226,7 @@ async function flaggedChatCandidates(
 // player log), its result conflicts and the reports that name it.
 async function runLinksOf(
 	runIds: string[],
-	now: Date,
-): Promise<Map<string, EvidenceLink[]>> {
+): Promise<Map<string, EvidenceUse[]>> {
 	const itemsOf = new Map<string, ItemKey[]>(runIds.map((id) => [id, []]))
 	const add = (runId: string, key: ItemKey) => itemsOf.get(runId)?.push(key)
 	for (const part of chunks(runIds)) {
@@ -260,7 +256,7 @@ async function runLinksOf(
 			if (r.runId)
 				add(r.runId, { itemType: 'report', sourceId: String(r.id) })
 	}
-	return linksOf(itemsOf, now)
+	return linksOf(itemsOf)
 }
 
 export const retentionRepository: IRetentionRepository = {
@@ -292,7 +288,6 @@ export const retentionRepository: IRetentionRepository = {
 			)
 		return flaggedChatCandidates(
 			rows.map((r) => ({ ...r, id: String(r.id) })),
-			now,
 		)
 	},
 
@@ -319,7 +314,6 @@ export const retentionRepository: IRetentionRepository = {
 			.where(lt(flaggedMessages.expiresAt, now))
 		return flaggedChatCandidates(
 			rows.map((r) => ({ ...r, id: String(r.id), flaggedMessageId: r.id })),
-			now,
 		)
 	},
 
@@ -351,10 +345,7 @@ export const retentionRepository: IRetentionRepository = {
 			)
 		if (runs.length === 0) return []
 
-		const links = await runLinksOf(
-			runs.map((r) => r.runId),
-			now,
-		)
+		const links = await runLinksOf(runs.map((r) => r.runId))
 		return runs.map((r) => ({
 			id: r.runId,
 			madeAt: r.madeAt,
@@ -395,7 +386,7 @@ export const retentionRepository: IRetentionRepository = {
 					.from(serviceQueueItems)
 					.where(inArray(serviceQueueItems.id, part))),
 			)
-		const links = await linksOfItems(items, now)
+		const links = await linksOfItems(items)
 		return rows.map((r) => ({
 			id: r.id,
 			madeAt: r.madeAt,
@@ -434,7 +425,7 @@ export const retentionRepository: IRetentionRepository = {
 				],
 			]),
 		)
-		const links = await linksOf(itemsOf, now)
+		const links = await linksOf(itemsOf)
 		return rows.map((r) => ({
 			id: String(r.id),
 			madeAt: r.madeAt,
@@ -463,7 +454,7 @@ export const retentionRepository: IRetentionRepository = {
 					),
 				),
 			)
-		const links = await linksOfItems(items, now)
+		const links = await linksOfItems(items)
 		return items.map((i) => ({
 			id: String(i.id),
 			madeAt: i.madeAt,

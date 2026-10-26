@@ -17,17 +17,17 @@ const old = (id: string): EvidenceCandidate => ({
 const openCase = (id: string): EvidenceCandidate => ({
 	id,
 	madeAt: daysAgo(400),
-	links: [{ closedAt: null }],
+	links: [{ kind: 'item', status: 'open', resolvedAt: null }],
 })
 const recentlyClosed = (id: string): EvidenceCandidate => ({
 	id,
 	madeAt: daysAgo(400),
-	links: [{ closedAt: daysAgo(30) }],
+	links: [{ kind: 'item', status: 'resolved', resolvedAt: daysAgo(30) }],
 })
 const longClosed = (id: string): EvidenceCandidate => ({
 	id,
 	madeAt: daysAgo(400),
-	links: [{ closedAt: daysAgo(190) }],
+	links: [{ kind: 'item', status: 'resolved', resolvedAt: daysAgo(190) }],
 })
 
 function repo(

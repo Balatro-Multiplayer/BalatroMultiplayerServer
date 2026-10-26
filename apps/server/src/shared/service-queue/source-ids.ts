@@ -1,6 +1,6 @@
 // The sourceId each item type keys its source row by, and back.
 //   anti_cheat: 'runId:playerId' (match_run_logs' composite key)
-//   integrity:  'playerId:YYYY-MM-DD' (integrity-flag.ts integritySourceId)
+//   integrity:  'playerId:YYYY-MM-DD' (the UTC day of the failed check)
 //   the rest:   the source row's integer id
 
 export function antiCheatSourceId(runId: string, playerId: string): string {
@@ -11,6 +11,15 @@ export function parseAntiCheatSourceId(sourceId: string): { runId: string; playe
 	const at = sourceId.indexOf(':')
 	if (at <= 0 || at === sourceId.length - 1) return null
 	return { runId: sourceId.slice(0, at), playerId: sourceId.slice(at + 1) }
+}
+
+// The UTC day an event falls on, as the item's source id carries it.
+export function utcDayOf(at: Date): string {
+	return at.toISOString().slice(0, 10)
+}
+
+export function integritySourceId(playerId: string, at: Date): string {
+	return `${playerId}:${utcDayOf(at)}`
 }
 
 export function parseIntegritySourceId(sourceId: string): { playerId: string; day: string } | null {

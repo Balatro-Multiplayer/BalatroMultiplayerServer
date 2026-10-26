@@ -2,7 +2,8 @@
 // integrity-flag.ts says it should be one. Called after the failure's event
 // row is written (features/nakama/integrity.ts), so today's count includes it.
 import type { LauncherIntegrityFailureReason } from '../../shared/types/index.js'
-import { decideIntegrityFlag, integritySourceId, utcDayStart } from './integrity-flag.js'
+import { integritySourceId } from '../../shared/service-queue/source-ids.js'
+import { decideIntegrityFlag, utcDayStart } from './integrity-flag.js'
 import type { ItemContext } from './types.js'
 
 export interface IntegrityIntakeDeps {

@@ -7,7 +7,11 @@
 // ban that uses it is open, then EVIDENCE_KEEP_MS. Evidence nothing uses is
 // kept EVIDENCE_KEEP_MS from when it was made.
 
-import type { ItemStatus } from '../service-queue/types.js'
+import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
+import {
+	type ItemStatus,
+	isItemStatus,
+} from '../service-queue/types.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -56,6 +60,25 @@ export function linkOfBan(
 	)
 	if (ends.length === 0) return { closedAt: null }
 	return { closedAt: new Date(Math.min(...ends.map((d) => d.getTime()))) }
+}
+
+// The link a stored use stands for. A status this code does not know is
+// kept, as an open item.
+export function linkOf(use: EvidenceUse, now: Date): EvidenceLink {
+	if (use.kind === 'ban') return linkOfBan(use, now)
+	const status = isItemStatus(use.status) ? use.status : 'open'
+	return linkOfItem({ status, resolvedAt: use.resolvedAt })
+}
+
+// evidencePurgeable, from the uses as stored.
+export function storedEvidencePurgeable(
+	evidence: { madeAt: Date; links: readonly EvidenceUse[] },
+	now: Date,
+): boolean {
+	return evidencePurgeable(
+		{ madeAt: evidence.madeAt, links: evidence.links.map((u) => linkOf(u, now)) },
+		now,
+	)
 }
 
 // A ban record is kept for the ban's length plus 12 months, so until 12 months

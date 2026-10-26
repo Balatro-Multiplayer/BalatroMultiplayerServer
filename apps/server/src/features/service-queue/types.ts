@@ -2,18 +2,10 @@
 // actions a moderator can take and their presets. Closed unions throughout;
 // every parser that turns a request value into one of these lives here.
 
-export const ITEM_TYPES = [
-	'report',
-	'flagged_chat',
-	'match_conflict',
-	'forfeit_reconciliation',
-	'anti_cheat',
-	'integrity',
-] as const
-export type ItemType = (typeof ITEM_TYPES)[number]
+import { ITEM_STATUSES, ITEM_TYPES, type ItemStatus, type ItemType } from '../../shared/service-queue/items.js'
 
-export const ITEM_STATUSES = ['open', 'resolved'] as const
-export type ItemStatus = (typeof ITEM_STATUSES)[number]
+// Items are shared with the gateways (shared/service-queue/items.ts).
+export { ITEM_STATUSES, ITEM_TYPES, type ItemStatus, type ItemType }
 
 export type StaffRole = 'moderator' | 'admin'
 

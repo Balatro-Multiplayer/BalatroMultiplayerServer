@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm'
 import type { ChatRows, ForfeitRow, GameKind, RunRows } from '../../features/nakama/mirror.service.js'
-import { antiCheatSourceId } from '../../features/service-queue/source-ids.js'
+import { antiCheatSourceId } from '../../shared/service-queue/source-ids.js'
 import { db } from '../db/index.js'
 import {
 	chatLogs,

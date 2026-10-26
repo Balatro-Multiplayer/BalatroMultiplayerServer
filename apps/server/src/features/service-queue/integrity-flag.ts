@@ -1,6 +1,7 @@
 // When a failed (or refused) launcher challenge becomes a service-queue item:
 // while the player is ranked-queued or in a ranked game, or on the
 // REPEAT_THRESHOLD-th failure of a UTC day. One item per player per day.
+import { utcDayOf } from '../../shared/service-queue/source-ids.js'
 import type { IntegrityTrigger } from './types.js'
 
 export const REPEAT_THRESHOLD = 3
@@ -17,15 +18,6 @@ export function decideIntegrityFlag(context: IntegrityFailureContext): Integrity
 	if (context.ranked && (context.ranked.queued || context.ranked.inGame)) return { kind: 'raise', trigger: 'ranked' }
 	if (context.failuresToday >= REPEAT_THRESHOLD) return { kind: 'raise', trigger: 'repeated' }
 	return { kind: 'none' }
-}
-
-// The UTC day an event falls on, as the item's source id carries it.
-export function utcDayOf(at: Date): string {
-	return at.toISOString().slice(0, 10)
-}
-
-export function integritySourceId(playerId: string, at: Date): string {
-	return `${playerId}:${utcDayOf(at)}`
 }
 
 export function utcDayStart(at: Date): Date {

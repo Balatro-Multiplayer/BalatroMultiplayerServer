@@ -8,7 +8,6 @@ import { expiresAtOf } from '../../features/service-queue/durations.js'
 import {
 	REPEAT_THRESHOLD,
 	decideIntegrityFlag,
-	integritySourceId,
 	utcDayStart,
 } from '../../features/service-queue/integrity-flag.js'
 import { planOverturn, ratedPlacements, samePlaces } from '../../features/service-queue/overturn.js'
@@ -21,10 +20,11 @@ import {
 import { httpOf } from '../../features/service-queue/refusals.js'
 import {
 	antiCheatSourceId,
+	integritySourceId,
 	numericSourceId,
 	parseAntiCheatSourceId,
 	parseIntegritySourceId,
-} from '../../features/service-queue/source-ids.js'
+} from '../../shared/service-queue/source-ids.js'
 import { pickTarget, targetsOf } from '../../features/service-queue/targets.js'
 import { closes, sourceStatusFor } from '../../features/service-queue/transitions.js'
 import { actorOf, contextOf, playerIdOfActor, roleOf } from '../../features/service-queue/types.js'

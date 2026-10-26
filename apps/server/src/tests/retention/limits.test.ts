@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
 	banRecordPurgeable,
 	evidencePurgeable,
+	linkOf,
 	linkOfBan,
 	linkOfItem,
 } from '../../features/retention/limits.js'
@@ -56,6 +57,14 @@ describe('linkOfItem', () => {
 		expect(linkOfItem({ status: 'resolved', resolvedAt: daysAgo(3) })).toEqual({
 			closedAt: daysAgo(3),
 		})
+	})
+})
+
+describe('linkOf', () => {
+	it('keeps an item with a status it does not know, as open', () => {
+		expect(
+			linkOf({ kind: 'item', status: 'escalated', resolvedAt: daysAgo(3) }, NOW),
+		).toEqual({ closedAt: null })
 	})
 })
 

@@ -1,3 +1,4 @@
+import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
 import { describe, expect, it, vi } from 'vitest'
 import { purgeNakamaBanIndex, purgeNakamaIpHashes, purgeNakamaRuns, RUN_RETENTION_DAYS, sweepNakamaCheckpoints } from '../../features/nakama/retention.job.js'
 
@@ -27,11 +28,13 @@ describe('purgeNakamaRuns', () => {
 			{ runs: [{ runId: 'banned', endedAt: old }, { runId: 'closed-long-ago', endedAt: old }], cursor: '' },
 		])
 		const runLinks = vi.fn(async (runIds: string[]) => {
-			const links = new Map<string, { closedAt: Date | null }[]>()
+			const links = new Map<string, EvidenceUse[]>()
 			for (const id of runIds) {
-				if (id === 'reported') links.set(id, [{ closedAt: null }])
-				if (id === 'banned') links.set(id, [{ closedAt: new Date(now.getTime() - 10 * DAY) }])
-				if (id === 'closed-long-ago') links.set(id, [{ closedAt: new Date(now.getTime() - 190 * DAY) }])
+				if (id === 'reported') links.set(id, [{ kind: 'item', status: 'open', resolvedAt: null }])
+				if (id === 'banned')
+					links.set(id, [{ kind: 'ban', expiresAt: null, liftedAt: new Date(now.getTime() - 10 * DAY) }])
+				if (id === 'closed-long-ago')
+					links.set(id, [{ kind: 'item', status: 'resolved', resolvedAt: new Date(now.getTime() - 190 * DAY) }])
 			}
 			return links
 		})

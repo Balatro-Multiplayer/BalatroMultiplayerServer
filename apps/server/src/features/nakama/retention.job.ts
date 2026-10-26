@@ -2,7 +2,8 @@ import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
 import { retentionRepository } from '../../infrastructure/gateways/retention.gateway.js'
 import type { Result } from '../../shared/utils/result.js'
-import { type EvidenceLink, evidencePurgeable } from '../retention/limits.js'
+import type { EvidenceUse } from '../../contracts/IRetentionRepository.js'
+import { storedEvidencePurgeable } from '../retention/limits.js'
 import { NAMED_RUNS_PER_CALL } from '../retention/sweep.js'
 import { RUN_LOG_TTL_MS } from './mirror.service.js'
 
@@ -28,7 +29,7 @@ type Rpc = <T>(id: string, body: Record<string, unknown>) => Promise<Result<T, N
 export interface RunPurgeDeps {
 	rpc: Rpc
 	// The reports and bans that use each run (retention gateway runLinks).
-	runLinks(runIds: string[], now: Date): Promise<Map<string, EvidenceLink[]>>
+	runLinks(runIds: string[]): Promise<Map<string, EvidenceUse[]>>
 }
 
 // One sweep: pages through Nakama's old runs until the end. Returns how many
@@ -46,9 +47,9 @@ export async function purgeNakamaRuns(deps: RunPurgeDeps, now: Date): Promise<nu
 			return total
 		}
 		const { runs } = page.value
-		const links = runs.length > 0 ? await deps.runLinks(runs.map((r) => r.runId), now) : new Map()
+		const links = runs.length > 0 ? await deps.runLinks(runs.map((r) => r.runId)) : new Map()
 		const purgeable = runs
-			.filter((r) => evidencePurgeable({ madeAt: new Date(r.endedAt), links: links.get(r.runId) ?? [] }, now))
+			.filter((r) => storedEvidencePurgeable({ madeAt: new Date(r.endedAt), links: links.get(r.runId) ?? [] }, now))
 			.map((r) => r.runId)
 		for (let i = 0; i < purgeable.length; i += NAMED_RUNS_PER_CALL) {
 			const purged = await deps.rpc<{ deleted: number }>('admin_runs_purge_named', {
