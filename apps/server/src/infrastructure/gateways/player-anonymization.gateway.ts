@@ -97,7 +97,6 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'created_at',
 		'updated_at',
 		'deleted_at',
-		'ip_hash',
 		'nakama_user_id',
 	],
 	refresh_tokens: ['id', 'token_hash', 'expires_at', 'created_at'],

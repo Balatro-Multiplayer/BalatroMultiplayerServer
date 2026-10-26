@@ -47,7 +47,6 @@ export const players = pgTable(
 		// stays enforceable and a re-sign-in with that Steam identity lands on it.
 		// Null = active account.
 		deletedAt: timestamp('deleted_at', { withTimezone: true }),
-		ipHash: text('ip_hash'),
 		// Nakama account id, set when the mirror or profile sync first sees
 		// the player's Nakama account. Null for players who never played on it.
 		nakamaUserId: uuid('nakama_user_id'),
