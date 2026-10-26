@@ -23,6 +23,7 @@ import { clearMatched } from '../matchmaking/queue'
 import { hasPlayerAnswer, releaseGroups } from './group_queue'
 import { answerGroupSignal, isGroupSignal } from './group_signals'
 import { type RelayStep, action } from './relay'
+import { catchUpLimitMsFor } from './catch_up'
 import {
 	DEFAULT_GRACE_MS,
 	DEFAULT_RESULT_TIMEOUT_MS,
@@ -383,6 +384,7 @@ export function lobbyMatchInit(
 		requiredStanding: requiredStandingParam(params),
 		now: Date.now(),
 		graceMs: secondsFromEnv(ctx, 'LOBBY_GRACE_SECONDS', DEFAULT_GRACE_MS),
+		catchUpLimitMs: catchUpLimitMsFor(stringParam(params, 'modId'), Number(ctx.env.LOBBY_CATCH_UP_LIMIT_SECONDS) || undefined),
 		resultTimeoutMs: secondsFromEnv(
 			ctx,
 			'RESULT_TIMEOUT_SECONDS',

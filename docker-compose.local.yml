@@ -82,6 +82,7 @@ services:
           --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "LOBBY_GRACE_SECONDS=$$LOBBY_GRACE_SECONDS" \
           --runtime.env "RESULT_TIMEOUT_SECONDS=$$RESULT_TIMEOUT_SECONDS" \
+          --runtime.env "LOBBY_CATCH_UP_LIMIT_SECONDS=$$LOBBY_CATCH_UP_LIMIT_SECONDS" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
           --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
           --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
@@ -97,6 +98,8 @@ services:
       LOBBY_GRACE_SECONDS: ${LOBBY_GRACE_SECONDS:-}
       # How long a game waits for the rest of its results; empty = 60s.
       RESULT_TIMEOUT_SECONDS: ${RESULT_TIMEOUT_SECONDS:-}
+      # Shortens the catch-up limit of a mod that has one (PvP: 180s); empty = the default.
+      LOBBY_CATCH_UP_LIMIT_SECONDS: ${LOBBY_CATCH_UP_LIMIT_SECONDS:-}
     volumes: !override
       - ./nakama/local.yml:/nakama/data/local.yml:ro
       - ./nakama/modules:/nakama/data/modules:ro
