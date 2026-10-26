@@ -34,14 +34,19 @@ describe('website account changes reaching Nakama', () => {
 		expect(rpcCall(1).body).toEqual({ userId: NAKAMA_ID, discord: null })
 	})
 
+	const KEEP = { keptRunIds: ['run-1'], keepSteamIdHash: true }
+
 	it('links Discord and deletes the account', async () => {
 		await linkNakamaDiscord('p1', 'hash', 'ally')
 		expect(rpcCall()).toEqual({
 			rpc: 'admin_discord_set',
 			body: { userId: NAKAMA_ID, discordIdHash: 'hash', discordUsername: 'ally' },
 		})
-		expect(await deleteNakamaAccount('p1', ANON)).toEqual({ ok: true, value: 'deleted' })
-		expect(rpcCall(1)).toEqual({ rpc: 'admin_account_delete', body: { userId: NAKAMA_ID, anonymousId: ANON } })
+		expect(await deleteNakamaAccount('p1', ANON, KEEP)).toEqual({ ok: true, value: 'deleted' })
+		expect(rpcCall(1)).toEqual({
+			rpc: 'admin_account_delete',
+			body: { userId: NAKAMA_ID, anonymousId: ANON, keptRunIds: ['run-1'], keepSteamIdHash: true },
+		})
 	})
 
 	it('skips players without a Nakama account, and reports a failed call', async () => {
@@ -49,8 +54,8 @@ describe('website account changes reaching Nakama', () => {
 		expect(await editNakamaProfile('p1', { useDiscordName: true })).toBe(false)
 		expect(fetchMock).not.toHaveBeenCalled()
 		fetchMock.mockResolvedValueOnce(new Response('{"code":5,"message":"No such user"}', { status: 404 }))
-		expect(await deleteNakamaAccount('p1', ANON)).toEqual({ ok: true, value: 'no_account' })
+		expect(await deleteNakamaAccount('p1', ANON, KEEP)).toEqual({ ok: true, value: 'no_account' })
 		fetchMock.mockResolvedValueOnce(new Response('', { status: 502 }))
-		expect(await deleteNakamaAccount('p1', ANON)).toEqual({ ok: false, error: 'unavailable' })
+		expect(await deleteNakamaAccount('p1', ANON, KEEP)).toEqual({ ok: false, error: 'unavailable' })
 	})
 })

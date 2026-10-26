@@ -123,7 +123,7 @@ export default function NoticePage() {
             <li><strong className='text-foreground'>Chat saved with a report:</strong> kept while a report about that lobby is open, then 180 more days.</li>
             <li><strong className='text-foreground'>Ban records:</strong> the length of the ban plus 12 months. For permanent bans: retained indefinitely.</li>
             <li><strong className='text-foreground'>Reports, warnings, moderation decisions and failed launcher checks:</strong> 180 days from when they were made. While the report or moderation case is open, or while a ban from it is in force, we keep them, then 180 more days.</li>
-            <li><strong className='text-foreground'>Match results, ratings and season standings:</strong> kept for the life of your account, because leaderboards and other players' match history depend on them. If you delete your account, they stay under the random ID (see Account deletion).</li>
+            <li><strong className='text-foreground'>Match results, ratings and season standings:</strong> kept for the life of your account, because leaderboards and other players' match history depend on them. If you delete your account, your ratings and season standings are deleted, and your side of each match with other players stays under the deleted-player ID (see Account deletion).</li>
           </ul>
 
           <Hr />
@@ -132,12 +132,13 @@ export default function NoticePage() {
           <p>You can delete your account via your profile page at <a href='https://balatromp.com' className='text-blue-400 hover:text-blue-300'>balatromp.com</a> or by emailing <a href='mailto:bmp@virtualized.dev' className='text-blue-400 hover:text-blue-300'>bmp@virtualized.dev</a>.</p>
           <p>When you delete your account on the website, this happens at once:</p>
           <ul className='pl-6 space-y-1.5 list-disc'>
-            <li>Your Steam display name, Discord ID hash and display name, network hashes, settings, chat access and installed-mod list are deleted.</li>
-            <li>If a network ban holds some of your network hashes, the ban keeps its copy of them until an admin lifts it. Nothing in it names you: it names the random ID below.</li>
-            <li>Everywhere we store your player ID, we replace it with a new random ID. Nothing links that random ID back to you. Your name in other players' games becomes "[deleted player]".</li>
-            <li>Chat messages, gameplay logs and reports that are still within their limits stay under the random ID until their normal limit above. Then they are permanently deleted. Match results and ratings stay under the random ID, so other players' history stays whole.</li>
+            <li>Your own data is deleted: your Steam display name, Discord ID hash and display name, network hashes, settings, chat access, installed-mod list, ratings, season standings, achievements, chat messages, gameplay logs, and matches that no other player played. The only exception is evidence, in the moderation records below.</li>
+            <li>Matches you played with other players stay, so their history and ratings stay whole. In them, your player ID is replaced by one fixed deleted-player ID that all deleted accounts share, and your name becomes "[deleted player]". That ID identifies nobody and is never linked to an account.</li>
+            <li>Moderation records stay under a new random ID: bans, network bans, reports you made or that are about you, warnings, moderation decisions, failed launcher checks, and evidence that is still within its limit above (blocked or flagged chat, chat saved with a report, and gameplay logs that an open report or ban uses). Nothing links that random ID back to you. Each record is deleted at its normal limit above.</li>
+            <li>If a network ban holds some of your network hashes, the ban keeps its copy of them until an admin lifts it. Nothing in it names you: it names the random ID.</li>
             <li>If you have no ban record, we delete your Steam ID hash too.</li>
             <li>If you have a ban record, we keep your Steam ID hash with the anonymous record, so the ban still applies if you come back. This hash cannot be reversed to recover your Steam ID. When 12 months have passed since deletion and no ban is in force, we delete it. For a permanent ban we keep it.</li>
+            <li>If you log in again with the same Steam account while we keep your Steam ID hash, your account comes back with only the moderation records above, and any ban still in force applies. Your deleted data does not come back.</li>
           </ul>
 
           <Hr />

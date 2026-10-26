@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { compressToBase64 } from '../../shared/utils/compression.js'
-import { DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
+import { DELETED_PLAYER_ID, DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
 import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
 
 // The Nakama -> Postgres mirror (nakama/src/mirror/outbox.ts): Nakama keeps
@@ -505,12 +505,14 @@ export function createMirrorService(deps: MirrorDeps) {
 	// else created. A deleted account gets a deleted row that does not keep
 	// its Nakama id: deletion (player/anonymize.ts) already rewrote what it
 	// could, and an entry written after it must not link back to the account.
+	// The standard deleted-player id is the same in both: it maps to itself.
 	async function resolvePlayers(
 		pulled: MirrorPull,
 	): Promise<Map<string, string>> {
 		const userIds = Object.keys(pulled.players)
 		const ids = await players.findPlayerIdsByNakamaUserIds(userIds)
 		for (const userId of userIds) {
+			if (userId === DELETED_PLAYER_ID) ids.set(userId, DELETED_PLAYER_ID)
 			if (ids.has(userId)) continue
 			const info = pulled.players[userId]
 			if (info.deleted) {

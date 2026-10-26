@@ -5,6 +5,7 @@ import { env } from '../../env.js'
 import { signJwt, signTosPendingToken } from '../../features/auth/jwt.js'
 import * as anonymizationGateway from '../../infrastructure/gateways/player-anonymization.gateway.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
+import { retentionRepository } from '../../infrastructure/gateways/retention.gateway.js'
 import * as adminClient from '../../infrastructure/nakama/admin-client.js'
 import { err, ok } from '../../shared/utils/result.js'
 import { setConfig } from '../../state/config.js'
@@ -293,7 +294,55 @@ describe('DELETE /api/auth/account', () => {
 		expect(rpcId).toBe('admin_account_delete')
 		expect(body.userId).toBe(NAKAMA_ID)
 		expect(body.anonymousId).toMatch(UUID)
-		expect(anonymize()).toHaveBeenCalledWith('del-p1', body.anonymousId)
+		expect(anonymize()).toHaveBeenCalledWith('del-p1', body.anonymousId, [])
+	})
+
+	it('keeps the runs an open report or ban uses, and the Steam ID hash of a player with a ban record', async () => {
+		const token = signedIn('del-p6', NAKAMA_ID)
+		vi.mocked(anonymizationGateway.deletionFacts).mockResolvedValue({
+			runIds: ['run-open', 'run-closed', 'run-unused'],
+			hasBanRecord: true,
+		})
+		const runLinks = vi
+			.spyOn(retentionRepository, 'runLinks')
+			.mockResolvedValue(
+				new Map([
+					[
+						'run-open',
+						[{ kind: 'item' as const, status: 'open', resolvedAt: null }],
+					],
+					[
+						'run-closed',
+						[
+							{
+								kind: 'item' as const,
+								status: 'resolved',
+								resolvedAt: new Date(1000),
+							},
+						],
+					],
+				]),
+			)
+		rpc().mockResolvedValue(ok({ deleted: true }))
+
+		expect((await del(token)).status).toBe(200)
+
+		expect(runLinks).toHaveBeenCalledWith([
+			'run-open',
+			'run-closed',
+			'run-unused',
+		])
+		const [, body] = rpc().mock.calls[0] as [string, Record<string, unknown>]
+		expect(body).toEqual({
+			userId: NAKAMA_ID,
+			anonymousId: expect.stringMatching(UUID),
+			keptRunIds: ['run-open'],
+			keepSteamIdHash: true,
+		})
+		expect(anonymize()).toHaveBeenCalledWith('del-p6', body.anonymousId, [
+			'run-open',
+		])
+		runLinks.mockRestore()
 	})
 
 	it('changes nothing in Postgres while Nakama cannot delete the account', async () => {
@@ -311,11 +360,19 @@ describe('DELETE /api/auth/account', () => {
 		const token = signedIn('del-p4', NAKAMA_ID)
 		rpc().mockResolvedValue(err('not_found'))
 		expect((await del(token)).status).toBe(200)
-		expect(anonymize()).toHaveBeenCalledWith('del-p4', expect.stringMatching(UUID))
+		expect(anonymize()).toHaveBeenCalledWith(
+			'del-p4',
+			expect.stringMatching(UUID),
+			[],
+		)
 
 		const unlinked = signedIn('del-p5', null)
 		expect((await del(unlinked)).status).toBe(200)
-		expect(anonymize()).toHaveBeenCalledWith('del-p5', expect.stringMatching(UUID))
+		expect(anonymize()).toHaveBeenCalledWith(
+			'del-p5',
+			expect.stringMatching(UUID),
+			[],
+		)
 	})
 
 	it('clears the session on deletion', async () => {

@@ -69,6 +69,12 @@ export function linkOf(use: EvidenceUse, now: Date): EvidenceLink {
 	return linkOfItem({ status, resolvedAt: use.resolvedAt })
 }
 
+// Whether an open report or ban uses the evidence, from the uses as stored
+// (account deletion keeps such a run's logs under the anonymous id).
+export function inOpenUse(uses: readonly EvidenceUse[], now: Date): boolean {
+	return uses.some((u) => linkOf(u, now).closedAt === null)
+}
+
 // evidencePurgeable, from the uses as stored.
 export function storedEvidencePurgeable(
 	evidence: { madeAt: Date; links: readonly EvidenceUse[] },

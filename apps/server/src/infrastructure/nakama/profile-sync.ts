@@ -1,6 +1,7 @@
 import type {
 	NakamaAccountDeletion,
 	NakamaAccountDeletionError,
+	NakamaDeletionKeep,
 	NakamaNoticeAcceptance,
 } from '../../contracts/INakamaAccounts.js'
 import { type Result, err, ok } from '../../shared/utils/result.js'
@@ -42,15 +43,21 @@ export async function linkNakamaDiscord(playerId: string, discordIdHash: string,
 	return result.ok
 }
 
-// Deletes the player's Nakama account after renaming them to anonymousId in
-// Nakama storage (nakama/src/player/anonymize.ts).
+// Deletes the player's Nakama account after handling their data in Nakama
+// storage (nakama/src/player/anonymize.ts).
 export async function deleteNakamaAccount(
 	playerId: string,
 	anonymousId: string,
+	keep: NakamaDeletionKeep,
 ): Promise<Result<NakamaAccountDeletion, NakamaAccountDeletionError>> {
 	const userId = await nakamaUserIdOf(playerId)
 	if (!userId) return ok('no_account')
-	const result = await callNakamaRpc('admin_account_delete', { userId, anonymousId })
+	const result = await callNakamaRpc('admin_account_delete', {
+		userId,
+		anonymousId,
+		keptRunIds: keep.keptRunIds,
+		keepSteamIdHash: keep.keepSteamIdHash,
+	})
 	if (result.ok) return ok('deleted')
 	if (result.error === 'not_found' || result.error === 'disabled') return ok('no_account')
 	console.warn(`[nakama] Account of ${playerId} not deleted: ${result.error}`)

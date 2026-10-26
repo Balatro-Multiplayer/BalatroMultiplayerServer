@@ -52,6 +52,9 @@ function makeMockPlayerRepository(): IPlayerRepository {
 		recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 		updateChatStatus: vi.fn().mockResolvedValue(undefined),
 		anonymizePlayer: vi.fn().mockResolvedValue(undefined),
+		deletionFacts: vi
+			.fn()
+			.mockResolvedValue({ runIds: [], hasBanRecord: false }),
 		reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
 	}
 }
@@ -65,6 +68,7 @@ function makeAuthService() {
 	const service = createAuthService({
 		playerRepository,
 		nakamaAccounts,
+		retention: { runLinks: vi.fn().mockResolvedValue(new Map()) },
 	})
 	return { service, playerRepository, nakamaAccounts }
 }

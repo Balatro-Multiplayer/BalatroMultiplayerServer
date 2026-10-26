@@ -110,6 +110,64 @@ describe('/internal/nakama/player-sync', () => {
 		})
 	})
 
+	it("gives a new Nakama account a deleted player's anonymous row back, with its bans", async () => {
+		env.INTERNAL_API_KEY = KEY
+		const players = await import(
+			'../../infrastructure/gateways/player.gateway.js'
+		)
+		const bans = await import('../../infrastructure/gateways/ban.gateway.js')
+		const ANON = '99999999-9999-4999-8999-999999999999'
+		vi.mocked(players.findPlayerBySteamIdHash).mockResolvedValueOnce({
+			id: ANON,
+			steamIdHash: STEAM_ID_HASH,
+			discordIdHash: null,
+			discordUsername: null,
+			useDiscordName: false,
+			preferredJoker: 'j_joker',
+			privileges: [],
+			steamName: '[deleted player]',
+			chatEnabled: false,
+			chatBlocked: false,
+			tosAcceptedVersion: 0,
+			noticeAcceptedAt: null,
+			deletedAt: new Date(1000),
+		})
+		vi.mocked(bans.getActiveBans).mockResolvedValueOnce([
+			{
+				id: 'b1',
+				playerId: ANON,
+				banType: 'account',
+				expiresAt: null,
+				issuedBy: 'admin',
+				issuedAt: new Date(0),
+				reason: 'cheating',
+				liftedAt: null,
+				liftedBy: null,
+			},
+		])
+		const res = await request(app)
+			.post('/internal/nakama/player-sync')
+			.set('X-BMP-Internal-Key', KEY)
+			.send({
+				steamIdHash: STEAM_ID_HASH,
+				nakamaUserId: NAKAMA_ID,
+				steamName: 'Alice',
+			})
+		expect(res.status).toBe(200)
+		expect(vi.mocked(players.linkNakamaUser)).toHaveBeenCalledWith(
+			ANON,
+			NAKAMA_ID,
+		)
+		expect(vi.mocked(players.reactivateIfDeleted)).toHaveBeenCalledWith(ANON)
+		expect(vi.mocked(players.createPlayer)).not.toHaveBeenCalled()
+		expect(res.body).toMatchObject({
+			playerId: ANON,
+			bans: [
+				{ banId: 'b1', type: 'account', expiresAt: null, reason: 'cheating' },
+			],
+		})
+	})
+
 	it('refuses a malformed body', async () => {
 		env.INTERNAL_API_KEY = KEY
 		const res = await request(app)

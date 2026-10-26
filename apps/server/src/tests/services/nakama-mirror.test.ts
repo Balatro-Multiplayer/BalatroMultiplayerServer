@@ -9,6 +9,7 @@ import {
 	rankedGameModeOf,
 	runRowsOf,
 } from '../../features/nakama/mirror.service.js'
+import { DELETED_PLAYER_ID } from '../../shared/deleted-player.js'
 import { decompressFromBase64 } from '../../shared/utils/compression.js'
 import { err, ok } from '../../shared/utils/result.js'
 
@@ -257,6 +258,23 @@ describe('the mirror service', () => {
 		expect(created.nakamaUserId).toBeUndefined()
 		expect(created).toEqual(expect.objectContaining({ steamName: '[deleted player]', deleted: true }))
 		expect(resolved.get('ngone')).toBe(created.id)
+	})
+
+	it("maps the standard deleted-player id to itself, every deleted player's side of a shared game", async () => {
+		const { players, service } = deps()
+		const resolved = await service.resolvePlayers({
+			entries: [],
+			players: {
+				[DELETED_PLAYER_ID]: {
+					steamIdHash: null,
+					legacyPlayerId: null,
+					displayName: '',
+					deleted: true,
+				},
+			},
+		})
+		expect(resolved.get(DELETED_PLAYER_ID)).toBe(DELETED_PLAYER_ID)
+		expect(players.createPlayer).not.toHaveBeenCalled()
 	})
 
 	it('stores what it can and leaves the rest', async () => {

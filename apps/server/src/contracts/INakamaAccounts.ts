@@ -16,12 +16,21 @@ export interface NakamaNoticeAcceptance {
 	chatEligible?: boolean
 }
 
+// What a deletion keeps in Nakama as moderation data: the runs an open
+// report or ban uses, and the Steam ID hash (in the ban index) when the
+// player has a ban record. The same rules as Postgres.
+export interface NakamaDeletionKeep {
+	keptRunIds: string[]
+	keepSteamIdHash: boolean
+}
+
 export interface INakamaAccounts {
-	// Deletes the account after renaming the player to anonymousId in Nakama
-	// storage (nakama/src/player/anonymize.ts).
+	// Deletes the account after handling the player's data in Nakama storage
+	// as Postgres does (nakama/src/player/anonymize.ts).
 	delete(
 		playerId: string,
 		anonymousId: string,
+		keep: NakamaDeletionKeep,
 	): Promise<Result<NakamaAccountDeletion, NakamaAccountDeletionError>>
 	// Best effort: false when Nakama was not reached or has no account.
 	acceptNotice(

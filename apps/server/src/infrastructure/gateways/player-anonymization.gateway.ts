@@ -1,12 +1,21 @@
 import { type SQL, sql } from 'drizzle-orm'
-import { DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
+import {
+	DELETED_PLAYER_ID,
+	DELETED_PLAYER_NAME,
+} from '../../shared/deleted-player.js'
 import { db } from '../db/index.js'
 
-// Account deletion (Notice decision 17): the player id is replaced by a
-// random anonymous id in every column that holds it, in one transaction.
-// The other players' games, reports and ratings stay whole; nothing left
-// links back to the account. Nakama does the same to its storage first
-// (nakama/src/player/anonymize.ts), with the same anonymous id.
+// Account deletion (Notice decision 17), in one transaction. Each column that
+// can hold a player id is one of three kinds of data:
+// - own: only the player's (profile, ratings, normal chat, run logs): deleted.
+// - shared: a game that also belongs to other players: the player's side
+//   takes DELETED_PLAYER_ID, one standard id shared by every deleted player,
+//   so the other players' history stays whole.
+// - moderation: bans, reports, warnings, queue items and evidence: kept under
+//   a random anonymous id, made per deletion. A login with the same Steam
+//   identity gets this row back when it kept the Steam ID hash (a ban record).
+// Nakama does the same to its storage first (nakama/src/player/anonymize.ts),
+// with the same ids.
 //
 // Every column of the schema is listed below, either as a place a player id
 // can be or as one that holds none; tests/gateways/player-anonymization.test.ts
@@ -16,65 +25,206 @@ import { db } from '../db/index.js'
 // text / json: a player id can be inside the value ('admin:<id>',
 //   '<runId>:<id>', a JSON document); every occurrence is replaced. Player
 //   ids are UUIDs, so a plain text replace cannot hit anything else.
-// delete: the rows only served the deleted player and go.
-export type PlayerIdColumnKind = 'id' | 'text' | 'json' | 'delete'
+export type PlayerIdColumnKind = 'id' | 'text' | 'json'
+export type PlayerData = 'own' | 'shared' | 'moderation'
+// Own rows that are moderation evidence all the same, kept under the
+// anonymous id: flagged chat, and the run logs an open report or ban uses.
+export type KeptEvidence = 'flagged_chat' | 'kept_runs'
 
 export interface PlayerIdColumn {
 	table: string
 	column: string
 	kind: PlayerIdColumnKind
+	data: PlayerData
+	evidence?: KeptEvidence
 }
 
 export const PLAYER_ID_COLUMNS: readonly PlayerIdColumn[] = [
-	{ table: 'refresh_tokens', column: 'player_id', kind: 'delete' },
-	{ table: 'player_mutes', column: 'muter_id', kind: 'delete' },
-	{ table: 'player_mutes', column: 'muted_id', kind: 'id' },
-	{ table: 'game_results', column: 'players', kind: 'json' },
-	{ table: 'game_results', column: 'result', kind: 'json' },
-	{ table: 'chat_logs', column: 'player_id', kind: 'id' },
-	{ table: 'action_logs', column: 'player_id', kind: 'id' },
-	{ table: 'action_logs', column: 'payload', kind: 'json' },
-	{ table: 'flagged_messages', column: 'player_id', kind: 'id' },
-	{ table: 'reports', column: 'reporter_id', kind: 'id' },
-	{ table: 'reports', column: 'reported_id', kind: 'id' },
-	{ table: 'reported_lobby_messages', column: 'player_id', kind: 'id' },
-	{ table: 'matchmaking_matches', column: 'players', kind: 'json' },
-	{ table: 'matchmaking_matches', column: 'lobby_state', kind: 'json' },
-	{ table: 'matchmaking_matches', column: 'result_placements', kind: 'json' },
-	{ table: 'matchmaking_matches', column: 'result_reported_by', kind: 'text' },
-	{ table: 'match_result_conflicts', column: 'first_reporter_id', kind: 'id' },
-	{ table: 'match_result_conflicts', column: 'first_placements', kind: 'json' },
+	{ table: 'refresh_tokens', column: 'player_id', kind: 'id', data: 'own' },
+	{ table: 'player_mutes', column: 'muter_id', kind: 'id', data: 'own' },
+	// A mute of a deleted player mutes nobody.
+	{ table: 'player_mutes', column: 'muted_id', kind: 'id', data: 'own' },
+	{ table: 'game_results', column: 'players', kind: 'json', data: 'shared' },
+	{ table: 'game_results', column: 'result', kind: 'json', data: 'shared' },
+	{
+		table: 'chat_logs',
+		column: 'player_id',
+		kind: 'id',
+		data: 'own',
+		evidence: 'flagged_chat',
+	},
+	{ table: 'action_logs', column: 'player_id', kind: 'id', data: 'own' },
+	{ table: 'action_logs', column: 'payload', kind: 'json', data: 'shared' },
+	{
+		table: 'flagged_messages',
+		column: 'player_id',
+		kind: 'id',
+		data: 'moderation',
+	},
+	{ table: 'reports', column: 'reporter_id', kind: 'id', data: 'moderation' },
+	{ table: 'reports', column: 'reported_id', kind: 'id', data: 'moderation' },
+	{
+		table: 'reported_lobby_messages',
+		column: 'player_id',
+		kind: 'id',
+		data: 'moderation',
+	},
+	{
+		table: 'matchmaking_matches',
+		column: 'players',
+		kind: 'json',
+		data: 'shared',
+	},
+	{
+		table: 'matchmaking_matches',
+		column: 'lobby_state',
+		kind: 'json',
+		data: 'shared',
+	},
+	{
+		table: 'matchmaking_matches',
+		column: 'result_placements',
+		kind: 'json',
+		data: 'shared',
+	},
+	{
+		table: 'matchmaking_matches',
+		column: 'result_reported_by',
+		kind: 'text',
+		data: 'shared',
+	},
+	{
+		table: 'match_result_conflicts',
+		column: 'first_reporter_id',
+		kind: 'id',
+		data: 'moderation',
+	},
+	{
+		table: 'match_result_conflicts',
+		column: 'first_placements',
+		kind: 'json',
+		data: 'moderation',
+	},
 	{
 		table: 'match_result_conflicts',
 		column: 'conflicting_reporter_id',
 		kind: 'id',
+		data: 'moderation',
 	},
 	{
 		table: 'match_result_conflicts',
 		column: 'conflicting_placements',
 		kind: 'json',
+		data: 'moderation',
 	},
-	{ table: 'forfeit_reconciliation_flags', column: 'player_id', kind: 'id' },
-	{ table: 'service_queue_items', column: 'source_id', kind: 'text' },
-	{ table: 'service_queue_items', column: 'subject_player_id', kind: 'id' },
-	{ table: 'service_queue_items', column: 'summary', kind: 'text' },
-	{ table: 'service_queue_items', column: 'resolved_by', kind: 'text' },
-	{ table: 'service_queue_items', column: 'claimed_by', kind: 'text' },
-	{ table: 'service_queue_items', column: 'context', kind: 'json' },
-	{ table: 'service_queue_item_events', column: 'actor', kind: 'text' },
-	{ table: 'service_queue_item_events', column: 'detail', kind: 'json' },
-	{ table: 'player_warnings', column: 'player_id', kind: 'id' },
-	{ table: 'player_warnings', column: 'issued_by', kind: 'text' },
-	{ table: 'grace_periods', column: 'player_id', kind: 'id' },
-	{ table: 'matchmaking_ratings', column: 'player_id', kind: 'id' },
-	{ table: 'leaderboard_cache', column: 'player_id', kind: 'id' },
-	{ table: 'blog_post', column: 'author_player_id', kind: 'id' },
-	{ table: 'player_bans', column: 'player_id', kind: 'id' },
-	{ table: 'player_bans', column: 'issued_by', kind: 'text' },
-	{ table: 'player_bans', column: 'lifted_by', kind: 'text' },
-	{ table: 'match_run_logs', column: 'player_id', kind: 'id' },
-	{ table: 'mod_profiles', column: 'created_by', kind: 'id' },
-	{ table: 'launcher_integrity_events', column: 'player_id', kind: 'id' },
+	{
+		table: 'forfeit_reconciliation_flags',
+		column: 'player_id',
+		kind: 'id',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_items',
+		column: 'source_id',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_items',
+		column: 'subject_player_id',
+		kind: 'id',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_items',
+		column: 'summary',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_items',
+		column: 'resolved_by',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_items',
+		column: 'claimed_by',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_items',
+		column: 'context',
+		kind: 'json',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_item_events',
+		column: 'actor',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'service_queue_item_events',
+		column: 'detail',
+		kind: 'json',
+		data: 'moderation',
+	},
+	{
+		table: 'player_warnings',
+		column: 'player_id',
+		kind: 'id',
+		data: 'moderation',
+	},
+	{
+		table: 'player_warnings',
+		column: 'issued_by',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{ table: 'grace_periods', column: 'player_id', kind: 'id', data: 'own' },
+	{
+		table: 'matchmaking_ratings',
+		column: 'player_id',
+		kind: 'id',
+		data: 'own',
+	},
+	{ table: 'leaderboard_cache', column: 'player_id', kind: 'id', data: 'own' },
+	// Site content other people read: kept, by the standard id.
+	{
+		table: 'blog_post',
+		column: 'author_player_id',
+		kind: 'id',
+		data: 'shared',
+	},
+	{ table: 'player_bans', column: 'player_id', kind: 'id', data: 'moderation' },
+	{
+		table: 'player_bans',
+		column: 'issued_by',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'player_bans',
+		column: 'lifted_by',
+		kind: 'text',
+		data: 'moderation',
+	},
+	{
+		table: 'match_run_logs',
+		column: 'player_id',
+		kind: 'id',
+		data: 'own',
+		evidence: 'kept_runs',
+	},
+	{ table: 'mod_profiles', column: 'created_by', kind: 'id', data: 'shared' },
+	{
+		table: 'launcher_integrity_events',
+		column: 'player_id',
+		kind: 'id',
+		data: 'moderation',
+	},
 ]
 
 // Columns that never hold a player id, by table. The players row itself is
@@ -368,30 +518,69 @@ export const NO_PLAYER_ID_COLUMNS: readonly string[] = Object.entries(
 
 const id = (name: string) => sql.identifier(name)
 
-function columnStatement(
+function replaceStatement(
 	c: PlayerIdColumn,
 	playerId: string,
-	anonymousId: string,
+	to: string,
 ): SQL {
 	const table = id(c.table)
 	const column = id(c.column)
-	if (c.kind === 'delete')
-		return sql`delete from ${table} where ${column} = ${playerId}`
 	if (c.kind === 'id')
-		return sql`update ${table} set ${column} = ${anonymousId} where ${column} = ${playerId}`
+		return sql`update ${table} set ${column} = ${to} where ${column} = ${playerId}`
 	if (c.kind === 'text')
-		return sql`update ${table} set ${column} = replace(${column}, ${playerId}, ${anonymousId}) where strpos(${column}, ${playerId}) > 0`
-	return sql`update ${table} set ${column} = replace(${column}::text, ${playerId}, ${anonymousId})::jsonb where strpos(${column}::text, ${playerId}) > 0`
+		return sql`update ${table} set ${column} = replace(${column}, ${playerId}, ${to}) where strpos(${column}, ${playerId}) > 0`
+	return sql`update ${table} set ${column} = replace(${column}::text, ${playerId}, ${to})::jsonb where strpos(${column}::text, ${playerId}) > 0`
+}
+
+// The own rows kept as evidence, as a condition; null when none are.
+function evidenceCondition(
+	evidence: KeptEvidence,
+	keptRunIds: readonly string[],
+): SQL | null {
+	if (evidence === 'flagged_chat') return sql`"flagged" = true`
+	if (keptRunIds.length === 0) return null
+	return sql`"run_id" in (${sql.join(
+		keptRunIds.map((r) => sql`${r}`),
+		sql`, `,
+	)})`
+}
+
+function columnStatements(
+	c: PlayerIdColumn,
+	playerId: string,
+	anonymousId: string,
+	keptRunIds: readonly string[],
+): SQL[] {
+	if (c.data === 'shared')
+		return [replaceStatement(c, playerId, DELETED_PLAYER_ID)]
+	if (c.data === 'moderation')
+		return [replaceStatement(c, playerId, anonymousId)]
+	const table = id(c.table)
+	const column = id(c.column)
+	const statements: SQL[] = []
+	const kept = c.evidence ? evidenceCondition(c.evidence, keptRunIds) : null
+	if (kept)
+		statements.push(
+			sql`update ${table} set ${column} = ${anonymousId} where ${column} = ${playerId} and ${kept}`,
+		)
+	statements.push(sql`delete from ${table} where ${column} = ${playerId}`)
+	return statements
 }
 
 // Every statement of one deletion, in order. keptSteamIdHash is the peppered
-// Steam ID hash the anonymous row keeps for ban enforcement, or null. Pure.
+// Steam ID hash the anonymous row keeps for ban enforcement, or null.
+// keptRunIds are the runs an open report or ban uses. Pure.
 export function anonymizationStatements(
 	playerId: string,
 	anonymousId: string,
 	keptSteamIdHash: string | null,
+	keptRunIds: readonly string[],
 ): SQL[] {
 	const statements: SQL[] = [
+		// The standard row every deleted player's shared games point at, made
+		// by the first deletion. Its nakama_user_id is the same id, as Nakama
+		// names it so.
+		sql`insert into "players" ("id", "steam_name", "nakama_user_id", "deleted_at") values (${DELETED_PLAYER_ID}, ${DELETED_PLAYER_NAME}, ${DELETED_PLAYER_ID}, now()) on conflict do nothing`,
 		// Frees the unique hash and Nakama id for the new row.
 		sql`update "players" set "steam_id_hash" = null, "discord_id_hash" = null, "nakama_user_id" = null where "id" = ${playerId}`,
 		// nakama_user_id is the anonymous id too: Nakama renamed the player to
@@ -399,17 +588,12 @@ export function anonymizationStatements(
 		sql`insert into "players" ("id", "steam_name", "steam_id_hash", "nakama_user_id", "deleted_at") values (${anonymousId}, ${DELETED_PLAYER_NAME}, ${keptSteamIdHash}, ${anonymousId}, now())`,
 	]
 	for (const c of PLAYER_ID_COLUMNS)
-		statements.push(columnStatement(c, playerId, anonymousId))
-	for (const table of [
-		'reported_lobby_messages',
-		'grace_periods',
-		'leaderboard_cache',
-	])
-		statements.push(
-			sql`update ${id(table)} set "display_name" = ${DELETED_PLAYER_NAME} where "player_id" = ${anonymousId}`,
-		)
+		statements.push(...columnStatements(c, playerId, anonymousId, keptRunIds))
 	statements.push(
-		sql`update "matchmaking_matches" set "lobby_state" = jsonb_set("lobby_state", array['playerInfos', ${anonymousId}, 'displayName'], to_jsonb(${DELETED_PLAYER_NAME}::text)) where "lobby_state" -> 'playerInfos' -> ${anonymousId} is not null`,
+		sql`update "reported_lobby_messages" set "display_name" = ${DELETED_PLAYER_NAME} where "player_id" = ${anonymousId}`,
+	)
+	statements.push(
+		sql`update "matchmaking_matches" set "lobby_state" = jsonb_set("lobby_state", array['playerInfos', ${DELETED_PLAYER_ID}, 'displayName'], to_jsonb(${DELETED_PLAYER_NAME}::text)) where "lobby_state" -> 'playerInfos' -> ${DELETED_PLAYER_ID} is not null`,
 	)
 	if (keptSteamIdHash === null)
 		statements.push(
@@ -419,13 +603,34 @@ export function anonymizationStatements(
 	return statements
 }
 
-// Replaces playerId by anonymousId everywhere in Postgres. The peppered Steam
-// ID hash stays on the anonymous row only when the player has a ban record
-// (it enforces the ban on a new account; purgeExpiredDeletedPlayerHashes
-// clears it later). A player id with no row still has its other rows moved.
+// What a deletion needs to know before it starts (auth.service deleteAccount):
+// the runs the player has a log in or a report on, and whether they have a
+// ban record (then the anonymous row keeps their Steam ID hash).
+export async function deletionFacts(
+	playerId: string,
+): Promise<{ runIds: string[]; hasBanRecord: boolean }> {
+	const runs = await db.execute(
+		sql`select "run_id"::text as "run_id" from "match_run_logs" where "player_id" = ${playerId} union select "run_id"::text from "reports" where "run_id" is not null and (${playerId} in ("reporter_id", "reported_id"))`,
+	)
+	const bans = await db.execute(
+		sql`select exists (select 1 from "player_bans" where "player_id" = ${playerId}) as "banned"`,
+	)
+	return {
+		runIds: (runs.rows as { run_id: string }[]).map((r) => r.run_id),
+		hasBanRecord:
+			(bans.rows[0] as { banned: boolean } | undefined)?.banned === true,
+	}
+}
+
+// Deletes or moves every row of playerId in Postgres (see the top). The
+// peppered Steam ID hash stays on the anonymous row only when the player has
+// a ban record (it enforces the ban on a new account;
+// purgeExpiredDeletedPlayerHashes clears it later). A player id with no row
+// still has its other rows handled.
 export async function anonymizePlayer(
 	playerId: string,
 	anonymousId: string,
+	keptRunIds: readonly string[],
 ): Promise<void> {
 	await db.transaction(async (tx) => {
 		const found = await tx.execute(
@@ -439,6 +644,7 @@ export async function anonymizePlayer(
 			playerId,
 			anonymousId,
 			kept,
+			keptRunIds,
 		))
 			await tx.execute(statement)
 	})

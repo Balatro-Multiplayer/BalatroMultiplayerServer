@@ -5,6 +5,7 @@ import type {
 	IPlayerRepository,
 	PlayerRecord,
 } from '../../contracts/IPlayerRepository.js'
+import type { IRetentionRepository } from '../../contracts/IRetentionRepository.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 import {
@@ -15,6 +16,7 @@ import {
 	linkProvider,
 	unlinkProvider,
 } from '../../state/index.js'
+import { inOpenUse } from '../retention/limits.js'
 import { signJwt } from './jwt.js'
 
 type Provider = 'steam' | 'discord'
@@ -24,6 +26,7 @@ type SessionAndToken = { session: PlayerSession; token: string }
 interface AuthServiceDeps {
 	playerRepository: IPlayerRepository
 	nakamaAccounts: INakamaAccounts
+	retention: Pick<IRetentionRepository, 'runLinks'>
 }
 
 export type AuthService = ReturnType<typeof createAuthService>
@@ -277,16 +280,34 @@ export function createAuthService(deps: AuthServiceDeps) {
 		return sessionAndToken(session)
 	}
 
-	// Account deletion (Notice decision 17): the player id becomes a random
-	// anonymous id, in Nakama first, then in Postgres. Bans stay attached to
-	// the anonymous row, so deleting an account never wipes a ban. If Nakama
-	// can't delete the account nothing changes, and the player can try again.
+	// Account deletion (Notice decision 17), in Nakama first, then in
+	// Postgres: the player's own data goes, their side of shared games takes
+	// the standard deleted-player id, and moderation data (bans, reports,
+	// evidence) stays under a random anonymous id, so deleting an account
+	// never wipes a ban. A run's logs are evidence while an open report or ban
+	// uses the run. If Nakama can't delete the account nothing changes, and
+	// the player can try again.
 	async function deleteAccount(playerId: string): Promise<void> {
 		const anonymousId = randomUUID()
-		const nakama = await deps.nakamaAccounts.delete(playerId, anonymousId)
+		const facts = await playerRepository.deletionFacts(playerId)
+		const links =
+			facts.runIds.length > 0
+				? await deps.retention.runLinks(facts.runIds)
+				: new Map()
+		const now = new Date()
+		const keptRunIds = facts.runIds.filter((runId) =>
+			inOpenUse(links.get(runId) ?? [], now),
+		)
+		const nakama = await deps.nakamaAccounts.delete(playerId, anonymousId, {
+			keptRunIds,
+			keepSteamIdHash: facts.hasBanRecord,
+		})
 		if (!nakama.ok)
-			throw new AppError('Account deletion is unavailable right now, try again later', 503)
-		await playerRepository.anonymizePlayer(playerId, anonymousId)
+			throw new AppError(
+				'Account deletion is unavailable right now, try again later',
+				503,
+			)
+		await playerRepository.anonymizePlayer(playerId, anonymousId, keptRunIds)
 	}
 
 	return {

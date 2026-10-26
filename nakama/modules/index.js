@@ -9398,6 +9398,7 @@ function seedAllowedModIdsExtra(nk, logger, env) {
 }
 
 // src/player/anonymize.ts
+var DELETED_PLAYER_ID = "00000000-0000-4000-8000-000000000000";
 var DELETED_PLAYER_NAME = "[deleted player]";
 function replaceId(value, from, to) {
   if (value === from) return to;
@@ -9415,26 +9416,11 @@ function replaceId(value, from, to) {
   }
   return value;
 }
-function withoutNameOf(value, anonymousId) {
-  if (Array.isArray(value)) return value.map((v) => withoutNameOf(v, anonymousId));
-  if (value === null || typeof value !== "object") return value;
-  const next = {};
-  for (const key of Object.keys(value))
-    next[key] = withoutNameOf(value[key], anonymousId);
-  const theirs = next.id === anonymousId || next.senderId === anonymousId || next.playerId === anonymousId || next.userId === anonymousId;
-  if (theirs) {
-    if (typeof next.displayName === "string") next.displayName = DELETED_PLAYER_NAME;
-    const info = next.info;
-    if (info && typeof info === "object" && typeof info.displayName === "string")
-      next.info = __spreadProps(__spreadValues({}, info), { displayName: DELETED_PLAYER_NAME });
-  }
-  return next;
-}
-function anonymizedRun(run, userId, anonymousId) {
-  const next = replaceId(run, userId, anonymousId);
+function anonymizedRun(run, userId, to) {
+  const next = replaceId(run, userId, to);
   return __spreadProps(__spreadValues({}, next), {
     players: next.players.map(
-      (p) => p.id === anonymousId ? __spreadProps(__spreadValues({}, p), { displayName: DELETED_PLAYER_NAME }) : p
+      (p) => p.id === to ? __spreadProps(__spreadValues({}, p), { displayName: DELETED_PLAYER_NAME }) : p
     )
   });
 }
@@ -9446,32 +9432,38 @@ function listAll(nk, owner, collection) {
   });
   return all;
 }
-function anonymizeRuns(nk, userId, anonymousId) {
+function anonymizeRuns(nk, userId, anonymousId, keptRunIds) {
   for (const pointer of listAll(nk, userId, MY_RUNS_COLLECTION)) {
     const runId = pointer.value.runId;
     if (typeof runId !== "string") continue;
-    const [object] = nk.storageRead([
-      { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
-    ]);
+    const runKey = {
+      collection: RUNS_COLLECTION,
+      key: runId,
+      userId: SYSTEM_USER_ID
+    };
+    const ownLog = {
+      collection: LOGS_COLLECTION,
+      key: logKey(runId, userId),
+      userId: SYSTEM_USER_ID
+    };
+    const [object] = nk.storageRead([runKey]);
     if (!object) continue;
     const run = object.value;
+    const kept = keptRunIds.indexOf(runId) !== -1;
+    const shared = run.players.some((p) => p.id !== userId);
+    if (!kept && !shared) {
+      nk.storageDelete([runKey, ownLog]);
+      continue;
+    }
+    const to = kept ? anonymousId : DELETED_PLAYER_ID;
     const writes = [
-      {
-        collection: RUNS_COLLECTION,
-        key: runId,
-        userId: SYSTEM_USER_ID,
-        value: anonymizedRun(run, userId, anonymousId),
+      __spreadProps(__spreadValues({}, runKey), {
+        value: anonymizedRun(run, userId, to),
         permissionRead: 2,
         permissionWrite: 0
-      }
+      })
     ];
-    const [log] = nk.storageRead([
-      {
-        collection: LOGS_COLLECTION,
-        key: logKey(runId, userId),
-        userId: SYSTEM_USER_ID
-      }
-    ]);
+    const [log] = kept ? nk.storageRead([ownLog]) : [];
     if (log)
       writes.push(__spreadValues({
         collection: LOGS_COLLECTION,
@@ -9480,21 +9472,60 @@ function anonymizeRuns(nk, userId, anonymousId) {
         value: log.value
       }, SERVER_ONLY2));
     nk.storageWrite(writes);
-    if (log)
-      nk.storageDelete([
-        {
-          collection: LOGS_COLLECTION,
-          key: logKey(runId, userId),
-          userId: SYSTEM_USER_ID
-        }
-      ]);
+    nk.storageDelete([ownLog]);
   }
 }
-function rewriteSystemObjects(nk, collection, userId, anonymousId, dropNames = false) {
+function anonymizeMirror(nk, userId, anonymousId) {
+  const writes = [];
+  const deletes = [];
+  for (const o of listAll(nk, SYSTEM_USER_ID, MIRROR_COLLECTION)) {
+    const entry = o.value;
+    const owner = entry.kind === "chat" ? entry.line.userId : entry.kind === "run" ? null : entry.userId;
+    if (owner !== userId) continue;
+    const own = entry.kind === "notice" || entry.kind === "chat" && !entry.line.flagged;
+    if (own) {
+      deletes.push({
+        collection: MIRROR_COLLECTION,
+        key: o.key,
+        userId: SYSTEM_USER_ID
+      });
+      continue;
+    }
+    writes.push(__spreadValues({
+      collection: MIRROR_COLLECTION,
+      key: o.key,
+      userId: SYSTEM_USER_ID,
+      value: replaceId(o.value, userId, anonymousId)
+    }, SERVER_ONLY2));
+  }
+  if (writes.length > 0) nk.storageWrite(writes);
+  if (deletes.length > 0) nk.storageDelete(deletes);
+}
+var namesPlayer = (value, userId) => JSON.stringify(value).indexOf(userId) !== -1;
+function deleteLobbyState(nk, userId) {
+  const checkpoints = listAll(
+    nk,
+    SYSTEM_USER_ID,
+    LOBBY_CHECKPOINT_COLLECTION
+  ).filter((o) => namesPlayer(o.value, userId));
+  if (checkpoints.length > 0)
+    nk.storageDelete(
+      checkpoints.map((o) => ({
+        collection: LOBBY_CHECKPOINT_COLLECTION,
+        key: o.key,
+        userId: SYSTEM_USER_ID
+      }))
+    );
+  for (const o of listAll(nk, SYSTEM_USER_ID, BINDING_COLLECTION)) {
+    const binding = o.value;
+    if (namesPlayer(binding, userId))
+      deleteBinding(nk, binding.partyId, binding.memberIds);
+  }
+}
+function rewriteSystemObjects(nk, collection, userId, anonymousId) {
   const writes = [];
   for (const o of listAll(nk, SYSTEM_USER_ID, collection)) {
-    const replaced = replaceId(o.value, userId, anonymousId);
-    const next = dropNames ? withoutNameOf(replaced, anonymousId) : replaced;
+    const next = replaceId(o.value, userId, anonymousId);
     if (JSON.stringify(next) === JSON.stringify(o.value)) continue;
     writes.push(__spreadValues({
       collection,
@@ -9505,7 +9536,7 @@ function rewriteSystemObjects(nk, collection, userId, anonymousId, dropNames = f
   }
   if (writes.length > 0) nk.storageWrite(writes);
 }
-function anonymizeBanIndex(nk, userId, anonymousId) {
+function anonymizeBanIndex(nk, userId, anonymousId, keep) {
   const objects = nk.storageRead(
     loginKeys(nk, userId).map((key) => ({
       collection: BAN_INDEX_COLLECTION,
@@ -9514,6 +9545,16 @@ function anonymizeBanIndex(nk, userId, anonymousId) {
     }))
   );
   if (objects.length === 0) return;
+  if (!keep) {
+    nk.storageDelete(
+      objects.map((o) => ({
+        collection: BAN_INDEX_COLLECTION,
+        key: o.key,
+        userId: SYSTEM_USER_ID
+      }))
+    );
+    return;
+  }
   nk.storageWrite(
     objects.map((o) => __spreadValues({
       collection: BAN_INDEX_COLLECTION,
@@ -9523,34 +9564,33 @@ function anonymizeBanIndex(nk, userId, anonymousId) {
     }, SERVER_ONLY2))
   );
 }
-function anonymizeLegacyRatings(nk, userId, anonymousId, now) {
+function deleteLegacyRatings(nk, userId) {
   const hash = steamIdHashOf(nk, userId);
   if (!hash) return;
-  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
-  if (!parked || parked.value.claimedBy !== userId) return;
-  const bans = readBans(nk, userId);
-  const banned = BAN_TYPES.some((type) => activeBan(bans, type, now) !== null);
-  if (!banned) {
-    nk.storageDelete([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
-    return;
-  }
-  nk.storageWrite([
-    __spreadValues({
+  const [parked] = nk.storageRead([
+    {
       collection: LEGACY_RATINGS_COLLECTION,
       key: hash,
-      userId: SYSTEM_USER_ID,
-      value: __spreadProps(__spreadValues({}, parked.value), { claimedBy: anonymousId })
-    }, SERVER_ONLY2)
+      userId: SYSTEM_USER_ID
+    }
+  ]);
+  if (!parked || parked.value.claimedBy !== userId)
+    return;
+  nk.storageDelete([
+    {
+      collection: LEGACY_RATINGS_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID
+    }
   ]);
 }
-function anonymizeAccount(nk, userId, anonymousId) {
-  anonymizeRuns(nk, userId, anonymousId);
-  anonymizeLegacyRatings(nk, userId, anonymousId, Date.now());
-  rewriteSystemObjects(nk, MIRROR_COLLECTION, userId, anonymousId);
-  rewriteSystemObjects(nk, LOBBY_CHECKPOINT_COLLECTION, userId, anonymousId, true);
-  rewriteSystemObjects(nk, BINDING_COLLECTION, userId, anonymousId);
+function anonymizeAccount(nk, userId, anonymousId, keep) {
+  anonymizeRuns(nk, userId, anonymousId, keep.keptRunIds);
+  deleteLegacyRatings(nk, userId);
+  anonymizeMirror(nk, userId, anonymousId);
+  deleteLobbyState(nk, userId);
   rewriteSystemObjects(nk, NETWORK_BANS_COLLECTION, userId, anonymousId);
-  anonymizeBanIndex(nk, userId, anonymousId);
+  anonymizeBanIndex(nk, userId, anonymousId, keep.keepSteamIdHash);
   nk.storageDelete([
     { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
   ]);
@@ -9726,6 +9766,11 @@ function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   const userId = requireAccount(nk, input.userId);
   if (typeof input.anonymousId !== "string" || !USER_ID4.test(input.anonymousId) || input.anonymousId === userId)
     throw runtimeError(INVALID_ARGUMENT, "anonymousId is required");
+  const keptRunIds = input.keptRunIds;
+  if (!Array.isArray(keptRunIds) || !keptRunIds.every((id) => typeof id === "string"))
+    throw runtimeError(INVALID_ARGUMENT, "keptRunIds must be a list of run ids");
+  if (typeof input.keepSteamIdHash !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "keepSteamIdHash is required");
   const lobby = currentLobby(nk, userId);
   if (lobby) {
     const signal2 = { type: "admin_remove", userId, reason: "account_deleted", onlyIfStarted: false };
@@ -9733,7 +9778,10 @@ function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   }
   releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash);
   nk.sessionLogout(userId, "", "");
-  anonymizeAccount(nk, userId, input.anonymousId);
+  anonymizeAccount(nk, userId, input.anonymousId, {
+    keptRunIds,
+    keepSteamIdHash: input.keepSteamIdHash
+  });
   nk.accountDeleteId(userId, false);
   logger.info("Deleted account %s", userId);
   return JSON.stringify({ deleted: true });

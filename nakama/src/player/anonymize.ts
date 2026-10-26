@@ -1,9 +1,21 @@
-// Account deletion (Notice decision 17): before the account goes, every
-// system-owned object that names the player is rewritten to name a random
-// anonymous id instead, which the API also gives the player's Postgres rows.
-// The other players' games stay whole; nothing left links back to the
-// account. Objects the player owns go with the account (Nakama deletes them).
-import { BINDING_COLLECTION } from '../matchmaking/group/binding'
+// Account deletion (Notice decision 17), before the account goes. The same
+// three kinds of data as Postgres (the API's player-anonymization gateway):
+// - own data goes: the player's own objects (with the account), their logs,
+//   runs only they played, pending mirror entries of their own (normal chat,
+//   Notice acceptance), their legacy rating claim, lobby checkpoints and group
+//   parties that name them.
+// - a shared run (one other players played too) names DELETED_PLAYER_ID, one
+//   standard id every deleted player shares, so the other players' history
+//   stays whole.
+// - moderation data names a random anonymous id, which the API also gives
+//   the Postgres rows: runs an open report or ban uses (with the player's
+//   log), flagged chat and forfeits on their way to Postgres, network bans,
+//   and the ban index when the player has a ban record.
+import {
+	BINDING_COLLECTION,
+	type GroupBinding,
+	deleteBinding,
+} from '../matchmaking/group/binding'
 import {
 	LOBBY_CHECKPOINT_COLLECTION,
 	LOGS_COLLECTION,
@@ -13,8 +25,7 @@ import {
 	SYSTEM_USER_ID,
 } from '../lobby/protocol'
 import { logKey } from '../lobby/storage'
-import { MIRROR_COLLECTION } from '../mirror/outbox'
-import { BAN_TYPES, activeBan, readBans } from '../moderation/bans'
+import { MIRROR_COLLECTION, type MirrorEntry } from '../mirror/outbox'
 import { BAN_INDEX_COLLECTION, loginKeys } from '../moderation/enforce'
 import {
 	IP_HASHES_COLLECTION,
@@ -25,6 +36,8 @@ import { LEGACY_RATINGS_COLLECTION, type LegacyPlayer } from '../rating/legacy'
 import { forEachStored } from '../shared/storage'
 import { steamIdHashOf } from './steam_id'
 
+// The same values as the API's shared/deleted-player.ts (a test checks).
+export const DELETED_PLAYER_ID = '00000000-0000-4000-8000-000000000000'
 export const DELETED_PLAYER_NAME = '[deleted player]'
 
 // value with every string equal to `from`, and every object key equal to it,
@@ -46,36 +59,17 @@ export function replaceId<T>(value: T, from: string, to: string): T {
 	return value
 }
 
-// value with the display name dropped wherever it belongs to anonymousId: an
-// object naming them by id, senderId, playerId or userId loses its
-// displayName (and its info.displayName, as a lobby seat keeps it). Pure.
-export function withoutNameOf<T>(value: T, anonymousId: string): T {
-	if (Array.isArray(value)) return value.map((v) => withoutNameOf(v, anonymousId)) as unknown as T
-	if (value === null || typeof value !== 'object') return value
-	const next: { [key: string]: unknown } = {}
-	for (const key of Object.keys(value))
-		next[key] = withoutNameOf((value as { [key: string]: unknown })[key], anonymousId)
-	const theirs = next.id === anonymousId || next.senderId === anonymousId || next.playerId === anonymousId || next.userId === anonymousId
-	if (theirs) {
-		if (typeof next.displayName === 'string') next.displayName = DELETED_PLAYER_NAME
-		const info = next.info as { [key: string]: unknown } | null | undefined
-		if (info && typeof info === 'object' && typeof info.displayName === 'string')
-			next.info = { ...info, displayName: DELETED_PLAYER_NAME }
-	}
-	return next as T
-}
-
-// The run with the player replaced by anonymousId, their display name dropped.
+// The run with the player replaced by `to`, their display name dropped.
 export function anonymizedRun(
 	run: RunRecord,
 	userId: string,
-	anonymousId: string,
+	to: string,
 ): RunRecord {
-	const next = replaceId(run, userId, anonymousId)
+	const next = replaceId(run, userId, to)
 	return {
 		...next,
 		players: next.players.map((p) =>
-			p.id === anonymousId ? { ...p, displayName: DELETED_PLAYER_NAME } : p,
+			p.id === to ? { ...p, displayName: DELETED_PLAYER_NAME } : p,
 		),
 	}
 }
@@ -94,39 +88,55 @@ function listAll(
 	return all
 }
 
-// The player's runs (found by their own run pointers) and each replay log.
+// What a deletion keeps as moderation data (the API decides, with the same
+// rules as Postgres): the runs an open report or ban uses, and the ban index
+// entries when the player has a ban record.
+export interface DeletionKeep {
+	keptRunIds: string[]
+	keepSteamIdHash: boolean
+}
+
+// The player's runs (found by their own run pointers) and each one's log.
 function anonymizeRuns(
 	nk: nkruntime.Nakama,
 	userId: string,
 	anonymousId: string,
+	keptRunIds: string[],
 ) {
 	for (const pointer of listAll(nk, userId, MY_RUNS_COLLECTION)) {
 		const runId = (pointer.value as { runId?: unknown }).runId
 		if (typeof runId !== 'string') continue
-		const [object] = nk.storageRead([
-			{ collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID },
-		])
+		const runKey = {
+			collection: RUNS_COLLECTION,
+			key: runId,
+			userId: SYSTEM_USER_ID,
+		}
+		const ownLog = {
+			collection: LOGS_COLLECTION,
+			key: logKey(runId, userId),
+			userId: SYSTEM_USER_ID,
+		}
+		const [object] = nk.storageRead([runKey])
 		if (!object) continue
 		const run = object.value as unknown as RunRecord
+		const kept = keptRunIds.indexOf(runId) !== -1
+		const shared = run.players.some((p) => p.id !== userId)
+		if (!kept && !shared) {
+			nk.storageDelete([runKey, ownLog])
+			continue
+		}
+		const to = kept ? anonymousId : DELETED_PLAYER_ID
 		const writes: nkruntime.StorageWriteRequest[] = [
 			{
-				collection: RUNS_COLLECTION,
-				key: runId,
-				userId: SYSTEM_USER_ID,
-				value: anonymizedRun(run, userId, anonymousId) as unknown as {
+				...runKey,
+				value: anonymizedRun(run, userId, to) as unknown as {
 					[key: string]: unknown
 				},
 				permissionRead: 2,
 				permissionWrite: 0,
 			},
 		]
-		const [log] = nk.storageRead([
-			{
-				collection: LOGS_COLLECTION,
-				key: logKey(runId, userId),
-				userId: SYSTEM_USER_ID,
-			},
-		])
+		const [log] = kept ? nk.storageRead([ownLog]) : []
 		if (log)
 			writes.push({
 				collection: LOGS_COLLECTION,
@@ -136,30 +146,87 @@ function anonymizeRuns(
 				...SERVER_ONLY,
 			})
 		nk.storageWrite(writes)
-		if (log)
-			nk.storageDelete([
-				{
-					collection: LOGS_COLLECTION,
-					key: logKey(runId, userId),
-					userId: SYSTEM_USER_ID,
-				},
-			])
+		nk.storageDelete([ownLog])
 	}
 }
 
-// Every system-owned object of a collection whose value names the player.
-// With dropNames, the player's display names in it go too.
+// Pending mirror entries: the player's own ones (normal chat, a Notice
+// acceptance) go; flagged chat and forfeits are moderation data and name the
+// anonymous id. A run entry names only its run, handled above.
+function anonymizeMirror(
+	nk: nkruntime.Nakama,
+	userId: string,
+	anonymousId: string,
+) {
+	const writes: nkruntime.StorageWriteRequest[] = []
+	const deletes: nkruntime.StorageReadRequest[] = []
+	for (const o of listAll(nk, SYSTEM_USER_ID, MIRROR_COLLECTION)) {
+		const entry = o.value as unknown as MirrorEntry
+		const owner =
+			entry.kind === 'chat'
+				? entry.line.userId
+				: entry.kind === 'run'
+					? null
+					: entry.userId
+		if (owner !== userId) continue
+		const own =
+			entry.kind === 'notice' || (entry.kind === 'chat' && !entry.line.flagged)
+		if (own) {
+			deletes.push({
+				collection: MIRROR_COLLECTION,
+				key: o.key,
+				userId: SYSTEM_USER_ID,
+			})
+			continue
+		}
+		writes.push({
+			collection: MIRROR_COLLECTION,
+			key: o.key,
+			userId: SYSTEM_USER_ID,
+			value: replaceId(o.value, userId, anonymousId),
+			...SERVER_ONLY,
+		})
+	}
+	if (writes.length > 0) nk.storageWrite(writes)
+	if (deletes.length > 0) nk.storageDelete(deletes)
+}
+
+const namesPlayer = (value: unknown, userId: string) =>
+	JSON.stringify(value).indexOf(userId) !== -1
+
+// Lobby checkpoints and group parties that name the player go.
+function deleteLobbyState(nk: nkruntime.Nakama, userId: string) {
+	const checkpoints = listAll(
+		nk,
+		SYSTEM_USER_ID,
+		LOBBY_CHECKPOINT_COLLECTION,
+	).filter((o) => namesPlayer(o.value, userId))
+	if (checkpoints.length > 0)
+		nk.storageDelete(
+			checkpoints.map((o) => ({
+				collection: LOBBY_CHECKPOINT_COLLECTION,
+				key: o.key,
+				userId: SYSTEM_USER_ID,
+			})),
+		)
+	for (const o of listAll(nk, SYSTEM_USER_ID, BINDING_COLLECTION)) {
+		const binding = o.value as unknown as GroupBinding
+		if (namesPlayer(binding, userId))
+			deleteBinding(nk, binding.partyId, binding.memberIds)
+	}
+}
+
+// Every system-owned object of a collection whose value names the player,
+// naming anonymousId instead.
 function rewriteSystemObjects(
 	nk: nkruntime.Nakama,
 	collection: string,
 	userId: string,
 	anonymousId: string,
-	dropNames = false,
 ) {
 	const writes: nkruntime.StorageWriteRequest[] = []
 	for (const o of listAll(nk, SYSTEM_USER_ID, collection)) {
-		const replaced = replaceId(o.value, userId, anonymousId)
-		const next = dropNames ? withoutNameOf(replaced, anonymousId) : replaced
+		const next = replaceId(o.value, userId, anonymousId)
 		if (JSON.stringify(next) === JSON.stringify(o.value)) continue
 		writes.push({
 			collection,
@@ -172,12 +239,16 @@ function rewriteSystemObjects(
 	if (writes.length > 0) nk.storageWrite(writes)
 }
 
-// The account-ban index entries for the player's login ids: kept (they
-// enforce the ban on a new account), naming the anonymous id.
+// The account-ban index entries for the player's login ids, keyed by their
+// Steam id hash (or device id hash). Kept, naming the anonymous id, when the
+// player has a ban record: they refuse a new account on the same login id
+// while the ban is in force. The API's hourly job drops them when Postgres
+// drops the hash (admin_ban_index_forget). Otherwise they go now.
 function anonymizeBanIndex(
 	nk: nkruntime.Nakama,
 	userId: string,
 	anonymousId: string,
+	keep: boolean,
 ) {
 	const objects = nk.storageRead(
 		loginKeys(nk, userId).map((key) => ({
@@ -187,6 +258,16 @@ function anonymizeBanIndex(
 		})),
 	)
 	if (objects.length === 0) return
+	if (!keep) {
+		nk.storageDelete(
+			objects.map((o) => ({
+				collection: BAN_INDEX_COLLECTION,
+				key: o.key,
+				userId: SYSTEM_USER_ID,
+			})),
+		)
+		return
+	}
 	nk.storageWrite(
 		objects.map((o) => ({
 			collection: BAN_INDEX_COLLECTION,
@@ -199,50 +280,43 @@ function anonymizeBanIndex(
 }
 
 // The legacy ratings the player claimed (rating/legacy.ts), keyed by their
-// Steam id hash. Under the Postgres rule the hash stays only while the player
-// is banned, then naming the anonymous id; otherwise the entry goes.
-function anonymizeLegacyRatings(
-	nk: nkruntime.Nakama,
-	userId: string,
-	anonymousId: string,
-	now: number,
-) {
+// Steam id hash: own data.
+function deleteLegacyRatings(nk: nkruntime.Nakama, userId: string) {
 	const hash = steamIdHashOf(nk, userId)
 	if (!hash) return
-	const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }])
-	if (!parked || (parked.value as unknown as LegacyPlayer).claimedBy !== userId) return
-	const bans = readBans(nk, userId)
-	const banned = BAN_TYPES.some((type) => activeBan(bans, type, now) !== null)
-	if (!banned) {
-		nk.storageDelete([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }])
-		return
-	}
-	nk.storageWrite([
+	const [parked] = nk.storageRead([
 		{
 			collection: LEGACY_RATINGS_COLLECTION,
 			key: hash,
 			userId: SYSTEM_USER_ID,
-			value: { ...parked.value, claimedBy: anonymousId },
-			...SERVER_ONLY,
+		},
+	])
+	if (!parked || (parked.value as unknown as LegacyPlayer).claimedBy !== userId)
+		return
+	nk.storageDelete([
+		{
+			collection: LEGACY_RATINGS_COLLECTION,
+			key: hash,
+			userId: SYSTEM_USER_ID,
 		},
 	])
 }
 
-// Rewrites everything system-owned that names userId to name anonymousId.
-// Call while the account still exists (its login ids and run pointers are
-// read from it).
+// Handles everything system-owned that names userId (see the top). Call
+// while the account still exists (its login ids and run pointers are read
+// from it).
 export function anonymizeAccount(
 	nk: nkruntime.Nakama,
 	userId: string,
 	anonymousId: string,
+	keep: DeletionKeep,
 ) {
-	anonymizeRuns(nk, userId, anonymousId)
-	anonymizeLegacyRatings(nk, userId, anonymousId, Date.now())
-	rewriteSystemObjects(nk, MIRROR_COLLECTION, userId, anonymousId)
-	rewriteSystemObjects(nk, LOBBY_CHECKPOINT_COLLECTION, userId, anonymousId, true)
-	rewriteSystemObjects(nk, BINDING_COLLECTION, userId, anonymousId)
+	anonymizeRuns(nk, userId, anonymousId, keep.keptRunIds)
+	deleteLegacyRatings(nk, userId)
+	anonymizeMirror(nk, userId, anonymousId)
+	deleteLobbyState(nk, userId)
 	rewriteSystemObjects(nk, NETWORK_BANS_COLLECTION, userId, anonymousId)
-	anonymizeBanIndex(nk, userId, anonymousId)
+	anonymizeBanIndex(nk, userId, anonymousId, keep.keepSteamIdHash)
 	// A network ban keeps its own copy of the hashes until it is lifted.
 	nk.storageDelete([
 		{ collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId },

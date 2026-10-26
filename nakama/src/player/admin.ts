@@ -131,9 +131,12 @@ export function rpcAdminProfileSet(
 	return JSON.stringify({ player: playerView(userId, profile) })
 }
 
-// {userId, anonymousId} -> {deleted: true}: the account deleted from the
-// website. The player leaves their lobby, everything system-owned that names
-// them is rewritten to name anonymousId (player/anonymize.ts), and the
+// {userId, anonymousId, keptRunIds, keepSteamIdHash} -> {deleted: true}: the
+// account deleted from the website. The player leaves their lobby, their
+// system-owned data is deleted or renamed (player/anonymize.ts: own data
+// goes, shared runs take the standard deleted-player id, moderation data
+// takes anonymousId; keptRunIds and keepSteamIdHash say what is moderation
+// data, by the API's rules), and the
 // account and everything it owns is deleted. Its refresh tokens are revoked first ('' tokens: all of them); an
 // already-issued session token can't be revoked in Nakama and lives out its
 // expiry (session.token_expiry_sec), but its account is gone so it owns no
@@ -151,6 +154,14 @@ export function rpcAdminAccountDelete(
 	const userId = requireAccount(nk, input.userId)
 	if (typeof input.anonymousId !== 'string' || !USER_ID.test(input.anonymousId) || input.anonymousId === userId)
 		throw runtimeError(INVALID_ARGUMENT, 'anonymousId is required')
+	const keptRunIds = input.keptRunIds
+	if (
+		!Array.isArray(keptRunIds) ||
+		!keptRunIds.every((id) => typeof id === 'string')
+	)
+		throw runtimeError(INVALID_ARGUMENT, 'keptRunIds must be a list of run ids')
+	if (typeof input.keepSteamIdHash !== 'boolean')
+		throw runtimeError(INVALID_ARGUMENT, 'keepSteamIdHash is required')
 	const lobby = currentLobby(nk, userId)
 	if (lobby) {
 		const signal: LobbySignal = { type: 'admin_remove', userId, reason: 'account_deleted', onlyIfStarted: false }
@@ -158,7 +169,10 @@ export function rpcAdminAccountDelete(
 	}
 	releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash)
 	nk.sessionLogout(userId, '', '')
-	anonymizeAccount(nk, userId, input.anonymousId)
+	anonymizeAccount(nk, userId, input.anonymousId, {
+		keptRunIds,
+		keepSteamIdHash: input.keepSteamIdHash,
+	})
 	nk.accountDeleteId(userId, false)
 	logger.info('Deleted account %s', userId)
 	return JSON.stringify({ deleted: true })

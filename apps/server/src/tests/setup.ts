@@ -114,6 +114,7 @@ const mockPlayerRecord = {
 vi.mock('../infrastructure/gateways/player-anonymization.gateway.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../infrastructure/gateways/player-anonymization.gateway.js')>()),
 	anonymizePlayer: vi.fn().mockResolvedValue(undefined),
+	deletionFacts: vi.fn().mockResolvedValue({ runIds: [], hasBanRecord: false }),
 }))
 
 vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
@@ -171,6 +172,7 @@ beforeEach(async () => {
 	vi.mocked(playerDb.updatePreferredJoker).mockResolvedValue(undefined)
 	const anonymization = await import('../infrastructure/gateways/player-anonymization.gateway.js')
 	vi.mocked(anonymization.anonymizePlayer).mockResolvedValue(undefined)
+	vi.mocked(anonymization.deletionFacts).mockResolvedValue({ runIds: [], hasBanRecord: false })
 	vi.mocked(playerDb.reactivateIfDeleted).mockResolvedValue(undefined)
 
 	// Re-apply ban gateway defaults (cleared by vi.clearAllMocks above)

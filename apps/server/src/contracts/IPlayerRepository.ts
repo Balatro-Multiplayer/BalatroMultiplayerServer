@@ -54,8 +54,18 @@ export interface IPlayerRepository {
 		chatEnabled: boolean,
 		chatBlocked: boolean,
 	): Promise<void>
-	// Account deletion: the player id becomes anonymousId everywhere
-	// (gateways/player-anonymization.gateway.ts).
-	anonymizePlayer(playerId: string, anonymousId: string): Promise<void>
+	// Account deletion (gateways/player-anonymization.gateway.ts): own data
+	// goes, shared games take the standard deleted-player id, moderation data
+	// takes anonymousId. keptRunIds: the runs whose logs stay as evidence.
+	anonymizePlayer(
+		playerId: string,
+		anonymousId: string,
+		keptRunIds: readonly string[],
+	): Promise<void>
+	// The runs the player has a log in or a report on, and whether they have
+	// a ban record.
+	deletionFacts(
+		playerId: string,
+	): Promise<{ runIds: string[]; hasBanRecord: boolean }>
 	reactivateIfDeleted(playerId: string): Promise<void>
 }
