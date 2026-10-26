@@ -3723,7 +3723,7 @@ var CREATOR_JOIN_TIMEOUT_MS = 3e4;
 var MIN_PLAYERS = 2;
 var MAX_PLAYERS = 128;
 function newLobby(params) {
-  var _a;
+  var _a, _b;
   return {
     code: params.code,
     modId: params.modId,
@@ -3738,7 +3738,8 @@ function newLobby(params) {
     kickedIds: [],
     createdAt: params.now,
     graceMs: params.graceMs,
-    resultTimeoutMs: (_a = params.resultTimeoutMs) != null ? _a : DEFAULT_RESULT_TIMEOUT_MS,
+    catchUpLimitMs: (_a = params.catchUpLimitMs) != null ? _a : null,
+    resultTimeoutMs: (_b = params.resultTimeoutMs) != null ? _b : DEFAULT_RESULT_TIMEOUT_MS,
     closed: false,
     game: emptyGame(),
     actionBudget: {},
@@ -3832,7 +3833,7 @@ function forfeitedStill(lobby, userId) {
 function isCatchingUp(player) {
   return typeof player.catchingUpSince === "number";
 }
-function snapshotFor(lobby, userId) {
+function snapshotFor(lobby, userId, now = Date.now()) {
   const self = findPlayer(lobby, userId);
   return {
     code: lobby.code,
@@ -3858,10 +3859,11 @@ function snapshotFor(lobby, userId) {
     },
     groupQueue: viewOf(lobby),
     teamPlan: lobby.teamPlan || null,
-    graceSeconds: Math.ceil(lobby.graceMs / 1e3)
+    graceSeconds: Math.ceil(lobby.graceMs / 1e3),
+    serverNow: now
   };
 }
-function join(lobby, userId, sessionId, info) {
+function join(lobby, userId, sessionId, info, now = Date.now()) {
   const existing = findPlayer(lobby, userId);
   if (existing) {
     const wasAway = existing.awaySince !== null;
@@ -3875,7 +3877,7 @@ function join(lobby, userId, sessionId, info) {
       {
         kind: "send",
         op: ServerOp.SNAPSHOT,
-        payload: snapshotFor(next2, userId),
+        payload: snapshotFor(next2, userId, now),
         to: [userId]
       }
     ];
@@ -3913,7 +3915,7 @@ function join(lobby, userId, sessionId, info) {
       {
         kind: "send",
         op: ServerOp.SNAPSHOT,
-        payload: snapshotFor(next, userId),
+        payload: snapshotFor(next, userId, now),
         to: [userId]
       },
       event(
@@ -4150,6 +4152,10 @@ function setPlayerInfo(lobby, userId, patch) {
     out: [{ kind: "send", op: ServerOp.PLAYER_INFO, payload: { playerId: userId, info }, to: allIds(lobby) }]
   };
 }
+function catchUpLimitReached(lobby, player, now) {
+  const limit = lobby.catchUpLimitMs;
+  return typeof limit === "number" && typeof player.catchingUpSince === "number" && now - player.catchingUpSince >= limit;
+}
 function tick(lobby, now) {
   if (lobby.closed) return { lobby, out: [] };
   if (lobby.players.length === 0) {
@@ -4159,8 +4165,10 @@ function tick(lobby, now) {
   for (const p of lobby.players) {
     if (step.lobby.closed) break;
     const parked = isParked(step.lobby) && step.lobby.groupQueue.memberIds.indexOf(p.id) !== -1;
-    const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince;
-    if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
+    const current = findPlayer(step.lobby, p.id) || p;
+    const awaySince = current.awaySince;
+    const graceRanOut = !parked && awaySince !== null && now - awaySince >= lobby.graceMs;
+    if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
       const started = step.lobby.game.started;
       const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
       const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
@@ -6773,37 +6781,73 @@ var reportResult = {
 var MAX_LOG_EVENTS = 2e4;
 var MAX_LOG_BYTES = 1024 * 1024;
 var MAX_OPCODE_LENGTH = 64;
+function appendLogEvent(lobby, from, now, params) {
+  if (!isPlainObject2(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
+    return { reject: "bad_params" };
+  const started = lobby.game.started;
+  if (!started) return { reject: "not_in_game" };
+  if (typeof params.run === "string" && params.run !== started.runId)
+    return { game: lobby.game, relayed: null };
+  const args = params.args === void 0 ? null : params.args;
+  const line = JSON.stringify([params.t, params.opcode, args]);
+  const size = line.length;
+  const game = lobby.game;
+  const log = game.logs[from] || { lines: [], bytes: 0, truncated: false };
+  if (log.truncated || log.lines.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
+    const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
+    return {
+      game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [from]: truncated }) }),
+      relayed: null
+    };
+  }
+  const grown = {
+    lines: log.lines.concat([line]),
+    bytes: log.bytes + size,
+    truncated: false
+  };
+  const stamped = started.raceStartedAt === void 0 ? __spreadProps(__spreadValues({}, started), { raceStartedAt: now }) : started;
+  return {
+    game: __spreadProps(__spreadValues({}, game), { started: stamped, logs: __spreadProps(__spreadValues({}, game.logs), { [from]: grown }) }),
+    relayed: { playerId: from, t: params.t, opcode: params.opcode, args }
+  };
+}
 var logEvent = {
   key: "mpapi_log_event",
   reduce(lobby, ctx, params) {
     if (!lobby.game.started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
-    if (!isPlainObject2(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
-      return { reject: "bad_params" };
-    if (typeof params.run === "string" && params.run !== lobby.game.started.runId)
-      return { game: lobby.game, params: null, to: "none" };
-    const args = params.args === void 0 ? null : params.args;
-    const line = JSON.stringify([params.t, params.opcode, args]);
-    const size = line.length;
-    const game = lobby.game;
-    const log = game.logs[ctx.from] || { lines: [], bytes: 0, truncated: false };
-    if (log.truncated || log.lines.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
-      const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
-      return {
-        game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: truncated }) }),
-        params: null,
-        to: "none"
-      };
-    }
-    const grown = {
-      lines: log.lines.concat([line]),
-      bytes: log.bytes + size,
-      truncated: false
-    };
+    const appended = appendLogEvent(lobby, ctx.from, ctx.now, params);
+    if ("reject" in appended) return appended;
     return {
-      game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: grown }) }),
-      params: { playerId: ctx.from, t: params.t, opcode: params.opcode, args },
-      to: "others"
+      game: appended.game,
+      params: appended.relayed,
+      to: appended.relayed ? "others" : "none"
+    };
+  }
+};
+var MAX_LOG_BATCH = 50;
+var logEvents = {
+  key: "mpapi_log_events",
+  reduce(lobby, ctx, params) {
+    if (!lobby.game.started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    if (!isPlainObject2(params) || !Array.isArray(params.events) || params.events.length === 0 || params.events.length > MAX_LOG_BATCH)
+      return { reject: "bad_params" };
+    let current = lobby;
+    const relayed2 = [];
+    for (const event2 of params.events) {
+      const appended = appendLogEvent(current, ctx.from, ctx.now, event2);
+      if ("reject" in appended) return appended;
+      current = __spreadProps(__spreadValues({}, current), { game: appended.game });
+      if (appended.relayed) relayed2.push(appended.relayed);
+    }
+    if (relayed2.length === 0) return { game: current.game, params: null, to: "none" };
+    const last = relayed2[relayed2.length - 1];
+    return {
+      game: current.game,
+      params: __spreadProps(__spreadValues({}, last), { count: relayed2.length }),
+      to: "others",
+      spectate: relayed2
     };
   }
 };
@@ -6813,9 +6857,11 @@ var REGISTRY = {
   [restartGame.key]: restartGame,
   [abandonGame.key]: abandonGame,
   [reportResult.key]: reportResult,
-  [logEvent.key]: logEvent
+  [logEvent.key]: logEvent,
+  [logEvents.key]: logEvents
 };
 var LOG_EVENT_KEY = logEvent.key;
+var LOG_EVENTS_KEY = logEvents.key;
 function authoritativeAction(key) {
   return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
 }
@@ -6945,7 +6991,7 @@ var MAX_CID_LENGTH = 64;
 var RATE_PER_SECOND = 40;
 var BURST = 100;
 var LOG_RATE_PER_SECOND = 20;
-var LOG_BURST = 200;
+var LOG_BURST = 1024;
 function reject(to, rejection) {
   return {
     kind: "send",
@@ -6954,8 +7000,8 @@ function reject(to, rejection) {
     to: [to]
   };
 }
-function spend(lobby, userId, key, now) {
-  const isLog = key === LOG_EVENT_KEY;
+function spend(lobby, userId, key, now, cost = 1) {
+  const isLog = key === LOG_EVENT_KEY || key === LOG_EVENTS_KEY;
   const budgetKey = isLog ? logBudgetKey(userId) : userId;
   const burst = isLog ? LOG_BURST : BURST;
   const rate = isLog ? LOG_RATE_PER_SECOND : RATE_PER_SECOND;
@@ -6964,12 +7010,17 @@ function spend(lobby, userId, key, now) {
     burst,
     bucket.tokens + (now - bucket.at) / 1e3 * rate
   );
-  if (refilled < 1) return null;
+  if (refilled < cost) return null;
   return __spreadProps(__spreadValues({}, lobby), {
     actionBudget: __spreadProps(__spreadValues({}, lobby.actionBudget), {
-      [budgetKey]: { tokens: refilled - 1, at: now }
+      [budgetKey]: { tokens: refilled - cost, at: now }
     })
   });
+}
+function spendCost(key, params) {
+  if (key !== LOG_EVENTS_KEY) return 1;
+  const events = params == null ? void 0 : params.events;
+  return Array.isArray(events) ? Math.max(1, events.length) : 1;
 }
 function stringField(data, key) {
   const value = data[key];
@@ -7002,7 +7053,8 @@ function relayAction(lobby, senderId, data, ctx) {
   const to = stringField(data, "to");
   const refuse2 = (reason) => ({
     lobby,
-    out: [reject(senderId, { cid, action: key, reason })]
+    out: [reject(senderId, { cid, action: key, reason })],
+    refused: { key, reason }
   });
   const sender = findPlayer(lobby, senderId);
   if (!sender) return { lobby, out: [] };
@@ -7010,7 +7062,7 @@ function relayAction(lobby, senderId, data, ctx) {
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
     return refuse2("too_large");
-  const budgeted = spend(lobby, senderId, key, ctx.now);
+  const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params));
   if (!budgeted) return refuse2("rate_limited");
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
@@ -7042,6 +7094,8 @@ function relayAction(lobby, senderId, data, ctx) {
     if (result.out) out.push(...result.out);
     if (key === LOG_EVENT_KEY && audience !== "none" && result.params)
       out.push(...spectateEvent(next, result.params));
+    if (key === LOG_EVENTS_KEY && result.spectate)
+      for (const event2 of result.spectate) out.push(...spectateEvent(next, event2));
     const settled = settle(next, ctx.now);
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
@@ -7074,6 +7128,16 @@ function relayAction(lobby, senderId, data, ctx) {
     lobby: budgeted,
     out: [{ kind: "send", op: ServerOp.ACTION, payload: envelope, to: targets }]
   };
+}
+
+// src/lobby/catch_up.ts
+var CATCH_UP_LIMIT_MS_BY_MOD = {
+  MultiplayerPvP: 18e4
+};
+function catchUpLimitMsFor(modId, overrideSeconds) {
+  const limit = CATCH_UP_LIMIT_MS_BY_MOD[modId];
+  if (limit === void 0) return null;
+  return overrideSeconds !== void 0 && overrideSeconds > 0 ? overrideSeconds * 1e3 : limit;
 }
 
 // src/lobby/chat.ts
@@ -7405,6 +7469,7 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     requiredStanding: requiredStandingParam(params),
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
+    catchUpLimitMs: catchUpLimitMsFor(stringParam(params, "modId"), Number(ctx.env.LOBBY_CATCH_UP_LIMIT_SECONDS) || void 0),
     resultTimeoutMs: secondsFromEnv(
       ctx,
       "RESULT_TIMEOUT_SECONDS",
@@ -7542,7 +7607,7 @@ function lobbyMatchJoin(ctx, logger, nk, dispatcher, tickNumber, state, presence
       nk,
       dispatcher,
       attached,
-      join(attached.lobby, presence.userId, presence.sessionId, info)
+      join(attached.lobby, presence.userId, presence.sessionId, info, Date.now())
     );
   }
   return current ? { state: current } : null;
@@ -7639,6 +7704,15 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
         message.sender.userId
       );
       continue;
+    }
+    if (step.refused) {
+      logger.warn(
+        "Lobby %s: refused %s from %s (%s)",
+        current.lobby.code,
+        step.refused.key,
+        message.sender.userId,
+        step.refused.reason
+      );
     }
     if (step.dropped) {
       const d = step.dropped;
