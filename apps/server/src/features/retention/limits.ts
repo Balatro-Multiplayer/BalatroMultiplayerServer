@@ -7,6 +7,8 @@
 // ban that uses it is open, then EVIDENCE_KEEP_MS. Evidence nothing uses is
 // kept EVIDENCE_KEEP_MS from when it was made.
 
+import type { ItemStatus } from '../service-queue/types.js'
+
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export const CHAT_KEEP_MS = 90 * DAY_MS
@@ -38,7 +40,7 @@ export function evidencePurgeable(
 
 // A service queue item (a report, a flag) is open until it is resolved.
 export function linkOfItem(item: {
-	status: string
+	status: ItemStatus
 	resolvedAt: Date | null
 }): EvidenceLink {
 	return { closedAt: item.status === 'open' ? null : item.resolvedAt }

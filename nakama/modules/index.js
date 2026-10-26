@@ -8840,9 +8840,13 @@ function obscenityMatches(message) {
 }
 
 // src/chat/rpc.ts
+var MISSING_CONSENT_MESSAGE = {
+  notice: "Accept the Notice first",
+  age: "Answer the age question first"
+};
 function consentMissing(profile, settings) {
-  if (settings.noticeRequired) return profile.tosAcceptedVersion >= NOTICE_VERSION ? null : "Accept the Notice first";
-  return profile.ageAnswered ? null : "Answer the age question first";
+  if (settings.noticeRequired) return profile.tosAcceptedVersion >= NOTICE_VERSION ? null : "notice";
+  return profile.ageAnswered ? null : "age";
 }
 function rpcChatEnable(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -8853,7 +8857,7 @@ function rpcChatEnable(ctx, logger, nk, payload) {
     (current) => {
       if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, "Chat access is permanently restricted");
       const missing = consentMissing(current, settings);
-      if (missing) throw runtimeError(PERMISSION_DENIED, missing);
+      if (missing) throw runtimeError(PERMISSION_DENIED, MISSING_CONSENT_MESSAGE[missing]);
       return __spreadProps(__spreadValues({}, current), { chatEnabled: true });
     },
     ctx.username
@@ -8873,7 +8877,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
   if (profile.chatBlocked || !profile.chatEnabled)
     throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
   const missing = consentMissing(profile, settingsOf(ctx));
-  if (missing) throw runtimeError(PERMISSION_DENIED, missing);
+  if (missing) throw runtimeError(PERMISSION_DENIED, MISSING_CONSENT_MESSAGE[missing]);
   const banned = chatBanRefusal(readBans(nk, userId), Date.now());
   if (banned) throw runtimeError(PERMISSION_DENIED, banned);
   const current = currentLobby(nk, userId);

@@ -62,6 +62,7 @@ const includes = <T extends string>(list: readonly T[], value: unknown): value i
 	typeof value === 'string' && (list as readonly string[]).includes(value)
 
 export const isItemType = (value: unknown): value is ItemType => includes(ITEM_TYPES, value)
+export const isItemStatus = (value: unknown): value is ItemStatus => includes(ITEM_STATUSES, value)
 export const isActionKey = (value: unknown): value is ActionKey => includes(ACTION_KEYS, value)
 export const isChatMuteDuration = (value: unknown): value is ChatMuteDuration => includes(CHAT_MUTE_DURATIONS, value)
 export const isBanDuration = (value: unknown): value is BanDuration => includes(BAN_DURATIONS, value)

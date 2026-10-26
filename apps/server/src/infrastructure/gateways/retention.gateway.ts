@@ -16,7 +16,10 @@ import {
 } from '../../features/retention/limits.js'
 import { integritySourceId } from '../../features/service-queue/integrity-flag.js'
 import { antiCheatSourceId } from '../../features/service-queue/source-ids.js'
-import type { ItemType } from '../../features/service-queue/types.js'
+import {
+	type ItemType,
+	isItemStatus,
+} from '../../features/service-queue/types.js'
 import { db } from '../db/index.js'
 import {
 	chatLogs,
@@ -107,7 +110,9 @@ async function linksOfItems(
 
 	const out = new Map<number, EvidenceLink[]>()
 	for (const item of items) {
-		const links = [linkOfItem(item)]
+		// A status this code does not know is kept, as an open item.
+		const status = isItemStatus(item.status) ? item.status : 'open'
+		const links = [linkOfItem({ status, resolvedAt: item.resolvedAt })]
 		for (const banId of bansOfItem.get(item.id) ?? []) {
 			const link = banLink.get(banId)
 			if (link) links.push(link)
