@@ -106,6 +106,7 @@ const mockPlayerRecord = {
 	chatEnabled: false,
 	chatBlocked: false,
 	tosAcceptedVersion: 0,
+	noticeAcceptedAt: null,
 	deletedAt: null,
 }
 
@@ -127,7 +128,7 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	updateDiscordUsername: vi.fn().mockResolvedValue(undefined),
 	updateUseDiscordName: vi.fn().mockResolvedValue(undefined),
 	updatePreferredJoker: vi.fn().mockResolvedValue(undefined),
-	updateTosAcceptedVersion: vi.fn().mockResolvedValue(undefined),
+	recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 	updateChatStatus: vi.fn().mockResolvedValue(undefined),
 	softDeletePlayer: vi.fn().mockResolvedValue(undefined),
 	reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
@@ -146,8 +147,7 @@ beforeEach(async () => {
 	const linkState = await import('../features/auth/link-state.js')
 	linkState.linkStateNonces.clear()
 
-	// Reset server config — tosVersion 0 disables TOS gating in tests
-	setConfig({ tosVersion: 0, mods: [], chatAllowlist: new Set() })
+	setConfig({ mods: [], chatAllowlist: new Set() })
 
 	vi.clearAllMocks()
 

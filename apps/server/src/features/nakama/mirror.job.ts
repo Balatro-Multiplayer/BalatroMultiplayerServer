@@ -42,7 +42,12 @@ export async function drainMirror(rpc: Rpc, mirror: MirrorService): Promise<numb
 export function startMirrorJob(): () => void {
 	const mirror = createMirrorService({
 		players: playerGateway,
-		store: { storeRun: storeMirroredRun, storeChat: storeMirroredChat, storeForfeit: storeMirroredForfeit },
+		store: {
+			storeRun: storeMirroredRun,
+			storeChat: storeMirroredChat,
+			storeForfeit: storeMirroredForfeit,
+			storeNoticeAcceptance: (row) => playerGateway.recordNoticeAcceptance(row.playerId, row.version, row.acceptedAt),
+		},
 	})
 	let running = false
 	const tick = async () => {

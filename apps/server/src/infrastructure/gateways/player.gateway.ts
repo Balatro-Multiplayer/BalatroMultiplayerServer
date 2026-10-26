@@ -17,6 +17,7 @@ export interface PlayerRecord {
 	chatEnabled: boolean
 	chatBlocked: boolean
 	tosAcceptedVersion: number
+	noticeAcceptedAt: Date | null
 	deletedAt: Date | null
 	// Set once the player has signed in through Nakama.
 	nakamaUserId?: string | null
@@ -223,13 +224,16 @@ export async function updateSteamName(
 		.where(eq(players.id, playerId))
 }
 
-export async function updateTosAcceptedVersion(
+// The Notice version the player accepted, and when (website login or the
+// Nakama mirror).
+export async function recordNoticeAcceptance(
 	playerId: string,
 	version: number,
+	acceptedAt: Date,
 ): Promise<void> {
 	await db
 		.update(players)
-		.set({ tosAcceptedVersion: version, updatedAt: new Date() })
+		.set({ tosAcceptedVersion: version, noticeAcceptedAt: acceptedAt, updatedAt: new Date() })
 		.where(eq(players.id, playerId))
 }
 

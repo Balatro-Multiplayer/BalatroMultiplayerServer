@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
 import { DEFAULT_CONFIG, writeConfig } from '../config'
 import { defaultProfile, writeProfile, type Profile } from '../player/profile'
 import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY } from '../lobby/protocol'
@@ -10,7 +11,7 @@ const USER = '11111111-1111-4111-8111-111111111111'
 
 function nkWith(profile: Partial<Profile>, config = {}) {
 	const nk = fakeNk()
-	writeConfig(nk as any, { ...DEFAULT_CONFIG, tosVersion: 2, ...config })
+	writeConfig(nk as any, { ...DEFAULT_CONFIG, ...config })
 	writeProfile(nk as any, USER, { ...defaultProfile('Alice'), ...profile })
 	return nk
 }
@@ -19,43 +20,43 @@ const enable = (nk: unknown) => JSON.parse(rpcChatEnable(playerCtx(USER), fakeLo
 const send = (nk: unknown) => rpcChatSend(playerCtx(USER), fakeLogger, nk as any, JSON.stringify({ message: 'hi' }))
 
 describe('chat_enable', () => {
-	it('turns chat on once the current ToS is accepted', () => {
-		const nk = nkWith({ tosAcceptedVersion: 2 })
+	it('turns chat on once the current Notice is accepted', () => {
+		const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION })
 		expect(enable(nk).player.chatEnabled).toBe(true)
 	})
 
-	it('waits for the current ToS', () => {
-		expect(() => enable(nkWith({ tosAcceptedVersion: 1 }))).toThrow(/Terms of Service/)
+	it('waits for the current Notice', () => {
+		expect(() => enable(nkWith({ tosAcceptedVersion: NOTICE_VERSION - 1 }))).toThrow(/Accept the Notice/)
 	})
 
 	it('refuses a chat-blocked account', () => {
-		expect(() => enable(nkWith({ tosAcceptedVersion: 2, chatBlocked: true }))).toThrow(/restricted/)
+		expect(() => enable(nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatBlocked: true }))).toThrow(/restricted/)
 	})
 })
 
 describe('chat_send gates', () => {
 	it('refuses when chat is off server-wide', () => {
-		const nk = nkWith({ tosAcceptedVersion: 2, chatEnabled: true }, { chatEnabled: false })
+		const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }, { chatEnabled: false })
 		expect(() => send(nk)).toThrow(/turned off/)
 	})
 
 	it('refuses players without chat enabled', () => {
-		expect(() => send(nkWith({ tosAcceptedVersion: 2 }))).toThrow(/not enabled/)
-		expect(() => send(nkWith({ tosAcceptedVersion: 2, chatEnabled: true, chatBlocked: true }))).toThrow(/not enabled/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION }))).toThrow(/not enabled/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true, chatBlocked: true }))).toThrow(/not enabled/)
 	})
 
 	it('refuses after a ToS update until it is accepted', () => {
-		expect(() => send(nkWith({ tosAcceptedVersion: 1, chatEnabled: true }))).toThrow(/Terms of Service/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION - 1, chatEnabled: true }))).toThrow(/Accept the Notice/)
 	})
 
 	it('lets an enabled player through to the lobby check', () => {
-		expect(() => send(nkWith({ tosAcceptedVersion: 2, chatEnabled: true }))).toThrow(/Not in a lobby/)
+		expect(() => send(nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }))).toThrow(/Not in a lobby/)
 	})
 })
 
 // Seated in lobby ABCDEF; the moderation service answers with verdict.
 function seated(verdict: unknown, config = {}) {
-	const nk = nkWith({ tosAcceptedVersion: 2, chatEnabled: true }, config)
+	const nk = nkWith({ tosAcceptedVersion: NOTICE_VERSION, chatEnabled: true }, config)
 	let next = 0
 	nk.uuidv4 = () => `u${++next}`
 	nk.matchGet = () => ({})

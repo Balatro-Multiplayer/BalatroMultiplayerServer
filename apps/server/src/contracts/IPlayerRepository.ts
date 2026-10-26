@@ -42,7 +42,11 @@ export interface IPlayerRepository {
 	): Promise<void>
 	updatePreferredJoker(playerId: string, preferredJoker: string): Promise<void>
 	updateSteamName(playerId: string, steamName: string): Promise<void>
-	updateTosAcceptedVersion(playerId: string, version: number): Promise<void>
+	recordNoticeAcceptance(
+		playerId: string,
+		version: number,
+		acceptedAt: Date,
+	): Promise<void>
 	updateChatStatus(
 		playerId: string,
 		chatEnabled: boolean,

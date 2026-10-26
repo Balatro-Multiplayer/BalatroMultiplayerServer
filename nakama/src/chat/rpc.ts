@@ -8,7 +8,8 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from '../errors'
-import { readConfig, type ServerConfig } from '../config'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
+import { readConfig } from '../config'
 import { chatBanRefusal } from '../moderation/access'
 import { readBans } from '../moderation/bans'
 import { currentLobby } from '../lobby/rpc'
@@ -25,8 +26,8 @@ import { settingsOf } from '../server_kind'
 import { type ChatLogLine, type ChatVerdict, enqueue } from '../mirror/outbox'
 import { lobbyKindOfLabel } from '../review/ranked'
 
-function tosAccepted(profile: Profile, config: ServerConfig): boolean {
-	return profile.tosAcceptedVersion >= config.tosVersion
+function noticeAccepted(profile: Profile): boolean {
+	return profile.tosAcceptedVersion >= NOTICE_VERSION
 }
 
 // {} -> {enabled, player}: turns chat on for the caller (the API's
@@ -45,7 +46,7 @@ export function rpcChatEnable(
 		userId,
 		(current) => {
 			if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, 'Chat access is permanently restricted')
-			if (!tosAccepted(current, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
+			if (!noticeAccepted(current)) throw runtimeError(PERMISSION_DENIED, 'Accept the Notice first')
 			return { ...current, chatEnabled: true }
 		},
 		ctx.username,
@@ -75,7 +76,7 @@ export function rpcChatSend(
 	const profile = profileFor(nk, userId, ctx.username)
 	if (profile.chatBlocked || !profile.chatEnabled)
 		throw runtimeError(PERMISSION_DENIED, 'Chat is not enabled for this account')
-	if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
+	if (!noticeAccepted(profile)) throw runtimeError(PERMISSION_DENIED, 'Accept the Notice first')
 	const banned = chatBanRefusal(readBans(nk, userId), Date.now())
 	if (banned) throw runtimeError(PERMISSION_DENIED, banned)
 

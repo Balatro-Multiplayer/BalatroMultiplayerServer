@@ -6,7 +6,6 @@ export interface ModConfig {
 }
 
 export interface AppConfig {
-	tosVersion: number
 	mods: ModConfig[]
 	chatAllowlist: Set<string>
 	// DB-backed (server_config.chat_enabled). Global chat kill-switch. When
@@ -42,7 +41,6 @@ export interface AppConfig {
 }
 
 let _config: AppConfig = {
-	tosVersion: 1,
 	mods: [],
 	chatAllowlist: new Set(),
 	chatEnabled: false,

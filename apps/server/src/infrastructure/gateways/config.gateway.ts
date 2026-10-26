@@ -27,11 +27,10 @@ export async function pinnedSmodsIds(): Promise<string[]> {
 export async function loadConfigFromDb(): Promise<AppConfig> {
 	await db
 		.insert(serverConfig)
-		.values({ id: 1, tosVersion: 1 })
+		.values({ id: 1 })
 		.onConflictDoNothing()
 
 	const configRow = await db.query.serverConfig.findFirst()
-	const tosVersion = configRow?.tosVersion ?? 1
 
 	const modRows = await db.query.modVersions.findMany()
 	const mods = modRows.map((row) => ({
@@ -46,7 +45,6 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 
 	const config: AppConfig = {
 		season: await ratingSeason(),
-		tosVersion,
 		mods,
 		chatAllowlist: chatAllowlistSet,
 		chatEnabled: configRow?.chatEnabled ?? false,

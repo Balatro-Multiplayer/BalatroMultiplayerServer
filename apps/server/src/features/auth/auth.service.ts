@@ -1,3 +1,4 @@
+import { NOTICE_VERSION } from '@bmp/types'
 import type {
 	IPlayerRepository,
 	PlayerRecord,
@@ -6,7 +7,6 @@ import { pseudonymizeChatLogsForPlayer } from '../../infrastructure/gateways/his
 import { pseudonymizeRunLogsForPlayer } from '../../infrastructure/gateways/replay-log.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
-import { getConfig } from '../../state/config.js'
 import {
 	type PlayerSession,
 	createSession,
@@ -243,14 +243,16 @@ export function createAuthService(deps: AuthServiceDeps) {
 	}
 
 	async function acceptTos(playerId: string, chatEligible?: boolean) {
-		const { tosVersion } = getConfig()
-
 		const session = getSession(playerId)
 		if (!session) throw new AppError('Session not found', 401)
 
 		await ensurePlayerExistsInDb(session)
-		await playerRepository.updateTosAcceptedVersion(playerId, tosVersion)
-		session.tosAcceptedVersion = tosVersion
+		await playerRepository.recordNoticeAcceptance(
+			playerId,
+			NOTICE_VERSION,
+			new Date(),
+		)
+		session.tosAcceptedVersion = NOTICE_VERSION
 
 		if (chatEligible !== undefined) {
 			await playerRepository.updateChatStatus(

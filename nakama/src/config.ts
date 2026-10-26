@@ -9,7 +9,6 @@ export const CONFIG_COLLECTION = 'server_config'
 export const CONFIG_KEY = 'global'
 
 export interface ServerConfig {
-	tosVersion: number
 	chatEnabled: boolean
 	rankedEnabled: boolean
 	casualQueueEnabled: boolean
@@ -39,7 +38,6 @@ export interface ServerConfig {
 
 // Until the API's first push: everything Nakama already did stays allowed.
 export const DEFAULT_CONFIG: ServerConfig = {
-	tosVersion: 1,
 	chatEnabled: true,
 	rankedEnabled: true,
 	casualQueueEnabled: true,
@@ -68,8 +66,6 @@ export function modIdsOf(value: unknown): string[] | null {
 // typed values are ignored.
 export function mergeConfig(current: ServerConfig, update: { [key: string]: unknown }): ServerConfig {
 	const next: ServerConfig = { ...current }
-	const tos = update.tosVersion
-	if (typeof tos === 'number' && Number.isInteger(tos) && tos >= 0) next.tosVersion = tos
 	const season = update.season
 	if (typeof season === 'number' && Number.isInteger(season) && season > 0) next.season = season
 	const flags: (keyof ServerConfig)[] = [

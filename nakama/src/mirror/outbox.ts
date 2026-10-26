@@ -1,6 +1,7 @@
 // The Nakama -> Postgres mirror. Postgres (the BMP API) still backs the
 // website, webadmin and the moderators' service queue, so what Nakama games
-// produce -- finished runs with their logs and ratings, chat lines -- is
+// produce -- finished runs with their logs and ratings, chat lines, Notice
+// acceptances -- is
 // copied there. Nakama never pushes it: a finished game is stored from the
 // match loop, where an HTTP call would block the VM, and the API may be down.
 // Instead each fact is written to a system-owned outbox, and the API pulls
@@ -28,6 +29,8 @@ export type MirrorEntry =
 			forfeitedAt: number
 			lobbyKind?: LobbyKind
 	  }
+	// A player accepted the Notice (player/session.ts rpcTosAccept); at is when.
+	| { kind: 'notice'; at: number; userId: string; version: number }
 
 // The rating board a ranked run counted on.
 export interface RatingBoard {
@@ -111,7 +114,15 @@ export interface PulledForfeit {
 	forfeitedAt: number
 }
 
-export type PulledEntry = PulledRun | PulledChat | PulledForfeit
+export interface PulledNotice {
+	key: string
+	kind: 'notice'
+	at: number
+	userId: string
+	version: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice
 
 function expandRun(nk: nkruntime.Nakama, key: string, entry: Extract<MirrorEntry, { kind: 'run' }>): PulledRun | null {
 	const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }])
@@ -173,7 +184,7 @@ export function pullEntries(
 		} else if (entry.kind === 'chat') {
 			userIds[entry.line.userId] = true
 			entries.push({ key: object.key, kind: 'chat', at: entry.at, line: entry.line })
-		} else if (entry.kind === 'forfeit') {
+		} else if (entry.kind === 'forfeit' || entry.kind === 'notice') {
 			userIds[entry.userId] = true
 			entries.push({ key: object.key, ...entry })
 		} else {
