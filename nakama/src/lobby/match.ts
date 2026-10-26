@@ -40,6 +40,7 @@ import {
 	leave,
 	newLobby,
 	setMetadata,
+	setCatchingUp,
 	setOwnState,
 	setPlayerInfo,
 	tick,
@@ -669,6 +670,8 @@ function stepForMessage(
 				senderId,
 				data.state === undefined ? null : data.state,
 			)
+		case ClientOp.CATCHING_UP:
+			return setCatchingUp(lobby, senderId, data.catchingUp === true, Date.now())
 		default:
 			return null
 	}
