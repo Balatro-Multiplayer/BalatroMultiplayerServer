@@ -3799,6 +3799,7 @@ function rejectOp(userId, message) {
   };
 }
 var DIFFERENT_MOD = "Lobby is for a different mod";
+var FORFEITED_SEAT = "You forfeited this match";
 function joinRejection(lobby, userId, modId) {
   if (lobby.closed) return "Lobby is closed";
   if (modId !== lobby.modId) return DIFFERENT_MOD;
@@ -3807,6 +3808,7 @@ function joinRejection(lobby, userId, modId) {
     return "You are spectating this lobby";
   if (lobby.kickedIds.indexOf(userId) !== -1)
     return "You were kicked from this lobby";
+  if (forfeitedStill(lobby, userId)) return FORFEITED_SEAT;
   if (lobby.game.started) return "The game has already started";
   if (lobby.groupQueue) return "This lobby is queueing as a group";
   if (lobby.allowedIds) {
@@ -3817,6 +3819,12 @@ function joinRejection(lobby, userId, modId) {
   }
   if (lobby.players.length >= lobby.maxPlayers) return "Lobby is full";
   return null;
+}
+function forfeitedStill(lobby, userId) {
+  const runId = (lobby.forfeitedSeats || {})[userId];
+  if (runId === void 0) return false;
+  const started = lobby.game.started;
+  return started === null || started.runId === runId;
 }
 function snapshotFor(lobby, userId) {
   const self = findPlayer(lobby, userId);
@@ -4129,7 +4137,8 @@ function tick(lobby, now) {
       const started = step.lobby.game.started;
       const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
       const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
-      step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) };
+      const marked = forfeited.length > 0 && started ? __spreadProps(__spreadValues({}, removed.lobby), { forfeitedSeats: __spreadProps(__spreadValues({}, removed.lobby.forfeitedSeats || {}), { [p.id]: started.runId }) }) : removed.lobby;
+      step = { lobby: marked, out: step.out.concat(forfeited, removed.out) };
     }
   }
   return step;
