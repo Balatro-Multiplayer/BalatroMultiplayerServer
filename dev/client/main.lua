@@ -10,6 +10,8 @@
 --   BMP_IMPERSONATE_NAME=<name>       (Device login; ID wins over NAME)
 --   BMP_DEV_STEAM_LOGIN=1             log in with Steam login (the server
 --                                     needs a Steam Web API key)
+--   BMP_SCENARIO=<mod_id>:<name>      run that in-game scenario (MPAPI
+--                                     scripts/run_scenario.sh sets it)
 if not (MPAPI and MPAPI.dev) then
 	if MPAPI then
 		MPAPI.sendWarnMessage('Dev mod: this MultiplayerAPI has no MPAPI.dev; the Dev mod does nothing.')
@@ -44,6 +46,10 @@ if os.getenv('BMP_DEV_STEAM_LOGIN') == '1' then
 elseif imp_id or imp_name then
 	MPAPI.dev.set_identity(imp_id and { id = imp_id } or { name = imp_name })
 	MPAPI.sendDebugMessage('Dev mod: logging in as test account ' .. tostring(imp_id or imp_name))
+end
+
+if os.getenv('BMP_SCENARIO') then
+	MPAPI.dev.start_scenario()
 end
 
 MPAPI.sendDebugMessage('Dev mod: server ' .. tostring(host or '127.0.0.1'))

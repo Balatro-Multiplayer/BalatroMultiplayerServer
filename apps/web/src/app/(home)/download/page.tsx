@@ -147,7 +147,7 @@ export default function DownloadPage() {
                 <ExternalLink href='https://github.com/ethangreen-dev/lovely-injector'>
                   Lovely
                 </ExternalLink>{' '}
-                0.9 or newer and{' '}
+                0.10 or newer and{' '}
                 <ExternalLink href='https://github.com/Steamodded/smods'>
                   Steamodded
                 </ExternalLink>{' '}
