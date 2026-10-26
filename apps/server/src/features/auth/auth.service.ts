@@ -14,6 +14,7 @@ import {
 	linkProvider,
 	unlinkProvider,
 } from '../../state/index.js'
+import type { NakamaNoticeAcceptance } from '../../infrastructure/nakama/profile-sync.js'
 import { signJwt } from './jwt.js'
 
 type Provider = 'steam' | 'discord'
@@ -25,6 +26,8 @@ interface AuthServiceDeps {
 	nakamaAccounts: {
 		// infrastructure/nakama/profile-sync.ts deleteNakamaAccount
 		delete(playerId: string, anonymousId: string): Promise<'deleted' | 'no_account' | 'unavailable'>
+		// infrastructure/nakama/profile-sync.ts acceptNakamaNotice
+		acceptNotice(playerId: string, notice: NakamaNoticeAcceptance): Promise<boolean>
 	}
 }
 
@@ -250,10 +253,11 @@ export function createAuthService(deps: AuthServiceDeps) {
 		if (!session) throw new AppError('Session not found', 401)
 
 		await ensurePlayerExistsInDb(session)
+		const acceptedAt = new Date()
 		await playerRepository.recordNoticeAcceptance(
 			playerId,
 			NOTICE_VERSION,
-			new Date(),
+			acceptedAt,
 		)
 		session.tosAcceptedVersion = NOTICE_VERSION
 
@@ -266,6 +270,14 @@ export function createAuthService(deps: AuthServiceDeps) {
 			session.chatEnabled = chatEligible
 			session.chatBlocked = !chatEligible
 		}
+
+		// The game reads its own Nakama profile: without this it asks again.
+		// Best effort, as the other profile edits; Postgres has it already.
+		await deps.nakamaAccounts.acceptNotice(playerId, {
+			version: NOTICE_VERSION,
+			acceptedAt: acceptedAt.getTime(),
+			chatEligible,
+		})
 
 		return sessionAndToken(session)
 	}

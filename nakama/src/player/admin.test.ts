@@ -69,6 +69,19 @@ describe('admin_profile_set', () => {
 		expect(discordOwner(nk as any, HASH)).toBeNull()
 	})
 
+	it('takes a Notice acceptance and an age answer made on the website, so the game does not ask again', () => {
+		const { nk } = setup()
+		set(nk, { notice: { version: 2, acceptedAt: 1_700_000_000_000 }, chatEligible: false })
+		const profile = readProfile(nk as any, ALICE)?.profile
+		expect(profile?.tosAcceptedVersion).toBe(2)
+		expect(profile?.noticeAcceptedAt).toBe(1_700_000_000_000)
+		expect(profile?.ageAnswered).toBe(true)
+		expect(profile?.chatEnabled).toBe(false)
+		expect(profile?.chatBlocked).toBe(true)
+		expect(() => set(nk, { notice: { version: 'two', acceptedAt: 1 } })).toThrow(/notice/)
+		expect(() => set(nk, { chatEligible: 'yes' })).toThrow(/chatEligible/)
+	})
+
 	it('refuses bad input, unknown players and players', () => {
 		const { nk } = setup()
 		expect(() => set(nk, { privileges: 'admin' })).toThrow(/privileges/)

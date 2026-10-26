@@ -1,6 +1,7 @@
 // Account changes made on the website and webadmin (the BMP API), applied to
 // the player's Nakama profile so the game sees them at once: privileges,
-// display name and joker preferences, a Discord unlink, and account deletion.
+// display name and joker preferences, a Discord unlink, a Notice acceptance
+// and age answer, and account deletion.
 // Server only. (Linking Discord is admin_discord_set, in discord.ts.)
 import { FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND, PERMISSION_DENIED, runtimeError } from '../errors'
 import { currentLobby } from '../lobby/rpc'
@@ -23,6 +24,10 @@ export interface ProfileEdit {
 	preferredJoker?: string
 	// null unlinks.
 	discord?: null
+	// A Notice accepted on the website (auth.service.ts acceptTos).
+	notice?: { version: number; acceptedAt: number }
+	// The age answer given with it: chat on, or blocked (as rpcTosAccept).
+	chatEligible?: boolean
 }
 
 function requireAccount(nk: nkruntime.Nakama, userId: unknown): string {
@@ -38,7 +43,7 @@ function requireAccount(nk: nkruntime.Nakama, userId: unknown): string {
 // The edit in a request body; INVALID_ARGUMENT for a field of the wrong shape.
 export function parseEdit(input: { [key: string]: unknown }): ProfileEdit {
 	const edit: ProfileEdit = {}
-	const { privileges, useDiscordName, preferredJoker, discord } = input
+	const { privileges, useDiscordName, preferredJoker, discord, notice, chatEligible } = input
 	if (privileges !== undefined) {
 		if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === 'string' && PRIVILEGE.test(p)))
 			throw runtimeError(INVALID_ARGUMENT, 'privileges must be an array of privilege names')
@@ -56,6 +61,16 @@ export function parseEdit(input: { [key: string]: unknown }): ProfileEdit {
 	if (discord !== undefined) {
 		if (discord !== null) throw runtimeError(INVALID_ARGUMENT, 'discord can only be null (unlink)')
 		edit.discord = null
+	}
+	if (notice !== undefined) {
+		const n = notice as { [key: string]: unknown } | null
+		if (!n || typeof n !== 'object' || !Number.isInteger(n.version) || (n.version as number) < 1 || typeof n.acceptedAt !== 'number')
+			throw runtimeError(INVALID_ARGUMENT, 'notice must be {version, acceptedAt}')
+		edit.notice = { version: n.version as number, acceptedAt: n.acceptedAt }
+	}
+	if (chatEligible !== undefined) {
+		if (typeof chatEligible !== 'boolean') throw runtimeError(INVALID_ARGUMENT, 'chatEligible must be a boolean')
+		edit.chatEligible = chatEligible
 	}
 	return edit
 }
@@ -80,10 +95,20 @@ export function applyEdit(profile: Profile, edit: ProfileEdit, unlocked: readonl
 			throw runtimeError(INVALID_ARGUMENT, 'Invalid joker')
 		next.preferredJoker = edit.preferredJoker
 	}
+	if (edit.notice) {
+		next.tosAcceptedVersion = edit.notice.version
+		next.noticeAcceptedAt = edit.notice.acceptedAt
+	}
+	if (edit.chatEligible !== undefined) {
+		next.ageAnswered = true
+		next.chatEnabled = edit.chatEligible
+		next.chatBlocked = !edit.chatEligible
+	}
 	return next
 }
 
-// {userId, privileges?, useDiscordName?, preferredJoker?, discord?: null} -> {player}
+// {userId, privileges?, useDiscordName?, preferredJoker?, discord?: null,
+// notice?: {version, acceptedAt}, chatEligible?} -> {player}
 export function rpcAdminProfileSet(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,

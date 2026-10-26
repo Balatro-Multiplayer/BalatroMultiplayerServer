@@ -11,6 +11,8 @@ export interface NakamaProfileEdit {
 	preferredJoker?: string
 	// null unlinks.
 	discord?: null
+	notice?: { version: number; acceptedAt: number }
+	chatEligible?: boolean
 }
 
 export async function editNakamaProfile(playerId: string, edit: NakamaProfileEdit): Promise<boolean> {
@@ -19,6 +21,18 @@ export async function editNakamaProfile(playerId: string, edit: NakamaProfileEdi
 	const result = await callNakamaRpc('admin_profile_set', { userId, ...edit })
 	if (!result.ok) console.warn(`[nakama] Profile of ${playerId} not updated: ${result.error}`)
 	return result.ok
+}
+
+// A Notice accepted on the website, with the age answer if one was given.
+export interface NakamaNoticeAcceptance {
+	version: number
+	acceptedAt: number
+	chatEligible?: boolean
+}
+
+export async function acceptNakamaNotice(playerId: string, notice: NakamaNoticeAcceptance): Promise<boolean> {
+	const { version, acceptedAt, chatEligible } = notice
+	return editNakamaProfile(playerId, { notice: { version, acceptedAt }, chatEligible })
 }
 
 export async function linkNakamaDiscord(playerId: string, discordIdHash: string, discordUsername?: string): Promise<boolean> {

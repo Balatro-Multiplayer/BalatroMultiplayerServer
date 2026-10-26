@@ -58,11 +58,15 @@ function makeMockPlayerRepository(): IPlayerRepository {
 
 function makeAuthService() {
 	const playerRepository = makeMockPlayerRepository()
+	const nakamaAccounts = {
+		delete: vi.fn().mockResolvedValue('no_account' as const),
+		acceptNotice: vi.fn().mockResolvedValue(true),
+	}
 	const service = createAuthService({
 		playerRepository,
-		nakamaAccounts: { delete: vi.fn().mockResolvedValue('no_account' as const) },
+		nakamaAccounts,
 	})
-	return { service, playerRepository }
+	return { service, playerRepository, nakamaAccounts }
 }
 
 describe('auth.service', () => {
@@ -216,6 +220,32 @@ describe('auth.service', () => {
 			await expect(
 				service.authenticateWithDiscord('disc1', 'Bob'),
 			).rejects.toThrow('DB connection failed')
+		})
+	})
+
+	describe('acceptTos', () => {
+		it('also records the acceptance and the age answer in Nakama, so the game does not ask again', async () => {
+			const { service, playerRepository, nakamaAccounts } = makeAuthService()
+			const session = createSession('Alice', { steamIdHash: 'steam1' })
+
+			await service.acceptTos(session.playerId, false)
+
+			const [, version, at] = vi.mocked(playerRepository.recordNoticeAcceptance).mock.calls[0]
+			expect(nakamaAccounts.acceptNotice).toHaveBeenCalledWith(session.playerId, {
+				version,
+				acceptedAt: (at as Date).getTime(),
+				chatEligible: false,
+			})
+		})
+
+		it('still accepts on the website when Nakama is not reached', async () => {
+			const { service, nakamaAccounts } = makeAuthService()
+			nakamaAccounts.acceptNotice.mockResolvedValueOnce(false)
+			const session = createSession('Alice', { steamIdHash: 'steam1' })
+
+			const result = await service.acceptTos(session.playerId)
+
+			expect(result.session.tosAcceptedVersion).toBeGreaterThan(0)
 		})
 	})
 

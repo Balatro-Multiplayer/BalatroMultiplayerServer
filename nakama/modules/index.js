@@ -9616,7 +9616,7 @@ function requireAccount(nk, userId) {
 }
 function parseEdit(input) {
   const edit = {};
-  const { privileges, useDiscordName, preferredJoker, discord } = input;
+  const { privileges, useDiscordName, preferredJoker, discord, notice, chatEligible } = input;
   if (privileges !== void 0) {
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE2.test(p)))
       throw runtimeError(INVALID_ARGUMENT, "privileges must be an array of privilege names");
@@ -9635,6 +9635,16 @@ function parseEdit(input) {
     if (discord !== null) throw runtimeError(INVALID_ARGUMENT, "discord can only be null (unlink)");
     edit.discord = null;
   }
+  if (notice !== void 0) {
+    const n = notice;
+    if (!n || typeof n !== "object" || !Number.isInteger(n.version) || n.version < 1 || typeof n.acceptedAt !== "number")
+      throw runtimeError(INVALID_ARGUMENT, "notice must be {version, acceptedAt}");
+    edit.notice = { version: n.version, acceptedAt: n.acceptedAt };
+  }
+  if (chatEligible !== void 0) {
+    if (typeof chatEligible !== "boolean") throw runtimeError(INVALID_ARGUMENT, "chatEligible must be a boolean");
+    edit.chatEligible = chatEligible;
+  }
   return edit;
 }
 function applyEdit(profile, edit, unlocked = []) {
@@ -9652,6 +9662,15 @@ function applyEdit(profile, edit, unlocked = []) {
     if (!isSelectable(edit.preferredJoker, { privileges: next.privileges, unlocked }))
       throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
     next.preferredJoker = edit.preferredJoker;
+  }
+  if (edit.notice) {
+    next.tosAcceptedVersion = edit.notice.version;
+    next.noticeAcceptedAt = edit.notice.acceptedAt;
+  }
+  if (edit.chatEligible !== void 0) {
+    next.ageAnswered = true;
+    next.chatEnabled = edit.chatEligible;
+    next.chatBlocked = !edit.chatEligible;
   }
   return next;
 }
