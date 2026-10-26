@@ -124,6 +124,24 @@ export function liftBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, userId: 
 	return after
 }
 
+// Re-keys an account's ban index entry after its login id changed (a Device
+// login moving from the raw Steam id to its hash), so the old id is not kept.
+export function moveLoginKey(nk: nkruntime.Nakama, from: string, to: string) {
+	const [entry] = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }])
+	if (!entry) return
+	nk.storageWrite([
+		{
+			collection: BAN_INDEX_COLLECTION,
+			key: to,
+			userId: SYSTEM_USER_ID,
+			value: entry.value,
+			permissionRead: 0,
+			permissionWrite: 0,
+		},
+	])
+	nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }])
+}
+
 // For the login before-hooks: refuses a login into a banned account, and
 // lifts an account ban that has run out. key is a loginKeys entry.
 export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, key: string, now: number) {

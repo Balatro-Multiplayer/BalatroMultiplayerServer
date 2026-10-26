@@ -3437,6 +3437,21 @@ function liftBan(nk, logger, userId, banId) {
   logger.info("Lifted ban %s of %s", banId, userId);
   return after;
 }
+function moveLoginKey(nk, from, to) {
+  const [entry] = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }]);
+  if (!entry) return;
+  nk.storageWrite([
+    {
+      collection: BAN_INDEX_COLLECTION,
+      key: to,
+      userId: SYSTEM_USER_ID,
+      value: entry.value,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+  nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }]);
+}
 function checkLoginBan(nk, logger, key, now) {
   const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
   if (objects.length === 0) return;
@@ -6448,6 +6463,21 @@ function rpcAdminMirrorAck(ctx, logger, nk, payload) {
   return JSON.stringify({ acked: keys.length });
 }
 
+// src/player/steam_id.ts
+var STEAM_HASH_CUSTOM_ID_PREFIX = "steamhash:";
+var STEAM_HASH_DEVICE_ID_PREFIX = "devicehash:";
+var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
+var STEAM_HASH_CUSTOM_ID = /^steamhash:([0-9a-f]{64})$/;
+function steamIdHash(nk, salt, steamId) {
+  return nk.sha256Hash(steamId + salt);
+}
+function steamIdHashOf(nk, userId) {
+  const match = STEAM_HASH_CUSTOM_ID.exec(
+    nk.accountGetId(userId).customId || ""
+  );
+  return match ? match[1] : null;
+}
+
 // src/rating/elo.ts
 var INITIAL_HIDDEN_RATING = 600;
 var PLACEMENT_GAMES = 5;
@@ -6788,12 +6818,8 @@ function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
 
 // src/rating/legacy.ts
 var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
-var STEAM_CUSTOM_ID_PREFIX = "steam:";
 var HASH_PATTERN = /^[0-9a-f]{64}$/;
 var IMPORT_BATCH_LIMIT = 100;
-function steamIdHash(nk, salt, steamId) {
-  return nk.sha256Hash(steamId + salt);
-}
 function isLegacyBoard(value) {
   const b = value;
   return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
@@ -6900,12 +6926,11 @@ function claimLegacyRatings(nk, logger, userId, username, hash, now) {
 }
 function claimLegacyRatingsAtLogin(ctx, logger, nk) {
   try {
-    const salt = ctx.env.PLAYER_ID_SALT;
-    if (!salt || !ctx.userId) return;
-    const account = nk.accountGetId(ctx.userId);
-    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX)) return;
-    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX.length));
-    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
+    if (!ctx.userId) return;
+    const hash = steamIdHashOf(nk, ctx.userId);
+    if (!hash) return;
+    const username = nk.accountGetId(ctx.userId).user.username;
+    claimLegacyRatings(nk, logger, ctx.userId, username, hash, Date.now());
   } catch (e) {
     logger.error("Legacy rating claim failed: %v", e);
   }
@@ -6913,10 +6938,16 @@ function claimLegacyRatingsAtLogin(ctx, logger, nk) {
 
 // src/auth.ts
 var STEAM_AUTH_URL = "https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/";
-var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
 var STEAM_TICKET_PATTERN = /^[0-9a-fA-F]{16,4096}$/;
 var STEAM_TIMEOUT_MS = 1e4;
-var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
+function playerIdSalt(ctx, logger) {
+  const salt = ctx.env.PLAYER_ID_SALT;
+  if (!salt) {
+    logger.error("Login is not configured: PLAYER_ID_SALT is empty");
+    throw runtimeError(UNAVAILABLE, "Login is not configured");
+  }
+  return salt;
+}
 function verifySteamTicket(ctx, logger, nk, ticket) {
   const key = ctx.env.STEAM_WEB_API_KEY;
   const appId = ctx.env.STEAM_APP_ID || "2379780";
@@ -6965,8 +6996,9 @@ function beforeAuthenticateCustom(ctx, logger, nk, data) {
       "Custom login needs a Steam ticket in vars.steam_ticket"
     );
   }
+  const salt = playerIdSalt(ctx, logger);
   const steamId = verifySteamTicket(ctx, logger, nk, ticket);
-  account.id = STEAM_CUSTOM_ID_PREFIX2 + steamId;
+  account.id = STEAM_HASH_CUSTOM_ID_PREFIX + steamIdHash(nk, salt, steamId);
   checkLoginBan(nk, logger, "custom:" + account.id, Date.now());
   delete vars.steam_ticket;
   account.vars = vars;
@@ -6983,10 +7015,29 @@ function beforeAuthenticateDevice(ctx, logger, nk, data) {
   if (!settingsOf(ctx).deviceLogin) {
     throw runtimeError(PERMISSION_DENIED, "Device login is disabled");
   }
-  const deviceId = data.account && data.account.id;
-  if (deviceId) checkLoginBan(nk, logger, "device:" + deviceId, Date.now());
-  if (deviceId && STEAM_ID64_PATTERN.test(deviceId)) delete data.username;
+  const account = data.account;
+  if (account && account.id && STEAM_ID64_PATTERN.test(account.id)) {
+    const hashedId = STEAM_HASH_DEVICE_ID_PREFIX + steamIdHash(nk, playerIdSalt(ctx, logger), account.id);
+    moveRawDeviceAccount(nk, logger, account.id, hashedId);
+    account.id = hashedId;
+    delete data.username;
+  }
+  if (account && account.id) checkLoginBan(nk, logger, "device:" + account.id, Date.now());
   return data;
+}
+function moveRawDeviceAccount(nk, logger, rawId, hashedId) {
+  const rows = nk.sqlQuery("SELECT user_id::text AS user_id FROM user_device WHERE id = $1", [rawId]);
+  if (rows.length === 0) return;
+  const userId = String(rows[0].user_id);
+  try {
+    nk.linkDevice(userId, hashedId);
+  } catch (e) {
+    logger.warn("Device login move for %s failed: %v", userId, e);
+    return;
+  }
+  nk.unlinkDevice(userId, rawId);
+  moveLoginKey(nk, "device:" + rawId, "device:" + hashedId);
+  logger.info("Moved the Device login of %s to its Steam id hash", userId);
 }
 function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
   claimLegacyRatingsAtLogin(ctx, logger, nk);
