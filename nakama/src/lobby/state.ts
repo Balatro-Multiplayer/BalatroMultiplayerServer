@@ -105,6 +105,10 @@ export interface Lobby {
 	// is planned, so a config change can't move the bar mid-game; absent on
 	// a private lobby (never gated) and on one made before standings existed.
 	requiredStanding?: RequiredStanding
+	// userId -> the runId of the game whose grace period forfeited their seat.
+	// The seat is gone, but the player must not be seated again as a fresh
+	// joiner (joinRejection), so the record stays after the game ends.
+	forfeitedSeats?: { [userId: string]: string }
 }
 
 export type Outbound =
@@ -247,6 +251,9 @@ function rejectOp(userId: string, message: string): Outbound {
 }
 
 export const DIFFERENT_MOD = 'Lobby is for a different mod'
+// The clients (api/lobby/nakama.lua) match this text to show the forfeit
+// dialog: change both together.
+export const FORFEITED_SEAT = 'You forfeited this match'
 
 // Why userId may not join, or null. A member rejoining (after a disconnect)
 // is let back in, but only from the lobby's own mod: one seat per user spans
@@ -263,6 +270,7 @@ export function joinRejection(
 		return 'You are spectating this lobby'
 	if (lobby.kickedIds.indexOf(userId) !== -1)
 		return 'You were kicked from this lobby'
+	if (forfeitedStill(lobby, userId)) return FORFEITED_SEAT
 	if (lobby.game.started) return 'The game has already started'
 	if (lobby.groupQueue) return 'This lobby is queueing as a group'
 	if (lobby.allowedIds) {
@@ -273,6 +281,15 @@ export function joinRejection(
 	}
 	if (lobby.players.length >= lobby.maxPlayers) return 'Lobby is full'
 	return null
+}
+
+// Whether userId lost their seat to the grace period in the game that is
+// running or that has just ended. A newer game makes the record stale.
+function forfeitedStill(lobby: Lobby, userId: string): boolean {
+	const runId = (lobby.forfeitedSeats || {})[userId]
+	if (runId === undefined) return false
+	const started = lobby.game.started
+	return started === null || started.runId === runId
 }
 
 export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
@@ -678,7 +695,11 @@ export function tick(lobby: Lobby, now: number): Step {
 					? [{ kind: 'forfeited', userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }]
 					: []
 			const removed = remove(step.lobby, p.id, 'player_left', 'member_disconnected')
-			step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) }
+			const marked =
+				forfeited.length > 0 && started
+					? { ...removed.lobby, forfeitedSeats: { ...(removed.lobby.forfeitedSeats || {}), [p.id]: started.runId } }
+					: removed.lobby
+			step = { lobby: marked, out: step.out.concat(forfeited, removed.out) }
 		}
 	}
 	return step
