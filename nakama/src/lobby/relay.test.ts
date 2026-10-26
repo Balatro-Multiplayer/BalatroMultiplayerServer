@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SEED_LENGTH, seedFromHex } from '../actions/registry'
 import { ServerOp } from './protocol'
-import { BURST, MAX_PARAMS_BYTES, action } from './relay'
+import { BURST, MAX_PARAMS_BYTES, type RelayStep, action } from './relay'
 import {
 	type Lobby,
 	type Outbound,
@@ -155,6 +155,7 @@ describe('relayed actions', () => {
 			lobby = last.lobby
 		}
 		expect(rejection(last as Step)).toBe('rate_limited')
+		expect((last as RelayStep).refused).toEqual({ key: 'x', reason: 'rate_limited' })
 		// Refills with time.
 		const later = action(
 			lobby,

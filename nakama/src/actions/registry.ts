@@ -5,7 +5,7 @@
 //
 // Pure: a reducer gets the lobby and its context and returns the new game
 // state plus the results to broadcast, or a rejection reason for the sender.
-import type { GameState, StartedGame } from '../lobby/protocol'
+import type { GameState, SpectateEvent, StartedGame } from '../lobby/protocol'
 import {
 	type Lobby,
 	type Outbound,
@@ -31,6 +31,8 @@ export interface ActionResult {
 	params: unknown
 	to?: 'all' | 'others' | 'none'
 	out?: Outbound[]
+	// Replay events to pass on to spectators, one by one (a batch of events).
+	spectate?: SpectateEvent[]
 }
 
 export type Reduction = ActionResult | { reject: string }
@@ -248,6 +250,55 @@ export const MAX_LOG_EVENTS = 20_000
 export const MAX_LOG_BYTES = 1024 * 1024
 const MAX_OPCODE_LENGTH = 64
 
+// One replay event from a participant, added to their log. `relayed` is what
+// the others are told (null when the event was dropped or is not for this run).
+type Appended = { game: GameState; relayed: SpectateEvent | null } | { reject: string }
+
+function appendLogEvent(lobby: Lobby, from: string, params: unknown): Appended {
+	if (
+		!isPlainObject(params) ||
+		typeof params.t !== 'number' ||
+		typeof params.opcode !== 'string' ||
+		params.opcode.length === 0 ||
+		params.opcode.length > MAX_OPCODE_LENGTH
+	)
+		return { reject: 'bad_params' }
+	const started = lobby.game.started
+	if (!started) return { reject: 'not_in_game' }
+	// An event the client sent for a run the server has since restarted
+	// (it was in flight as the restart went out) belongs to no stored
+	// log: kept, it would sit ahead of the new run's manifest and fail
+	// the new run's hash check. Clients tag events with their run.
+	if (typeof params.run === 'string' && params.run !== started.runId)
+		return { game: lobby.game, relayed: null }
+	const args = params.args === undefined ? null : params.args
+	const line = JSON.stringify([params.t, params.opcode, args])
+	const size = line.length
+
+	const game = lobby.game
+	const log = game.logs[from] || { lines: [], bytes: 0, truncated: false }
+	if (
+		log.truncated ||
+		log.lines.length >= MAX_LOG_EVENTS ||
+		log.bytes + size > MAX_LOG_BYTES
+	) {
+		const truncated = { ...log, truncated: true }
+		return {
+			game: { ...game, logs: { ...game.logs, [from]: truncated } },
+			relayed: null,
+		}
+	}
+	const grown = {
+		lines: log.lines.concat([line]),
+		bytes: log.bytes + size,
+		truncated: false,
+	}
+	return {
+		game: { ...game, logs: { ...game.logs, [from]: grown } },
+		relayed: { playerId: from, t: params.t, opcode: params.opcode, args },
+	}
+}
+
 // {t, opcode, args?, run?} -- one replay event from a participant, kept for the
 // stored run and passed on to the others (who track how far each player's
 // stream has got).
@@ -256,47 +307,51 @@ const logEvent: AuthoritativeAction = {
 	reduce(lobby, ctx, params) {
 		if (!lobby.game.started) return { reject: 'not_in_game' }
 		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
+		const appended = appendLogEvent(lobby, ctx.from, params)
+		if ('reject' in appended) return appended
+		return {
+			game: appended.game,
+			params: appended.relayed,
+			to: appended.relayed ? 'others' : 'none',
+		}
+	},
+}
+
+// Most events one mpapi_log_events message may carry.
+export const MAX_LOG_BATCH = 50
+
+// {events: [{t, opcode, args?, run?}, ...]} -- up to MAX_LOG_BATCH replay
+// events, in order, each handled as mpapi_log_event would. The others are told
+// once: {playerId, t, opcode, args, count} of the last event kept, which is all
+// they track (how far the stream has got). Spectators get every event. One bad
+// event refuses the whole batch, before any of it is kept.
+const logEvents: AuthoritativeAction = {
+	key: 'mpapi_log_events',
+	reduce(lobby, ctx, params) {
+		if (!lobby.game.started) return { reject: 'not_in_game' }
+		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
 		if (
 			!isPlainObject(params) ||
-			typeof params.t !== 'number' ||
-			typeof params.opcode !== 'string' ||
-			params.opcode.length === 0 ||
-			params.opcode.length > MAX_OPCODE_LENGTH
+			!Array.isArray(params.events) ||
+			params.events.length === 0 ||
+			params.events.length > MAX_LOG_BATCH
 		)
 			return { reject: 'bad_params' }
-		// An event the client sent for a run the server has since restarted
-		// (it was in flight as the restart went out) belongs to no stored
-		// log: kept, it would sit ahead of the new run's manifest and fail
-		// the new run's hash check. Clients tag events with their run.
-		if (typeof params.run === 'string' && params.run !== lobby.game.started.runId)
-			return { game: lobby.game, params: null, to: 'none' }
-		const args = params.args === undefined ? null : params.args
-		const line = JSON.stringify([params.t, params.opcode, args])
-		const size = line.length
-
-		const game = lobby.game
-		const log = game.logs[ctx.from] || { lines: [], bytes: 0, truncated: false }
-		if (
-			log.truncated ||
-			log.lines.length >= MAX_LOG_EVENTS ||
-			log.bytes + size > MAX_LOG_BYTES
-		) {
-			const truncated = { ...log, truncated: true }
-			return {
-				game: { ...game, logs: { ...game.logs, [ctx.from]: truncated } },
-				params: null,
-				to: 'none',
-			}
+		let current = lobby
+		const relayed: SpectateEvent[] = []
+		for (const event of params.events) {
+			const appended = appendLogEvent(current, ctx.from, event)
+			if ('reject' in appended) return appended
+			current = { ...current, game: appended.game }
+			if (appended.relayed) relayed.push(appended.relayed)
 		}
-		const grown = {
-			lines: log.lines.concat([line]),
-			bytes: log.bytes + size,
-			truncated: false,
-		}
+		if (relayed.length === 0) return { game: current.game, params: null, to: 'none' }
+		const last = relayed[relayed.length - 1]
 		return {
-			game: { ...game, logs: { ...game.logs, [ctx.from]: grown } },
-			params: { playerId: ctx.from, t: params.t, opcode: params.opcode, args },
+			game: current.game,
+			params: { ...last, count: relayed.length },
 			to: 'others',
+			spectate: relayed,
 		}
 	},
 }
@@ -308,10 +363,12 @@ const REGISTRY: { [key: string]: AuthoritativeAction } = {
 	[abandonGame.key]: abandonGame,
 	[reportResult.key]: reportResult,
 	[logEvent.key]: logEvent,
+	[logEvents.key]: logEvents,
 }
 
 // The replay-log action, which relay.ts budgets separately.
 export const LOG_EVENT_KEY = logEvent.key
+export const LOG_EVENTS_KEY = logEvents.key
 
 export function authoritativeAction(key: string): AuthoritativeAction | null {
 	return Object.prototype.hasOwnProperty.call(REGISTRY, key)
