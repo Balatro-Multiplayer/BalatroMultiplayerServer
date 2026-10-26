@@ -125,7 +125,7 @@ Formatting is Biome: tabs, single quotes, no semicolons.
   `pnpm --filter balatro-multiplayer-web typecheck`.
 - Live, against the local stack (`compose.local.yml`): rebuild the
   bundle, restart Nakama, then run the relevant
-  `node nakama/scripts/live/<area>.live.mjs`. These use throwaway device-auth
+  `node <ClaudeControl>/live/<area>.live.mjs` (not in this repo). These use throwaway device-auth
   players with a test prefix and query Postgres in the `bmp-postgres`
   container. Unit tests alone do not prove a Nakama change: Go round-tripping
   and socket behaviour only show up live. Client-level checks drive real game

@@ -297,10 +297,10 @@ pnpm generate    # write a new migration from apps/server/src/infrastructure/db/
 pnpm migrate     # apply migrations
 ```
 
-Live checks against a running local stack live in
-[`nakama/scripts/live/`](nakama/scripts/live); each is a standalone Node
-script (`node nakama/scripts/live/mirror.live.mjs`) that drives throwaway
-device-auth players through Nakama and checks the result in Postgres.
+Live checks against a running local Dev server are kept outside this repo,
+with the maintainers' client test tooling (ClaudeControl `live/`). Each is a
+standalone Node script that drives throwaway device-auth players through
+Nakama and checks the result in Postgres.
 
 ## Deployment
 
