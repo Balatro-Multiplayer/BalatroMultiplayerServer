@@ -57,9 +57,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
 ));
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
 var require_Char = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isHighSurrogate = isHighSurrogate;
@@ -107,9 +107,9 @@ var require_Char = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
 var require_BuiltinStrategies = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.keepStartCensorStrategy = keepStartCensorStrategy2;
@@ -171,9 +171,9 @@ var require_BuiltinStrategies = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
 var require_Interval = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareIntervals = compareIntervals;
@@ -191,9 +191,9 @@ var require_Interval = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
 var require_MatchPayload = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareMatchByPositionAndId = compareMatchByPositionAndId2;
@@ -207,9 +207,9 @@ var require_MatchPayload = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
 var require_TextCensor = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TextCensor = void 0;
@@ -300,9 +300,9 @@ var require_TextCensor = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
 var require_BlacklistedTerm = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignIncrementingIds = assignIncrementingIds2;
@@ -313,9 +313,9 @@ var require_BlacklistedTerm = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
 var require_DataSet = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PhraseBuilder = exports.DataSet = void 0;
@@ -482,17 +482,17 @@ var require_DataSet = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
 var require_Matcher = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
 var require_Nodes = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.SyntaxKind = void 0;
@@ -506,9 +506,9 @@ var require_Nodes = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
 var require_Util = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.potentiallyMatchesEmptyString = potentiallyMatchesEmptyString;
@@ -549,9 +549,9 @@ var require_Util = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
 var require_TransformerSet = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TransformerSet = void 0;
@@ -591,9 +591,9 @@ var require_TransformerSet = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
 var require_CharacterIterator = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CharacterIterator = void 0;
@@ -656,9 +656,9 @@ var require_CharacterIterator = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
 var require_IntervalCollection = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IntervalCollection = void 0;
@@ -700,9 +700,9 @@ var require_IntervalCollection = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
 var require_RegExpMatcher = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.RegExpMatcher = void 0;
@@ -878,9 +878,9 @@ var require_RegExpMatcher = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
 var require_ParserError = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ParserError = void 0;
@@ -905,9 +905,9 @@ var require_ParserError = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
 var require_Parser = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Parser = void 0;
@@ -1099,9 +1099,9 @@ var require_Parser = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
 var require_Pattern = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.pattern = pattern2;
@@ -1122,9 +1122,9 @@ var require_Pattern = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
 var require_Transformers = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSimpleTransformer = createSimpleTransformer2;
@@ -1138,9 +1138,9 @@ var require_Transformers = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
 var require_transformer = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CollapseDuplicatesTransformer = void 0;
@@ -1172,9 +1172,9 @@ var require_transformer = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
 var require_collapse_duplicates = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.collapseDuplicatesTransformer = collapseDuplicatesTransformer2;
@@ -1198,9 +1198,9 @@ var require_collapse_duplicates = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
 var require_remap_characters = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.remapCharactersTransformer = remapCharactersTransformer2;
@@ -1228,9 +1228,9 @@ var require_remap_characters = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
 var require_confusables = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.confusables = void 0;
@@ -1308,9 +1308,9 @@ var require_confusables = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
 var require_resolve_confusables = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveConfusablesTransformer = resolveConfusablesTransformer2;
@@ -1322,9 +1322,9 @@ var require_resolve_confusables = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
 var require_dictionary = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.dictionary = void 0;
@@ -1343,9 +1343,9 @@ var require_dictionary = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
 var require_resolve_leetspeak = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveLeetSpeakTransformer = resolveLeetSpeakTransformer2;
@@ -1357,9 +1357,9 @@ var require_resolve_leetspeak = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
 var require_to_ascii_lowercase = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.toAsciiLowerCaseTransformer = toAsciiLowerCaseTransformer2;
@@ -1371,9 +1371,9 @@ var require_to_ascii_lowercase = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
 var require_english = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.englishDataset = exports.englishRecommendedTransformers = exports.englishRecommendedWhitelistMatcherTransformers = exports.englishRecommendedBlacklistMatcherTransformers = void 0;
@@ -1423,9 +1423,9 @@ var require_english = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
 var require_skip_non_alphabetic = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.skipNonAlphabeticTransformer = skipNonAlphabeticTransformer2;
@@ -1437,9 +1437,9 @@ var require_skip_non_alphabetic = __commonJS({
   }
 });
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
 var require_dist = __commonJS({
-  "../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -1727,15 +1727,15 @@ function withoutBan(bans, banId) {
   return next;
 }
 function withoutExpired(bans, now) {
-  let changed = false;
+  let changed2 = false;
   const next = {};
   for (const type of BAN_TYPES) {
     const ban = bans[type];
     if (!ban) continue;
     if (activeBan(bans, type, now)) next[type] = ban;
-    else changed = true;
+    else changed2 = true;
   }
-  return changed ? next : bans;
+  return changed2 ? next : bans;
 }
 function bansFromList(list) {
   let bans = {};
@@ -2161,6 +2161,389 @@ function releaseCode(nk, code, matchId) {
   }
 }
 
+// src/actions/setup.ts
+var STEP_ID_PATTERN = /^[a-z0-9_]{1,32}$/;
+var MAX_CANDIDATES = 64;
+var MAX_SCHEDULE_TURNS = 64;
+var MAX_STAKE = 32;
+var MAX_VOTE_OPTIONS = 8;
+var DEFAULT_TURN_SECONDS = 30;
+var DEFAULT_VOTE_SECONDS = 15;
+var MIN_STEP_SECONDS = 5;
+var MAX_STEP_SECONDS = 120;
+var SETUP_STATE_KEY = "mpapi_setup_state";
+function emptySetup() {
+  return { open: null, results: {} };
+}
+function setupOf(game) {
+  return game.setup || emptySetup();
+}
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isWhole(value, min, max) {
+  return typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
+}
+function shuffled(items, random) {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    const swap = out[i];
+    out[i] = out[j];
+    out[j] = swap;
+  }
+  return out;
+}
+function pickIndex(length, random) {
+  return Math.min(length - 1, Math.floor(random() * length));
+}
+function seatedParticipants(lobby) {
+  const started = lobby.game.started;
+  if (!started) return [];
+  const seated = {};
+  for (const p of lobby.players) seated[p.id] = true;
+  return started.players.filter((p) => seated[p.id]).map((p) => p.id);
+}
+function connected(lobby, userId) {
+  return lobby.players.some((p) => p.id === userId && p.awaySince === null);
+}
+function draftActor(draft) {
+  const turn = draft.schedule[draft.turn];
+  if (!turn || draft.order.length === 0) return null;
+  return draft.order[(draft.first + turn.actor - 1) % draft.order.length];
+}
+function setupView(setup, now) {
+  const open = setup.open;
+  if (!open) return { open: null, results: setup.results };
+  const msLeft = Math.max(0, open.deadline - now);
+  if (open.kind === "vote") {
+    const _a = open, { votes, deadline: _deadline2 } = _a, rest2 = __objRest(_a, ["votes", "deadline"]);
+    return {
+      open: __spreadProps(__spreadValues({}, rest2), { voted: Object.keys(votes), msLeft }),
+      results: setup.results
+    };
+  }
+  const _b = open, { turnMs: _turnMs, deadline: _deadline } = _b, rest = __objRest(_b, ["turnMs", "deadline"]);
+  return {
+    open: __spreadProps(__spreadValues({}, rest), { actor: draftActor(open), msLeft }),
+    results: setup.results
+  };
+}
+function deriveSchedule(poolSize, keep, actors) {
+  const turns = [];
+  for (let i = 0; i < poolSize - keep; i++) {
+    turns.push({ actor: i % actors + 1, action: "ban", count: 1 });
+  }
+  return turns;
+}
+function finishDraft(game, draft, survivors) {
+  const setup = setupOf(game);
+  const result = { kind: "draft", survivors, banned: draft.banned };
+  const started = game.started;
+  const keptStake = survivors.length === 1 ? survivors[0].stake : void 0;
+  return __spreadProps(__spreadValues({}, game), {
+    started: started && typeof keptStake === "number" ? __spreadProps(__spreadValues({}, started), { stake: keptStake }) : started,
+    setup: { open: null, results: __spreadProps(__spreadValues({}, setup.results), { [draft.id]: result }) }
+  });
+}
+function advanceDraft(game, draft, now) {
+  const turn = draft.turn + 1;
+  const next = draft.schedule[turn];
+  if (!next) {
+    const banned = {};
+    for (const key of draft.banned) banned[key] = true;
+    return finishDraft(
+      game,
+      draft,
+      draft.pool.filter((item) => !banned[item.key])
+    );
+  }
+  const advanced = __spreadProps(__spreadValues({}, draft), {
+    turn,
+    remaining: next.count,
+    deadline: now + draft.turnMs
+  });
+  return __spreadProps(__spreadValues({}, game), { setup: __spreadProps(__spreadValues({}, setupOf(game)), { open: advanced }) });
+}
+function chooseTile(game, draft, key, now) {
+  const item = draft.pool.find((i) => i.key === key);
+  if (!item || draft.banned.indexOf(key) !== -1) return null;
+  const turn = draft.schedule[draft.turn];
+  if (turn.action === "pick") return finishDraft(game, __spreadValues({}, draft), [item]);
+  const banned = __spreadProps(__spreadValues({}, draft), {
+    banned: draft.banned.concat([key]),
+    remaining: draft.remaining - 1
+  });
+  if (banned.remaining > 0) {
+    return __spreadProps(__spreadValues({}, game), { setup: __spreadProps(__spreadValues({}, setupOf(game)), { open: banned }) });
+  }
+  return advanceDraft(game, banned, now);
+}
+function timeOutTurn(game, draft, now, random) {
+  let current = game;
+  let open = draft;
+  const turn = draft.turn;
+  while (open && open.kind === "draft" && open.id === draft.id && open.turn === turn) {
+    const banned = open.banned;
+    const left = open.pool.filter((i) => banned.indexOf(i.key) === -1);
+    if (left.length === 0) break;
+    const next = chooseTile(
+      current,
+      open,
+      left[pickIndex(left.length, random)].key,
+      now
+    );
+    if (!next) break;
+    current = next;
+    open = setupOf(current).open;
+  }
+  return current;
+}
+function parseCandidates(value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_CANDIDATES)
+    return null;
+  const seen = {};
+  const items = [];
+  for (const raw of value) {
+    if (!isPlainObject(raw) || typeof raw.key !== "string" || raw.key.length === 0)
+      return null;
+    if (seen[raw.key]) return null;
+    if (raw.stake !== void 0 && !isWhole(raw.stake, 1, MAX_STAKE))
+      return null;
+    seen[raw.key] = true;
+    items.push(raw);
+  }
+  return items;
+}
+function parseSchedule(value) {
+  if (!Array.isArray(value) || value.length > MAX_SCHEDULE_TURNS) return null;
+  const turns = [];
+  for (const raw of value) {
+    if (!isPlainObject(raw)) return null;
+    if (!isWhole(raw.actor, 1, MAX_CANDIDATES)) return null;
+    if (raw.action !== "ban" && raw.action !== "pick") return null;
+    if (!isWhole(raw.count, 1, MAX_CANDIDATES)) return null;
+    turns.push({ actor: raw.actor, action: raw.action, count: raw.count });
+  }
+  return turns;
+}
+function stepSeconds(value, fallback) {
+  if (value === void 0) return fallback;
+  return isWhole(value, MIN_STEP_SECONDS, MAX_STEP_SECONDS) ? value : null;
+}
+function startRefusal(lobby, ctx, id) {
+  if (!lobby.game.started) return "not_in_game";
+  if (lobby.hostId !== ctx.from) return "not_host";
+  if (typeof id !== "string" || !STEP_ID_PATTERN.test(id)) return "bad_params";
+  const setup = setupOf(lobby.game);
+  if (setup.open) return "step_open";
+  if (setup.results[id]) return "step_done";
+  return null;
+}
+function changed(game, now) {
+  return { game, params: { setup: setupView(setupOf(game), now) } };
+}
+var startDraft = {
+  key: "mpapi_setup_draft",
+  reduce(lobby, ctx, params) {
+    const p = isPlainObject(params) ? params : {};
+    const refusal = startRefusal(lobby, ctx, p.id);
+    if (refusal) return { reject: refusal };
+    const candidates = parseCandidates(p.candidates);
+    if (!candidates) return { reject: "bad_params" };
+    const poolSize = p.poolSize === void 0 ? candidates.length : p.poolSize;
+    if (!isWhole(poolSize, 1, candidates.length))
+      return { reject: "bad_params" };
+    const keep = p.keep === void 0 ? 1 : p.keep;
+    if (!isWhole(keep, 0, poolSize)) return { reject: "bad_params" };
+    const schedule = p.schedule === void 0 ? null : parseSchedule(p.schedule);
+    if (p.schedule !== void 0 && !schedule) return { reject: "bad_params" };
+    if (p.maxStake !== void 0 && !isWhole(p.maxStake, 1, MAX_STAKE))
+      return { reject: "bad_params" };
+    const turnSeconds = stepSeconds(p.turnSeconds, DEFAULT_TURN_SECONDS);
+    if (turnSeconds === null) return { reject: "bad_params" };
+    const order = seatedParticipants(lobby);
+    if (order.length === 0) return { reject: "not_in_game" };
+    const maxStake = p.maxStake;
+    const pool = shuffled(candidates, ctx.random).slice(0, poolSize).map(
+      (item) => item.stake === void 0 && maxStake !== void 0 ? __spreadProps(__spreadValues({}, item), { stake: 1 + pickIndex(maxStake, ctx.random) }) : item
+    );
+    const turns = schedule || deriveSchedule(poolSize, keep, order.length);
+    const turnMs = turnSeconds * 1e3;
+    const draft = {
+      kind: "draft",
+      id: p.id,
+      pool,
+      banned: [],
+      order,
+      first: pickIndex(order.length, ctx.random),
+      schedule: turns,
+      turn: 0,
+      remaining: turns.length > 0 ? turns[0].count : 0,
+      turnMs,
+      deadline: ctx.now + turnMs
+    };
+    const game = __spreadProps(__spreadValues({}, lobby.game), {
+      setup: __spreadProps(__spreadValues({}, setupOf(lobby.game)), { open: draft })
+    });
+    if (turns.length === 0)
+      return changed(finishDraft(game, draft, pool), ctx.now);
+    return changed(game, ctx.now);
+  }
+};
+var chooseDraftTile = {
+  key: "mpapi_setup_choose",
+  reduce(lobby, ctx, params) {
+    const open = setupOf(lobby.game).open;
+    if (!open || open.kind !== "draft") return { reject: "no_draft" };
+    if (draftActor(open) !== ctx.from) return { reject: "not_your_turn" };
+    const key = isPlainObject(params) ? params.key : void 0;
+    if (typeof key !== "string") return { reject: "bad_params" };
+    const game = chooseTile(lobby.game, open, key, ctx.now);
+    if (!game) return { reject: "bad_tile" };
+    return changed(game, ctx.now);
+  }
+};
+function rollVote(vote, random) {
+  const counts = {};
+  for (const option of vote.options) counts[option] = 0;
+  for (const voter of Object.keys(vote.votes)) counts[vote.votes[voter]] += 1;
+  const total = Object.keys(vote.votes).length;
+  if (total === 0) {
+    return {
+      kind: "vote",
+      option: vote.options[pickIndex(vote.options.length, random)],
+      counts
+    };
+  }
+  let ticket = pickIndex(total, random);
+  for (const option of vote.options) {
+    if (ticket < counts[option]) return { kind: "vote", option, counts };
+    ticket -= counts[option];
+  }
+  return { kind: "vote", option: vote.options[vote.options.length - 1], counts };
+}
+function closeVote(game, vote, random) {
+  const setup = setupOf(game);
+  return __spreadProps(__spreadValues({}, game), {
+    setup: {
+      open: null,
+      results: __spreadProps(__spreadValues({}, setup.results), { [vote.id]: rollVote(vote, random) })
+    }
+  });
+}
+function everyoneVoted(lobby, vote) {
+  return vote.voters.every(
+    (id) => vote.votes[id] !== void 0 || !connected(lobby, id)
+  );
+}
+var startVote = {
+  key: "mpapi_setup_vote",
+  reduce(lobby, ctx, params) {
+    const p = isPlainObject(params) ? params : {};
+    const refusal = startRefusal(lobby, ctx, p.id);
+    if (refusal) return { reject: refusal };
+    const options = p.options;
+    if (!Array.isArray(options) || options.length < 2 || options.length > MAX_VOTE_OPTIONS)
+      return { reject: "bad_params" };
+    for (let i = 0; i < options.length; i++) {
+      const option = options[i];
+      if (typeof option !== "string" || !STEP_ID_PATTERN.test(option))
+        return { reject: "bad_params" };
+      if (options.indexOf(option) !== i) return { reject: "bad_params" };
+    }
+    const seconds = stepSeconds(p.seconds, DEFAULT_VOTE_SECONDS);
+    if (seconds === null) return { reject: "bad_params" };
+    const vote = {
+      kind: "vote",
+      id: p.id,
+      options,
+      voters: seatedParticipants(lobby),
+      votes: {},
+      deadline: ctx.now + seconds * 1e3
+    };
+    return changed(
+      __spreadProps(__spreadValues({}, lobby.game), {
+        setup: __spreadProps(__spreadValues({}, setupOf(lobby.game)), { open: vote })
+      }),
+      ctx.now
+    );
+  }
+};
+var castVote = {
+  key: "mpapi_setup_cast",
+  reduce(lobby, ctx, params) {
+    const open = setupOf(lobby.game).open;
+    if (!open || open.kind !== "vote") return { reject: "no_vote" };
+    if (open.voters.indexOf(ctx.from) === -1) return { reject: "not_voter" };
+    if (open.votes[ctx.from] !== void 0) return { reject: "already_voted" };
+    const option = isPlainObject(params) ? params.option : void 0;
+    if (typeof option !== "string" || open.options.indexOf(option) === -1)
+      return { reject: "bad_params" };
+    const vote = __spreadProps(__spreadValues({}, open), {
+      votes: __spreadProps(__spreadValues({}, open.votes), { [ctx.from]: option })
+    });
+    const game = __spreadProps(__spreadValues({}, lobby.game), {
+      setup: __spreadProps(__spreadValues({}, setupOf(lobby.game)), { open: vote })
+    });
+    if (everyoneVoted(lobby, vote))
+      return changed(closeVote(game, vote, ctx.random), ctx.now);
+    return changed(game, ctx.now);
+  }
+};
+var setupState = {
+  key: SETUP_STATE_KEY,
+  reduce() {
+    return { reject: "server_only" };
+  }
+};
+var SETUP_ACTIONS = [
+  startDraft,
+  chooseDraftTile,
+  startVote,
+  castVote,
+  setupState
+];
+function setupTick(lobby, now, random) {
+  const open = lobby.game.started ? setupOf(lobby.game).open : null;
+  if (!open) return { lobby, out: [] };
+  let game = null;
+  if (open.kind === "draft" && now >= open.deadline) {
+    game = timeOutTurn(lobby.game, open, now, random);
+  } else if (open.kind === "vote" && (now >= open.deadline || everyoneVoted(lobby, open))) {
+    game = closeVote(lobby.game, open, random);
+  }
+  if (!game) return { lobby, out: [] };
+  const next = __spreadProps(__spreadValues({}, lobby), { game });
+  return {
+    lobby: next,
+    out: [
+      {
+        kind: "send",
+        op: ServerOp.ACTION,
+        payload: {
+          cid: "",
+          action: SETUP_STATE_KEY,
+          from: SERVER_TARGET,
+          to: BROADCAST_TARGET,
+          params: { setup: setupView(setupOf(game), now) }
+        },
+        to: next.players.map((p) => p.id)
+      }
+    ]
+  };
+}
+function setupForRestart(game) {
+  return { open: null, results: setupOf(game).results };
+}
+function setupAfterDowntime(game, downtime) {
+  const setup = game.setup;
+  if (!setup || !setup.open) return setup;
+  return __spreadProps(__spreadValues({}, setup), {
+    open: __spreadProps(__spreadValues({}, setup.open), { deadline: setup.open.deadline + downtime })
+  });
+}
+
 // src/lobby/checkpoint.ts
 var CLAIM_TIMEOUT_MS = 3e4;
 function checkpointOf(lobby, now) {
@@ -2187,7 +2570,8 @@ function resumeFrom(checkpoint, now) {
     spectators: [],
     actionBudget: {},
     game: __spreadProps(__spreadValues({}, lobby.game), {
-      settleFrom: settleFrom === null ? null : settleFrom + downtime
+      settleFrom: settleFrom === null ? null : settleFrom + downtime,
+      setup: setupAfterDowntime(lobby.game, downtime)
     })
   });
 }
@@ -3818,7 +4202,7 @@ function joinRejection(lobby, userId, modId) {
   if (lobby.players.length >= lobby.maxPlayers) return "Lobby is full";
   return null;
 }
-function snapshotFor(lobby, userId) {
+function snapshotFor(lobby, userId, now = Date.now()) {
   const self = findPlayer(lobby, userId);
   return {
     code: lobby.code,
@@ -3839,7 +4223,8 @@ function snapshotFor(lobby, userId) {
     game: {
       ready: lobby.game.ready,
       started: lobby.game.started,
-      reported: Object.keys(lobby.game.reports)
+      reported: Object.keys(lobby.game.reports),
+      setup: setupView(setupOf(lobby.game), now)
     },
     groupQueue: viewOf(lobby),
     teamPlan: lobby.teamPlan || null
@@ -4074,13 +4459,13 @@ function adminView(lobby) {
     spectators: lobby.spectators || []
   };
 }
-function isPlainObject(value) {
+function isPlainObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function setMetadata(lobby, byId, patch) {
   if (lobby.hostId !== byId)
     return { lobby, out: [rejectOp(byId, "Only the host can set metadata")] };
-  if (!isPlainObject(patch))
+  if (!isPlainObject2(patch))
     return { lobby, out: [rejectOp(byId, "Metadata must be an object")] };
   const metadata = __spreadValues(__spreadValues({}, lobby.metadata), patch);
   const next = __spreadProps(__spreadValues({}, lobby), { metadata });
@@ -6583,13 +6968,13 @@ function settle(lobby, now) {
 // src/actions/registry.ts
 var MAX_OPTIONS_BYTES = 4 * 1024;
 var MIN_GAME_PLAYERS = 2;
-function isPlainObject2(value) {
+function isPlainObject3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 var ready = {
   key: "mpapi_ready",
   reduce(lobby, ctx, params) {
-    if (!isPlainObject2(params) || typeof params.ready !== "boolean")
+    if (!isPlainObject3(params) || typeof params.ready !== "boolean")
       return { reject: "bad_params" };
     if (lobby.game.started) return { reject: "in_game" };
     const readyMap = __spreadValues({}, lobby.game.ready);
@@ -6627,7 +7012,7 @@ function newGame(lobby, ctx, stake, options) {
 var startGame = {
   key: "mpapi_start_game",
   reduce(lobby, ctx, params) {
-    const p = isPlainObject2(params) ? params : {};
+    const p = isPlainObject3(params) ? params : {};
     if (p.stake !== void 0 && typeof p.stake !== "number")
       return { reject: "bad_params" };
     if (p.minPlayers !== void 0 && (typeof p.minPlayers !== "number" || p.minPlayers % 1 !== 0))
@@ -6661,16 +7046,9 @@ var startGame = {
     };
   }
 };
-var DRAFTED_STAKE_KEY = "drafted_stake";
-function draftedStake(lobby) {
-  const raw = lobby.metadata[DRAFTED_STAKE_KEY];
-  const n = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : raw;
-  return typeof n === "number" && Number.isInteger(n) && n >= 1 ? n : null;
-}
 var restartGame = {
   key: "mpapi_restart_game",
   reduce(lobby, ctx) {
-    var _a;
     if (lobby.hostId !== ctx.from) return { reject: "not_host" };
     const current = lobby.game.started;
     if (!current) return { reject: "not_in_game" };
@@ -6678,14 +7056,9 @@ var restartGame = {
       status: "restarted",
       announce: false
     });
-    const started = newGame(
-      finished.lobby,
-      ctx,
-      (_a = draftedStake(lobby)) != null ? _a : current.stake,
-      current.options
-    );
+    const started = newGame(finished.lobby, ctx, current.stake, current.options);
     return {
-      game: __spreadProps(__spreadValues({}, emptyGame()), { started }),
+      game: __spreadProps(__spreadValues({}, emptyGame()), { started, setup: setupForRestart(lobby.game) }),
       params: startedParams(started),
       out: finished.out
     };
@@ -6719,7 +7092,7 @@ var reportResult = {
     if (!started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
     const placements = parsePlacements(
-      isPlainObject2(params) ? params.placements : null,
+      isPlainObject3(params) ? params.placements : null,
       started.players
     );
     if (!placements) return { reject: "bad_params" };
@@ -6742,7 +7115,7 @@ var logEvent = {
   reduce(lobby, ctx, params) {
     if (!lobby.game.started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
-    if (!isPlainObject2(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
+    if (!isPlainObject3(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
       return { reject: "bad_params" };
     if (typeof params.run === "string" && params.run !== lobby.game.started.runId)
       return { game: lobby.game, params: null, to: "none" };
@@ -6779,6 +7152,7 @@ var REGISTRY = {
   [reportResult.key]: reportResult,
   [logEvent.key]: logEvent
 };
+for (const setupAction of SETUP_ACTIONS) REGISTRY[setupAction.key] = setupAction;
 var LOG_EVENT_KEY = logEvent.key;
 function authoritativeAction(key) {
   return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
@@ -7533,7 +7907,8 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
       return action(lobby, senderId, data, {
         now: Date.now(),
         newSeed: () => seedFromHex(nk.uuidv4()),
-        newId: () => nk.uuidv4()
+        newId: () => nk.uuidv4(),
+        random: Math.random
       });
     case ClientOp.LEAVE:
       if (isSpectator(lobby, senderId)) {
@@ -7599,13 +7974,22 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
   const now = Date.now();
   const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now));
   if (!ticked) return null;
-  const settled = apply(
+  const setupTicked = apply(
     ctx,
     logger,
     nk,
     dispatcher,
     ticked,
-    settle(ticked.lobby, now)
+    setupTick(ticked.lobby, now, Math.random)
+  );
+  if (!setupTicked) return null;
+  const settled = apply(
+    ctx,
+    logger,
+    nk,
+    dispatcher,
+    setupTicked,
+    settle(setupTicked.lobby, now)
   );
   return settled ? { state: settled } : null;
 }
@@ -7781,7 +8165,7 @@ function callModeration(nk, logger, env, request) {
   }
 }
 
-// ../../../../BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
 var import_index = __toESM(require_dist(), 1);
 var DataSet = import_index.default.DataSet;
 var ParserError = import_index.default.ParserError;

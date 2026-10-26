@@ -7,6 +7,7 @@ import type { TeamPlan } from '../matchmaking/group/teams'
 import type { RequiredStanding } from '../standing/standing'
 import { type LobbyKind, lobbyKindOf } from '../review/ranked'
 import { replayTailOf } from './active'
+import { setupOf, setupView } from '../actions/setup'
 import {
 	endGroup,
 	groupAwayCapped,
@@ -275,7 +276,8 @@ export function joinRejection(
 	return null
 }
 
-export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
+// `now` only times an open Setup step (its msLeft).
+export function snapshotFor(lobby: Lobby, userId: string, now = Date.now()): Snapshot {
 	const self = findPlayer(lobby, userId)
 	return {
 		code: lobby.code,
@@ -297,6 +299,7 @@ export function snapshotFor(lobby: Lobby, userId: string): Snapshot {
 			ready: lobby.game.ready,
 			started: lobby.game.started,
 			reported: Object.keys(lobby.game.reports),
+			setup: setupView(setupOf(lobby.game), now),
 		},
 		groupQueue: viewOf(lobby),
 		teamPlan: lobby.teamPlan || null,

@@ -4,6 +4,7 @@
 // checkpoint there claims it and starts a new match from it, under the same
 // code. Every player comes back away, with a fresh grace period to rejoin in.
 import { bindCode } from './codes'
+import { setupAfterDowntime } from '../actions/setup'
 import {
 	CHECKPOINT_TTL_MS,
 	CURRENT_LOBBY_COLLECTION,
@@ -73,6 +74,7 @@ export function resumeFrom(checkpoint: Checkpoint, now: number): Lobby {
 		game: {
 			...lobby.game,
 			settleFrom: settleFrom === null ? null : settleFrom + downtime,
+			setup: setupAfterDowntime(lobby.game, downtime),
 		},
 	}
 }

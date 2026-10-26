@@ -14,7 +14,6 @@ import {
 	labelOf,
 	leave,
 	newLobby,
-	setMetadata,
 	snapshotFor,
 	tick,
 } from '../lobby/state'
@@ -33,6 +32,7 @@ const ctxAt = (now: number) => ({
 	now,
 	newSeed: () => `SEED000${ids}`,
 	newId: () => `RUN${++ids}`,
+	random: () => 0,
 })
 
 function send(lobby: Lobby, from: string, key: string, params: unknown = {}, now = 1000) {
@@ -340,25 +340,6 @@ describe('abandon and restart', () => {
 		expect(after?.seed).not.toBe(before?.seed)
 		expect(after?.stake).toBe(2)
 		expect(after?.players.map((p) => p.id)).toEqual(['a', 'b'])
-	})
-
-	it('restarts on the stake the host drafted, written to the lobby metadata', () => {
-		const lobby = setMetadata(started('a', 'b'), 'a', { drafted_stake: '6' }).lobby
-		const step = send(lobby, 'a', 'mpapi_restart_game')
-		expect(step.lobby.game.started?.stake).toBe(6)
-	})
-
-	it('ignores a drafted stake the host cleared when a new game started', () => {
-		const drafted = setMetadata(started('a', 'b'), 'a', { drafted_stake: '6' }).lobby
-		const lobby = setMetadata(drafted, 'a', { drafted_stake: '' }).lobby
-		const step = send(lobby, 'a', 'mpapi_restart_game')
-		expect(step.lobby.game.started?.stake).toBe(2)
-	})
-
-	it('ignores a drafted stake that is not a whole number', () => {
-		const lobby = setMetadata(started('a', 'b'), 'a', { drafted_stake: 'gold' }).lobby
-		const step = send(lobby, 'a', 'mpapi_restart_game')
-		expect(step.lobby.game.started?.stake).toBe(2)
 	})
 
 	it('needs a game to restart or abandon', () => {

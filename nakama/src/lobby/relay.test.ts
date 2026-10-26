@@ -35,7 +35,7 @@ function lobbyWith(...ids: string[]): Lobby {
 	return lobby
 }
 
-const ctx = { now: 1000, newSeed: () => 'SEED1234', newId: () => 'RUN1' }
+const ctx = { now: 1000, newSeed: () => 'SEED1234', newId: () => 'RUN1', random: () => 0 }
 
 function send(lobby: Lobby, from: string, data: { [key: string]: unknown }) {
 	return action(lobby, from, data, ctx)

@@ -13,6 +13,7 @@ import {
 	emptyGame,
 } from '../lobby/state'
 import { finishGame, parsePlacements } from './results'
+import { SETUP_ACTIONS, setupForRestart } from './setup'
 
 export interface ActionContext {
 	from: string
@@ -21,6 +22,8 @@ export interface ActionContext {
 	// deterministic in tests).
 	newSeed: () => string
 	newId: () => string
+	// A number in [0, 1), for Setup's rolls.
+	random: () => number
 }
 
 // A result broadcast as ACTION {from:'server'}: to every player (the
@@ -145,25 +148,10 @@ const startGame: AuthoritativeAction = {
 	},
 }
 
-// The lobby metadata key a mod writes the drafted stake to. Mirrored by hand
-// in PvP (`PVP.LOBBY_METADATA.DRAFTED_STAKE`); change both together.
-export const DRAFTED_STAKE_KEY = 'drafted_stake'
-
-// The stake the host drafted after the game started (a mod writes it to the
-// lobby metadata under DRAFTED_STAKE_KEY, a whole number or its decimal
-// string). Null when absent, cleared (the empty string a mod writes when a new
-// game starts, so an old draft cannot leak into it) or not a whole number
-// from 1 up.
-function draftedStake(lobby: Lobby): number | null {
-	const raw = lobby.metadata[DRAFTED_STAKE_KEY]
-	const n = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : raw
-	return typeof n === 'number' && Number.isInteger(n) && n >= 1 ? n : null
-}
-
-// {} -- host only: a new game on a new seed, same options. The stake is the
-// drafted one when the host wrote it to the metadata, else the game's own. The
-// current one is stored as 'restarted' (no GAME_ENDED: clients go straight
-// into the new game, through the same path as a start).
+// {} -- host only: a new game on a new seed, same options and stake (a
+// finished Draft has set the stake), same Setup results. The current one is
+// stored as 'restarted' (no GAME_ENDED: clients go straight into the new game,
+// through the same path as a start).
 const restartGame: AuthoritativeAction = {
 	key: 'mpapi_restart_game',
 	reduce(lobby, ctx) {
@@ -174,14 +162,9 @@ const restartGame: AuthoritativeAction = {
 			status: 'restarted',
 			announce: false,
 		})
-		const started = newGame(
-			finished.lobby,
-			ctx,
-			draftedStake(lobby) ?? current.stake,
-			current.options,
-		)
+		const started = newGame(finished.lobby, ctx, current.stake, current.options)
 		return {
-			game: { ...emptyGame(), started },
+			game: { ...emptyGame(), started, setup: setupForRestart(lobby.game) },
 			params: startedParams(started),
 			out: finished.out,
 		}
@@ -309,6 +292,7 @@ const REGISTRY: { [key: string]: AuthoritativeAction } = {
 	[reportResult.key]: reportResult,
 	[logEvent.key]: logEvent,
 }
+for (const setupAction of SETUP_ACTIONS) REGISTRY[setupAction.key] = setupAction
 
 // The replay-log action, which relay.ts budgets separately.
 export const LOG_EVENT_KEY = logEvent.key

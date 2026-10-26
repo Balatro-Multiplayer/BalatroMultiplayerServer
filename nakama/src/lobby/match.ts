@@ -3,6 +3,7 @@
 // One match per lobby; the match ends (returns null) once the lobby closes.
 import { seedFromHex } from '../actions/registry'
 import { finishGame, settle } from '../actions/results'
+import { setupTick } from '../actions/setup'
 import { activeRunOf } from './active'
 import { checkpointOf, readCheckpoint, resumeFrom, saveCheckpoint } from './checkpoint'
 import { releaseCode } from './codes'
@@ -648,6 +649,7 @@ function stepForMessage(
 				now: Date.now(),
 				newSeed: () => seedFromHex(nk.uuidv4()),
 				newId: () => nk.uuidv4(),
+				random: Math.random,
 			})
 		case ClientOp.LEAVE:
 			if (isSpectator(lobby, senderId)) {
@@ -729,13 +731,22 @@ export function lobbyMatchLoop(
 	const now = Date.now()
 	const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now))
 	if (!ticked) return null
-	const settled = apply(
+	const setupTicked = apply(
 		ctx,
 		logger,
 		nk,
 		dispatcher,
 		ticked,
-		settle(ticked.lobby, now),
+		setupTick(ticked.lobby, now, Math.random),
+	)
+	if (!setupTicked) return null
+	const settled = apply(
+		ctx,
+		logger,
+		nk,
+		dispatcher,
+		setupTicked,
+		settle(setupTicked.lobby, now),
 	)
 	return settled ? { state: settled } : null
 }

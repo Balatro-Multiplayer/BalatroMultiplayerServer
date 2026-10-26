@@ -56,7 +56,7 @@ function groupOps(step: Step): GroupQueueMessage[] {
 }
 const kinds = (step: Step) => step.out.map((o) => o.kind)
 const startGameReduction = (lobby: Lobby, from: string) =>
-	authoritativeAction('mpapi_start_game')!.reduce(lobby, { from, now: 0, newSeed: () => 'S', newId: () => 'R' }, {})
+	authoritativeAction('mpapi_start_game')!.reduce(lobby, { from, now: 0, newSeed: () => 'S', newId: () => 'R', random: () => 0 }, {})
 
 describe('openGroupQueue', () => {
 	it('forms the whole lobby as the group, binds the party and tells everyone', () => {

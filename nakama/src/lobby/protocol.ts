@@ -120,6 +120,85 @@ export interface PlayerLog {
 	truncated: boolean
 }
 
+// One Draft tile: a mod's own item, opaque to the server but for `key`, which
+// names it, and `stake`, which the server rolls when the host asks it to.
+export interface SetupItem {
+	key: string
+	stake?: number
+	[field: string]: unknown
+}
+
+// One turn of a Draft: the actor slot (1-based, before the first-actor
+// rotation) bans `count` tiles, or picks the one tile that is kept.
+export interface DraftTurn {
+	actor: number
+	action: 'ban' | 'pick'
+	count: number
+}
+
+export interface OpenDraft {
+	kind: 'draft'
+	id: string
+	pool: SetupItem[]
+	// Ban order: the tiles banned so far, oldest first.
+	banned: string[]
+	// The participants in actor order, and the index of the actor slot 1.
+	order: string[]
+	first: number
+	schedule: DraftTurn[]
+	turn: number
+	// Bans the current turn still needs.
+	remaining: number
+	turnMs: number
+	deadline: number
+}
+
+export interface OpenVote {
+	kind: 'vote'
+	id: string
+	options: string[]
+	voters: string[]
+	// userId -> option. Hidden from clients until the vote closes.
+	votes: { [userId: string]: string }
+	deadline: number
+}
+
+export interface DraftResult {
+	kind: 'draft'
+	survivors: SetupItem[]
+	banned: string[]
+}
+
+export interface VoteResult {
+	kind: 'vote'
+	option: string
+	// option -> votes cast for it (every option present).
+	counts: { [option: string]: number }
+}
+
+// Setup (ADR 0003): the steps a game runs before its run, one open at a time,
+// and the results of the finished ones by step id.
+export interface SetupState {
+	open: OpenDraft | OpenVote | null
+	results: { [id: string]: DraftResult | VoteResult }
+}
+
+// What clients see of an open step: a vote shows who voted, not for what.
+// msLeft stands in for the deadline, so no client compares clocks.
+export type OpenDraftView = Omit<OpenDraft, 'turnMs' | 'deadline'> & {
+	actor: string | null
+	msLeft: number
+}
+export type OpenVoteView = Omit<OpenVote, 'votes' | 'deadline'> & {
+	voted: string[]
+	msLeft: number
+}
+
+export interface SetupView {
+	open: OpenDraftView | OpenVoteView | null
+	results: { [id: string]: DraftResult | VoteResult }
+}
+
 // State the server owns for its authoritative actions (src/actions).
 export interface GameState {
 	// userId -> ready. Absent means not ready.
@@ -133,6 +212,8 @@ export interface GameState {
 	// under two remaining participants.
 	settleFrom: number | null
 	logs: { [userId: string]: PlayerLog }
+	// Absent in match state from before Setup existed.
+	setup?: SetupState
 }
 
 // What clients see of GameState (logs stay on the server).
@@ -140,6 +221,7 @@ export interface GameView {
 	ready: { [userId: string]: boolean }
 	started: null | StartedGame
 	reported: string[]
+	setup: SetupView
 }
 
 // agreed: every participant reported the same places. partial: whoever

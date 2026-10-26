@@ -30,7 +30,7 @@ function lobbyWith(ids: string[], matched = false): Lobby {
 	return lobby
 }
 
-const ctx = { now: 1000, newSeed: () => 'SEED1234', newId: () => 'RUN1' }
+const ctx = { now: 1000, newSeed: () => 'SEED1234', newId: () => 'RUN1', random: () => 0 }
 const send = (lobby: Lobby, from: string, data: { [key: string]: unknown }) => action(lobby, from, data, ctx)
 
 function started(lobby: Lobby): Lobby {
