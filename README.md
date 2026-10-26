@@ -271,9 +271,9 @@ with `MPAPI.dev`. It reads these environment variables when the game starts:
 | Variable | Effect |
 |---|---|
 | none | Use the Dev server at `127.0.0.1:7350` (plain, not TLS) and Device login with your Steam id |
-| `BMP_SERVER_HOST`, `BMP_SERVER_PORT` | Use this host and port instead |
+| `BMP_SERVER_HOST`, `BMP_SERVER_PORT` | Use this host and port instead (port 443 if `BMP_SERVER_PORT` is not set). The rest stays MPAPI's default: TLS, `defaultkey` and the Official website. So this reaches only a server behind TLS, not a plain Dev server on another machine. |
 | `BMP_IMPERSONATE_NAME=<name>` | Log in as that test account (the same name is the same account) |
-| `BMP_IMPERSONATE_ID=<id>` | Log in as that exact account (wins over the name) |
+| `BMP_IMPERSONATE_ID=<id>` | Like `BMP_IMPERSONATE_NAME`, but the display name is `Dev-` and the first 8 characters of the id. Wins over the name. The id is not a Nakama user id: it picks the test account the same way a name does. |
 | `BMP_DEV_STEAM_LOGIN=1` | Log in with Steam instead (wins over the two above). The server needs `STEAM_WEB_API_KEY` in `.env`. |
 
 To run several game clients on one Steam account, start each one with a
