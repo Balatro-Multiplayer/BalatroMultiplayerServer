@@ -416,6 +416,26 @@ describe('replay logs', () => {
 		expect(current.lobby.game.logs.a.lines).toEqual(['[9,"play",null]'])
 	})
 
+	it('keeps a late burst of events in arrival order, after the sender was away', () => {
+		let lobby = started('a', 'b')
+		const runId = lobby.game.started!.runId
+		lobby = log(lobby, 'a', 1).lobby
+		lobby = disconnect(lobby, 'a', 'a-s', 1600).lobby
+		lobby = join(lobby, 'a', 'a-s2', info('a')).lobby
+		// Events made while the socket was down arrive together, in order.
+		for (const t of [2, 3, 4]) {
+			const step = send(lobby, 'a', 'mpapi_log_event', { t, opcode: 'play', args: [t], run: runId }, 1700)
+			expect(rejection(step)).toBeUndefined()
+			lobby = step.lobby
+		}
+		expect(lobby.game.logs.a.lines).toEqual([
+			'[1,"play",[1]]',
+			'[2,"play",[2]]',
+			'[3,"play",[3]]',
+			'[4,"play",[4]]',
+		])
+	})
+
 	it('refuses events outside a game, or malformed ones', () => {
 		const idle = newLobby({ code: 'X', modId: 'm', maxPlayers: 2, creatorId: 'a', now: 0, graceMs: 1 })
 		const joined = join(idle, 'a', 's', info('a')).lobby
