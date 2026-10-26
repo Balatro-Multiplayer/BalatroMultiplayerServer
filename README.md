@@ -94,20 +94,24 @@ A public stub. Some features (for example the launcher-integrity challenge
 strategy) have private implementations that replace this package at deploy
 time. Without them the feature is simply disabled.
 
-## Run your own server
+## Self Hosting and Local Development
 
 [`compose.local.yml`](compose.local.yml) runs a server on your own machine
 with plain `docker compose` commands. It does not use `docker-compose.yml`
-(the Official server's file). You need Docker with Compose and a clone of this
-repo; the server uses the committed Nakama bundle, so you need no Node or pnpm.
+(the Official server's file). Settings go in a `.env` file in the repo folder
+(copy [`.env.example`](.env.example)); every setting is optional.
 
 You can run two kinds of server (`BMP_SERVER_KIND`):
 
-- A **Community server** (the default): Postgres and Nakama. Players log in
-  with Device login, so the server needs no Steam Web API key. Casual, Ranked
-  and private lobbies work; ratings stay on this server.
-- A **Dev server**: the same, plus the API, the website, a Nakama bundle that
-  rebuilds on save, and every dev flag allowed. For contributors.
+- A **Community server** (the default), to self host: Postgres and Nakama.
+  Players log in with Device login, so the server needs no Steam Web API key.
+  Casual, Ranked and private lobbies work; ratings stay on this server. It
+  uses the committed Nakama bundle, so you need no Node or pnpm. See
+  [Run a Community server](#run-a-community-server).
+- A **Dev server**, for local development: the same, plus the API, the
+  website, a Nakama bundle that rebuilds on save, and every dev flag allowed.
+  Game clients connect to it with the [Dev mod](#dev-mod). See
+  [Dev server](#dev-server).
 
 ### Run a Community server
 
@@ -224,27 +228,121 @@ place (see [`apps/moderation/README.md`](apps/moderation/README.md)), add
 
 ### Dev server
 
-In `.env` (copied from [`.env.example`](.env.example)), set:
+A Dev server is for contributors. It is a Community server plus the API, the
+website, a Nakama bundle that rebuilds on save, and every dev flag allowed.
+You need Docker with Compose and `git`. You need Node and pnpm only to run
+the tests or to work on the API or the website outside Docker.
+
+1. Get this repo (see [Run a Community server](#run-a-community-server)).
+
+2. Copy [`.env.example`](.env.example) to `.env`, and uncomment the two lines
+   of its "Dev server" block:
+
+   ```sh
+   BMP_SERVER_KIND=dev
+   COMPOSE_PROFILES=dev
+   ```
+
+3. Start the server:
+
+   ```sh
+   docker compose -f compose.local.yml up --watch
+   ```
+
+   This stays in the foreground and shows the logs. To run it in the
+   background, use `up -d`, then `docker compose -f compose.local.yml watch`
+   when you change `nakama/src`.
+
+4. Wait until `bmp-nakama` and `bmp-api` show `(healthy)` in
+   `docker compose -f compose.local.yml ps`.
+
+5. Make the test accounts and a web admin login (see [Test data](#test-data)):
+
+   ```sh
+   docker compose -f compose.local.yml run --rm seed
+   ```
+
+6. Install the [Dev mod](#dev-mod) next to MPAPI, then start the game.
+
+| Service | Address |
+|---|---|
+| Nakama, for game clients | `127.0.0.1:7350` (plain, not TLS) |
+| Nakama console | `http://127.0.0.1:7351` (user `admin`, password `localdevpassword`) |
+| API | `http://127.0.0.1:8788` |
+| Website and web admin panel | `http://127.0.0.1:3000` |
+| Postgres | in the `bmp-postgres` container only |
+
+#### Change the Nakama code
+
+`nakama-bundle` rebuilds `nakama/modules/index.js` on every save in
+`nakama/src`, and `--watch` then restarts Nakama. Commit the rebuilt bundle
+with your `nakama/src` change: it is what the container runs. Without the
+watcher, rebuild it yourself and restart Nakama:
 
 ```sh
-BMP_SERVER_KIND=dev
-COMPOSE_PROFILES=dev
+pnpm --filter bmp-nakama-modules build
+docker compose -f compose.local.yml restart nakama
 ```
 
-Then:
+The bundle must stay one plain script (no exports, not minified): Nakama finds
+`InitModule` and every handler by its global name.
+
+#### Change the API or the website
+
+The `api` and `web` containers run a built image, so they do not follow your
+edits. Rebuild them after a change:
 
 ```sh
-docker compose -f compose.local.yml up --watch
+docker compose -f compose.local.yml up -d --build api web
 ```
 
-This starts Postgres, Nakama, the migrated API on `127.0.0.1:8788`, the
-website on `127.0.0.1:3000` and `nakama-bundle`, which rebuilds
-`nakama/modules/index.js` on every save in `nakama/src`. `--watch` restarts
-Nakama after each rebuild. Commit the rebuilt bundle with your `nakama/src`
-change: it is what the container runs.
+To work on the website with hot reload, stop the `web` container and run it
+outside Docker. It uses the API container on `127.0.0.1:8788`:
 
-To work on the API or website outside Docker, `pnpm install` and `pnpm dev`
-run every package's watch mode through Turbo.
+```sh
+docker compose -f compose.local.yml stop web
+pnpm install
+pnpm --filter balatro-multiplayer-web dev
+```
+
+Run the API in Docker: Postgres is not published to your machine, so an API
+outside Docker cannot reach it.
+
+A schema change goes through Drizzle (`pnpm generate`, see
+[Tests, typecheck and lint](#tests-typecheck-and-lint)). After `up --build`,
+the `migrate` service applies the new migration before the API starts.
+
+#### Dev flags
+
+Set these in `.env`. A Dev server allows all four dev flags. A Community
+server refuses `ALLOW_RANKED_LOBBIES` and the two `DEV_` flags, and the
+Official server refuses all four: Nakama and the API do not start with a
+refused flag on. The last two rows are not dev flags: every server kind reads
+them.
+
+| Variable | Dev server default | Effect |
+|---|---|---|
+| `ALLOW_DEVICE_AUTH` | on | Device login (no Steam Web API key needed). |
+| `ALLOW_RANKED_LOBBIES` | on | A client may create a ranked lobby directly, without the matchmaker. |
+| `DEV_AUTO_VERIFY_LAUNCHER` | off | The API marks every player's launcher as checked. |
+| `DEV_FAKE_LAUNCHER_STRATEGY` | off | The API uses a stand-in launcher-integrity challenge when `packages/internal` has none. |
+| `LOBBY_GRACE_SECONDS` | 120 | How long a lobby waits for a player who dropped. |
+| `RESULT_TIMEOUT_SECONDS` | 60 | How long a lobby waits for the result of a game. |
+
+`true` or `1` turns a flag on, `false` or `0` turns it off. After you change
+`.env`, run `up` again: `restart` does not read `.env`.
+
+#### Stop and update
+
+```sh
+docker compose -f compose.local.yml down    # stop; add -v to delete all data
+git pull && docker compose -f compose.local.yml up --watch --build   # update
+```
+
+To empty the databases, see [Test data](#test-data).
+
+`down` stops the services of the profiles in `.env`. If you started extra
+profiles on the command line, give the same profiles to `down`.
 
 ### Test data
 
