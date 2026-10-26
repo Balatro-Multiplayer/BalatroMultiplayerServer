@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { NOTICE_VERSION } from '@bmp/types'
+import type { INakamaAccounts } from '../../contracts/INakamaAccounts.js'
 import type {
 	IPlayerRepository,
 	PlayerRecord,
@@ -14,7 +15,6 @@ import {
 	linkProvider,
 	unlinkProvider,
 } from '../../state/index.js'
-import type { NakamaNoticeAcceptance } from '../../infrastructure/nakama/profile-sync.js'
 import { signJwt } from './jwt.js'
 
 type Provider = 'steam' | 'discord'
@@ -23,12 +23,7 @@ type SessionAndToken = { session: PlayerSession; token: string }
 
 interface AuthServiceDeps {
 	playerRepository: IPlayerRepository
-	nakamaAccounts: {
-		// infrastructure/nakama/profile-sync.ts deleteNakamaAccount
-		delete(playerId: string, anonymousId: string): Promise<'deleted' | 'no_account' | 'unavailable'>
-		// infrastructure/nakama/profile-sync.ts acceptNakamaNotice
-		acceptNotice(playerId: string, notice: NakamaNoticeAcceptance): Promise<boolean>
-	}
+	nakamaAccounts: INakamaAccounts
 }
 
 export type AuthService = ReturnType<typeof createAuthService>
@@ -289,7 +284,7 @@ export function createAuthService(deps: AuthServiceDeps) {
 	async function deleteAccount(playerId: string): Promise<void> {
 		const anonymousId = randomUUID()
 		const nakama = await deps.nakamaAccounts.delete(playerId, anonymousId)
-		if (nakama === 'unavailable')
+		if (!nakama.ok)
 			throw new AppError('Account deletion is unavailable right now, try again later', 503)
 		await playerRepository.anonymizePlayer(playerId, anonymousId)
 	}

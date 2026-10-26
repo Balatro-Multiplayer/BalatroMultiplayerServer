@@ -1,3 +1,9 @@
+import type {
+	NakamaAccountDeletion,
+	NakamaAccountDeletionError,
+	NakamaNoticeAcceptance,
+} from '../../contracts/INakamaAccounts.js'
+import { type Result, err, ok } from '../../shared/utils/result.js'
 import { callNakamaRpc } from './admin-client.js'
 import { nakamaUserIdOf } from './moderation-sync.js'
 
@@ -23,13 +29,6 @@ export async function editNakamaProfile(playerId: string, edit: NakamaProfileEdi
 	return result.ok
 }
 
-// A Notice accepted on the website, with the age answer if one was given.
-export interface NakamaNoticeAcceptance {
-	version: number
-	acceptedAt: number
-	chatEligible?: boolean
-}
-
 export async function acceptNakamaNotice(playerId: string, notice: NakamaNoticeAcceptance): Promise<boolean> {
 	const { version, acceptedAt, chatEligible } = notice
 	return editNakamaProfile(playerId, { notice: { version, acceptedAt }, chatEligible })
@@ -43,18 +42,17 @@ export async function linkNakamaDiscord(playerId: string, discordIdHash: string,
 	return result.ok
 }
 
-// no_account: the player has no Nakama account (never linked, Nakama off,
-// or already deleted). unavailable: Nakama did not delete it; nothing changed.
-export type NakamaAccountDeletion = 'deleted' | 'no_account' | 'unavailable'
-
 // Deletes the player's Nakama account after renaming them to anonymousId in
 // Nakama storage (nakama/src/player/anonymize.ts).
-export async function deleteNakamaAccount(playerId: string, anonymousId: string): Promise<NakamaAccountDeletion> {
+export async function deleteNakamaAccount(
+	playerId: string,
+	anonymousId: string,
+): Promise<Result<NakamaAccountDeletion, NakamaAccountDeletionError>> {
 	const userId = await nakamaUserIdOf(playerId)
-	if (!userId) return 'no_account'
+	if (!userId) return ok('no_account')
 	const result = await callNakamaRpc('admin_account_delete', { userId, anonymousId })
-	if (result.ok) return 'deleted'
-	if (result.error === 'not_found' || result.error === 'disabled') return 'no_account'
+	if (result.ok) return ok('deleted')
+	if (result.error === 'not_found' || result.error === 'disabled') return ok('no_account')
 	console.warn(`[nakama] Account of ${playerId} not deleted: ${result.error}`)
-	return 'unavailable'
+	return err('unavailable')
 }

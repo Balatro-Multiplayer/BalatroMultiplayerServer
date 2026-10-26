@@ -1,5 +1,6 @@
 import type { BanRecord } from '../gateways/ban.gateway.js'
 import { findPlayerById } from '../gateways/player.gateway.js'
+import { type Result, err, ok } from '../../shared/utils/result.js'
 import { callNakamaRpc, isNakamaAdminEnabled } from './admin-client.js'
 
 // Bans and webadmin lobby actions reaching players on Nakama
@@ -46,30 +47,34 @@ export interface NetworkBanSummary {
 	liftedAt: number | null
 }
 
-// The network bans that touch a player, or null when Nakama cannot answer.
-// Only the Official server has network bans; elsewhere the list is empty.
-export async function networkBansInNakama(playerId: string): Promise<NetworkBanSummary[] | null> {
+// unavailable: Nakama cannot answer (off, or not reached).
+export type NetworkBansError = 'unavailable'
+
+// The network bans that touch a player. Only the Official server has network
+// bans; elsewhere the list is empty.
+export async function networkBansInNakama(playerId: string): Promise<Result<NetworkBanSummary[], NetworkBansError>> {
 	const userId = await nakamaUserIdOf(playerId)
-	if (!userId) return isNakamaAdminEnabled() ? [] : null
+	if (!userId) return isNakamaAdminEnabled() ? ok([]) : err('unavailable')
 	const result = await callNakamaRpc<{
 		networkBans: { banId: string; userId: string; networks: number; bannedAt: number; liftedAt: number | null }[]
 	}>('admin_network_bans', { userId })
-	if (!result.ok) return null
-	return result.value.networkBans.map((b) => ({
+	if (!result.ok) return err('unavailable')
+	return ok(result.value.networkBans.map((b) => ({
 		banId: b.banId,
 		own: b.userId === userId,
 		networks: b.networks,
 		bannedAt: b.bannedAt,
 		liftedAt: b.liftedAt,
-	}))
+	})))
 }
 
-export type NetworkBanLift = 'lifted' | 'not_found' | 'unavailable'
+// not_found: no such network ban in force. unavailable: Nakama cannot answer.
+export type NetworkBanLiftError = 'not_found' | 'unavailable'
 
-export async function liftNetworkBanInNakama(banId: string): Promise<NetworkBanLift> {
+export async function liftNetworkBanInNakama(banId: string): Promise<Result<null, NetworkBanLiftError>> {
 	const result = await callNakamaRpc<{ lifted: boolean }>('admin_network_ban_lift', { banId })
-	if (!result.ok) return 'unavailable'
-	return result.value.lifted ? 'lifted' : 'not_found'
+	if (!result.ok) return err('unavailable')
+	return result.value.lifted ? ok(null) : err('not_found')
 }
 
 export interface NakamaLobbySummary {

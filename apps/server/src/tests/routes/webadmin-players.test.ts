@@ -17,8 +17,8 @@ vi.mock(
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
 		banInNakama: vi.fn().mockResolvedValue(true),
-		networkBansInNakama: vi.fn().mockResolvedValue([]),
-		liftNetworkBanInNakama: vi.fn().mockResolvedValue('lifted'),
+		networkBansInNakama: vi.fn().mockResolvedValue({ ok: true, value: [] }),
+		liftNetworkBanInNakama: vi.fn().mockResolvedValue({ ok: true, value: null }),
 		nakamaUserIdOf: vi.fn().mockResolvedValue(null),
 	}),
 )
@@ -163,7 +163,7 @@ describe('network bans in the admin panel', () => {
 
 	it('shows staff the network bans that touch a player', async () => {
 		const token = authAsModerator('mod-6', 'Mod6')
-		vi.mocked(networkBansInNakama).mockResolvedValue([networkBan])
+		vi.mocked(networkBansInNakama).mockResolvedValue({ ok: true, value: [networkBan] })
 		const res = await request(app).get('/api/webadmin/players/target-5/network-bans').set('Authorization', token)
 		expect(res.status).toBe(200)
 		expect(res.body).toEqual({ networkBans: [networkBan] })
@@ -172,7 +172,7 @@ describe('network bans in the admin panel', () => {
 
 	it('says so when Nakama cannot answer', async () => {
 		const token = authAsModerator('mod-7', 'Mod7')
-		vi.mocked(networkBansInNakama).mockResolvedValue(null)
+		vi.mocked(networkBansInNakama).mockResolvedValue({ ok: false, error: 'unavailable' })
 		const res = await request(app).get('/api/webadmin/players/target-5/network-bans').set('Authorization', token)
 		expect(res.status).toBe(503)
 	})
@@ -198,7 +198,7 @@ describe('network bans in the admin panel', () => {
 
 	it('is 404 for a network ban not in force', async () => {
 		const token = authAsAdmin('admin-7', 'Admin7')
-		vi.mocked(liftNetworkBanInNakama).mockResolvedValue('not_found')
+		vi.mocked(liftNetworkBanInNakama).mockResolvedValue({ ok: false, error: 'not_found' })
 		const res = await request(app)
 			.delete('/api/webadmin/players/target-5/network-bans/ban-7')
 			.set('Authorization', token)

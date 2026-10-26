@@ -59,7 +59,7 @@ function makeMockPlayerRepository(): IPlayerRepository {
 function makeAuthService() {
 	const playerRepository = makeMockPlayerRepository()
 	const nakamaAccounts = {
-		delete: vi.fn().mockResolvedValue('no_account' as const),
+		delete: vi.fn().mockResolvedValue({ ok: true as const, value: 'no_account' as const }),
 		acceptNotice: vi.fn().mockResolvedValue(true),
 	}
 	const service = createAuthService({

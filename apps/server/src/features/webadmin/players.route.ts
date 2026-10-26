@@ -172,8 +172,8 @@ router.delete('/players/:id/bans/:banId', async (req, res, next) => {
 router.get('/players/:id/network-bans', async (req, res, next) => {
 	try {
 		const networkBans = await networkBansInNakama(req.params.id)
-		if (!networkBans) throw new AppError('Nakama is unavailable', 503)
-		res.json({ networkBans })
+		if (!networkBans.ok) throw new AppError('Nakama is unavailable', 503)
+		res.json({ networkBans: networkBans.value })
 	} catch (err) {
 		next(err)
 	}
@@ -184,8 +184,8 @@ router.delete('/players/:id/network-bans/:banId', async (req, res, next) => {
 		const staff = await staffOf(req)
 		if (!staff || !mayLiftBan(staff.role, 'account')) throw new AppError('Your role may not lift a network ban', 403)
 		const outcome = await liftNetworkBanInNakama(req.params.banId)
-		if (outcome === 'unavailable') throw new AppError('Nakama is unavailable', 503)
-		if (outcome === 'not_found') throw new AppError('No matching network ban in force', 404)
+		if (!outcome.ok && outcome.error === 'unavailable') throw new AppError('Nakama is unavailable', 503)
+		if (!outcome.ok && outcome.error === 'not_found') throw new AppError('No matching network ban in force', 404)
 		console.log(`[webadmin] ${req.player!.playerId} lifted network ban ${req.params.banId}`)
 		res.json({ lifted: true })
 	} catch (err) {
