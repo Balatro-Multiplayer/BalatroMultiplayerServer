@@ -32,7 +32,7 @@ export const QUEUE_MODS: QueueMod[] = [
           { label: 'Vanilla Ranked', key: 'ranked:pvp_ranked_vanilla' },
           { label: 'Balanced Ranked', key: 'ranked:pvp_ranked_balanced' },
           { label: 'Expanded Ranked', key: 'ranked:pvp_ranked_expanded' },
-          { label: 'MLBa Ranked', key: null },
+          { label: 'MLBa Ranked', key: 'ranked:pvp_ranked_majorleague' },
           { label: 'Smallworld Ranked', key: 'ranked:pvp_ranked_smallworld' },
         ],
       },
