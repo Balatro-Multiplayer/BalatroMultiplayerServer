@@ -36,6 +36,7 @@ import {
 import type { ModIndexEntryInput } from '../../features/mods/thunderstore-mod-index.service.js'
 import { db } from '../db/index.js'
 import {
+	type ModProfileVersionMode,
 	modProfileEntries,
 	modProfiles,
 	modRegistry,
@@ -248,6 +249,157 @@ export async function getPublicProfileBySlug(slug: string) {
 		.from(modProfileEntries)
 		.where(eq(modProfileEntries.profileId, profile.id))
 	return { ...profile, entries }
+}
+
+// --- Admin: profile writes (features/webadmin/mods.route.ts) ---
+//
+// Only an admin writes these. The launcher reads them through the public
+// reads above, so a write here changes its preset picker directly.
+
+type ModProfileRow = typeof modProfiles.$inferSelect
+type ModProfileEntryRow = typeof modProfileEntries.$inferSelect
+
+export interface ModProfileFields {
+	name: string
+	slug: string
+	description: string | null
+}
+
+export type SaveProfileResult =
+	| { ok: true; profile: ModProfileRow }
+	| { ok: false; reason: 'not-found' }
+	| { ok: false; reason: 'slug-taken' }
+
+async function slugTakenByOther(
+	tx: Tx,
+	slug: string,
+	exceptId: string | null,
+): Promise<boolean> {
+	const [row] = await tx
+		.select({ id: modProfiles.id })
+		.from(modProfiles)
+		.where(eq(modProfiles.slug, slug))
+	return row !== undefined && row.id !== exceptId
+}
+
+export async function createProfile(
+	input: ModProfileFields & { createdBy: string },
+): Promise<SaveProfileResult> {
+	return db.transaction(async (tx) => {
+		if (await slugTakenByOther(tx, input.slug, null)) {
+			return { ok: false, reason: 'slug-taken' }
+		}
+		const [profile] = await tx.insert(modProfiles).values(input).returning()
+		return { ok: true, profile }
+	})
+}
+
+export async function updateProfile(
+	id: string,
+	input: ModProfileFields,
+): Promise<SaveProfileResult> {
+	return db.transaction(async (tx) => {
+		if (await slugTakenByOther(tx, input.slug, id)) {
+			return { ok: false, reason: 'slug-taken' }
+		}
+		const [profile] = await tx
+			.update(modProfiles)
+			.set({ ...input, updatedAt: new Date() })
+			.where(eq(modProfiles.id, id))
+			.returning()
+		return profile ? { ok: true, profile } : { ok: false, reason: 'not-found' }
+	})
+}
+
+// Entries go with it (ON DELETE CASCADE).
+export async function deleteProfile(id: string): Promise<boolean> {
+	const rows = await db
+		.delete(modProfiles)
+		.where(eq(modProfiles.id, id))
+		.returning({ id: modProfiles.id })
+	return rows.length > 0
+}
+
+export type SetProfileEntryResult =
+	| { ok: true; entry: ModProfileEntryRow }
+	| { ok: false; reason: 'profile-not-found' }
+	| { ok: false; reason: 'mod-not-found' }
+	| { ok: false; reason: 'version-not-found' }
+
+// Adds a mod to a profile or replaces its entry. The mod must be in the
+// registry (stored under its registry id, so a Thunderstore full name works
+// too), and an exact pin must be one of its versions by name or alias,
+// stored as the version's own name: the launcher matches pinnedVersion
+// against the version list it reads from GET /api/mods/:id.
+export async function setProfileEntry(input: {
+	profileId: string
+	modId: string
+	versionMode: ModProfileVersionMode
+	pinnedVersion: string | null
+	allowed: boolean
+}): Promise<SetProfileEntryResult> {
+	const [profile] = await db
+		.select({ id: modProfiles.id })
+		.from(modProfiles)
+		.where(eq(modProfiles.id, input.profileId))
+	if (!profile) return { ok: false, reason: 'profile-not-found' }
+
+	const mod = await findModByIdOrFullName(input.modId)
+	if (!mod) return { ok: false, reason: 'mod-not-found' }
+
+	let pinnedVersion: string | null = null
+	if (input.versionMode === 'exact') {
+		const wanted = input.pinnedVersion ?? ''
+		const rows = await listVersionRows(mod.id)
+		const row =
+			rows.find((r) => r.version === wanted) ??
+			rows.find((r) => matchesVersion(r, wanted))
+		if (!row) return { ok: false, reason: 'version-not-found' }
+		pinnedVersion = row.version
+	}
+
+	const values = {
+		profileId: profile.id,
+		modId: mod.id,
+		versionMode: input.versionMode,
+		pinnedVersion,
+		allowed: input.allowed,
+	}
+	const [entry] = await db
+		.insert(modProfileEntries)
+		.values(values)
+		.onConflictDoUpdate({
+			target: [modProfileEntries.profileId, modProfileEntries.modId],
+			set: {
+				versionMode: values.versionMode,
+				pinnedVersion: values.pinnedVersion,
+				allowed: values.allowed,
+			},
+		})
+		.returning()
+	await db
+		.update(modProfiles)
+		.set({ updatedAt: new Date() })
+		.where(eq(modProfiles.id, profile.id))
+	return { ok: true, entry }
+}
+
+// Takes the stored mod id as-is: an entry can name a mod the sync has since
+// pruned, and it must still be removable.
+export async function removeProfileEntry(
+	profileId: string,
+	modId: string,
+): Promise<boolean> {
+	const rows = await db
+		.delete(modProfileEntries)
+		.where(
+			and(
+				eq(modProfileEntries.profileId, profileId),
+				eq(modProfileEntries.modId, modId),
+			),
+		)
+		.returning({ id: modProfileEntries.id })
+	return rows.length > 0
 }
 
 // --- Thunderstore sync (features/mods/mods-sync.service.ts) ---

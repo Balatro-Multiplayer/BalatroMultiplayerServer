@@ -176,3 +176,38 @@ export function formToBody(
   }
   return body
 }
+
+// A mod profile: a named preset the launcher offers (GET /api/mods/profiles).
+// The admin list (GET /webadmin/mods/profiles) is the same shape.
+export type ModProfileVersionMode = 'exact' | 'latest' | 'latestRanked'
+
+export interface ModProfileEntry {
+  id: number
+  profileId: string
+  // Can name a mod the sync has since pruned; such an entry still shows.
+  modId: string
+  versionMode: ModProfileVersionMode
+  // Set only when versionMode is 'exact'.
+  pinnedVersion: string | null
+  allowed: boolean
+}
+
+export interface ModProfile {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  entries: ModProfileEntry[]
+}
+
+export interface ProfileForm {
+  name: string
+  slug: string
+  description: string
+}
+
+export const emptyProfileForm: ProfileForm = {
+  name: '',
+  slug: '',
+  description: '',
+}
