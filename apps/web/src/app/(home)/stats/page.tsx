@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { QUEUE_MODS, pillarCounts, type QueueMod, type QueueStatsResponse } from '@/lib/queue-pillars'
 
 interface GlobalStats {
   activePlayers: number
@@ -27,6 +28,12 @@ export default function StatsPage() {
     refetchInterval: 5 * 60_000,
   })
 
+  const queueStats = useQuery<QueueStatsResponse>({
+    queryKey: ['stats-queues'],
+    queryFn: () => apiFetch('/stats/queues'),
+    refetchInterval: 15_000,
+  })
+
   return (
     <div className='container py-8 space-y-8'>
       <div className='space-y-1'>
@@ -41,6 +48,15 @@ export default function StatsPage() {
         <StatCard label='Active Players' value={stats?.activePlayers} color='text-primary' />
       </div>
 
+      {QUEUE_MODS.map((mod) => (
+        <QueueStatsCard
+          key={mod.modId}
+          mod={mod}
+          counts={queueStats.data?.[mod.modId]}
+          failed={queueStats.isError}
+        />
+      ))}
+
       <ActivityChartCard data={activityData} />
     </div>
   )
@@ -54,6 +70,63 @@ function StatCard({ label, value, color }: { label: string; value: number | unde
           {value !== undefined ? value.toLocaleString() : '-'}
         </div>
         <div className='mt-1.5 text-xs uppercase tracking-wider text-muted-foreground'>{label}</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function QueueStatsCard({
+  mod,
+  counts,
+  failed,
+}: {
+  mod: QueueMod
+  // undefined: still loading; null: Nakama did not answer for this mod.
+  counts: QueueStatsResponse[QueueMod['modId']] | undefined
+  failed: boolean
+}) {
+  // failed: the last fetch failed; old counts would be stale, so hide them.
+  const unavailable = counts === null || failed
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{mod.label} Queues</CardTitle>
+        <CardDescription>Players in each Find Game queue and in its games now.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {unavailable ? (
+          <p className='text-sm text-muted-foreground'>Queue stats are unavailable right now.</p>
+        ) : (
+          <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
+            {mod.groups.map((group) => (
+              <div key={group.label} className='space-y-2'>
+                <h3 className='text-xs uppercase tracking-wider text-muted-foreground'>{group.label}</h3>
+                <table className='w-full text-sm'>
+                  <thead>
+                    <tr className='text-left text-xs text-muted-foreground'>
+                      <th className='py-1 font-medium'>Mode</th>
+                      <th className='py-1 text-right font-medium'>In Queue</th>
+                      <th className='py-1 text-right font-medium'>In Game</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {group.pillars.map((pillar) => {
+                      const pillarStats = counts ? pillarCounts(counts, pillar) : undefined
+                      return (
+                        <tr key={pillar.label} className='border-t border-border/50'>
+                          <td className='py-1.5'>{pillar.label}</td>
+                          <td className='py-1.5 text-right tabular-nums'>{pillarStats?.queued ?? '-'}</td>
+                          <td className='py-1.5 text-right tabular-nums'>{pillarStats?.inMatch ?? '-'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   )
