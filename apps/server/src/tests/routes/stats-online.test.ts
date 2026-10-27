@@ -47,7 +47,6 @@ describe('GET /api/stats online players', () => {
 	it.each([
 		['Nakama does not answer', err('unreachable' as const)],
 		['the metrics URL is not set', err('disabled' as const)],
-		['the gauge is missing', ok('# TYPE nakama_api_count counter\n')],
 	])('answers onlinePlayers null when %s', async (_case, answer) => {
 		fetchNakamaMetrics.mockResolvedValue(answer)
 
@@ -56,6 +55,18 @@ describe('GET /api/stats online players', () => {
 		expect(res.status).toBe(200)
 		expect(res.body.onlinePlayers).toBeNull()
 		expect(res.body).toHaveProperty('totalMatches')
+	})
+
+	// After a Nakama start the gauge appears only when the first socket opens.
+	it('answers onlinePlayers 0 when the metrics answer without the gauge', async () => {
+		fetchNakamaMetrics.mockResolvedValue(
+			ok('# TYPE nakama_api_count counter\n'),
+		)
+
+		const res = await request(app).get('/api/stats')
+
+		expect(res.status).toBe(200)
+		expect(res.body.onlinePlayers).toBe(0)
 	})
 
 	it('refreshes the online count after 10 seconds while the totals stay cached', async () => {

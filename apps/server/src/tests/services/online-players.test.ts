@@ -22,12 +22,12 @@ describe('parseNakamaSessions', () => {
 		expect(parseNakamaSessions(sampleBody)).toBe(7)
 	})
 
-	it('answers null when the gauge is missing', () => {
+	it('answers 0 when the gauge is missing', () => {
 		expect(
 			parseNakamaSessions(
 				'# TYPE nakama_api_count counter\nnakama_api_count{node_name="nakama1"} 42\n',
 			),
-		).toBeNull()
+		).toBe(0)
 	})
 
 	it('sums the gauge over several lines', () => {
