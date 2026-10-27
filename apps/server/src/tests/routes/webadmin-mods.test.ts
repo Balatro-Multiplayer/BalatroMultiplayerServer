@@ -23,6 +23,12 @@ vi.mock('../../infrastructure/gateways/mods.gateway.js', async () => {
 		setModFlags: vi.fn(),
 		setRankedVersion: vi.fn(),
 		setSmodsIds: vi.fn(),
+		listPublicProfiles: vi.fn(),
+		createProfile: vi.fn(),
+		updateProfile: vi.fn(),
+		deleteProfile: vi.fn(),
+		setProfileEntry: vi.fn(),
+		removeProfileEntry: vi.fn(),
 	}
 })
 
@@ -587,5 +593,191 @@ describe('SMODS ids', () => {
 		const res = await request(app).post('/api/webadmin/mods/smods-ids/backfill').set('Authorization', admin)
 		expect(res.status).toBe(200)
 		expect(res.body).toEqual({ ok: true, read: 2, failed: 0, skipped: 1, queueAllowedModIds: ['AuthorMod'] })
+	})
+})
+
+describe('mod profile admin routes', () => {
+	const profile = {
+		id: 'p-1',
+		name: 'PvP',
+		slug: 'mppvp',
+		description: null,
+	}
+
+	it('lists every profile with its entries, readable by a moderator', async () => {
+		const rows = [{ ...profile, entries: [] }]
+		vi.mocked(modsGateway.listPublicProfiles).mockResolvedValue(rows as any)
+
+		const token = authAsModerator('prof-list-1', 'Mod')
+		const res = await request(app)
+			.get('/api/webadmin/mods/profiles')
+			.set('Authorization', token)
+
+		expect(res.status).toBe(200)
+		expect(res.body).toEqual(rows)
+		expect(modsGateway.findModByIdOrFullName).not.toHaveBeenCalledWith('profiles')
+	})
+
+	it('writes are admin-only', async () => {
+		const token = authAsModerator('prof-mod-1', 'Mod')
+		const res = await request(app)
+			.post('/api/webadmin/mods/profiles')
+			.set('Authorization', token)
+			.send({ name: 'PvP', slug: 'mppvp' })
+
+		expect(res.status).toBe(403)
+		expect(modsGateway.createProfile).not.toHaveBeenCalled()
+	})
+
+	it('creates a profile and records who made it', async () => {
+		vi.mocked(modsGateway.createProfile).mockResolvedValue({
+			ok: true,
+			profile,
+		} as any)
+
+		const token = authAsAdmin('prof-admin-1', 'Admin')
+		const res = await request(app)
+			.post('/api/webadmin/mods/profiles')
+			.set('Authorization', token)
+			.send({ name: ' PvP ', slug: 'mppvp', description: '' })
+
+		expect(res.status).toBe(201)
+		expect(modsGateway.createProfile).toHaveBeenCalledWith({
+			name: 'PvP',
+			slug: 'mppvp',
+			description: null,
+			createdBy: 'prof-admin-1',
+		})
+	})
+
+	it('refuses a slug that is not lowercase letters, digits and dashes', async () => {
+		const token = authAsAdmin('prof-admin-2', 'Admin')
+		const res = await request(app)
+			.post('/api/webadmin/mods/profiles')
+			.set('Authorization', token)
+			.send({ name: 'PvP', slug: 'My Profile' })
+
+		expect(res.status).toBe(400)
+	})
+
+	it('returns 409 when the slug is taken and 404 for an unknown profile', async () => {
+		const token = authAsAdmin('prof-admin-3', 'Admin')
+		vi.mocked(modsGateway.updateProfile).mockResolvedValueOnce({
+			ok: false,
+			reason: 'slug-taken',
+		})
+		const taken = await request(app)
+			.put('/api/webadmin/mods/profiles/p-1')
+			.set('Authorization', token)
+			.send({ name: 'PvP', slug: 'mpspdrn' })
+		expect(taken.status).toBe(409)
+
+		vi.mocked(modsGateway.updateProfile).mockResolvedValueOnce({
+			ok: false,
+			reason: 'not-found',
+		})
+		const missing = await request(app)
+			.put('/api/webadmin/mods/profiles/p-x')
+			.set('Authorization', token)
+			.send({ name: 'PvP', slug: 'mppvp' })
+		expect(missing.status).toBe(404)
+	})
+
+	it('deletes a profile', async () => {
+		vi.mocked(modsGateway.deleteProfile).mockResolvedValue(true)
+		const token = authAsAdmin('prof-admin-4', 'Admin')
+		const res = await request(app)
+			.delete('/api/webadmin/mods/profiles/p-1')
+			.set('Authorization', token)
+
+		expect(res.status).toBe(200)
+		expect(modsGateway.deleteProfile).toHaveBeenCalledWith('p-1')
+	})
+
+	it('sets an exact entry through the gateway', async () => {
+		vi.mocked(modsGateway.setProfileEntry).mockResolvedValue({
+			ok: true,
+			entry: { modId: 'smods', versionMode: 'exact', pinnedVersion: '1.1620.0' },
+		} as any)
+		const token = authAsAdmin('prof-admin-5', 'Admin')
+		const res = await request(app)
+			.put('/api/webadmin/mods/profiles/p-1/entries/smods')
+			.set('Authorization', token)
+			.send({ versionMode: 'exact', pinnedVersion: '1.0.0-beta-1620a' })
+
+		expect(res.status).toBe(200)
+		expect(modsGateway.setProfileEntry).toHaveBeenCalledWith({
+			profileId: 'p-1',
+			modId: 'smods',
+			versionMode: 'exact',
+			pinnedVersion: '1.0.0-beta-1620a',
+			allowed: true,
+		})
+	})
+
+	it('drops pinnedVersion for a non-exact mode', async () => {
+		vi.mocked(modsGateway.setProfileEntry).mockResolvedValue({
+			ok: true,
+			entry: {},
+		} as any)
+		const token = authAsAdmin('prof-admin-6', 'Admin')
+		await request(app)
+			.put('/api/webadmin/mods/profiles/p-1/entries/smods')
+			.set('Authorization', token)
+			.send({ versionMode: 'latestRanked', pinnedVersion: '1.0', allowed: false })
+
+		expect(modsGateway.setProfileEntry).toHaveBeenCalledWith(
+			expect.objectContaining({ pinnedVersion: null, allowed: false }),
+		)
+	})
+
+	it('refuses a bad mode, an exact entry with no version, and an unknown version', async () => {
+		const token = authAsAdmin('prof-admin-7', 'Admin')
+		const badMode = await request(app)
+			.put('/api/webadmin/mods/profiles/p-1/entries/smods')
+			.set('Authorization', token)
+			.send({ versionMode: 'newest' })
+		expect(badMode.status).toBe(400)
+
+		const noVersion = await request(app)
+			.put('/api/webadmin/mods/profiles/p-1/entries/smods')
+			.set('Authorization', token)
+			.send({ versionMode: 'exact' })
+		expect(noVersion.status).toBe(400)
+		expect(modsGateway.setProfileEntry).not.toHaveBeenCalled()
+
+		vi.mocked(modsGateway.setProfileEntry).mockResolvedValue({
+			ok: false,
+			reason: 'version-not-found',
+		})
+		const unknown = await request(app)
+			.put('/api/webadmin/mods/profiles/p-1/entries/smods')
+			.set('Authorization', token)
+			.send({ versionMode: 'exact', pinnedVersion: '9.9.9' })
+		expect(unknown.status).toBe(400)
+	})
+
+	it('returns 404 for an unknown mod', async () => {
+		vi.mocked(modsGateway.setProfileEntry).mockResolvedValue({
+			ok: false,
+			reason: 'mod-not-found',
+		})
+		const token = authAsAdmin('prof-admin-8', 'Admin')
+		const res = await request(app)
+			.put('/api/webadmin/mods/profiles/p-1/entries/nope')
+			.set('Authorization', token)
+			.send({ versionMode: 'latest' })
+		expect(res.status).toBe(404)
+	})
+
+	it('removes an entry', async () => {
+		vi.mocked(modsGateway.removeProfileEntry).mockResolvedValue(true)
+		const token = authAsAdmin('prof-admin-9', 'Admin')
+		const res = await request(app)
+			.delete('/api/webadmin/mods/profiles/p-1/entries/smods')
+			.set('Authorization', token)
+
+		expect(res.status).toBe(200)
+		expect(modsGateway.removeProfileEntry).toHaveBeenCalledWith('p-1', 'smods')
 	})
 })

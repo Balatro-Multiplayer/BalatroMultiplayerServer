@@ -1,18 +1,30 @@
 import { Router } from 'express'
 import {
+	type ModProfileVersionMode,
+	modProfileVersionModeEnum,
+} from '../../infrastructure/db/schema.js'
+import {
+	type ModProfileFields,
 	type PinCommitResult,
+	type SaveProfileResult,
 	createCustomMod,
+	createProfile,
 	deleteCustomMod,
+	deleteProfile,
 	findModByIdOrFullName,
 	getPublicModById,
 	listPublicMods,
+	listPublicProfiles,
 	listVersionsForMod,
 	pinCommit,
+	removeProfileEntry,
 	setModFlags,
+	setProfileEntry,
 	setRankedVersion,
 	setSmodsIds,
 	setTrackGithub,
 	updateCustomMod,
+	updateProfile,
 } from '../../infrastructure/gateways/mods.gateway.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
@@ -30,7 +42,8 @@ import { backfillSmodsIds } from '../mods/smods-ids-backfill.service.js'
 // manage the admin-owned fields -- the ranked pin (see schema.ts's own doc
 // comment -- a mod is ranked-allowed iff rankedVersion is non-null),
 // featured, hidden and trackGithub -- on every mod, and create/edit/delete
-// custom mods (rows with no Thunderstore package). A Thunderstore mod's own fields are read-only here:
+// custom mods (rows with no Thunderstore package), and edit the mod profiles
+// the launcher offers as presets. A Thunderstore mod's own fields are read-only here:
 // the gateway's custom-mod writes are scoped to isCustom rows in SQL, so
 // that holds even if a route check is missed.
 //
@@ -51,6 +64,149 @@ async function requireAdmin(req: import('express').Request) {
 router.get('/mods', async (_req, res, next) => {
 	try {
 		res.json(await listPublicMods({ includeHidden: true }))
+	} catch (err) {
+		next(err)
+	}
+})
+
+// --- Mod profiles: the named presets the launcher offers ---
+//
+// Registered before every /mods/:modId route so that wildcard never takes
+// /mods/profiles. The list is the public GET /api/mods/profiles shape
+// (every profile with its entries); only an admin writes.
+
+router.get('/mods/profiles', async (_req, res, next) => {
+	try {
+		res.json(await listPublicProfiles())
+	} catch (err) {
+		next(err)
+	}
+})
+
+const PROFILE_SLUG = /^[a-z0-9][a-z0-9-]{0,127}$/
+
+function readProfileFields(body: Record<string, unknown>): ModProfileFields {
+	const { name, slug, description } = body
+	if (typeof name !== 'string' || !name.trim())
+		throw new AppError('name is required', 400)
+	if (typeof slug !== 'string' || !PROFILE_SLUG.test(slug))
+		throw new AppError(
+			'slug is required: lowercase letters, digits and dashes',
+			400,
+		)
+	if (description !== undefined && description !== null && typeof description !== 'string')
+		throw new AppError('description must be a string or null', 400)
+	return {
+		name: name.trim(),
+		slug,
+		description: description?.trim() || null,
+	}
+}
+
+function throwSaveProfileError(
+	result: Exclude<SaveProfileResult, { ok: true }>,
+): never {
+	switch (result.reason) {
+		case 'not-found':
+			throw new AppError('Profile not found', 404)
+		case 'slug-taken':
+			throw new AppError('Another profile already uses that slug', 409)
+	}
+}
+
+router.post('/mods/profiles', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const result = await createProfile({
+			...readProfileFields(req.body as Record<string, unknown>),
+			createdBy: req.player!.playerId,
+		})
+		if (!result.ok) throwSaveProfileError(result)
+		res.status(201).json(result.profile)
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.put('/mods/profiles/:id', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const result = await updateProfile(
+			req.params.id,
+			readProfileFields(req.body as Record<string, unknown>),
+		)
+		if (!result.ok) throwSaveProfileError(result)
+		res.json(result.profile)
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.delete('/mods/profiles/:id', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		if (!(await deleteProfile(req.params.id)))
+			throw new AppError('Profile not found', 404)
+		res.json({ ok: true })
+	} catch (err) {
+		next(err)
+	}
+})
+
+// versionMode 'exact' needs a pinnedVersion that is one of the mod's
+// versions (name or alias); the other modes ignore pinnedVersion.
+router.put('/mods/profiles/:id/entries/:modId', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const { versionMode, pinnedVersion, allowed } = req.body as {
+			versionMode?: unknown
+			pinnedVersion?: unknown
+			allowed?: unknown
+		}
+		if (
+			typeof versionMode !== 'string' ||
+			!modProfileVersionModeEnum.enumValues.includes(
+				versionMode as ModProfileVersionMode,
+			)
+		)
+			throw new AppError(
+				`versionMode must be one of: ${modProfileVersionModeEnum.enumValues.join(', ')}`,
+				400,
+			)
+		if (versionMode === 'exact' && (typeof pinnedVersion !== 'string' || !pinnedVersion))
+			throw new AppError('pinnedVersion is required when versionMode is exact', 400)
+		if (allowed !== undefined && typeof allowed !== 'boolean')
+			throw new AppError('allowed must be a boolean', 400)
+
+		const result = await setProfileEntry({
+			profileId: req.params.id,
+			modId: req.params.modId,
+			versionMode: versionMode as ModProfileVersionMode,
+			pinnedVersion: versionMode === 'exact' ? (pinnedVersion as string) : null,
+			allowed: allowed ?? true,
+		})
+		if (!result.ok) {
+			switch (result.reason) {
+				case 'profile-not-found':
+					throw new AppError('Profile not found', 404)
+				case 'mod-not-found':
+					throw new AppError('Mod not found', 404)
+				case 'version-not-found':
+					throw new AppError("That version is not one of this mod's versions", 400)
+			}
+		}
+		res.json(result.entry)
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.delete('/mods/profiles/:id/entries/:modId', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		if (!(await removeProfileEntry(req.params.id, req.params.modId)))
+			throw new AppError('That mod is not in this profile', 404)
+		res.json({ ok: true })
 	} catch (err) {
 		next(err)
 	}
