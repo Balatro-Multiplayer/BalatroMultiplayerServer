@@ -1,3 +1,5 @@
+import type { GameModeCounts, QueueStatsMod } from '@bmp/types'
+
 // The Find Game pillars the Stats page shows live queue counts for, in pillar
 // order, with the game mode key Nakama's queue_counts reports them under.
 // Mirrors PvP's ui/main_menu/find_game.lua and SPDRN's
@@ -16,7 +18,7 @@ export interface QueuePillarGroup {
 }
 
 export interface QueueMod {
-  modId: 'MultiplayerPvP' | 'MultiplayerSPDRN'
+  modId: QueueStatsMod
   label: string
   groups: QueuePillarGroup[]
 }
@@ -68,14 +70,6 @@ export const QUEUE_MODS: QueueMod[] = [
     ],
   },
 ]
-
-export interface GameModeCounts {
-  queued: number
-  inMatch: number
-}
-
-/** GET /stats/queues: per mod, the counts by game mode key, or null when Nakama did not answer. */
-export type QueueStatsResponse = Record<QueueMod['modId'], Record<string, GameModeCounts> | null>
 
 export function pillarCounts(
   counts: Record<string, GameModeCounts>,

@@ -1,4 +1,5 @@
-import type { Result } from '../../shared/utils/result.js'
+import type { FetchMetrics } from '../../contracts/IStatsSources.js'
+import { createTtlCache } from '../../shared/utils/ttl-cache.js'
 
 // Online players for the Stats page: every account whose game holds a socket
 // to Nakama now. A website login holds no socket, and session.single_socket
@@ -23,25 +24,11 @@ export function parseNakamaSessions(body: string): number {
 	return total
 }
 
-export type FetchMetrics = () => Promise<Result<string, unknown>>
-
-// Every visitor polls the page, so the count is cached briefly: at most one
-// metrics fetch per ttl. The pending promise is cached too, so requests that
-// arrive during a fetch share it. null: Nakama or its metrics are down.
+// Every visitor polls the page, so the count is cached: at most one metrics
+// fetch per ttl. null: Nakama or its metrics are down.
 export function createOnlinePlayers(fetchMetrics: FetchMetrics, ttlMs: number) {
-	let cached: Promise<number | null> | null = null
-	let cachedAt = 0
-
-	async function load(): Promise<number | null> {
+	return createTtlCache(async (): Promise<number | null> => {
 		const answer = await fetchMetrics()
 		return answer.ok ? parseNakamaSessions(answer.value) : null
-	}
-
-	return function getOnlinePlayers(now: number): Promise<number | null> {
-		if (!cached || now - cachedAt >= ttlMs) {
-			cached = load()
-			cachedAt = now
-		}
-		return cached
-	}
+	}, ttlMs)
 }
