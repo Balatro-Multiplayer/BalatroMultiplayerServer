@@ -45,6 +45,7 @@ export const LEADERBOARD_CATEGORIES: LeaderboardCategory[] = [
       { id: 'pvp_ranked_vanilla', label: 'Vanilla' },
       { id: 'pvp_ranked_balanced', label: 'Balanced' },
       { id: 'pvp_ranked_expanded', label: 'Expanded' },
+      { id: 'pvp_ranked_majorleague', label: 'MLBa' },
       { id: 'pvp_ranked_smallworld', label: 'Smallworld' },
     ],
   },
