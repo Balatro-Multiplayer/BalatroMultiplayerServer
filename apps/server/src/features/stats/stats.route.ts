@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 import { Router } from 'express'
 import { db } from '../../infrastructure/db/index.js'
 import {
@@ -9,14 +9,13 @@ import {
 } from '../../infrastructure/db/schema.js'
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
+import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 import {
 	DECAY_FLOOR,
 	DECAY_INACTIVE_THRESHOLD_DAYS,
 	DECAY_RATE_PER_DAY,
 	PLACEMENT_GAMES,
 } from '../ratings/elo.js'
-import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
-import { stakePopularity } from './stake-popularity.js'
 
 const router = Router()
 
@@ -294,97 +293,6 @@ router.get('/activity', async (_req, res, next) => {
 				return { hour: row.bucket, count: Number(row.count) }
 			}),
 		})
-	} catch (err) {
-		next(err)
-	}
-})
-
-// §6.2: per-season summary. matchmakingMatches has no season column of its own
-// (unlike matchmakingRatings), so matches are attributed to a season by falling
-// within its [startedAt, endedAt ?? endsAt] range -- the same boundary
-// checkSeasonRollover itself uses to decide when a season ends.
-router.get('/season-overview', async (_req, res, next) => {
-	try {
-		const rows = await db.execute(sql`
-			SELECT
-				s.id, s.name, s.started_at, s.ends_at, s.ended_at,
-				(SELECT count(*)::int FROM matchmaking_matches m
-				 WHERE m.created_at >= s.started_at
-				   AND m.created_at < coalesce(s.ended_at, s.ends_at)) AS total_matches,
-				(SELECT count(*)::int FROM matchmaking_ratings r
-				 WHERE r.season = s.id AND r.games_played >= ${PLACEMENT_GAMES}) AS ranked_players
-			FROM seasons s
-			ORDER BY s.id DESC
-		`)
-		res.json({
-			seasons: rows.rows.map((r) => {
-				const row = r as {
-					id: number
-					name: string
-					started_at: string
-					ends_at: string
-					ended_at: string | null
-					total_matches: number
-					ranked_players: number
-				}
-				return {
-					id: row.id,
-					name: row.name,
-					startedAt: row.started_at,
-					endsAt: row.ends_at,
-					endedAt: row.ended_at,
-					totalMatches: Number(row.total_matches),
-					rankedPlayers: Number(row.ranked_players),
-				}
-			}),
-		})
-	} catch (err) {
-		next(err)
-	}
-})
-
-// §6.2: browseable log of recent ranked matches. Global feed (every match, not
-// scoped to one player) -- a different shape from getRunsForPlayer (§22.2,
-// which is player-scoped by design for the "My Matches" replay list).
-router.get('/history', async (req, res, next) => {
-	try {
-		const limit = queryInt(req.query.limit, 25, 1, 100)
-		const rows = await db
-			.select({
-				matchId: matchmakingMatches.matchId,
-				modId: matchmakingMatches.modId,
-				gameMode: matchmakingMatches.gameMode,
-				status: matchmakingMatches.status,
-				createdAt: matchmakingMatches.createdAt,
-				gameStartedAt: matchmakingMatches.gameStartedAt,
-			})
-			.from(matchmakingMatches)
-			.orderBy(desc(matchmakingMatches.createdAt))
-			.limit(limit)
-
-		res.json({ matches: rows })
-	} catch (err) {
-		next(err)
-	}
-})
-
-// §6.2: Stake Popularity. Deliberately a COARSE proxy, not true per-choice
-// tracking -- no schema anywhere records which stake an individual match was
-// actually played on (confirmed: matchmakingMatches/lobbyRuns/matchRunLogs
-// have no stake column; deck/stake drafting is client-side Lua only, see
-// §16.4). This buckets by (modId, gameMode) instead; see stake-popularity.ts.
-router.get('/stake-popularity', async (_req, res, next) => {
-	try {
-		const rows = await db
-			.select({
-				modId: matchmakingMatches.modId,
-				gameMode: matchmakingMatches.gameMode,
-				count: sql<number>`count(*)::int`,
-			})
-			.from(matchmakingMatches)
-			.groupBy(matchmakingMatches.modId, matchmakingMatches.gameMode)
-
-		res.json(stakePopularity(rows))
 	} catch (err) {
 		next(err)
 	}
