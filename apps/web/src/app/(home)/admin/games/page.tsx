@@ -48,7 +48,7 @@ interface MatchesResponse {
 
 const MODS = [
   { value: 'all', label: 'All mods' },
-  { value: 'MultiplayerSpeedrunning', label: 'Speedrun' },
+  { value: 'MultiplayerSPDRN', label: 'Speedrun' },
   { value: 'MultiplayerPvP', label: 'PvP' },
 ]
 const STATUSES = [
