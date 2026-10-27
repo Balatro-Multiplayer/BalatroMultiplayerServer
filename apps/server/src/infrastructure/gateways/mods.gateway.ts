@@ -36,6 +36,7 @@ import {
 import type { ModIndexEntryInput } from '../../features/mods/thunderstore-mod-index.service.js'
 import { db } from '../db/index.js'
 import {
+	type ModProfileVersionMode,
 	modProfileEntries,
 	modProfiles,
 	modRegistry,
@@ -248,6 +249,105 @@ export async function getPublicProfileBySlug(slug: string) {
 		.from(modProfileEntries)
 		.where(eq(modProfileEntries.profileId, profile.id))
 	return { ...profile, entries }
+}
+
+// --- Admin: mod profile presets (/api/webadmin/mod-profiles/...) ---
+//
+// getPublicProfileBySlug/listPublicProfiles above serve these to the launcher;
+// the writes below are what the admin site uses to curate them.
+
+export async function getProfileById(id: string) {
+	const profile = await db.query.modProfiles.findFirst({
+		where: eq(modProfiles.id, id),
+	})
+	if (!profile) return null
+	const entries = await db
+		.select()
+		.from(modProfileEntries)
+		.where(eq(modProfileEntries.profileId, id))
+	return { ...profile, entries }
+}
+
+// Checked up front rather than by catching the unique-index error, so it
+// holds however the driver wraps that error. The routes turn it into a 409.
+async function slugTaken(slug: string, exceptId?: string): Promise<boolean> {
+	const row = await db.query.modProfiles.findFirst({
+		where: eq(modProfiles.slug, slug),
+	})
+	return !!row && row.id !== exceptId
+}
+
+// Returns null when another profile already uses the slug.
+export async function createProfile(input: {
+	name: string
+	slug: string
+	description: string | null
+	createdBy: string | null
+}) {
+	if (await slugTaken(input.slug)) return null
+	const [row] = await db.insert(modProfiles).values(input).returning()
+	return row
+}
+
+export async function updateProfile(
+	id: string,
+	input: { name: string; slug: string; description: string | null },
+) {
+	if (await slugTaken(input.slug, id)) return 'slug-taken' as const
+	const [row] = await db
+		.update(modProfiles)
+		.set({ ...input, updatedAt: new Date() })
+		.where(eq(modProfiles.id, id))
+		.returning()
+	return row ?? null
+}
+
+export async function deleteProfile(id: string): Promise<void> {
+	await db.delete(modProfiles).where(eq(modProfiles.id, id))
+}
+
+export async function upsertProfileEntry(input: {
+	profileId: string
+	modId: string
+	versionMode: ModProfileVersionMode
+	pinnedVersion: string | null
+	allowed: boolean
+}) {
+	const [row] = await db
+		.insert(modProfileEntries)
+		.values(input)
+		.onConflictDoUpdate({
+			target: [modProfileEntries.profileId, modProfileEntries.modId],
+			set: {
+				versionMode: input.versionMode,
+				pinnedVersion: input.pinnedVersion,
+				allowed: input.allowed,
+			},
+		})
+		.returning()
+	await db
+		.update(modProfiles)
+		.set({ updatedAt: new Date() })
+		.where(eq(modProfiles.id, input.profileId))
+	return row
+}
+
+export async function removeProfileEntry(
+	profileId: string,
+	modId: string,
+): Promise<void> {
+	await db
+		.delete(modProfileEntries)
+		.where(
+			and(
+				eq(modProfileEntries.profileId, profileId),
+				eq(modProfileEntries.modId, modId),
+			),
+		)
+	await db
+		.update(modProfiles)
+		.set({ updatedAt: new Date() })
+		.where(eq(modProfiles.id, profileId))
 }
 
 // --- Thunderstore sync (features/mods/mods-sync.service.ts) ---

@@ -15,17 +15,25 @@ import {
 import { ApiError, apiFetch } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { DeleteModDialog } from './components/delete-mod-dialog'
+import { DeleteProfileDialog } from './components/delete-profile-dialog'
 import { ModFormDialog } from './components/mod-form-dialog'
 import { ModsTable } from './components/mods-table'
 import { PinCommitDialog } from './components/pin-commit-dialog'
+import { ProfileEntriesDialog } from './components/profile-entries-dialog'
+import { ProfileFormDialog } from './components/profile-form-dialog'
+import { ProfilesTable } from './components/profiles-table'
 import {
+  EMPTY_PROFILE_FORM,
   emptyModForm,
   formFromDetail,
   formToBody,
   type ModDetail,
   type ModForm,
   type ModPatch,
+  type ModProfile,
+  type ModProfileVersionMode,
   type ModSummary,
+  type ProfileForm,
 } from './components/ranked-mods-types'
 
 // The ranked mod catalog -- synced hourly straight from Thunderstore (see
@@ -201,6 +209,95 @@ export default function RankedModsPage() {
     onError: onErr,
   })
 
+  // Preset profiles: the named mod lists the launcher offers. The entries
+  // dialog is keyed by id and reads the live list, so it reflects each save.
+  const { data: profiles, isLoading: profilesLoading } = useQuery<ModProfile[]>(
+    {
+      queryKey: ['mod-profiles'],
+      queryFn: () => apiFetch('/webadmin/mod-profiles'),
+      enabled: canView,
+    }
+  )
+  const refreshProfiles = () =>
+    qc.invalidateQueries({ queryKey: ['mod-profiles'] })
+
+  const [profileDialog, setProfileDialog] = useState<null | {
+    mode: 'create' | 'edit'
+    editing: ModProfile | null
+  }>(null)
+  const [profileForm, setProfileForm] =
+    useState<ProfileForm>(EMPTY_PROFILE_FORM)
+  const [entriesProfileId, setEntriesProfileId] = useState<string | null>(null)
+  const [deleteProfileTarget, setDeleteProfileTarget] =
+    useState<ModProfile | null>(null)
+
+  const entriesProfile =
+    profiles?.find((p) => p.id === entriesProfileId) ?? null
+
+  const saveProfileMut = useMutation({
+    mutationFn: async () => {
+      if (!profileDialog) return
+      const body = JSON.stringify(profileForm)
+      if (profileDialog.editing) {
+        return apiFetch(
+          `/webadmin/mod-profiles/${encodeURIComponent(profileDialog.editing.id)}`,
+          { method: 'PUT', body }
+        )
+      }
+      return apiFetch('/webadmin/mod-profiles', { method: 'POST', body })
+    },
+    onSuccess: () => {
+      setProfileDialog(null)
+      refreshProfiles()
+    },
+    onError: onErr,
+  })
+
+  const deleteProfileMut = useMutation({
+    mutationFn: (profile: ModProfile) =>
+      apiFetch(`/webadmin/mod-profiles/${encodeURIComponent(profile.id)}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      setDeleteProfileTarget(null)
+      refreshProfiles()
+    },
+    onError: onErr,
+  })
+
+  const upsertEntryMut = useMutation({
+    mutationFn: (input: {
+      profileId: string
+      modId: string
+      versionMode: ModProfileVersionMode
+      pinnedVersion: string | null
+      allowed: boolean
+    }) =>
+      apiFetch(
+        `/webadmin/mod-profiles/${encodeURIComponent(input.profileId)}/entries/${encodeURIComponent(input.modId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            versionMode: input.versionMode,
+            pinnedVersion: input.pinnedVersion,
+            allowed: input.allowed,
+          }),
+        }
+      ),
+    onSuccess: refreshProfiles,
+    onError: onErr,
+  })
+
+  const removeEntryMut = useMutation({
+    mutationFn: (input: { profileId: string; modId: string }) =>
+      apiFetch(
+        `/webadmin/mod-profiles/${encodeURIComponent(input.profileId)}/entries/${encodeURIComponent(input.modId)}`,
+        { method: 'DELETE' }
+      ),
+    onSuccess: refreshProfiles,
+    onError: onErr,
+  })
+
   if (pending || !canView) return null
 
   const unavailablePins =
@@ -278,6 +375,88 @@ export default function RankedModsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className='flex flex-row items-center justify-between'>
+          <div>
+            <CardTitle>Preset profiles</CardTitle>
+            <CardDescription>
+              The mod lists the launcher offers as starting points for a new
+              profile.
+            </CardDescription>
+          </div>
+          {isAdmin && (
+            <Button
+              size='sm'
+              onClick={() => {
+                setProfileForm(EMPTY_PROFILE_FORM)
+                setProfileDialog({ mode: 'create', editing: null })
+              }}
+            >
+              New preset
+            </Button>
+          )}
+        </CardHeader>
+        <CardContent>
+          {profilesLoading || !profiles ? (
+            <p className='text-muted-foreground text-sm'>Loading…</p>
+          ) : (
+            <ProfilesTable
+              profiles={profiles}
+              isAdmin={isAdmin}
+              onManageEntries={(p) => setEntriesProfileId(p.id)}
+              onEdit={(p) => {
+                setProfileForm({
+                  name: p.name,
+                  slug: p.slug,
+                  description: p.description ?? '',
+                })
+                setProfileDialog({ mode: 'edit', editing: p })
+              }}
+              onDelete={setDeleteProfileTarget}
+            />
+          )}
+        </CardContent>
+      </Card>
+
+      <ProfileFormDialog
+        open={profileDialog !== null}
+        mode={profileDialog?.mode ?? 'create'}
+        form={profileForm}
+        isPending={saveProfileMut.isPending}
+        onFormChange={setProfileForm}
+        onSave={() => saveProfileMut.mutate()}
+        onClose={() => setProfileDialog(null)}
+      />
+      <ProfileEntriesDialog
+        profile={entriesProfile}
+        mods={mods ?? []}
+        isAdmin={isAdmin}
+        isPending={upsertEntryMut.isPending || removeEntryMut.isPending}
+        onUpsertEntry={(modId, versionMode, pinnedVersion, allowed) =>
+          entriesProfile &&
+          upsertEntryMut.mutate({
+            profileId: entriesProfile.id,
+            modId,
+            versionMode,
+            pinnedVersion,
+            allowed,
+          })
+        }
+        onRemoveEntry={(modId) =>
+          entriesProfile &&
+          removeEntryMut.mutate({ profileId: entriesProfile.id, modId })
+        }
+        onClose={() => setEntriesProfileId(null)}
+      />
+      <DeleteProfileDialog
+        target={deleteProfileTarget}
+        isPending={deleteProfileMut.isPending}
+        onConfirm={() =>
+          deleteProfileTarget && deleteProfileMut.mutate(deleteProfileTarget)
+        }
+        onClose={() => setDeleteProfileTarget(null)}
+      />
 
       <ModFormDialog
         open={dialog !== null}

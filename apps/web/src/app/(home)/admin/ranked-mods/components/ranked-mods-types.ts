@@ -176,3 +176,37 @@ export function formToBody(
   }
   return body
 }
+
+// Launcher preset profiles (GET /webadmin/mod-profiles): a named list of
+// mods the launcher's preset picker offers. Entries reference mods by id
+// with no foreign key, so one can outlive its mod.
+export type ModProfileVersionMode = 'exact' | 'latest' | 'latestRanked'
+
+export interface ModProfileEntry {
+  id: number
+  profileId: string
+  modId: string
+  versionMode: ModProfileVersionMode
+  pinnedVersion: string | null
+  allowed: boolean
+}
+
+export interface ModProfile {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  entries: ModProfileEntry[]
+}
+
+export interface ProfileForm {
+  name: string
+  slug: string
+  description: string
+}
+
+export const EMPTY_PROFILE_FORM: ProfileForm = {
+  name: '',
+  slug: '',
+  description: '',
+}

@@ -1,18 +1,26 @@
 import { Router } from 'express'
+import { modProfileVersionModeEnum } from '../../infrastructure/db/schema.js'
 import {
 	type PinCommitResult,
 	createCustomMod,
+	createProfile,
 	deleteCustomMod,
+	deleteProfile,
 	findModByIdOrFullName,
+	getProfileById,
 	getPublicModById,
 	listPublicMods,
+	listPublicProfiles,
 	listVersionsForMod,
 	pinCommit,
+	removeProfileEntry,
 	setModFlags,
 	setRankedVersion,
 	setSmodsIds,
 	setTrackGithub,
 	updateCustomMod,
+	updateProfile,
+	upsertProfileEntry,
 } from '../../infrastructure/gateways/mods.gateway.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
@@ -380,6 +388,130 @@ router.get('/mods/:modId', async (req, res, next) => {
 		})
 		if (!mod) throw new AppError('Mod not found', 404)
 		res.json(mod)
+	} catch (err) {
+		next(err)
+	}
+})
+
+// --- Mod profile presets (what the launcher's preset picker serves) ---
+//
+// Reads stay at the router-level webAdmin gate; writes are admin-only like
+// the rest of this file. Under /mod-profiles rather than /mods/profiles so
+// the /mods/:modId wildcards can never swallow them.
+
+router.get('/mod-profiles', async (_req, res, next) => {
+	try {
+		res.json(await listPublicProfiles())
+	} catch (err) {
+		next(err)
+	}
+})
+
+function readProfileFields(body: Record<string, unknown>) {
+	const name = typeof body.name === 'string' ? body.name.trim() : ''
+	const slug = typeof body.slug === 'string' ? body.slug.trim() : ''
+	if (!name) throw new AppError('name is required', 400)
+	if (!slug) throw new AppError('slug is required', 400)
+	if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug))
+		throw new AppError(
+			'slug must be lowercase letters, numbers and single dashes',
+			400,
+		)
+	const description =
+		typeof body.description === 'string' && body.description.trim()
+			? body.description.trim()
+			: null
+	return { name, slug, description }
+}
+
+router.post('/mod-profiles', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const fields = readProfileFields(req.body as Record<string, unknown>)
+		const profile = await createProfile({
+			...fields,
+			createdBy: req.player!.playerId,
+		})
+		if (!profile) throw new AppError('That slug is already in use', 409)
+		res.status(201).json({ ...profile, entries: [] })
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.put('/mod-profiles/:id', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const fields = readProfileFields(req.body as Record<string, unknown>)
+		const profile = await updateProfile(req.params.id, fields)
+		if (profile === 'slug-taken')
+			throw new AppError('That slug is already in use', 409)
+		if (!profile) throw new AppError('Profile not found', 404)
+		res.json(profile)
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.delete('/mod-profiles/:id', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		await deleteProfile(req.params.id)
+		res.json({ ok: true })
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.put('/mod-profiles/:id/entries/:modId', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		const { versionMode, pinnedVersion, allowed } = req.body as {
+			versionMode?: unknown
+			pinnedVersion?: unknown
+			allowed?: unknown
+		}
+		if (
+			typeof versionMode !== 'string' ||
+			!modProfileVersionModeEnum.enumValues.includes(
+				versionMode as (typeof modProfileVersionModeEnum.enumValues)[number],
+			)
+		)
+			throw new AppError(
+				`versionMode must be one of: ${modProfileVersionModeEnum.enumValues.join(', ')}`,
+				400,
+			)
+		if (
+			versionMode === 'exact' &&
+			(typeof pinnedVersion !== 'string' || !pinnedVersion.trim())
+		)
+			throw new AppError(
+				'pinnedVersion is required when versionMode is exact',
+				400,
+			)
+		if (!(await getProfileById(req.params.id)))
+			throw new AppError('Profile not found', 404)
+
+		const entry = await upsertProfileEntry({
+			profileId: req.params.id,
+			modId: req.params.modId,
+			versionMode:
+				versionMode as (typeof modProfileVersionModeEnum.enumValues)[number],
+			pinnedVersion:
+				versionMode === 'exact' ? (pinnedVersion as string).trim() : null,
+			allowed: typeof allowed === 'boolean' ? allowed : true,
+		})
+		res.json(entry)
+	} catch (err) {
+		next(err)
+	}
+})
+
+router.delete('/mod-profiles/:id/entries/:modId', async (req, res, next) => {
+	try {
+		await requireAdmin(req)
+		await removeProfileEntry(req.params.id, req.params.modId)
+		res.json({ ok: true })
 	} catch (err) {
 		next(err)
 	}

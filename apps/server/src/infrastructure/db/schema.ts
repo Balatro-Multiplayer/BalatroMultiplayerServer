@@ -919,8 +919,8 @@ export const modRegistryVersions = pgTable(
 	],
 )
 
-// Named mod presets the launcher offers (GET /api/mods/profiles). Read-only:
-// no admin surface writes these anymore, the existing rows are served as-is.
+// Named mod presets the launcher offers (GET /api/mods/profiles). Curated from the
+// admin site's Ranked Mods page (/api/webadmin/mod-profiles).
 export const modProfiles = pgTable('mod_profiles', {
 	id: uuid('id').primaryKey().defaultRandom(),
 	name: varchar('name', { length: 128 }).notNull(),
