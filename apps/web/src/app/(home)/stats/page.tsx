@@ -3,7 +3,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiFetch } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { QUEUE_MODS, pillarCounts, type QueueMod, type QueueStatsResponse } from '@/lib/queue-pillars'
+import type { QueueStatsResponse } from '@bmp/types'
+import { QUEUE_MODS, pillarCounts, type QueueMod } from '@/lib/queue-pillars'
 
 interface GlobalStats {
   // null: the server could not read Nakama's open-socket count.

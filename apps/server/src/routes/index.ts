@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import type { QueueCountsAnswer } from '../contracts/IStatsSources.js'
 import adminRouter from '../features/admin/admin.route.js'
 import { createAuthRouter } from '../features/auth/auth.route.js'
 import { createAuthService } from '../features/auth/auth.service.js'
@@ -10,7 +11,7 @@ import r2modmanReleasesRouter from '../features/r2modman-releases/r2modman-relea
 import { createReplayLogRouter } from '../features/replay-log/replay-log.route.js'
 import { replayLogService } from '../features/replay-log/replay-log.service.js'
 import { createReportsRouter } from '../features/reports/reports.route.js'
-import statsRouter from '../features/stats/stats.route.js'
+import { createStatsRouter } from '../features/stats/stats.route.js'
 import webadminRouter from '../features/webadmin/webadmin.route.js'
 import {
 	anonymizePlayer,
@@ -18,6 +19,9 @@ import {
 } from '../infrastructure/gateways/player-anonymization.gateway.js'
 import * as playerGateway from '../infrastructure/gateways/player.gateway.js'
 import { retentionRepository } from '../infrastructure/gateways/retention.gateway.js'
+import { statsRepository } from '../infrastructure/gateways/stats.gateway.js'
+import { callNakamaRpc } from '../infrastructure/nakama/admin-client.js'
+import { fetchNakamaMetrics } from '../infrastructure/nakama/metrics-client.js'
 import {
 	acceptNakamaNotice,
 	deleteNakamaAccount,
@@ -30,6 +34,13 @@ export const authService = createAuthService({
 		acceptNotice: acceptNakamaNotice,
 	},
 	retention: retentionRepository,
+})
+
+const statsRouter = createStatsRouter({
+	fetchMetrics: fetchNakamaMetrics,
+	fetchQueueCounts: (modId) =>
+		callNakamaRpc<QueueCountsAnswer>('queue_counts', { modId }),
+	statsRepository,
 })
 
 const router = Router()

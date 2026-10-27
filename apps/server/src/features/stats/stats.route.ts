@@ -1,17 +1,20 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { Router } from 'express'
+import type {
+	FetchMetrics,
+	FetchQueueCounts,
+	IStatsRepository,
+} from '../../contracts/IStatsSources.js'
 import { db } from '../../infrastructure/db/index.js'
 import {
-	matchmakingMatches,
 	matchmakingRatings,
 	players,
 	seasons,
 } from '../../infrastructure/db/schema.js'
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
-import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
-import { fetchNakamaMetrics } from '../../infrastructure/nakama/metrics-client.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
+import { createTtlCache } from '../../shared/utils/ttl-cache.js'
 import {
 	DECAY_FLOOR,
 	DECAY_INACTIVE_THRESHOLD_DAYS,
@@ -19,9 +22,7 @@ import {
 	PLACEMENT_GAMES,
 } from '../ratings/elo.js'
 import { createOnlinePlayers } from './online-players.js'
-import { type QueueCountsAnswer, createQueueStats } from './queue-counts.js'
-
-const router = Router()
+import { createQueueStats } from './queue-counts.js'
 
 // Nakama decays an inactive rating when it next reads it and only stores the
 // result after the player's next game, so the mirrored rating is the
@@ -39,81 +40,82 @@ const effectiveRating = sql.raw(`CASE
 const LEGACY_MATCHES = 453_792
 const LEGACY_UNIQUE_PLAYERS = 0
 
-let totals: {
-	totalMatches: number
-	uniquePlayers: number
-} | null = null
-let totalsAt = 0
 const TOTALS_TTL_MS = 5 * 60 * 1000
-
-// Cached apart from the totals: the page polls it every 15 seconds.
+// Cached apart from the totals: the page polls them every 15 seconds.
 const ONLINE_PLAYERS_TTL_MS = 10 * 1000
-const getOnlinePlayers = createOnlinePlayers(
-	fetchNakamaMetrics,
-	ONLINE_PLAYERS_TTL_MS,
-)
+const QUEUE_STATS_TTL_MS = 10 * 1000
 
-async function getTotals(now: number) {
-	if (totals && now - totalsAt < TOTALS_TTL_MS) return totals
-
-	const [matchRow, playerRow] = await Promise.all([
-		db.select({ total: sql<number>`count(*)::int` }).from(matchmakingMatches),
-		db.select({ total: sql<number>`count(*)::int` }).from(players),
-	])
-
-	totals = {
-		totalMatches: LEGACY_MATCHES + (matchRow[0]?.total ?? 0),
-		uniquePlayers: LEGACY_UNIQUE_PLAYERS + (playerRow[0]?.total ?? 0),
-	}
-	totalsAt = now
-	return totals
+export interface StatsRouterDeps {
+	fetchMetrics: FetchMetrics
+	fetchQueueCounts: FetchQueueCounts
+	statsRepository: IStatsRepository
 }
 
-router.get('/', async (_req, res, next) => {
-	try {
-		const now = Date.now()
-		const [onlinePlayers, totalCounts] = await Promise.all([
-			getOnlinePlayers(now),
-			getTotals(now),
-		])
-		res.json({ onlinePlayers, ...totalCounts })
-	} catch (err) {
-		next(err)
-	}
-})
+export function createStatsRouter({
+	fetchMetrics,
+	fetchQueueCounts,
+	statsRepository,
+}: StatsRouterDeps): Router {
+	const router = Router()
 
-router.get('/leaderboard', async (req, res, next) => {
-	try {
-		const { modId, gameMode, season } = req.query
-		if (!modId || typeof modId !== 'string')
-			throw new AppError('Missing modId', 400)
-		if (!gameMode || typeof gameMode !== 'string')
-			throw new AppError('Missing gameMode', 400)
-
-		let seasonId: number
-		if (season !== undefined) {
-			const parsed = Number(season)
-			if (Number.isNaN(parsed)) throw new AppError('Invalid season', 400)
-			seasonId = parsed
-		} else {
-			const active = await getCurrentSeason()
-			if (!active) throw new AppError('No active season', 404)
-			seasonId = active.id
+	const getTotals = createTtlCache(async () => {
+		const counts = await statsRepository.countTotals()
+		return {
+			totalMatches: LEGACY_MATCHES + counts.matches,
+			uniquePlayers: LEGACY_UNIQUE_PLAYERS + counts.players,
 		}
+	}, TOTALS_TTL_MS)
+	const getOnlinePlayers = createOnlinePlayers(
+		fetchMetrics,
+		ONLINE_PLAYERS_TTL_MS,
+	)
+	const getQueueStats = createQueueStats(fetchQueueCounts, QUEUE_STATS_TTL_MS)
 
-		// Paginate over the full ranked list (matchmaking_ratings is the
-		// source of truth). Rank is a window
-		// function over the whole board (rating desc, wins desc), so an optional
-		// name search returns matching players with their true global rank,
-		// spanning every page rather than just the current one.
-		const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
-		const pageSize = queryInt(req.query.pageSize, 100, 1, 200)
-		const offset = (page - 1) * pageSize
-		const search =
-			typeof req.query.search === 'string' ? req.query.search.trim() : ''
-		const term = search ? `%${search}%` : null
+	router.get('/', async (_req, res, next) => {
+		try {
+			const now = Date.now()
+			const [onlinePlayers, totalCounts] = await Promise.all([
+				getOnlinePlayers(now),
+				getTotals(now),
+			])
+			res.json({ onlinePlayers, ...totalCounts })
+		} catch (err) {
+			next(err)
+		}
+	})
 
-		const totalRes = await db.execute(sql`
+	router.get('/leaderboard', async (req, res, next) => {
+		try {
+			const { modId, gameMode, season } = req.query
+			if (!modId || typeof modId !== 'string')
+				throw new AppError('Missing modId', 400)
+			if (!gameMode || typeof gameMode !== 'string')
+				throw new AppError('Missing gameMode', 400)
+
+			let seasonId: number
+			if (season !== undefined) {
+				const parsed = Number(season)
+				if (Number.isNaN(parsed)) throw new AppError('Invalid season', 400)
+				seasonId = parsed
+			} else {
+				const active = await getCurrentSeason()
+				if (!active) throw new AppError('No active season', 404)
+				seasonId = active.id
+			}
+
+			// Paginate over the full ranked list (matchmaking_ratings is the
+			// source of truth). Rank is a window
+			// function over the whole board (rating desc, wins desc), so an optional
+			// name search returns matching players with their true global rank,
+			// spanning every page rather than just the current one.
+			const page = queryInt(req.query.page, 1, 1, MAX_PAGE)
+			const pageSize = queryInt(req.query.pageSize, 100, 1, 200)
+			const offset = (page - 1) * pageSize
+			const search =
+				typeof req.query.search === 'string' ? req.query.search.trim() : ''
+			const term = search ? `%${search}%` : null
+
+			const totalRes = await db.execute(sql`
 			SELECT count(*)::int AS total
 			FROM matchmaking_ratings r
 			JOIN players p ON p.id = r.player_id
@@ -121,11 +123,11 @@ router.get('/leaderboard', async (req, res, next) => {
 			  AND r.games_played >= ${PLACEMENT_GAMES}
 			  ${term ? sql`AND (p.steam_name ILIKE ${term} OR p.discord_username ILIKE ${term})` : sql``}
 		`)
-		const total = Number(
-			(totalRes.rows[0] as { total: number } | undefined)?.total ?? 0,
-		)
+			const total = Number(
+				(totalRes.rows[0] as { total: number } | undefined)?.total ?? 0,
+			)
 
-		const rowsRes = await db.execute(sql`
+			const rowsRes = await db.execute(sql`
 			SELECT rank, player_id, display_name, rating, wins, losses, games_played, season_best
 			FROM (
 				SELECT
@@ -145,111 +147,111 @@ router.get('/leaderboard', async (req, res, next) => {
 			LIMIT ${pageSize} OFFSET ${offset}
 		`)
 
-		const entries = rowsRes.rows.map((row) => {
-			const r = row as Record<string, unknown>
-			return {
-				rank: Number(r.rank),
-				playerId: r.player_id as string,
-				displayName: r.display_name as string,
-				rating: Number(r.rating),
-				wins: Number(r.wins),
-				losses: Number(r.losses),
-				gamesPlayed: Number(r.games_played),
-				seasonBest: r.season_best == null ? null : Number(r.season_best),
-			}
-		})
-
-		res.json({
-			season: seasonId,
-			modId,
-			gameMode,
-			page,
-			pageSize,
-			total,
-			totalPages: Math.max(1, Math.ceil(total / pageSize)),
-			entries,
-		})
-	} catch (err) {
-		next(err)
-	}
-})
-
-router.get('/seasons', async (_req, res, next) => {
-	try {
-		const rows = await db
-			.select({
-				id: seasons.id,
-				name: seasons.name,
-				startedAt: seasons.startedAt,
-				endsAt: seasons.endsAt,
-				endedAt: seasons.endedAt,
+			const entries = rowsRes.rows.map((row) => {
+				const r = row as Record<string, unknown>
+				return {
+					rank: Number(r.rank),
+					playerId: r.player_id as string,
+					displayName: r.display_name as string,
+					rating: Number(r.rating),
+					wins: Number(r.wins),
+					losses: Number(r.losses),
+					gamesPlayed: Number(r.games_played),
+					seasonBest: r.season_best == null ? null : Number(r.season_best),
+				}
 			})
-			.from(seasons)
-			.orderBy(asc(seasons.id))
 
-		const active = await getCurrentSeason()
-		res.json({ seasons: rows, current: active?.id ?? null })
-	} catch (err) {
-		next(err)
-	}
-})
-
-router.get('/players/:id', async (req, res, next) => {
-	try {
-		const { id } = req.params
-		const { modId, gameMode, season } = req.query
-		if (!modId || typeof modId !== 'string')
-			throw new AppError('Missing modId', 400)
-		if (!gameMode || typeof gameMode !== 'string')
-			throw new AppError('Missing gameMode', 400)
-
-		let seasonId: number
-		if (season !== undefined) {
-			const parsed = Number(season)
-			if (Number.isNaN(parsed)) throw new AppError('Invalid season', 400)
-			seasonId = parsed
-		} else {
-			const active = await getCurrentSeason()
-			if (!active) throw new AppError('No active season', 404)
-			seasonId = active.id
+			res.json({
+				season: seasonId,
+				modId,
+				gameMode,
+				page,
+				pageSize,
+				total,
+				totalPages: Math.max(1, Math.ceil(total / pageSize)),
+				entries,
+			})
+		} catch (err) {
+			next(err)
 		}
+	})
 
-		const [player] = await db
-			.select({
-				id: players.id,
-				steamName: players.steamName,
-				discordUsername: players.discordUsername,
-				useDiscordName: players.useDiscordName,
-				preferredJoker: players.preferredJoker,
-				createdAt: players.createdAt,
-			})
-			.from(players)
-			.where(eq(players.id, id))
-			.limit(1)
+	router.get('/seasons', async (_req, res, next) => {
+		try {
+			const rows = await db
+				.select({
+					id: seasons.id,
+					name: seasons.name,
+					startedAt: seasons.startedAt,
+					endsAt: seasons.endsAt,
+					endedAt: seasons.endedAt,
+				})
+				.from(seasons)
+				.orderBy(asc(seasons.id))
 
-		if (!player) throw new AppError('Player not found', 404)
+			const active = await getCurrentSeason()
+			res.json({ seasons: rows, current: active?.id ?? null })
+		} catch (err) {
+			next(err)
+		}
+	})
 
-		const board = and(
-			eq(matchmakingRatings.modId, modId),
-			eq(matchmakingRatings.gameMode, gameMode),
-			eq(matchmakingRatings.season, seasonId),
-		)
+	router.get('/players/:id', async (req, res, next) => {
+		try {
+			const { id } = req.params
+			const { modId, gameMode, season } = req.query
+			if (!modId || typeof modId !== 'string')
+				throw new AppError('Missing modId', 400)
+			if (!gameMode || typeof gameMode !== 'string')
+				throw new AppError('Missing gameMode', 400)
 
-		const [r] = await db
-			.select({
-				wins: matchmakingRatings.wins,
-				losses: matchmakingRatings.losses,
-				gamesPlayed: matchmakingRatings.gamesPlayed,
-				seasonBest: matchmakingRatings.seasonBest,
-			})
-			.from(matchmakingRatings)
-			.where(and(board, eq(matchmakingRatings.playerId, id)))
-			.limit(1)
+			let seasonId: number
+			if (season !== undefined) {
+				const parsed = Number(season)
+				if (Number.isNaN(parsed)) throw new AppError('Invalid season', 400)
+				seasonId = parsed
+			} else {
+				const active = await getCurrentSeason()
+				if (!active) throw new AppError('No active season', 404)
+				seasonId = active.id
+			}
 
-		// Rank from the full ratings table (not the top-100 cache), using the exact
-		// same ROW_NUMBER ordering as the leaderboard so the two always agree.
-		// Established players only (placement players don't appear -> rank null).
-		const rankRes = await db.execute(sql`
+			const [player] = await db
+				.select({
+					id: players.id,
+					steamName: players.steamName,
+					discordUsername: players.discordUsername,
+					useDiscordName: players.useDiscordName,
+					preferredJoker: players.preferredJoker,
+					createdAt: players.createdAt,
+				})
+				.from(players)
+				.where(eq(players.id, id))
+				.limit(1)
+
+			if (!player) throw new AppError('Player not found', 404)
+
+			const board = and(
+				eq(matchmakingRatings.modId, modId),
+				eq(matchmakingRatings.gameMode, gameMode),
+				eq(matchmakingRatings.season, seasonId),
+			)
+
+			const [r] = await db
+				.select({
+					wins: matchmakingRatings.wins,
+					losses: matchmakingRatings.losses,
+					gamesPlayed: matchmakingRatings.gamesPlayed,
+					seasonBest: matchmakingRatings.seasonBest,
+				})
+				.from(matchmakingRatings)
+				.where(and(board, eq(matchmakingRatings.playerId, id)))
+				.limit(1)
+
+			// Rank from the full ratings table (not the top-100 cache), using the exact
+			// same ROW_NUMBER ordering as the leaderboard so the two always agree.
+			// Established players only (placement players don't appear -> rank null).
+			const rankRes = await db.execute(sql`
 			SELECT rank, rating FROM (
 				SELECT r.player_id, ${effectiveRating} AS rating,
 					ROW_NUMBER() OVER (ORDER BY ${effectiveRating} DESC, r.wins DESC, r.player_id ASC) AS rank
@@ -259,70 +261,65 @@ router.get('/players/:id', async (req, res, next) => {
 			) t
 			WHERE player_id = ${id}
 		`)
-		const rankRow = rankRes.rows[0] as
-			| { rank: string | number; rating: string | number }
-			| undefined
-		const rank = rankRow ? Number(rankRow.rank) : null
-		const rating = rankRow && r ? Number(rankRow.rating) : null
+			const rankRow = rankRes.rows[0] as
+				| { rank: string | number; rating: string | number }
+				| undefined
+			const rank = rankRow ? Number(rankRow.rank) : null
+			const rating = rankRow && r ? Number(rankRow.rating) : null
 
-		res.json({
-			playerId: player.id,
-			displayName:
-				player.useDiscordName && player.discordUsername
-					? player.discordUsername
-					: player.steamName,
-			steamName: player.steamName,
-			preferredJoker: player.preferredJoker,
-			createdAt: player.createdAt,
-			season: seasonId,
-			modId,
-			gameMode,
-			rank,
-			rating,
-			wins: r?.wins ?? null,
-			losses: r?.losses ?? null,
-			gamesPlayed: r?.gamesPlayed ?? null,
-			seasonBest: r?.seasonBest ?? null,
-		})
-	} catch (err) {
-		next(err)
-	}
-})
+			res.json({
+				playerId: player.id,
+				displayName:
+					player.useDiscordName && player.discordUsername
+						? player.discordUsername
+						: player.steamName,
+				steamName: player.steamName,
+				preferredJoker: player.preferredJoker,
+				createdAt: player.createdAt,
+				season: seasonId,
+				modId,
+				gameMode,
+				rank,
+				rating,
+				wins: r?.wins ?? null,
+				losses: r?.losses ?? null,
+				gamesPlayed: r?.gamesPlayed ?? null,
+				seasonBest: r?.seasonBest ?? null,
+			})
+		} catch (err) {
+			next(err)
+		}
+	})
 
-const QUEUE_STATS_TTL_MS = 10 * 1000
-const getQueueStats = createQueueStats(
-	(modId) => callNakamaRpc<QueueCountsAnswer>('queue_counts', { modId }),
-	QUEUE_STATS_TTL_MS,
-)
+	router.get('/queues', async (_req, res, next) => {
+		try {
+			res.json(await getQueueStats(Date.now()))
+		} catch (err) {
+			next(err)
+		}
+	})
 
-router.get('/queues', async (_req, res, next) => {
-	try {
-		res.json(await getQueueStats(Date.now()))
-	} catch (err) {
-		next(err)
-	}
-})
-
-// §6.2: games played per hour over the last 7 days. matchmakingMatches.createdAt
-// is stamped at queue-match-formation time, already exists, no schema change.
-router.get('/activity', async (_req, res, next) => {
-	try {
-		const rows = await db.execute(sql`
+	// §6.2: games played per hour over the last 7 days. matchmakingMatches.createdAt
+	// is stamped at queue-match-formation time, already exists, no schema change.
+	router.get('/activity', async (_req, res, next) => {
+		try {
+			const rows = await db.execute(sql`
 			SELECT date_trunc('hour', created_at) AS bucket, count(*)::int AS count
 			FROM matchmaking_matches
 			WHERE created_at >= now() - interval '7 days'
 			GROUP BY bucket
 			ORDER BY bucket ASC
 		`)
-		res.json({
-			buckets: rows.rows.map((r) => {
-				const row = r as { bucket: string; count: number }
-				return { hour: row.bucket, count: Number(row.count) }
-			}),
-		})
-	} catch (err) {
-		next(err)
-	}
-})
+			res.json({
+				buckets: rows.rows.map((r) => {
+					const row = r as { bucket: string; count: number }
+					return { hour: row.bucket, count: Number(row.count) }
+				}),
+			})
+		} catch (err) {
+			next(err)
+		}
+	})
 
-export default router
+	return router
+}
