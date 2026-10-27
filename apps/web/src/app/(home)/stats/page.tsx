@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { QUEUE_MODS, pillarCounts, type QueueMod, type QueueStatsResponse } from '@/lib/queue-pillars'
 
 interface GlobalStats {
-  activePlayers: number
+  // null: the server could not read Nakama's open-socket count.
+  onlinePlayers: number | null
   totalMatches: number
   uniquePlayers: number
 }
@@ -16,11 +17,15 @@ interface ActivityResponse {
 }
 
 export default function StatsPage() {
-  const { data: stats } = useQuery<GlobalStats>({
+  // Every 15 seconds, like the queue stats: the online count is live.
+  const globalStats = useQuery<GlobalStats>({
     queryKey: ['global-stats'],
     queryFn: () => apiFetch('/stats'),
-    refetchInterval: 30_000,
+    refetchInterval: 15_000,
   })
+  const stats = globalStats.data
+  // After a failed fetch the old online count is stale, so show "-".
+  const onlinePlayers = globalStats.isError ? null : stats?.onlinePlayers
 
   const { data: activityData } = useQuery<ActivityResponse>({
     queryKey: ['stats-activity'],
@@ -45,7 +50,7 @@ export default function StatsPage() {
       <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
         <StatCard label='Total Matches' value={stats?.totalMatches} color='text-bal-blue' />
         <StatCard label='Unique Players' value={stats?.uniquePlayers} color='text-bal-green' />
-        <StatCard label='Active Players' value={stats?.activePlayers} color='text-primary' />
+        <StatCard label='Online Players' value={onlinePlayers} color='text-primary' />
       </div>
 
       {QUEUE_MODS.map((mod) => (
@@ -62,12 +67,12 @@ export default function StatsPage() {
   )
 }
 
-function StatCard({ label, value, color }: { label: string; value: number | undefined; color: string }) {
+function StatCard({ label, value, color }: { label: string; value: number | null | undefined; color: string }) {
   return (
     <Card>
       <CardContent className='pt-6 text-center'>
         <div className={`text-4xl font-black ${color}`}>
-          {value !== undefined ? value.toLocaleString() : '-'}
+          {value != null ? value.toLocaleString() : '-'}
         </div>
         <div className='mt-1.5 text-xs uppercase tracking-wider text-muted-foreground'>{label}</div>
       </CardContent>
