@@ -36,6 +36,9 @@ x-api-env: &api-env
   NAKAMA_URL: http://nakama:7350
   NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}
   NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-local-dev-http-key}
+  # Nakama's Prometheus port (local.yml metrics), for the Stats page's online
+  # player count. Not published to the host.
+  NAKAMA_METRICS_URL: http://nakama:9100/
   INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-dev-internal-key}
   # Dev server only: the API refuses to start with these on any other kind.
   DEV_AUTO_VERIFY_LAUNCHER: ${DEV_AUTO_VERIFY_LAUNCHER:-}
