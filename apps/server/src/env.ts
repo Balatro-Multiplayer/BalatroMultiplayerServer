@@ -118,6 +118,11 @@ export const env = {
 	NAKAMA_URL: required('NAKAMA_URL').replace(/\/+$/, ''),
 	// Nakama's runtime.http_key, for those admin RPCs. Unset = dormant.
 	NAKAMA_HTTP_KEY: optional('NAKAMA_HTTP_KEY', ''),
+	// Nakama's Prometheus endpoint (metrics.prometheus_port in nakama/*.yml),
+	// e.g. http://nakama:9100/ on the compose network. The Stats page reads
+	// its open-socket gauge as the online player count. Unset = the page
+	// shows the count as unknown.
+	NAKAMA_METRICS_URL: optional('NAKAMA_METRICS_URL', ''),
 	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
 	// Unset = those routes refuse everything.
 	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),

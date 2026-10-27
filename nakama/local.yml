@@ -57,6 +57,16 @@ console:
   password: localdevpassword
   signing_key: local-dev-console-signing-key
 
+metrics:
+  # Prometheus endpoint, for the Stats page's online player count: the API
+  # reads the nakama_sessions gauge (open game sockets; a website login has
+  # none) at NAKAMA_METRICS_URL. Reached over the compose network only;
+  # compose.local.yml never publishes this port to the host. Values reach
+  # the endpoint every reporting_freq_sec (default 60), too slow for a
+  # counter the page polls every 15 seconds.
+  prometheus_port: 9100
+  reporting_freq_sec: 5
+
 matchmaker:
   # Default is 15s between matching passes; local tests shouldn't wait that long.
   interval_sec: 2

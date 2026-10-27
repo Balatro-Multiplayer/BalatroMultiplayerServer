@@ -9,6 +9,7 @@ import {
 } from '../../infrastructure/db/schema.js'
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
+import { fetchNakamaMetrics } from '../../infrastructure/nakama/metrics-client.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 import {
@@ -17,6 +18,7 @@ import {
 	DECAY_RATE_PER_DAY,
 	PLACEMENT_GAMES,
 } from '../ratings/elo.js'
+import { createOnlinePlayers } from './online-players.js'
 import { type QueueCountsAnswer, createQueueStats } from './queue-counts.js'
 
 const router = Router()
@@ -37,35 +39,44 @@ const effectiveRating = sql.raw(`CASE
 const LEGACY_MATCHES = 453_792
 const LEGACY_UNIQUE_PLAYERS = 0
 
-let cache: {
-	activePlayers: number
+let totals: {
 	totalMatches: number
 	uniquePlayers: number
 } | null = null
-let cacheAt = 0
-const CACHE_TTL_MS = 5 * 60 * 1000
+let totalsAt = 0
+const TOTALS_TTL_MS = 5 * 60 * 1000
+
+// Cached apart from the totals: the page polls it every 15 seconds.
+const ONLINE_PLAYERS_TTL_MS = 10 * 1000
+const getOnlinePlayers = createOnlinePlayers(
+	fetchNakamaMetrics,
+	ONLINE_PLAYERS_TTL_MS,
+)
+
+async function getTotals(now: number) {
+	if (totals && now - totalsAt < TOTALS_TTL_MS) return totals
+
+	const [matchRow, playerRow] = await Promise.all([
+		db.select({ total: sql<number>`count(*)::int` }).from(matchmakingMatches),
+		db.select({ total: sql<number>`count(*)::int` }).from(players),
+	])
+
+	totals = {
+		totalMatches: LEGACY_MATCHES + (matchRow[0]?.total ?? 0),
+		uniquePlayers: LEGACY_UNIQUE_PLAYERS + (playerRow[0]?.total ?? 0),
+	}
+	totalsAt = now
+	return totals
+}
 
 router.get('/', async (_req, res, next) => {
 	try {
 		const now = Date.now()
-		if (cache && now - cacheAt < CACHE_TTL_MS) {
-			res.json(cache)
-			return
-		}
-
-		const [matchRow, playerRow] = await Promise.all([
-			db.select({ total: sql<number>`count(*)::int` }).from(matchmakingMatches),
-			db.select({ total: sql<number>`count(*)::int` }).from(players),
+		const [onlinePlayers, totalCounts] = await Promise.all([
+			getOnlinePlayers(now),
+			getTotals(now),
 		])
-
-		cache = {
-			activePlayers: 0,
-			totalMatches: LEGACY_MATCHES + (matchRow[0]?.total ?? 0),
-			uniquePlayers: LEGACY_UNIQUE_PLAYERS + (playerRow[0]?.total ?? 0),
-		}
-		cacheAt = now
-
-		res.json(cache)
+		res.json({ onlinePlayers, ...totalCounts })
 	} catch (err) {
 		next(err)
 	}

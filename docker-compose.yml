@@ -129,6 +129,9 @@ services:
       # runtime.http_key); INTERNAL_API_KEY guards /internal/nakama/*.
       NAKAMA_URL: http://nakama:7350
       NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-}
+      # Nakama's Prometheus port (prod.yml metrics), for the Stats page's
+      # online player count. Not published to the host.
+      NAKAMA_METRICS_URL: http://nakama:9100/
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       ARCHIVE_DIR: /app/archives
     volumes:
