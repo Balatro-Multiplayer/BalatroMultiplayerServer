@@ -104,7 +104,7 @@ export default function DownloadPage() {
           <CardContent className='grid gap-6 md:grid-cols-2'>
             <div className='flex flex-col gap-4 rounded-lg border bg-card p-4'>
               <div>
-                <h3 className='font-semibold'>Balatro Multiplayer Launcher</h3>
+                <h3 className='font-semibold'>BET Launcher</h3>
                 <p className='mt-1 text-muted-foreground text-sm'>
                   A simple launcher made for Balatro, like Balatro Mod Manager.
                   Pick this if you do not use r2modman. It installs Lovely,
