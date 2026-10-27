@@ -8,6 +8,7 @@ import {
 	seasons,
 } from '../../infrastructure/db/schema.js'
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
+import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 import {
@@ -16,6 +17,7 @@ import {
 	DECAY_RATE_PER_DAY,
 	PLACEMENT_GAMES,
 } from '../ratings/elo.js'
+import { type QueueCountsAnswer, createQueueStats } from './queue-counts.js'
 
 const router = Router()
 
@@ -271,6 +273,20 @@ router.get('/players/:id', async (req, res, next) => {
 			gamesPlayed: r?.gamesPlayed ?? null,
 			seasonBest: r?.seasonBest ?? null,
 		})
+	} catch (err) {
+		next(err)
+	}
+})
+
+const QUEUE_STATS_TTL_MS = 10 * 1000
+const getQueueStats = createQueueStats(
+	(modId) => callNakamaRpc<QueueCountsAnswer>('queue_counts', { modId }),
+	QUEUE_STATS_TTL_MS,
+)
+
+router.get('/queues', async (_req, res, next) => {
+	try {
+		res.json(await getQueueStats(Date.now()))
 	} catch (err) {
 		next(err)
 	}
