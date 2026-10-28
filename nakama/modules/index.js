@@ -3161,7 +3161,8 @@ function groupMatched(lobby, partyId, matchId, code, now) {
   if (!gq) return err({ code: "not_bound" });
   if (gq.phase !== "queued") return err({ code: "not_forming" });
   const _a = gq, { ticket } = _a, rest = __objRest(_a, ["ticket"]);
-  const next = withGroup(lobby, __spreadProps(__spreadValues({}, rest), { phase: "away", matchId, code, until: now + GROUP_AWAY_CAP_MS }));
+  const unready = __spreadProps(__spreadValues({}, lobby), { game: __spreadProps(__spreadValues({}, lobby.game), { ready: {} }) });
+  const next = withGroup(unready, __spreadProps(__spreadValues({}, rest), { phase: "away", matchId, code, until: now + GROUP_AWAY_CAP_MS }));
   return ok({ lobby: next, out: [{ kind: "groupDissolve", partyId }, announce(next, null)] });
 }
 function endGroup(lobby, reason, refused) {

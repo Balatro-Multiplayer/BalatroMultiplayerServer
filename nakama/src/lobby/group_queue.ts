@@ -158,7 +158,7 @@ export function groupUnqueued(lobby: Lobby, partyId: string, requeue: boolean): 
 }
 
 // The matchmaker put the group in a public lobby: its members go there, and
-// their seats here wait for them.
+// their seats here wait for them. Nobody is ready when they come back.
 export function groupMatched(
 	lobby: Lobby,
 	partyId: string,
@@ -170,7 +170,8 @@ export function groupMatched(
 	if (!gq) return err({ code: 'not_bound' })
 	if (gq.phase !== 'queued') return err({ code: 'not_forming' })
 	const { ticket, ...rest } = gq
-	const next = withGroup(lobby, { ...rest, phase: 'away', matchId, code, until: now + GROUP_AWAY_CAP_MS })
+	const unready = { ...lobby, game: { ...lobby.game, ready: {} } }
+	const next = withGroup(unready, { ...rest, phase: 'away', matchId, code, until: now + GROUP_AWAY_CAP_MS })
 	return ok({ lobby: next, out: [{ kind: 'groupDissolve', partyId }, announce(next, null)] })
 }
 
