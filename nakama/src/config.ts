@@ -45,8 +45,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	lobbyCreationEnabled: true,
 	testingMode: false,
 	integrityEnforced: false,
-	// Off until the avatar reset (achievements/reset.ts) has run.
-	achievementsEnabled: false,
+	achievementsEnabled: true,
 	chatAllowlist: [],
 	season: 0,
 	queueAllowedModIds: [],

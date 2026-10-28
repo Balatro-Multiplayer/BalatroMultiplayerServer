@@ -53,7 +53,7 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 		casualQueueEnabled: configRow?.casualQueueEnabled ?? true,
 		groupQueueEnabled: configRow?.groupQueueEnabled ?? true,
 		lobbyCreationEnabled: configRow?.lobbyCreationEnabled ?? true,
-		achievementsEnabled: configRow?.achievementsEnabled ?? false,
+		achievementsEnabled: configRow?.achievementsEnabled ?? true,
 		queueAllowedModIds: await pinnedSmodsIds(),
 	}
 	setConfig(config)

@@ -195,6 +195,7 @@ describe('session_init avatars', () => {
 	it('earns Scholar for a linked Discord once achievements are on', () => {
 		const linked = { discordIdHash: 'h'.repeat(64), discordUsername: 'ally' }
 		const off = syncing(linked)
+		writeConfig(off as any, { ...DEFAULT_CONFIG, achievementsEnabled: false })
 		login(off)
 		expect(off.notifications.filter((n) => n.code === NotifyCode.AVATAR_UNLOCKED)).toEqual([])
 

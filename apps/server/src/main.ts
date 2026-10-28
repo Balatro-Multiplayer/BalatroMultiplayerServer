@@ -4,6 +4,7 @@ import type { Express, Request, Response } from 'express'
 import { env } from './env.js'
 import { createDevChallengeStrategy } from './features/launcher-integrity/dev-strategy.js'
 import { syncModRegistry } from './features/mods/mods-sync.service.js'
+import { fillAchievementsAtBoot } from './features/achievements/achievements-backfill.service.js'
 import { fillMissingSmodsIds } from './features/mods/smods-ids-backfill.service.js'
 import { nakamaIntegrityService } from './features/nakama/integrity.js'
 import { startMirrorJob } from './features/nakama/mirror.job.js'
@@ -168,6 +169,9 @@ async function start() {
 		// downloads, so the allowed-mod set can never be empty unnoticed. It
 		// never throws and pushes the config to Nakama itself.
 		void fillMissingSmodsIds()
+		// Achievement progress from the games Nakama already holds. Nakama
+		// fills each player once, so a later boot changes nothing.
+		void fillAchievementsAtBoot()
 		void syncModRegistryJob()
 		setInterval(() => void syncModRegistryJob(), 60 * 60 * 1000).unref()
 	} catch (err) {

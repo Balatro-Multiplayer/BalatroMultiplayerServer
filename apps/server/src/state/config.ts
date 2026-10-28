@@ -49,7 +49,7 @@ let _config: AppConfig = {
 	casualQueueEnabled: true,
 	groupQueueEnabled: true,
 	lobbyCreationEnabled: true,
-	achievementsEnabled: false,
+	achievementsEnabled: true,
 	queueAllowedModIds: [],
 }
 

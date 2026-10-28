@@ -3,6 +3,7 @@
 // the script's global scope, so they are passed as plain identifiers.
 import { rpcAccountStanding } from './standing/rpc'
 import { rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './achievements/rpc'
+import { rpcAdminAchievementsBackfill } from './achievements/backfill'
 import { rpcAdminAvatarsReset } from './achievements/reset'
 import {
 	rpcAdminBanApply,
@@ -182,6 +183,7 @@ function InitModule(
 	initializer.registerRpc('admin_avatars_for', rpcAdminAvatarsFor)
 	initializer.registerRpc('admin_progress_set', rpcAdminProgressSet)
 	initializer.registerRpc('admin_avatars_reset', rpcAdminAvatarsReset)
+	initializer.registerRpc('admin_achievements_backfill', rpcAdminAchievementsBackfill)
 	initializer.registerRpc('admin_runs_expired', rpcAdminRunsExpired)
 	initializer.registerRpc('admin_runs_purge_named', rpcAdminRunsPurgeNamed)
 	initializer.registerRpc('admin_checkpoints_sweep', rpcAdminCheckpointsSweep)

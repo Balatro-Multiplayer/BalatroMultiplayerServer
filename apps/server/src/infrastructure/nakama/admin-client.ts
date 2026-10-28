@@ -18,6 +18,7 @@ export function isNakamaAdminEnabled(): boolean {
 export async function callNakamaRpc<T = unknown>(
 	id: string,
 	body: Record<string, unknown>,
+	options: { timeoutMs?: number } = {},
 ): Promise<Result<T, NakamaRpcError>> {
 	if (!isNakamaAdminEnabled()) return err('disabled')
 	const url = `${env.NAKAMA_URL}/v2/rpc/${encodeURIComponent(id)}?http_key=${encodeURIComponent(env.NAKAMA_HTTP_KEY)}&unwrap`
@@ -27,7 +28,7 @@ export async function callNakamaRpc<T = unknown>(
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(TIMEOUT_MS),
+			signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
 		})
 	} catch {
 		return err('unreachable')

@@ -149,11 +149,11 @@ export const serverConfig = pgTable('server_config', {
 	lobbyCreationEnabled: boolean('lobby_creation_enabled')
 		.notNull()
 		.default(true),
-	// Finished games count toward avatar achievements (Nakama). Off until the
-	// avatar reset has run (migration 0049 + admin_avatars_reset).
+	// Finished games count toward avatar achievements (Nakama). On by
+	// default (migration 0058).
 	achievementsEnabled: boolean('achievements_enabled')
 		.notNull()
-		.default(false),
+		.default(true),
 	updatedAt: timestamp('updated_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),

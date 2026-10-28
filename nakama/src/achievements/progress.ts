@@ -32,6 +32,8 @@ export interface Progress {
 	countedRunIds: string[]
 	// Private-lobby games counted today, per opponent set (eligibility.ts).
 	privateGames: { day: string; counts: { [opponents: string]: number } }
+	// Filled from the stored games once (backfill.ts); never filled again.
+	backfilled: boolean
 }
 
 export type GameKind = 'pvp' | 'spdrn' | 'other'
@@ -71,6 +73,7 @@ export function emptyProgress(): Progress {
 		unlocked: [],
 		countedRunIds: [],
 		privateGames: { day: '', counts: {} },
+		backfilled: false,
 	}
 }
 
@@ -105,6 +108,7 @@ export function progressOf(value: unknown): Progress {
 		unlocked: strings(stored.unlocked).filter(isAvatarId),
 		countedRunIds: strings(stored.countedRunIds).slice(-COUNTED_RUN_IDS_KEPT),
 		privateGames: { day: typeof privateGames.day === 'string' ? privateGames.day : '', counts },
+		backfilled: stored.backfilled === true,
 	}
 }
 

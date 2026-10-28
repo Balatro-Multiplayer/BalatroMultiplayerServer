@@ -47,6 +47,14 @@ describe('recordRun', () => {
 		expect(unlocks(nk, A)).toHaveLength(1)
 	})
 
+	it('counts games on a server that has had no config pushed yet', () => {
+		const nk = fakeNk()
+		for (const id of [A, B]) writeProfile(nk as any, id, defaultProfile(id))
+		recordRun(nk as any, fakeLogger, runOf(), { [A]: pvpLog('win'), [B]: pvpLog('loss') })
+		expect(progressFor(nk as any, A).unlocked).toEqual(['j_baron'])
+		expect(unlocks(nk, A)).toHaveLength(1)
+	})
+
 	it('does nothing while achievements are off', () => {
 		const nk = stack(false)
 		recordRun(nk as any, fakeLogger, runOf(), { [A]: pvpLog('win'), [B]: pvpLog('loss') })
