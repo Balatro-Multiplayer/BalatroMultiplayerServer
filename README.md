@@ -14,85 +14,13 @@ All under [github.com/Balatro-Multiplayer](https://github.com/Balatro-Multiplaye
 
 | Repo | What it is |
 |------|------------|
-| **BalatroMultiplayerServer** (this repo) | Nakama runtime module, website/admin API, website, chat moderation service |
-| BalatroMultiplayerAPI | Client mod library (global `MPAPI`): connection, lobbies, actions, gamemodes, replay recorder |
-| BalatroMultiplayerPvP | PvP mod built on MPAPI |
-| BalatroMultiplayerSpeedrunning | Speedrun (SPDRN) gamemodes built on MPAPI |
+| [BalatroMultiplayerServer](https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer) (this repo) | Nakama runtime module, website/admin API, website, chat moderation service |
+| [BalatroMultiplayerAPI](https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI) | Client mod library (global `MPAPI`): connection, lobbies, actions, gamemodes, replay recorder |
+| [BalatroMultiplayerPvP](https://github.com/Balatro-Multiplayer/BalatroMultiplayerPvP) | PvP mod built on MPAPI |
+| [BalatroMultiplayerSpeedrunning](https://github.com/Balatro-Multiplayer/BalatroMultiplayerSpeedrunning) | Speedrun (SPDRN) gamemodes built on MPAPI |
 
 The client mods only ever talk to Nakama. Nothing in a game client calls the
 Express API directly.
-
-### The `legacy` branch
-
-`main` is the Nakama-based platform. The pre-Nakama server (the MQTT/EMQX-era
-Express server and the older socket server) is frozen on the
-[`legacy`](https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer/tree/legacy) branch. It is kept for reference only; diffing `main`
-against it is not a useful way to find what changed recently.
-
-## Architecture
-
-A pnpm + Turborepo monorepo:
-
-```
-nakama/            Nakama TypeScript runtime module (the game backend)
-apps/server/       Express API: website + web admin backend, Nakama mirror
-apps/web/          Next.js website: leaderboards, stats, match history, admin UI
-apps/moderation/   Stateless chat-moderation verdict service (local classifier)
-packages/types/    @bmp/types, shared types for server/web/internal
-packages/internal/ Public stub for private, deploy-time-only features
-nginx/             Reverse-proxy config (prod, local, blue/green upstream)
-scripts/           deploy-color-swap.sh (blue/green API deploy)
-```
-
-### `nakama/` — the game backend
-
-Bundled by esbuild from `nakama/src` into `nakama/modules/index.js`, which the
-Nakama container loads. It owns everything live:
-
-- **Login**: Steam session tickets via a custom-auth hook; device login for
-  local development only.
-- **Lobbies**: an authoritative `bmp_lobby` match that relays gameplay actions,
-  referees ready/start and result reporting, handles spectating, forfeits,
-  rejoin and checkpoint/restore across restarts.
-- **Ranked**: matchmaking queue (solo and group), Elo ratings, seasons with
-  soft reset and inactivity decay, legacy-rating carry-over.
-- **Chat**: lobby chat judged by the moderation service, with a local word
-  filter as fallback.
-- **Replay logs and anti-cheat**: per-player replay logs with an end-of-run
-  hash check and plausibility checks; flagged runs are kept out of ratings.
-- **Moderation**: bans, mutes, reports, account standing, achievements and
-  avatar unlocks.
-- **Mirror outbox**: finished games, ratings, chat and flags are appended to an
-  outbox that the API pulls into Postgres.
-
-### `apps/server/` — the API
-
-Express + Drizzle ORM on PostgreSQL. It serves the website and web admin
-(`/api/*`), mirrors Nakama's outbox into Postgres, owns seasons, the mod
-catalog and server config, and pushes config/bans/rating changes back into
-Nakama through server-only admin RPCs. Nakama calls back into it on
-`/internal/nakama/*`. Postgres holds durable and audit data plus the mirrored
-copy of Nakama's games; live game state stays in Nakama.
-
-### `apps/web/` — the website
-
-Next.js (App Router). Public pages (leaderboards, stats, player profiles,
-match history, downloads) and the moderator/admin panel. It reaches the API
-server-side through a proxy route.
-
-### `apps/moderation/` — chat moderation
-
-A stateless `POST /moderate` service that classifies chat with a local GGUF
-model. It runs as several replicas behind an internal nginx load balancer that
-only Nakama calls. The model file is not in the repo; see
-[`apps/moderation/README.md`](apps/moderation/README.md) for staging it and for
-the shadow-mode default.
-
-### `packages/internal/`
-
-A public stub. Some features (for example the launcher-integrity challenge
-strategy) have private implementations that replace this package at deploy
-time. Without them the feature is simply disabled.
 
 ## Local development
 
@@ -171,43 +99,32 @@ launch:
 Start one game instance per player, each with a different value. Leave both
 unset on an instance that should sign in through real Steam.
 
-## Tests, typecheck and lint
+## AI Content Disclaimer
 
-```sh
-pnpm test                                        # all unit tests (Vitest) via Turbo
-pnpm lint                                        # Biome
-pnpm build                                       # tsc / next build for every package
-pnpm --filter bmp-nakama-modules typecheck       # the Nakama module
-pnpm --filter balatro-multiplayer-web typecheck  # the website
-```
+This repo does NOT use AI for art or other assets. It
+uses generative AI in its development as a tool for writing code. The chat moderation service (`apps/moderation/`) uses a local AI model to
+classify chat messages.
 
-Database schema changes go through Drizzle:
+## Contributing
 
-```sh
-pnpm generate    # write a new migration from apps/server/src/infrastructure/db/schema.ts
-pnpm migrate     # apply migrations
-```
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for
+guidelines.
 
-Live checks against a running local stack live in
-[`nakama/scripts/live/`](nakama/scripts/live); each is a standalone Node
-script (`node nakama/scripts/live/mirror.live.mjs`) that drives throwaway
-device-auth players through Nakama and checks the result in Postgres.
-
-## Deployment
-
-Production runs the same Compose stack on a single host behind Cloudflare,
-with nginx as the only entry point. The API is deployed blue/green:
-[`scripts/deploy-color-swap.sh`](scripts/deploy-color-swap.sh) builds the
-inactive API color, runs migrations, health-checks it, switches
-`nginx/upstream.conf` over and stops the old color without dropping requests.
-Nakama, the website and the moderation replicas are rebuilt and restarted with
-`docker compose up -d`. Nakama gets a shutdown grace period so open lobbies
-checkpoint themselves and resume after a restart.
-
-Use the base compose file alone for a dedicated host, or add a host-specific
-overlay with `COMPOSE_OVERLAY=<file>` when sharing a host with other services.
+Changes to ratings, ranked, moderation or the wire contract with the client
+mods are heavily scrutinized, so open an issue or ask on
+[Discord](https://discord.gg/balatromp) first. A wire contract change also
+needs a matching change in
+[BalatroMultiplayerAPI](https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI).
+Bug fixes and quality-of-life work are always welcome. Check the
+[issues](https://github.com/Balatro-Multiplayer/BalatroMultiplayerServer/issues),
+especially those tagged "Help Wanted".
 
 ## License
 
-See [`apps/server/LICENSE`](apps/server/LICENSE) and
-[`apps/web/LICENSE`](apps/web/LICENSE).
+Each part of the repo has its own license:
+
+| Path | License |
+|------|---------|
+| `apps/server/` | GPL-3.0, see [`apps/server/LICENSE`](apps/server/LICENSE) |
+| `apps/web/` | AGPL-3.0, see [`apps/web/LICENSE`](apps/web/LICENSE) |
+| `packages/internal/` | Proprietary, see [`packages/internal/LICENSE`](packages/internal/LICENSE) |
