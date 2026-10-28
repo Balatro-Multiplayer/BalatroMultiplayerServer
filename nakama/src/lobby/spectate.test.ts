@@ -11,7 +11,7 @@ import {
 	spectateRejection,
 	spectateSnapshot,
 } from './spectate'
-import { type Lobby, type Outbound, type Step, close, join, joinRejection, kick, labelOf, newLobby } from './state'
+import { type Lobby, type Outbound, type Step, adminRemove, close, join, joinRejection, labelOf, newLobby } from './state'
 
 const info = (name: string) => ({ displayName: name, preferredJoker: null, mods: null })
 
@@ -61,7 +61,7 @@ describe('spectateRejection', () => {
 
 	it('refuses kicked players, seated players, a closed lobby and a full gallery', () => {
 		let lobby = lobbyWith(['a', 'b', 'c'], true)
-		lobby = kick(lobby, 'a', 'c').lobby
+		lobby = adminRemove(lobby, 'c', 'banned').lobby
 		expect(spectateRejection(lobby, 'c', '')).toBe('You have been kicked from this lobby')
 		expect(spectateRejection(lobby, 'b', '')).toBe('You are playing in this lobby')
 		expect(spectateRejection(close(lobby).lobby, 'z', '')).toBe('Lobby is closed')

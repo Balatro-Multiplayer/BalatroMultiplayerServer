@@ -312,6 +312,20 @@ describe('kick', () => {
 		expect(kick(lobby, 'a', 'a').lobby).toBe(lobby)
 	})
 
+	it('refuses the host of a matchmade lobby', () => {
+		const lobby = { ...lobbyWith('a', 'b'), allowedIds: ['a', 'b'] }
+		const step = kick(lobby, 'a', 'b')
+		expect(step.lobby).toBe(lobby)
+		expect(step.out).toEqual([
+			{
+				kind: 'send',
+				op: ServerOp.ERROR,
+				payload: { message: 'Players cannot be kicked from a matchmade lobby' },
+				to: ['a'],
+			},
+		])
+	})
+
 	it('tells everyone, the target included, then removes and kicks them', () => {
 		const step = kick(lobbyWith('a', 'b', 'c'), 'a', 'b')
 		expect(events(step)).toEqual([

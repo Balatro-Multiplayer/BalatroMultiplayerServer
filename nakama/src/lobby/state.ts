@@ -547,6 +547,9 @@ export function disconnect(
 export function kick(lobby: Lobby, byId: string, targetId: string): Step {
 	if (lobby.hostId !== byId)
 		return { lobby, out: [rejectOp(byId, 'Only the host can kick players')] }
+	// The matchmaker seated these players, so the host has no say over who plays.
+	if (lobbyType(lobby) === 'public')
+		return { lobby, out: [rejectOp(byId, 'Players cannot be kicked from a matchmade lobby')] }
 	if (targetId === byId)
 		return { lobby, out: [rejectOp(byId, 'You cannot kick yourself')] }
 	if (!findPlayer(lobby, targetId))

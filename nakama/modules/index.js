@@ -4414,6 +4414,8 @@ function disconnect(lobby, userId, sessionId, now) {
 function kick(lobby, byId, targetId) {
   if (lobby.hostId !== byId)
     return { lobby, out: [rejectOp(byId, "Only the host can kick players")] };
+  if (lobbyType(lobby) === "public")
+    return { lobby, out: [rejectOp(byId, "Players cannot be kicked from a matchmade lobby")] };
   if (targetId === byId)
     return { lobby, out: [rejectOp(byId, "You cannot kick yourself")] };
   if (!findPlayer(lobby, targetId))
