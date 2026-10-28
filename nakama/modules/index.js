@@ -1592,8 +1592,7 @@ var DEFAULT_CONFIG = {
   lobbyCreationEnabled: true,
   testingMode: false,
   integrityEnforced: false,
-  // Off until the avatar reset (achievements/reset.ts) has run.
-  achievementsEnabled: false,
+  achievementsEnabled: true,
   chatAllowlist: [],
   season: 0,
   queueAllowedModIds: [],
@@ -4263,7 +4262,8 @@ function emptyProgress() {
     milestones: [],
     unlocked: [],
     countedRunIds: [],
-    privateGames: { day: "", counts: {} }
+    privateGames: { day: "", counts: {} },
+    backfilled: false
   };
 }
 var fieldsOf2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -4288,7 +4288,8 @@ function progressOf(value) {
     milestones: strings(stored.milestones).filter((m) => MILESTONES.indexOf(m) !== -1),
     unlocked: strings(stored.unlocked).filter(isAvatarId),
     countedRunIds: strings(stored.countedRunIds).slice(-COUNTED_RUN_IDS_KEPT),
-    privateGames: { day: typeof privateGames.day === "string" ? privateGames.day : "", counts }
+    privateGames: { day: typeof privateGames.day === "string" ? privateGames.day : "", counts },
+    backfilled: stored.backfilled === true
   });
 }
 function utcDayOf(epochMs) {
@@ -4403,9 +4404,6 @@ function updateProgress(nk, userId, change) {
     }
   }
   throw lastError;
-}
-function deleteProgress(nk, userId) {
-  nk.storageDelete([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId }]);
 }
 function holdingsOf(nk, userId, privileges) {
   return { privileges, unlocked: progressFor(nk, userId).unlocked };
@@ -5686,22 +5684,373 @@ function rpcAdminProgressSet(ctx, logger, nk, payload) {
   return JSON.stringify({ progress: after });
 }
 
+// src/lobby/log_check.ts
+var FRAMING_OPCODES = { end: true, chk: true };
+function opcodeOf(line) {
+  return JSON.parse(line)[1];
+}
+function hashInput(lines) {
+  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
+}
+function claimedHash(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event2 = JSON.parse(lines[i]);
+    if (event2[1] !== "chk") continue;
+    const args = event2[2];
+    return args && typeof args.carbon === "string" ? args.carbon : null;
+  }
+  return null;
+}
+function checkLog(log, sha256) {
+  if (!log) return { carbonHash: null, check: "unavailable" };
+  const carbonHash = claimedHash(log.lines);
+  if (carbonHash === null || log.truncated)
+    return { carbonHash, check: "unavailable" };
+  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
+  return {
+    carbonHash,
+    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
+  };
+}
+
+// src/lobby/storage.ts
+function myRunKey(run) {
+  const reversed = String(9999999999999 - run.endedAt).padStart(13, "0");
+  return `${reversed}:${run.runId}`;
+}
+function logKey(runId, playerId) {
+  return `${runId}:${playerId}`;
+}
+function logChecksOf(run, logs, sha256) {
+  const checks = {};
+  for (const player of run.players)
+    checks[player.id] = checkLog(logs[player.id], sha256).check;
+  return checks;
+}
+function runWrites(run, logs, sha256) {
+  const checks = {};
+  const logChecks = {};
+  for (const player of run.players) {
+    checks[player.id] = checkLog(logs[player.id], sha256);
+    logChecks[player.id] = checks[player.id].check;
+  }
+  const writes = [
+    {
+      collection: RUNS_COLLECTION,
+      key: run.runId,
+      userId: SYSTEM_USER_ID,
+      value: __spreadProps(__spreadValues({}, run), { logChecks }),
+      permissionRead: 2,
+      permissionWrite: 0
+    }
+  ];
+  for (const player of run.players) {
+    const log = logs[player.id];
+    writes.push({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, player.id),
+      userId: SYSTEM_USER_ID,
+      value: {
+        events: log ? log.lines.map((line) => JSON.parse(line)) : [],
+        eventCount: log ? log.lines.length : 0,
+        truncated: log ? log.truncated : false,
+        carbonHash: checks[player.id].carbonHash,
+        check: checks[player.id].check
+      },
+      permissionRead: 0,
+      permissionWrite: 0
+    });
+    const placement = run.placements.filter((p) => p.playerId === player.id)[0];
+    writes.push({
+      collection: MY_RUNS_COLLECTION,
+      key: myRunKey(run),
+      userId: player.id,
+      value: {
+        runId: run.runId,
+        code: run.code,
+        modId: run.modId,
+        startedAt: run.startedAt,
+        endedAt: run.endedAt,
+        status: run.status,
+        place: placement ? placement.place : null,
+        rating: run.ratings && run.ratings[player.id] || null
+      },
+      permissionRead: 1,
+      permissionWrite: 0
+    });
+  }
+  return writes;
+}
+function saveRun(nk, run, logs) {
+  const writes = runWrites(run, logs, (input) => nk.sha256Hash(input));
+  nk.storageWrite(writes);
+  return writes[0].value;
+}
+function readRun(nk, runId) {
+  if (typeof runId !== "string" || runId === "")
+    throw runtimeError(INVALID_ARGUMENT, "runId is required");
+  const objects = nk.storageRead([
+    { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
+  ]);
+  if (objects.length === 0) throw runtimeError(NOT_FOUND, "Run not found");
+  return objects[0].value;
+}
+function rpcRunGet(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const run = readRun(nk, parsePayload(payload).runId);
+  if (!run.players.some((p) => p.id === userId))
+    throw runtimeError(NOT_FOUND, "Run not found");
+  return JSON.stringify(run);
+}
+function rpcRunLogs(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  const run = readRun(nk, input.runId);
+  if (!run.players.some((p) => p.id === userId))
+    throw runtimeError(NOT_FOUND, "Run not found");
+  const wanted = run.players.filter(
+    (p) => typeof input.playerId !== "string" || p.id === input.playerId
+  );
+  const objects = nk.storageRead(
+    wanted.map((p) => ({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, p.id),
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  const logs = {};
+  for (const object of objects) {
+    logs[object.key.slice(run.runId.length + 1)] = object.value;
+  }
+  return JSON.stringify({ logs });
+}
+var RUNS_PAGE = 20;
+function rpcRunsMine(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const input = parsePayload(payload);
+  const cursor = typeof input.cursor === "string" ? input.cursor : "";
+  let page;
+  try {
+    page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+  return JSON.stringify({
+    runs: (page.objects || []).map((o) => o.value),
+    cursor: page.cursor || ""
+  });
+}
+
+// src/shared/replay/events.ts
+function eventOf(tuple) {
+  var _a;
+  if (!Array.isArray(tuple) || typeof tuple[1] !== "string") return null;
+  return { t: typeof tuple[0] === "number" ? tuple[0] : 0, opcode: tuple[1], args: (_a = tuple[2]) != null ? _a : null };
+}
+function eventsOfTuples(tuples) {
+  const events = [];
+  for (const tuple of tuples) {
+    const event2 = eventOf(tuple);
+    if (event2) events.push(event2);
+  }
+  return events;
+}
+function eventsOf2(log) {
+  if (!log) return [];
+  return eventsOfTuples(log.lines.map((line) => JSON.parse(line)));
+}
+function eventsOfStored(value) {
+  const events = value !== null && typeof value === "object" ? value.events : void 0;
+  return Array.isArray(events) ? eventsOfTuples(events) : [];
+}
+function eventsByPlayer(logs) {
+  const events = {};
+  for (const userId in logs) events[userId] = eventsOf2(logs[userId]);
+  return events;
+}
+
+// src/achievements/backfill.ts
+var BACKFILL_COLLECTION = "achievements_backfill";
+var BACKFILL_KEY = "state";
+var PLAYER_PAGE = 20;
+var LIST_PAGE3 = 100;
+var READ_BATCH = 100;
+var FINISHED = ["agreed", "partial", "disputed"];
+var byEndThenId = (a, b) => a.run.endedAt - b.run.endedAt || (a.run.runId < b.run.runId ? -1 : a.run.runId > b.run.runId ? 1 : 0);
+function backfilledProgress(before, playerId, games, privileges, discordLinked) {
+  let progress = __spreadProps(__spreadValues({}, emptyProgress()), {
+    milestones: before.milestones,
+    unlocked: before.unlocked
+  });
+  for (const game of games.slice().sort(byEndThenId))
+    progress = outcomeOf(
+      progress,
+      game.run,
+      playerId,
+      game.facts,
+      privileges
+    ).progress;
+  if (discordLinked) progress = withMilestone(progress, "discordLinked");
+  return __spreadProps(__spreadValues({}, withEarned(progress, privileges).progress), { backfilled: true });
+}
+function chunks(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size)
+    out.push(items.slice(i, i + size));
+  return out;
+}
+function runIdsOf(nk, userId) {
+  const ids = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(userId, MY_RUNS_COLLECTION, LIST_PAGE3, cursor);
+    for (const o of page.objects || []) {
+      const runId = o.value.runId;
+      if (typeof runId === "string") ids.push(runId);
+    }
+    cursor = page.cursor || "";
+  } while (cursor !== "");
+  return ids;
+}
+function storedGamesOf(nk, userId) {
+  const runs = [];
+  for (const ids of chunks(runIdsOf(nk, userId), READ_BATCH)) {
+    const objects = nk.storageRead(
+      ids.map((key) => ({
+        collection: RUNS_COLLECTION,
+        key,
+        userId: SYSTEM_USER_ID
+      }))
+    );
+    for (const o of objects) {
+      const run = o.value;
+      if (FINISHED.indexOf(run.status) !== -1) runs.push(run);
+    }
+  }
+  const games = [];
+  for (const batch of chunks(runs, Math.max(1, Math.floor(READ_BATCH / 2)))) {
+    const reads = batch.flatMap(
+      (run) => run.players.map((p) => ({
+        collection: LOGS_COLLECTION,
+        key: logKey(run.runId, p.id),
+        userId: SYSTEM_USER_ID
+      }))
+    );
+    const logs = {};
+    for (const o of nk.storageRead(reads)) logs[o.key] = o.value;
+    for (const run of batch) {
+      const events = {};
+      for (const p of run.players)
+        events[p.id] = eventsOfStored(logs[logKey(run.runId, p.id)]);
+      games.push({ run, facts: factsByPlayer(run, events) });
+    }
+  }
+  return games;
+}
+function backfillPlayer(nk, userId, privileges, discordLinked) {
+  const stored = readProgress(nk, userId);
+  if (stored && stored.progress.backfilled) return false;
+  let filled = false;
+  updateProgress(nk, userId, (before) => {
+    if (before.backfilled) {
+      filled = false;
+      return before;
+    }
+    filled = true;
+    return backfilledProgress(
+      before,
+      userId,
+      storedGamesOf(nk, userId),
+      privileges,
+      discordLinked
+    );
+  });
+  return filled;
+}
+function isDone(nk) {
+  return nk.storageRead([
+    {
+      collection: BACKFILL_COLLECTION,
+      key: BACKFILL_KEY,
+      userId: SYSTEM_USER_ID
+    }
+  ]).length > 0;
+}
+function markDone(nk) {
+  nk.storageWrite([
+    {
+      collection: BACKFILL_COLLECTION,
+      key: BACKFILL_KEY,
+      userId: SYSTEM_USER_ID,
+      value: { doneAt: Date.now() },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function listProfiles(nk, cursor) {
+  try {
+    return nk.storageList(null, PLAYER_COLLECTION, PLAYER_PAGE, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+}
+function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  if (input.cursor !== void 0 && typeof input.cursor !== "string")
+    throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+  if (input.force !== void 0 && typeof input.force !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "force must be a boolean");
+  const cursor = input.cursor || "";
+  const answer = (enabled, done, counts, next2) => JSON.stringify(__spreadProps(__spreadValues({ enabled, done }, counts), { cursor: next2 }));
+  const none = { filled: 0, skipped: 0, failed: 0 };
+  if (!readConfig(nk).achievementsEnabled) return answer(false, false, none, "");
+  if (cursor === "" && input.force !== true && isDone(nk))
+    return answer(true, true, none, "");
+  let filled = 0;
+  let skipped = 0;
+  let failed = 0;
+  const page = listProfiles(nk, cursor);
+  for (const object of page.objects || []) {
+    if (object.key !== PROFILE_KEY) continue;
+    const profile = profileOf(object.value, "");
+    try {
+      if (backfillPlayer(
+        nk,
+        object.userId,
+        profile.privileges,
+        profile.discordIdHash !== null
+      ))
+        filled++;
+      else skipped++;
+    } catch (e) {
+      failed++;
+      logger.error(
+        "Achievement backfill: could not fill %s: %v",
+        object.userId,
+        e
+      );
+    }
+  }
+  const next = page.cursor || "";
+  if (next === "") markDone(nk);
+  logger.info(
+    "Achievement backfill: %d filled, %d already filled, %d failed%s",
+    filled,
+    skipped,
+    failed,
+    next === "" ? ", done" : ""
+  );
+  return answer(true, next === "", { filled, skipped, failed }, next);
+}
+
 // src/achievements/reset.ts
 var PAGE = 100;
-function parseCursor(value) {
-  if (value === void 0 || value === "") return { phase: "profiles", cursor: "" };
-  if (typeof value === "string") {
-    const at = value.indexOf(":");
-    const phase = value.slice(0, at);
-    if (at > 0 && (phase === "profiles" || phase === "progress")) return { phase, cursor: value.slice(at + 1) };
-  }
-  throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-}
-function cursorOf(position) {
-  return position ? `${position.phase}:${position.cursor}` : "";
-}
-function keepsJoker(joker, privileges) {
-  return isSelectable(joker, { privileges, unlocked: [] });
+function keepsJoker(joker, privileges, unlocked) {
+  return isSelectable(joker, { privileges, unlocked });
 }
 function listPage(nk, collection, cursor) {
   try {
@@ -5714,40 +6063,45 @@ function listPage(nk, collection, cursor) {
 function rpcAdminAvatarsReset(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  const position = parseCursor(input.cursor);
-  if (input.dryRun !== void 0 && typeof input.dryRun !== "boolean") throw runtimeError(INVALID_ARGUMENT, "dryRun must be a boolean");
+  if (input.cursor !== void 0 && typeof input.cursor !== "string")
+    throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+  if (input.dryRun !== void 0 && typeof input.dryRun !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "dryRun must be a boolean");
   const dryRun = input.dryRun === true;
   let checked = 0;
   let jokersReset = 0;
-  let progressDeleted = 0;
-  let next;
-  if (position.phase === "profiles") {
-    const page = listPage(nk, PLAYER_COLLECTION, position.cursor);
-    for (const object of page.objects || []) {
-      if (object.key !== PROFILE_KEY) continue;
-      checked++;
-      const stored = profileOf(object.value, "");
-      if (keepsJoker(stored.preferredJoker, stored.privileges)) continue;
-      jokersReset++;
-      if (dryRun) continue;
-      const profile = updateProfile(
-        nk,
-        object.userId,
-        (current) => keepsJoker(current.preferredJoker, current.privileges) ? current : __spreadProps(__spreadValues({}, current), { preferredJoker: DEFAULT_AVATAR })
-      );
-      profileChanged(nk, object.userId, profile);
-    }
-    next = page.cursor ? { phase: "profiles", cursor: page.cursor } : { phase: "progress", cursor: "" };
-  } else {
-    const page = listPage(nk, PROGRESS_COLLECTION, position.cursor);
-    for (const object of page.objects || []) {
-      progressDeleted++;
-      if (!dryRun) deleteProgress(nk, object.userId);
-    }
-    next = page.cursor ? { phase: "progress", cursor: dryRun ? page.cursor : "" } : null;
+  const page = listPage(
+    nk,
+    PLAYER_COLLECTION,
+    input.cursor || ""
+  );
+  for (const object of page.objects || []) {
+    if (object.key !== PROFILE_KEY) continue;
+    checked++;
+    const stored = profileOf(object.value, "");
+    const unlocked = progressFor(nk, object.userId).unlocked;
+    if (keepsJoker(stored.preferredJoker, stored.privileges, unlocked)) continue;
+    jokersReset++;
+    if (dryRun) continue;
+    const profile = updateProfile(
+      nk,
+      object.userId,
+      (current) => keepsJoker(current.preferredJoker, current.privileges, unlocked) ? current : __spreadProps(__spreadValues({}, current), { preferredJoker: DEFAULT_AVATAR })
+    );
+    profileChanged(nk, object.userId, profile);
   }
-  logger.info("Avatar reset%s: %d checked, %d jokers reset, %d progress deleted", dryRun ? " (dry run)" : "", checked, jokersReset, progressDeleted);
-  return JSON.stringify({ dryRun, checked, jokersReset, progressDeleted, cursor: cursorOf(next) });
+  logger.info(
+    "Avatar reset%s: %d checked, %d jokers reset",
+    dryRun ? " (dry run)" : "",
+    checked,
+    jokersReset
+  );
+  return JSON.stringify({
+    dryRun,
+    checked,
+    jokersReset,
+    cursor: page.cursor || ""
+  });
 }
 
 // src/matchmaking/group/binding.ts
@@ -5938,7 +6292,7 @@ function partitionTeams(groups) {
 // src/matchmaking/queue.ts
 var QUEUE_COLLECTION = "queue_presence";
 var QUEUE_STALE_MS = 30 * 6e4;
-var LIST_PAGE3 = 100;
+var LIST_PAGE4 = 100;
 var MATCH_LIST_LIMIT = 100;
 var NOTIFICATIONS_STREAM = 0;
 var TOMBSTONE_MS = 6e4;
@@ -5989,7 +6343,7 @@ function ownRecords(nk, userId) {
   const out = [];
   let cursor = "";
   do {
-    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE3, cursor);
+    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE4, cursor);
     for (const o of page.objects || []) out.push(o);
     cursor = page.cursor || "";
   } while (cursor);
@@ -6075,7 +6429,7 @@ function liveQueuedPlayers(nk, modId, now) {
   const byUser = {};
   let cursor = "";
   do {
-    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE3, cursor);
+    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE4, cursor);
     for (const o of page.objects || []) {
       if (!isRecord(o)) {
         if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
@@ -6342,164 +6696,6 @@ function standingInputsUpdated(nk, settings, logger, now) {
     cancelled.solos,
     cancelled.groups
   );
-}
-
-// src/lobby/log_check.ts
-var FRAMING_OPCODES = { end: true, chk: true };
-function opcodeOf(line) {
-  return JSON.parse(line)[1];
-}
-function hashInput(lines) {
-  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
-}
-function claimedHash(lines) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const event2 = JSON.parse(lines[i]);
-    if (event2[1] !== "chk") continue;
-    const args = event2[2];
-    return args && typeof args.carbon === "string" ? args.carbon : null;
-  }
-  return null;
-}
-function checkLog(log, sha256) {
-  if (!log) return { carbonHash: null, check: "unavailable" };
-  const carbonHash = claimedHash(log.lines);
-  if (carbonHash === null || log.truncated)
-    return { carbonHash, check: "unavailable" };
-  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
-  return {
-    carbonHash,
-    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
-  };
-}
-
-// src/lobby/storage.ts
-function myRunKey(run) {
-  const reversed = String(9999999999999 - run.endedAt).padStart(13, "0");
-  return `${reversed}:${run.runId}`;
-}
-function logKey(runId, playerId) {
-  return `${runId}:${playerId}`;
-}
-function logChecksOf(run, logs, sha256) {
-  const checks = {};
-  for (const player of run.players)
-    checks[player.id] = checkLog(logs[player.id], sha256).check;
-  return checks;
-}
-function runWrites(run, logs, sha256) {
-  const checks = {};
-  const logChecks = {};
-  for (const player of run.players) {
-    checks[player.id] = checkLog(logs[player.id], sha256);
-    logChecks[player.id] = checks[player.id].check;
-  }
-  const writes = [
-    {
-      collection: RUNS_COLLECTION,
-      key: run.runId,
-      userId: SYSTEM_USER_ID,
-      value: __spreadProps(__spreadValues({}, run), { logChecks }),
-      permissionRead: 2,
-      permissionWrite: 0
-    }
-  ];
-  for (const player of run.players) {
-    const log = logs[player.id];
-    writes.push({
-      collection: LOGS_COLLECTION,
-      key: logKey(run.runId, player.id),
-      userId: SYSTEM_USER_ID,
-      value: {
-        events: log ? log.lines.map((line) => JSON.parse(line)) : [],
-        eventCount: log ? log.lines.length : 0,
-        truncated: log ? log.truncated : false,
-        carbonHash: checks[player.id].carbonHash,
-        check: checks[player.id].check
-      },
-      permissionRead: 0,
-      permissionWrite: 0
-    });
-    const placement = run.placements.filter((p) => p.playerId === player.id)[0];
-    writes.push({
-      collection: MY_RUNS_COLLECTION,
-      key: myRunKey(run),
-      userId: player.id,
-      value: {
-        runId: run.runId,
-        code: run.code,
-        modId: run.modId,
-        startedAt: run.startedAt,
-        endedAt: run.endedAt,
-        status: run.status,
-        place: placement ? placement.place : null,
-        rating: run.ratings && run.ratings[player.id] || null
-      },
-      permissionRead: 1,
-      permissionWrite: 0
-    });
-  }
-  return writes;
-}
-function saveRun(nk, run, logs) {
-  const writes = runWrites(run, logs, (input) => nk.sha256Hash(input));
-  nk.storageWrite(writes);
-  return writes[0].value;
-}
-function readRun(nk, runId) {
-  if (typeof runId !== "string" || runId === "")
-    throw runtimeError(INVALID_ARGUMENT, "runId is required");
-  const objects = nk.storageRead([
-    { collection: RUNS_COLLECTION, key: runId, userId: SYSTEM_USER_ID }
-  ]);
-  if (objects.length === 0) throw runtimeError(NOT_FOUND, "Run not found");
-  return objects[0].value;
-}
-function rpcRunGet(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const run = readRun(nk, parsePayload(payload).runId);
-  if (!run.players.some((p) => p.id === userId))
-    throw runtimeError(NOT_FOUND, "Run not found");
-  return JSON.stringify(run);
-}
-function rpcRunLogs(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const input = parsePayload(payload);
-  const run = readRun(nk, input.runId);
-  if (!run.players.some((p) => p.id === userId))
-    throw runtimeError(NOT_FOUND, "Run not found");
-  const wanted = run.players.filter(
-    (p) => typeof input.playerId !== "string" || p.id === input.playerId
-  );
-  const objects = nk.storageRead(
-    wanted.map((p) => ({
-      collection: LOGS_COLLECTION,
-      key: logKey(run.runId, p.id),
-      userId: SYSTEM_USER_ID
-    }))
-  );
-  const logs = {};
-  for (const object of objects) {
-    logs[object.key.slice(run.runId.length + 1)] = object.value;
-  }
-  return JSON.stringify({ logs });
-}
-var RUNS_PAGE = 20;
-function rpcRunsMine(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const input = parsePayload(payload);
-  const cursor = typeof input.cursor === "string" ? input.cursor : "";
-  let page;
-  try {
-    page = nk.storageList(userId, MY_RUNS_COLLECTION, RUNS_PAGE, cursor);
-  } catch (e) {
-    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-    throw e;
-  }
-  return JSON.stringify({
-    runs: (page.objects || []).map((o) => o.value),
-    cursor: page.cursor || ""
-  });
 }
 
 // src/review/result.ts
@@ -8076,24 +8272,6 @@ function reportEvidence(lobby, reporterId, reportedId) {
   };
 }
 
-// src/shared/replay/events.ts
-function eventsOf2(log) {
-  var _a;
-  if (!log) return [];
-  const events = [];
-  for (const line of log.lines) {
-    const tuple = JSON.parse(line);
-    if (!Array.isArray(tuple) || typeof tuple[1] !== "string") continue;
-    events.push({ t: typeof tuple[0] === "number" ? tuple[0] : 0, opcode: tuple[1], args: (_a = tuple[2]) != null ? _a : null });
-  }
-  return events;
-}
-function eventsByPlayer(logs) {
-  const events = {};
-  for (const userId in logs) events[userId] = eventsOf2(logs[userId]);
-  return events;
-}
-
 // src/standing/rejoin.ts
 var REJOIN_REFUSED_PREFIX = "standing_refused:";
 function rejoinRefusal(required, result) {
@@ -9183,7 +9361,7 @@ function boardEntries(records, stored, now) {
 }
 
 // src/lobby/checkpoint_sweep.ts
-var LIST_PAGE4 = 100;
+var LIST_PAGE5 = 100;
 var SWEEP_MAX = 200;
 function isSweepable(checkpoint, now, ttlMs) {
   const expired = ttlMs === void 0 ? isExpired(checkpoint, now) : now >= checkpoint.at + ttlMs;
@@ -9213,7 +9391,7 @@ function sweepCheckpoints(nk, logger, now, max, ttlMs) {
   const result = { deleted: 0, noContest: 0, more: false };
   let cursor = "";
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, LOBBY_CHECKPOINT_COLLECTION, LIST_PAGE4, cursor);
+    const page = nk.storageList(SYSTEM_USER_ID, LOBBY_CHECKPOINT_COLLECTION, LIST_PAGE5, cursor);
     for (const o of page.objects || []) {
       const checkpoint = o.value;
       if (!isSweepable(checkpoint, now, ttlMs)) continue;
@@ -9252,7 +9430,7 @@ function rpcAdminCheckpointsSweep(ctx, logger, nk, payload) {
 
 // src/lobby/retention.ts
 var RUN_RETENTION_DAYS = 180;
-var LIST_PAGE5 = 100;
+var LIST_PAGE6 = 100;
 var EXPIRED_MAX = 100;
 function isKept(run) {
   return Object.keys(run.flags || {}).length > 0 || run.status === "disputed";
@@ -9274,7 +9452,7 @@ function expiredRuns(nk, cutoff, max, cursor) {
   const runs = [];
   let next = cursor;
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE5, next);
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE6, next);
     for (const o of page.objects || []) {
       const run = o.value;
       if (isPurgeable(run, cutoff)) runs.push({ runId: run.runId, endedAt: run.endedAt });
@@ -9989,6 +10167,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_avatars_for", rpcAdminAvatarsFor);
   initializer.registerRpc("admin_progress_set", rpcAdminProgressSet);
   initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
+  initializer.registerRpc("admin_achievements_backfill", rpcAdminAchievementsBackfill);
   initializer.registerRpc("admin_runs_expired", rpcAdminRunsExpired);
   initializer.registerRpc("admin_runs_purge_named", rpcAdminRunsPurgeNamed);
   initializer.registerRpc("admin_checkpoints_sweep", rpcAdminCheckpointsSweep);

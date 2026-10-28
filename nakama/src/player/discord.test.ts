@@ -52,7 +52,8 @@ describe('admin_discord_set', () => {
 		expect(res.player).toMatchObject({ discordLinked: true, discordUsername: 'alice' })
 		expect(readProfile(nk as any, ALICE)?.profile.discordIdHash).toBe(HASH)
 		expect(discordOwner(nk as any, HASH)).toBe(ALICE)
-		expect(nk.notifications.map((n) => n.code)).toEqual([NotifyCode.ACCOUNT_UPDATED])
+		// Linking also earns Scholar (achievements are on by default).
+		expect(nk.notifications.map((n) => n.code)).toEqual([NotifyCode.ACCOUNT_UPDATED, NotifyCode.AVATAR_UNLOCKED])
 	})
 	it('refuses a Discord account linked to another player', () => {
 		const { nk } = setup()
