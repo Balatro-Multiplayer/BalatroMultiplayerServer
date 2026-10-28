@@ -109,6 +109,14 @@ describe('the queue phases', () => {
 		expect(groupOps(step)[0]).toMatchObject({ phase: 'away', matchId: 'pub.m', code: 'PUB12' })
 	})
 
+	it('comes back with nobody ready: matched clears the home ready flags', () => {
+		const lobby = queued(home('a', 'b', 'c'))
+		const readied = { ...lobby, game: { ...lobby.game, ready: { b: true, c: true } } }
+		const step = unwrap(groupMatched(readied, PARTY, 'pub.m', 'PUB12', 1000))
+		expect(step.lobby.game.ready).toEqual({})
+		expect(snapshotFor(step.lobby, 'b').game.ready).toEqual({})
+	})
+
 	it('a member may cancel while forming or queued, not away; nobody else may', () => {
 		const cancelled = unwrap(cancelGroup(queued(home('a', 'b')), PARTY, 'cancelled', 'b'))
 		expect(cancelled.lobby.groupQueue).toBeNull()
