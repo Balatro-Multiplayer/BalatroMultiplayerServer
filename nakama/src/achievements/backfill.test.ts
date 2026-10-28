@@ -154,6 +154,26 @@ describe('admin_achievements_backfill', () => {
 		})
 	})
 
+	it('stays not done while a player failed, and fills them on the next run', () => {
+		const nk = stack()
+		store(nk, history())
+		const write = nk.storageWrite
+		let broken = true
+		nk.storageWrite = (writes: any[]) => {
+			if (broken && writes.some((w) => w.userId === B)) throw new Error('disk')
+			return write(writes)
+		}
+		expect(backfillAll(nk)).toMatchObject({ done: false, failed: 1 })
+		broken = false
+		expect(backfill(nk)).toMatchObject({
+			done: true,
+			filled: 1,
+			skipped: 1,
+			failed: 0,
+		})
+		expect(backfill(nk)).toMatchObject({ done: true, filled: 0, skipped: 0 })
+	})
+
 	it('does not count twice a game already counted live', () => {
 		const nk = stack()
 		const games = history()

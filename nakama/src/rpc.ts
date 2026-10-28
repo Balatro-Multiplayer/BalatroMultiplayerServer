@@ -26,3 +26,14 @@ export function parsePayload(payload: string): { [key: string]: unknown } {
 	}
 	throw runtimeError(INVALID_ARGUMENT, 'Payload must be a JSON object')
 }
+
+// One page of a collection across every owner. Nakama throws "Malformed
+// cursor was used" for a cursor it didn't issue; that becomes INVALID_ARGUMENT.
+export function listCollectionPage(nk: nkruntime.Nakama, collection: string, limit: number, cursor: string) {
+	try {
+		return nk.storageList(null, collection, limit, cursor)
+	} catch (e) {
+		if (cursor !== '') throw runtimeError(INVALID_ARGUMENT, 'Invalid cursor')
+		throw e
+	}
+}

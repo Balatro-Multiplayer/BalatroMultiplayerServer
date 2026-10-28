@@ -20,23 +20,24 @@ import {
 } from '../lobby/protocol'
 import { logKey } from '../lobby/storage'
 import { PLAYER_COLLECTION, PROFILE_KEY, profileOf } from '../player/profile'
-import { parsePayload, requireServer } from '../rpc'
+import { listCollectionPage, parsePayload, requireServer } from '../rpc'
 import { type LogEvent, eventsOfStored } from '../shared/replay/events'
 import type { LogFacts } from './facts'
+import { FINISHED_STATUSES } from './eligibility'
 import { type Progress, emptyProgress, withMilestone } from './progress'
 import { factsByPlayer, outcomeOf, withEarned } from './record'
+import type { Milestone } from '../shared/avatars/rules'
 import { readProgress, updateProgress } from './storage'
 
 export const BACKFILL_COLLECTION = 'achievements_backfill'
 export const BACKFILL_KEY = 'state'
+const RUN_KEY = 'run'
+const DISCORD_MILESTONE: Milestone = 'discordLinked'
 
 // Players per call: each one reads all their games and logs.
 const PLAYER_PAGE = 20
 const LIST_PAGE = 100
 const READ_BATCH = 100
-
-// The statuses eligibility.ts counts; logs of other runs are not read.
-const FINISHED: readonly string[] = ['agreed', 'partial', 'disputed']
 
 export interface StoredGame {
 	run: RunRecord
@@ -69,7 +70,7 @@ export function backfilledProgress(
 			game.facts,
 			privileges,
 		).progress
-	if (discordLinked) progress = withMilestone(progress, 'discordLinked')
+	if (discordLinked) progress = withMilestone(progress, DISCORD_MILESTONE)
 	return { ...withEarned(progress, privileges).progress, backfilled: true }
 }
 
@@ -110,7 +111,7 @@ export function storedGamesOf(
 		)
 		for (const o of objects) {
 			const run = o.value as unknown as RunRecord
-			if (FINISHED.indexOf(run.status) !== -1) runs.push(run)
+			if (FINISHED_STATUSES.indexOf(run.status) !== -1) runs.push(run)
 		}
 	}
 	const games: StoredGame[] = []
@@ -188,48 +189,52 @@ function markDone(nk: nkruntime.Nakama) {
 	])
 }
 
-function listProfiles(nk: nkruntime.Nakama, cursor: string) {
-	try {
-		return nk.storageList(null, PLAYER_COLLECTION, PLAYER_PAGE, cursor)
-	} catch (e) {
-		// Nakama throws "Malformed cursor was used" for a cursor it didn't issue.
-		if (cursor !== '') throw runtimeError(INVALID_ARGUMENT, 'Invalid cursor')
-		throw e
-	}
+interface PageCounts {
+	filled: number
+	skipped: number
+	failed: number
 }
 
-// {cursor?, force?} -> {enabled, done, filled, skipped, failed, cursor}.
-// skipped counts players filled before. force lists the players again after it is done.
-export function rpcAdminAchievementsBackfill(
-	ctx: nkruntime.Context,
-	logger: nkruntime.Logger,
+const NO_COUNTS: PageCounts = { filled: 0, skipped: 0, failed: 0 }
+
+const answer = (
+	enabled: boolean,
+	done: boolean,
+	counts: PageCounts,
+	cursor: string,
+) => JSON.stringify({ enabled, done, ...counts, cursor })
+
+// Players of this run that failed, kept between pages so the last page knows.
+function readRunFailures(nk: nkruntime.Nakama): number {
+	const stored = nk.storageRead([
+		{ collection: BACKFILL_COLLECTION, key: RUN_KEY, userId: SYSTEM_USER_ID },
+	])[0]
+	const failures = stored
+		? (stored.value as { failures?: unknown }).failures
+		: 0
+	return typeof failures === 'number' ? failures : 0
+}
+
+function writeRunFailures(nk: nkruntime.Nakama, failures: number) {
+	nk.storageWrite([
+		{
+			collection: BACKFILL_COLLECTION,
+			key: RUN_KEY,
+			userId: SYSTEM_USER_ID,
+			value: { failures },
+			permissionRead: 0,
+			permissionWrite: 0,
+		},
+	])
+}
+
+function fillPage(
 	nk: nkruntime.Nakama,
-	payload: string,
-) {
-	requireServer(ctx)
-	const input = parsePayload(payload)
-	if (input.cursor !== undefined && typeof input.cursor !== 'string')
-		throw runtimeError(INVALID_ARGUMENT, 'Invalid cursor')
-	if (input.force !== undefined && typeof input.force !== 'boolean')
-		throw runtimeError(INVALID_ARGUMENT, 'force must be a boolean')
-	const cursor = (input.cursor as string | undefined) || ''
-	const answer = (
-		enabled: boolean,
-		done: boolean,
-		counts: { filled: number; skipped: number; failed: number },
-		next: string,
-	) => JSON.stringify({ enabled, done, ...counts, cursor: next })
-	const none = { filled: 0, skipped: 0, failed: 0 }
-
-	if (!readConfig(nk).achievementsEnabled) return answer(false, false, none, '')
-	if (cursor === '' && input.force !== true && isDone(nk))
-		return answer(true, true, none, '')
-
-	let filled = 0
-	let skipped = 0
-	let failed = 0
-	const page = listProfiles(nk, cursor)
-	for (const object of page.objects || []) {
+	logger: nkruntime.Logger,
+	objects: nkruntime.StorageObject[],
+): PageCounts {
+	const counts = { ...NO_COUNTS }
+	for (const object of objects) {
 		if (object.key !== PROFILE_KEY) continue
 		const profile = profileOf(object.value, '')
 		try {
@@ -241,11 +246,11 @@ export function rpcAdminAchievementsBackfill(
 					profile.discordIdHash !== null,
 				)
 			)
-				filled++
-			else skipped++
+				counts.filled++
+			else counts.skipped++
 		} catch (e) {
-			// One bad record must not stop everyone else; a forced run retries them.
-			failed++
+			// One bad record must not stop everyone else; the run is not marked done, so the next run retries them.
+			counts.failed++
 			logger.error(
 				'Achievement backfill: could not fill %s: %v',
 				object.userId,
@@ -253,14 +258,50 @@ export function rpcAdminAchievementsBackfill(
 			)
 		}
 	}
+	return counts
+}
+
+function parseInput(payload: string): { cursor: string; force: boolean } {
+	const input = parsePayload(payload)
+	if (input.cursor !== undefined && typeof input.cursor !== 'string')
+		throw runtimeError(INVALID_ARGUMENT, 'Invalid cursor')
+	if (input.force !== undefined && typeof input.force !== 'boolean')
+		throw runtimeError(INVALID_ARGUMENT, 'force must be a boolean')
+	return {
+		cursor: (input.cursor as string | undefined) || '',
+		force: input.force === true,
+	}
+}
+
+// {cursor?, force?} -> {enabled, done, filled, skipped, failed, cursor}.
+// skipped counts players filled before. force lists the players again after it is done.
+// done is true only when the last page was reached and no player of the run failed.
+export function rpcAdminAchievementsBackfill(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	requireServer(ctx)
+	const { cursor, force } = parseInput(payload)
+	if (!readConfig(nk).achievementsEnabled)
+		return answer(false, false, NO_COUNTS, '')
+	if (cursor === '' && !force && isDone(nk))
+		return answer(true, true, NO_COUNTS, '')
+
+	const page = listCollectionPage(nk, PLAYER_COLLECTION, PLAYER_PAGE, cursor)
+	const counts = fillPage(nk, logger, page.objects || [])
 	const next = page.cursor || ''
-	if (next === '') markDone(nk)
+	const failures = (cursor === '' ? 0 : readRunFailures(nk)) + counts.failed
+	if (next !== '' || failures > 0) writeRunFailures(nk, failures)
+	const done = next === '' && failures === 0
+	if (done) markDone(nk)
 	logger.info(
 		'Achievement backfill: %d filled, %d already filled, %d failed%s',
-		filled,
-		skipped,
-		failed,
-		next === '' ? ', done' : '',
+		counts.filled,
+		counts.skipped,
+		counts.failed,
+		done ? ', done' : '',
 	)
-	return answer(true, next === '', { filled, skipped, failed }, next)
+	return answer(true, done, counts, next)
 }

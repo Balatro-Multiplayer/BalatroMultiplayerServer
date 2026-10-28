@@ -1510,6 +1510,14 @@ function parsePayload(payload) {
   }
   throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
 }
+function listCollectionPage(nk, collection, limit, cursor) {
+  try {
+    return nk.storageList(null, collection, limit, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+}
 
 // src/lobby/protocol.ts
 var LOBBY_MATCH = "bmp_lobby";
@@ -4432,6 +4440,7 @@ var MIN_HANDS = 3;
 var MIN_GAME_MS = 120 * 1e3;
 var MIN_ACTIVE_PLAYERS = 2;
 var PRIVATE_DAILY_CAP = 10;
+var FINISHED_STATUSES = ["agreed", "partial", "disputed"];
 var MOD_KINDS = { MultiplayerPvP: "pvp", MultiplayerSPDRN: "spdrn" };
 function resultOf(run, playerId) {
   if (run.status === "disputed") return "unknown";
@@ -4442,7 +4451,7 @@ function resultOf(run, playerId) {
 function eligibilityOf(run, playerId, facts, metShowman2, progress, day) {
   const skip = (reason) => ({ kind: "skipped", reason });
   if (!run.players.some((p) => p.id === playerId)) return skip("not_participant");
-  if (run.status !== "agreed" && run.status !== "partial" && run.status !== "disputed") return skip("not_finished");
+  if (FINISHED_STATUSES.indexOf(run.status) === -1) return skip("not_finished");
   if (run.flags && run.flags[playerId]) return skip("flagged");
   if (progress.countedRunIds.indexOf(run.runId) !== -1) return skip("already_counted");
   const own = facts[playerId];
@@ -5874,10 +5883,11 @@ function eventsByPlayer(logs) {
 // src/achievements/backfill.ts
 var BACKFILL_COLLECTION = "achievements_backfill";
 var BACKFILL_KEY = "state";
+var RUN_KEY = "run";
+var DISCORD_MILESTONE = "discordLinked";
 var PLAYER_PAGE = 20;
 var LIST_PAGE3 = 100;
 var READ_BATCH = 100;
-var FINISHED = ["agreed", "partial", "disputed"];
 var byEndThenId = (a, b) => a.run.endedAt - b.run.endedAt || (a.run.runId < b.run.runId ? -1 : a.run.runId > b.run.runId ? 1 : 0);
 function backfilledProgress(before, playerId, games, privileges, discordLinked) {
   let progress = __spreadProps(__spreadValues({}, emptyProgress()), {
@@ -5892,7 +5902,7 @@ function backfilledProgress(before, playerId, games, privileges, discordLinked) 
       game.facts,
       privileges
     ).progress;
-  if (discordLinked) progress = withMilestone(progress, "discordLinked");
+  if (discordLinked) progress = withMilestone(progress, DISCORD_MILESTONE);
   return __spreadProps(__spreadValues({}, withEarned(progress, privileges).progress), { backfilled: true });
 }
 function chunks(items, size) {
@@ -5926,7 +5936,7 @@ function storedGamesOf(nk, userId) {
     );
     for (const o of objects) {
       const run = o.value;
-      if (FINISHED.indexOf(run.status) !== -1) runs.push(run);
+      if (FINISHED_STATUSES.indexOf(run.status) !== -1) runs.push(run);
     }
   }
   const games = [];
@@ -5990,32 +6000,30 @@ function markDone(nk) {
     }
   ]);
 }
-function listProfiles(nk, cursor) {
-  try {
-    return nk.storageList(null, PLAYER_COLLECTION, PLAYER_PAGE, cursor);
-  } catch (e) {
-    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-    throw e;
-  }
+var NO_COUNTS = { filled: 0, skipped: 0, failed: 0 };
+var answer = (enabled, done, counts, cursor) => JSON.stringify(__spreadProps(__spreadValues({ enabled, done }, counts), { cursor }));
+function readRunFailures(nk) {
+  const stored = nk.storageRead([
+    { collection: BACKFILL_COLLECTION, key: RUN_KEY, userId: SYSTEM_USER_ID }
+  ])[0];
+  const failures = stored ? stored.value.failures : 0;
+  return typeof failures === "number" ? failures : 0;
 }
-function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const input = parsePayload(payload);
-  if (input.cursor !== void 0 && typeof input.cursor !== "string")
-    throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-  if (input.force !== void 0 && typeof input.force !== "boolean")
-    throw runtimeError(INVALID_ARGUMENT, "force must be a boolean");
-  const cursor = input.cursor || "";
-  const answer = (enabled, done, counts, next2) => JSON.stringify(__spreadProps(__spreadValues({ enabled, done }, counts), { cursor: next2 }));
-  const none = { filled: 0, skipped: 0, failed: 0 };
-  if (!readConfig(nk).achievementsEnabled) return answer(false, false, none, "");
-  if (cursor === "" && input.force !== true && isDone(nk))
-    return answer(true, true, none, "");
-  let filled = 0;
-  let skipped = 0;
-  let failed = 0;
-  const page = listProfiles(nk, cursor);
-  for (const object of page.objects || []) {
+function writeRunFailures(nk, failures) {
+  nk.storageWrite([
+    {
+      collection: BACKFILL_COLLECTION,
+      key: RUN_KEY,
+      userId: SYSTEM_USER_ID,
+      value: { failures },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function fillPage(nk, logger, objects) {
+  const counts = __spreadValues({}, NO_COUNTS);
+  for (const object of objects) {
     if (object.key !== PROFILE_KEY) continue;
     const profile = profileOf(object.value, "");
     try {
@@ -6025,10 +6033,10 @@ function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
         profile.privileges,
         profile.discordIdHash !== null
       ))
-        filled++;
-      else skipped++;
+        counts.filled++;
+      else counts.skipped++;
     } catch (e) {
-      failed++;
+      counts.failed++;
       logger.error(
         "Achievement backfill: could not fill %s: %v",
         object.userId,
@@ -6036,30 +6044,47 @@ function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
       );
     }
   }
+  return counts;
+}
+function parseInput(payload) {
+  const input = parsePayload(payload);
+  if (input.cursor !== void 0 && typeof input.cursor !== "string")
+    throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+  if (input.force !== void 0 && typeof input.force !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "force must be a boolean");
+  return {
+    cursor: input.cursor || "",
+    force: input.force === true
+  };
+}
+function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const { cursor, force } = parseInput(payload);
+  if (!readConfig(nk).achievementsEnabled)
+    return answer(false, false, NO_COUNTS, "");
+  if (cursor === "" && !force && isDone(nk))
+    return answer(true, true, NO_COUNTS, "");
+  const page = listCollectionPage(nk, PLAYER_COLLECTION, PLAYER_PAGE, cursor);
+  const counts = fillPage(nk, logger, page.objects || []);
   const next = page.cursor || "";
-  if (next === "") markDone(nk);
+  const failures = (cursor === "" ? 0 : readRunFailures(nk)) + counts.failed;
+  if (next !== "" || failures > 0) writeRunFailures(nk, failures);
+  const done = next === "" && failures === 0;
+  if (done) markDone(nk);
   logger.info(
     "Achievement backfill: %d filled, %d already filled, %d failed%s",
-    filled,
-    skipped,
-    failed,
-    next === "" ? ", done" : ""
+    counts.filled,
+    counts.skipped,
+    counts.failed,
+    done ? ", done" : ""
   );
-  return answer(true, next === "", { filled, skipped, failed }, next);
+  return answer(true, done, counts, next);
 }
 
 // src/achievements/reset.ts
 var PAGE = 100;
 function keepsJoker(joker, privileges, unlocked) {
   return isSelectable(joker, { privileges, unlocked });
-}
-function listPage(nk, collection, cursor) {
-  try {
-    return nk.storageList(null, collection, PAGE, cursor);
-  } catch (e) {
-    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-    throw e;
-  }
 }
 function rpcAdminAvatarsReset(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -6071,9 +6096,10 @@ function rpcAdminAvatarsReset(ctx, logger, nk, payload) {
   const dryRun = input.dryRun === true;
   let checked = 0;
   let jokersReset = 0;
-  const page = listPage(
+  const page = listCollectionPage(
     nk,
     PLAYER_COLLECTION,
+    PAGE,
     input.cursor || ""
   );
   for (const object of page.objects || []) {
@@ -8816,9 +8842,9 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     return { state, data: hasPlayerAnswer(state.lobby, signal2.userId, signal2.forMatchId) };
   }
   if (isGroupSignal(signal2)) {
-    const answer = answerGroupSignal(state.lobby, signal2, readConfig(nk), Date.now());
-    const next = apply(ctx, logger, nk, dispatcher, state, answer.step);
-    return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer.reply };
+    const answer2 = answerGroupSignal(state.lobby, signal2, readConfig(nk), Date.now());
+    const next = apply(ctx, logger, nk, dispatcher, state, answer2.step);
+    return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer2.reply };
   }
   if (signal2.type === "get_active") {
     return { state, data: JSON.stringify(activeRunOf(state.lobby, signal2.userId)) };

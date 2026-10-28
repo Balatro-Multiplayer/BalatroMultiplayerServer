@@ -12,7 +12,7 @@ import {
 	updateProfile,
 } from '../player/profile'
 import { profileChanged } from '../player/rpc'
-import { parsePayload, requireServer } from '../rpc'
+import { listCollectionPage, parsePayload, requireServer } from '../rpc'
 import { DEFAULT_AVATAR } from '../shared/avatars/ids'
 import { isSelectable } from '../shared/avatars/unlocked'
 import { progressFor } from './storage'
@@ -26,16 +26,6 @@ export function keepsJoker(
 	unlocked: readonly string[],
 ): boolean {
 	return isSelectable(joker, { privileges, unlocked })
-}
-
-function listPage(nk: nkruntime.Nakama, collection: string, cursor: string) {
-	try {
-		return nk.storageList(null, collection, PAGE, cursor)
-	} catch (e) {
-		// Nakama throws "Malformed cursor was used" for a cursor it didn't issue.
-		if (cursor !== '') throw runtimeError(INVALID_ARGUMENT, 'Invalid cursor')
-		throw e
-	}
 }
 
 // {cursor?, dryRun?} -> {dryRun, checked, jokersReset, cursor}
@@ -55,9 +45,10 @@ export function rpcAdminAvatarsReset(
 	let checked = 0
 	let jokersReset = 0
 
-	const page = listPage(
+	const page = listCollectionPage(
 		nk,
 		PLAYER_COLLECTION,
+		PAGE,
 		(input.cursor as string | undefined) || '',
 	)
 	for (const object of page.objects || []) {
