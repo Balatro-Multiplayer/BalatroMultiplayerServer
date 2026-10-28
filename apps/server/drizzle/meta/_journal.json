@@ -407,6 +407,13 @@
       "when": 1793300000000,
       "tag": "0057_drop_players_ip_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0058_achievements_enabled_default_on",
+      "breakpoints": true
     }
   ]
 }

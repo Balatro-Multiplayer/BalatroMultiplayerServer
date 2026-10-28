@@ -1,5 +1,5 @@
-// Migration 0049 resets players.preferred_joker by the same rule as Nakama's
-// admin_avatars_reset (keepsJoker); this keeps its hand-written lists in step
+// Migration 0049 resets players.preferred_joker to what a player may pick
+// with nothing earned (defaults and privilege jokers); this keeps its hand-written lists in step
 // with the catalog.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'

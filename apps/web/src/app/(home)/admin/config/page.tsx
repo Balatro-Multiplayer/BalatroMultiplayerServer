@@ -52,7 +52,7 @@ const FEATURE_FLAGS: { key: FeatureFlag; label: string; description: string }[] 
   {
     key: 'achievementsEnabled',
     label: 'Avatar Achievements',
-    description: 'Games count toward unlocking avatars. Turn on only after the avatar reset has run.',
+    description: 'Games count toward unlocking avatars. On by default.',
   },
 ]
 
