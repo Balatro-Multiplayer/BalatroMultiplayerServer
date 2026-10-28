@@ -8,7 +8,8 @@ import { lookupCode } from './lobby/codes'
 import type { LobbySignal } from './lobby/protocol'
 import { currentLobby } from './lobby/rpc'
 import { isBanType, readBans } from './moderation/bans'
-import { applyBan, liftBan } from './moderation/enforce'
+import { applyBan, liftBan, forgetBanIndex } from './moderation/enforce'
+import { banNetworks } from './moderation/network'
 import { playerView, profileFor } from './player/profile'
 import { mergeConfig, readConfig, writeConfig } from './config'
 import { callExpress } from './express'
@@ -16,6 +17,7 @@ import { isNotifyCode, notify } from './notify'
 import { parsePayload, requireServer } from './rpc'
 import { ackEntries, pullEntries } from './mirror/outbox'
 import { moderationContextOf } from './review/rpc'
+import { settingsOf } from './server_kind'
 
 const USER_ID_PATTERN = /^[0-9a-f-]{36}$/
 
@@ -81,7 +83,7 @@ export function rpcAdminConfigSet(
 	const config = mergeConfig(before, parsePayload(payload))
 	writeConfig(nk, config)
 	logger.info('Server config updated: %v', JSON.stringify(config))
-	if (standingInputsChanged(before, config)) standingInputsUpdated(nk, logger, Date.now())
+	if (standingInputsChanged(before, config)) standingInputsUpdated(nk, settingsOf(ctx), logger, Date.now())
 	return JSON.stringify(config)
 }
 
@@ -90,7 +92,7 @@ export function rpcAdminConfigSet(
 // ---------------------------------------------------------------------------
 
 // input.userId, which must name an account.
-function requireUserId(nk: nkruntime.Nakama, input: { [key: string]: unknown }): string {
+export function requireUserId(nk: nkruntime.Nakama, input: { [key: string]: unknown }): string {
 	if (typeof input.userId !== 'string' || !USER_ID_PATTERN.test(input.userId))
 		throw runtimeError(INVALID_ARGUMENT, 'userId is required')
 	try {
@@ -128,6 +130,8 @@ export function rpcAdminBanApply(
 	if (expiresAt === undefined) throw runtimeError(INVALID_ARGUMENT, 'expiresAt must be a time or null')
 	const reason = typeof input.reason === 'string' ? input.reason : ''
 	const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason })
+	if (bans.account && banNetworks(nk, settingsOf(ctx), userId, bans.account, Date.now()))
+		logger.info('Network ban %s from %s', bans.account.banId, userId)
 	return JSON.stringify({ bans })
 }
 
@@ -143,6 +147,24 @@ export function rpcAdminBanLift(
 	const userId = requireUserId(nk, input)
 	if (typeof input.banId !== 'string' || !input.banId) throw runtimeError(INVALID_ARGUMENT, 'banId is required')
 	return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) })
+}
+
+// {steamIdHashes} -> {deleted}: forgets the ban index entries of deleted
+// accounts whose Steam id hash Postgres has just cleared (the API's hourly
+// job; moderation/enforce.ts forgetBanIndex).
+export function rpcAdminBanIndexForget(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+	payload: string,
+) {
+	requireServer(ctx)
+	const hashes = parsePayload(payload).steamIdHashes
+	if (!Array.isArray(hashes) || !hashes.every((h) => typeof h === 'string'))
+		throw runtimeError(INVALID_ARGUMENT, 'steamIdHashes must be a list of hashes')
+	const result = forgetBanIndex(nk, hashes, Date.now())
+	if (result.deleted > 0) logger.info('Forgot %d ban index entries of deleted accounts', result.deleted)
+	return JSON.stringify(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +278,7 @@ export function rpcAdminPlayerGet(
 		bans: readBans(nk, userId),
 		lobby: currentLobby(nk, userId),
 		online,
-		...moderationContextOf(nk, userId, Date.now()),
+		...moderationContextOf(nk, settingsOf(ctx), userId, Date.now()),
 	})
 }
 

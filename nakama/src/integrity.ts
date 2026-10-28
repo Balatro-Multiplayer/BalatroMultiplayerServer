@@ -13,6 +13,7 @@ import { callExpress } from './express'
 import { INVALID_ARGUMENT, UNAVAILABLE, runtimeError } from './errors'
 import { notify, NotifyCode } from './notify'
 import { parsePayload, requireServer, requireUser } from './rpc'
+import { settingsOf } from './server_kind'
 
 export const INTEGRITY_COLLECTION = 'integrity'
 export const INTEGRITY_KEY = 'status'
@@ -152,7 +153,7 @@ export function rpcAdminIntegritySet(
 		message: optionalString(input.message),
 	})
 	// A verdict moves the standing; the lobby's snapshot follows.
-	pushToLobby(nk, userId, { standing: standingFor(nk, userId, Date.now()).standing })
+	pushToLobby(nk, userId, { standing: standingFor(nk, settingsOf(ctx), userId, Date.now()).standing })
 	return JSON.stringify({})
 }
 

@@ -39,7 +39,6 @@ beforeAll(async () => {
 		posture: ENFORCE_POSTURE,
 		lists: {
 			allowlist: 42,
-			rewrites: 'unset',
 			approvedDomains: 0,
 		},
 	})
@@ -83,7 +82,6 @@ describe('moderation HTTP server', () => {
 			model_load_error: null,
 			lists: {
 				allowlist: 42,
-				rewrites: 'unset',
 				approvedDomains: 0,
 			},
 			guard: { inflight: 0, avg_judge_ms: null },
@@ -208,7 +206,6 @@ describe('moderation HTTP server — model not loaded', () => {
 				build: { git_sha: 'deadbeef' },
 				lists: {
 					allowlist: 'unset',
-					rewrites: 'unset',
 					approvedDomains: 'unset',
 				},
 			})

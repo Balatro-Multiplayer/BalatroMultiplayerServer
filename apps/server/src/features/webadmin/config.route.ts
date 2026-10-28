@@ -1,3 +1,4 @@
+import { NOTICE_DATE, NOTICE_VERSION } from '@bmp/types'
 import { eq } from 'drizzle-orm'
 import { Router } from 'express'
 import { db } from '../../infrastructure/db/index.js'
@@ -29,7 +30,9 @@ router.get('/config', async (_req, res, next) => {
 	try {
 		const config = getConfig()
 		res.json({
-			tosVersion: config.tosVersion,
+			// Set in code (@bmp/types notice.ts), shown read-only.
+			noticeVersion: NOTICE_VERSION,
+			noticeDate: NOTICE_DATE,
 			mods: config.mods,
 			chatAllowlist: [...config.chatAllowlist],
 			chatEnabled: config.chatEnabled,
@@ -106,33 +109,6 @@ router.patch('/config/feature-flags', async (req, res, next) => {
 			achievementsEnabled: config.achievementsEnabled,
 			queueAllowedModIds: config.queueAllowedModIds,
 		})
-	} catch (err) {
-		next(err)
-	}
-})
-
-router.patch('/config/tos-version', async (req, res, next) => {
-	try {
-		await requireAdmin(req)
-		const { tosVersion } = req.body as { tosVersion?: unknown }
-		if (
-			typeof tosVersion !== 'number' ||
-			!Number.isInteger(tosVersion) ||
-			tosVersion < 1
-		) {
-			throw new AppError('tosVersion must be a positive integer', 400)
-		}
-
-		await db
-			.insert(serverConfig)
-			.values({ id: 1, tosVersion })
-			.onConflictDoUpdate({
-				target: serverConfig.id,
-				set: { tosVersion, updatedAt: new Date() },
-			})
-
-		const config = await loadConfigFromDb()
-		res.json({ tosVersion: config.tosVersion })
 	} catch (err) {
 		next(err)
 	}

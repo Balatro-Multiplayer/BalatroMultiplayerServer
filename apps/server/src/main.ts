@@ -1,24 +1,19 @@
 import type { Server } from 'node:http'
-import { lt } from 'drizzle-orm'
 import express from 'express'
 import type { Express, Request, Response } from 'express'
 import { env } from './env.js'
 import { createDevChallengeStrategy } from './features/launcher-integrity/dev-strategy.js'
 import { syncModRegistry } from './features/mods/mods-sync.service.js'
+import { fillAchievementsAtBoot } from './features/achievements/achievements-backfill.service.js'
 import { fillMissingSmodsIds } from './features/mods/smods-ids-backfill.service.js'
 import { nakamaIntegrityService } from './features/nakama/integrity.js'
 import { startMirrorJob } from './features/nakama/mirror.job.js'
 import { startRetentionJob } from './features/nakama/retention.job.js'
+import { startRetentionSweepJob } from './features/retention/sweep.job.js'
 import { startSeasonJob } from './features/ratings/season.job.js'
 import { db, pool } from './infrastructure/db/index.js'
-import { chatLogs } from './infrastructure/db/schema.js'
 import { loadConfigFromDb } from './infrastructure/gateways/config.gateway.js'
-import {
-	purgeExpiredFlaggedMessages,
-	purgeReportedLobbyMessages,
-} from './infrastructure/gateways/moderation-retention.gateway.js'
-import { purgeExpiredDeletedPlayerHashes } from './infrastructure/gateways/player.gateway.js'
-import { purgeExpiredRunLogs } from './infrastructure/gateways/replay-log.gateway.js'
+import { purgeReportedLobbyMessages } from './infrastructure/gateways/moderation-retention.gateway.js'
 import {
 	pushConfigToNakama,
 	setIntegrityEnforced,
@@ -85,12 +80,7 @@ async function shutdown() {
 	process.exit(0)
 }
 
-async function purgeModerationEvidenceJob() {
-	try {
-		await purgeExpiredFlaggedMessages()
-	} catch (err) {
-		console.error('[cleanup] Failed to purge expired flagged messages:', err)
-	}
+async function purgeReportedLobbyMessagesJob() {
 	try {
 		await purgeReportedLobbyMessages()
 	} catch (err) {
@@ -98,32 +88,6 @@ async function purgeModerationEvidenceJob() {
 	}
 }
 
-async function purgeExpiredRunLogsJob() {
-	try {
-		await purgeExpiredRunLogs()
-	} catch (err) {
-		console.error('[cleanup] Failed to purge expired run logs:', err)
-	}
-}
-
-async function purgeExpiredChatLogsJob() {
-	try {
-		await db.delete(chatLogs).where(lt(chatLogs.expiresAt, new Date()))
-	} catch (err) {
-		console.error('[cleanup] Failed to purge expired chat logs:', err)
-	}
-}
-
-async function purgeExpiredDeletedPlayerHashesJob() {
-	try {
-		await purgeExpiredDeletedPlayerHashes()
-	} catch (err) {
-		console.error(
-			'[cleanup] Failed to purge expired deleted-player hashes:',
-			err,
-		)
-	}
-}
 
 type PrivateModule = {
 	registerPrivate: (app: Express, deps: RegisterPrivateDeps) => Promise<void>
@@ -170,14 +134,11 @@ async function start() {
 
 		startSessionCleanup()
 
-		void purgeModerationEvidenceJob()
-		setInterval(() => void purgeModerationEvidenceJob(), 60 * 60 * 1000)
+		void purgeReportedLobbyMessagesJob()
+		setInterval(() => void purgeReportedLobbyMessagesJob(), 60 * 60 * 1000)
 
-		void purgeExpiredRunLogsJob()
-		setInterval(() => void purgeExpiredRunLogsJob(), 60 * 60 * 1000).unref()
-
-		void purgeExpiredChatLogsJob()
-		setInterval(() => void purgeExpiredChatLogsJob(), 60 * 60 * 1000).unref()
+		// Chat, evidence and ban records past their retention limit.
+		startRetentionSweepJob()
 
 		// Games reach the website and webadmin through the mirror...
 		startMirrorJob()
@@ -185,11 +146,6 @@ async function start() {
 		startRetentionJob()
 		startSeasonJob()
 
-		void purgeExpiredDeletedPlayerHashesJob()
-		setInterval(
-			() => void purgeExpiredDeletedPlayerHashesJob(),
-			60 * 60 * 1000,
-		).unref()
 
 		server = app.listen(env.PORT, () => {
 			console.log(`[server] API server listening on port ${env.PORT}`)
@@ -213,6 +169,9 @@ async function start() {
 		// downloads, so the allowed-mod set can never be empty unnoticed. It
 		// never throws and pushes the config to Nakama itself.
 		void fillMissingSmodsIds()
+		// Achievement progress from the games Nakama already holds. Nakama
+		// fills each player once, so a later boot changes nothing.
+		void fillAchievementsAtBoot()
 		void syncModRegistryJob()
 		setInterval(() => void syncModRegistryJob(), 60 * 60 * 1000).unref()
 	} catch (err) {

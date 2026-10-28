@@ -3,9 +3,11 @@
 // the script's global scope, so they are passed as plain identifiers.
 import { rpcAccountStanding } from './standing/rpc'
 import { rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './achievements/rpc'
+import { rpcAdminAchievementsBackfill } from './achievements/backfill'
 import { rpcAdminAvatarsReset } from './achievements/reset'
 import {
 	rpcAdminBanApply,
+	rpcAdminBanIndexForget,
 	rpcAdminBanLift,
 	rpcAdminConfigSet,
 	rpcAdminLobbyClose,
@@ -22,6 +24,7 @@ import {
 	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
 	beforeAuthenticateDevice,
+	beforeSessionRefresh,
 	refuseCustomIdChange,
 } from './auth'
 import {
@@ -60,14 +63,15 @@ import {
 	rpcQueueCounts,
 } from './matchmaking/queue'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
-import { rpcAdminRunsPurge } from './lobby/retention'
+import { rpcAdminCheckpointsSweep } from './lobby/checkpoint_sweep'
+import { rpcAdminRunsExpired, rpcAdminRunsPurgeNamed } from './lobby/retention'
 import { rpcAdminRatingsSet } from './rating/admin'
 import { rpcAdminRunGet, rpcAdminRunSetResult } from './review/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
 import { configureSeason } from './rating/season'
 import { seedAllowedModIdsExtra } from './standing/seed'
-import { rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
+import { refuseClientAccountDelete, rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 import { rpcReportSubmit } from './moderation/report'
@@ -78,6 +82,9 @@ import {
 	rpcLauncherChallengeAnswer,
 	rpcLauncherSessionStart,
 } from './integrity'
+import { checkServerKind } from './server_kind'
+import { requireIpHashSalt } from './moderation/network'
+import { rpcAdminIpHashesPurge, rpcAdminNetworkBanLift, rpcAdminNetworkBans } from './moderation/network_admin'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -85,13 +92,18 @@ function InitModule(
 	nk: nkruntime.Nakama,
 	initializer: nkruntime.Initializer,
 ) {
+	// Throws on a bad BMP_SERVER_KIND or a refused dev flag, so Nakama stops.
+	const settings = checkServerKind(ctx.env, logger)
+	requireIpHashSalt(settings, ctx.env)
 	configureSeason(ctx.env['RATING_SEASON'])
 	seedAllowedModIdsExtra(nk, logger, ctx.env)
 	initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom)
 	initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom)
 	initializer.registerBeforeLinkCustom(refuseCustomIdChange)
 	initializer.registerBeforeUnlinkCustom(refuseCustomIdChange)
+	initializer.registerBeforeDeleteAccount(refuseClientAccountDelete)
 	initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice)
+	initializer.registerBeforeSessionRefresh(beforeSessionRefresh)
 	logger.info('BMP Steam login module loaded')
 
 	// Literal, not LOBBY_MATCH: Nakama reads the registration calls from this
@@ -152,6 +164,10 @@ function InitModule(
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
 	initializer.registerRpc('admin_ban_lift', rpcAdminBanLift)
+	initializer.registerRpc('admin_ban_index_forget', rpcAdminBanIndexForget)
+	initializer.registerRpc('admin_network_bans', rpcAdminNetworkBans)
+	initializer.registerRpc('admin_network_ban_lift', rpcAdminNetworkBanLift)
+	initializer.registerRpc('admin_ip_hashes_purge', rpcAdminIpHashesPurge)
 	initializer.registerRpc('admin_lobby_list', rpcAdminLobbyList)
 	initializer.registerRpc('admin_lobby_get', rpcAdminLobbyGet)
 	initializer.registerRpc('admin_lobby_kick', rpcAdminLobbyKick)
@@ -167,7 +183,10 @@ function InitModule(
 	initializer.registerRpc('admin_avatars_for', rpcAdminAvatarsFor)
 	initializer.registerRpc('admin_progress_set', rpcAdminProgressSet)
 	initializer.registerRpc('admin_avatars_reset', rpcAdminAvatarsReset)
-	initializer.registerRpc('admin_runs_purge', rpcAdminRunsPurge)
+	initializer.registerRpc('admin_achievements_backfill', rpcAdminAchievementsBackfill)
+	initializer.registerRpc('admin_runs_expired', rpcAdminRunsExpired)
+	initializer.registerRpc('admin_runs_purge_named', rpcAdminRunsPurgeNamed)
+	initializer.registerRpc('admin_checkpoints_sweep', rpcAdminCheckpointsSweep)
 	initializer.registerRpc('admin_ratings_set', rpcAdminRatingsSet)
 	initializer.registerRpc('admin_run_get', rpcAdminRunGet)
 	initializer.registerRpc('admin_run_set_result', rpcAdminRunSetResult)

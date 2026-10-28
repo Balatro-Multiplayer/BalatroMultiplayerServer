@@ -3,13 +3,13 @@
 // previous one the first time it is read, and decay is computed from
 // lastMatchAt whenever a rating is read (and stored with the player's next game).
 import { readConfig } from '../config'
+import { DAY_MS } from '../shared/time'
 import { applySoftReset, PLACEMENT_GAMES } from './elo'
 
 export const DECAY_INACTIVE_THRESHOLD_DAYS = 7
 export const DECAY_RATE_PER_DAY = 5
 // Ratings at or below this never decay, and decay stops here.
 export const DECAY_FLOOR = 1200
-const DAY_MS = 24 * 60 * 60 * 1000
 
 let bootSeason = 1
 

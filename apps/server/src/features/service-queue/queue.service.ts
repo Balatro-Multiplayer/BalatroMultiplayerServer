@@ -32,7 +32,7 @@ import { decideClaim, decideRelease } from './claim.js'
 import { type DispatcherDeps, type GameRef, type QueueItem, createDispatcher } from './dispatcher.js'
 import { type Placement, samePlaces } from './overturn.js'
 import { type QueueResult, refuse } from './refusals.js'
-import { numericSourceId, parseAntiCheatSourceId } from './source-ids.js'
+import { numericSourceId, parseAntiCheatSourceId } from '../../shared/service-queue/source-ids.js'
 import { type StaffRole, actorOf } from './types.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

@@ -28,10 +28,27 @@ socket:
   # src/socket_limit.test.ts checks this against both configs.
   max_message_size_bytes: 32768
 
+match:
+  # Messages a match reads per tick. Nakama's default (128) silently drops the
+  # rest ("Match handler data processing too slow"); a replay burst after a
+  # scored hand or a flush after a drop can pass 128.
+  # src/socket_limit.test.ts checks this against both configs.
+  input_queue_size: 1024
+
 runtime:
   # modules/index.js, built from ./src by build.mjs.
   path: /nakama/data/modules
   js_entrypoint: index.js
+
+metrics:
+  # Prometheus endpoint, for the Stats page's online player count: the API
+  # reads the nakama_sessions gauge (open game sockets; a website login has
+  # none) at NAKAMA_METRICS_URL. Reached over the compose network only;
+  # docker-compose.yml never publishes this port to the host. Values reach
+  # the endpoint every reporting_freq_sec (default 60), too slow for a
+  # counter the page polls every 15 seconds.
+  prometheus_port: 9100
+  reporting_freq_sec: 5
 
 matchmaker:
   interval_sec: 5

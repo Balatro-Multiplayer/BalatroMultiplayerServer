@@ -2,8 +2,9 @@ import { env } from '../../env.js'
 import { err, ok } from '../../shared/utils/result.js'
 import type { Result } from '../../shared/utils/result.js'
 
-// conflict: the RPC answered ALREADY_EXISTS (HTTP 409).
-export type NakamaRpcError = 'disabled' | 'unreachable' | 'rejected' | 'conflict'
+// conflict: the RPC answered ALREADY_EXISTS (HTTP 409); not_found: NOT_FOUND
+// (HTTP 404), such as an account that no longer exists.
+export type NakamaRpcError = 'disabled' | 'unreachable' | 'rejected' | 'conflict' | 'not_found'
 
 const TIMEOUT_MS = 5000
 
@@ -17,6 +18,7 @@ export function isNakamaAdminEnabled(): boolean {
 export async function callNakamaRpc<T = unknown>(
 	id: string,
 	body: Record<string, unknown>,
+	options: { timeoutMs?: number } = {},
 ): Promise<Result<T, NakamaRpcError>> {
 	if (!isNakamaAdminEnabled()) return err('disabled')
 	const url = `${env.NAKAMA_URL}/v2/rpc/${encodeURIComponent(id)}?http_key=${encodeURIComponent(env.NAKAMA_HTTP_KEY)}&unwrap`
@@ -26,12 +28,13 @@ export async function callNakamaRpc<T = unknown>(
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(body),
-			signal: AbortSignal.timeout(TIMEOUT_MS),
+			signal: AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS),
 		})
 	} catch {
 		return err('unreachable')
 	}
 	if (response.status === 409) return err('conflict')
+	if (response.status === 404) return err('not_found')
 	if (!response.ok) {
 		console.warn(`[nakama] RPC ${id} failed: HTTP ${response.status} ${await response.text().catch(() => '')}`)
 		return err('rejected')

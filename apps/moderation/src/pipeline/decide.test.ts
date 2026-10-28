@@ -23,6 +23,7 @@ function input(over: Partial<DecisionInput> = {}): DecisionInput {
 		nowMs: 1000,
 		isAllowlisted: false,
 		threatMatches: [],
+		hasUnapprovedLink: false,
 		obscenityMatches: [],
 		safetySignals: [],
 		guard: guard('Safe'),
@@ -32,6 +33,14 @@ function input(over: Partial<DecisionInput> = {}): DecisionInput {
 }
 
 describe('decideModeration — precedence', () => {
+	it('link_block beats allowlist and a Safe guard, and enforces in shadow', () => {
+		const d = decideModeration(
+			input({ hasUnapprovedLink: true, isAllowlisted: true, policy: { ...ENFORCE, shadowMode: true } }),
+		)
+		expect(d.decision).toBe('reject')
+		expect(d.band).toBe('link_block')
+	})
+
 	it('threat_block beats allowlist and a Safe guard, and enforces in shadow', () => {
 		const threatMatches = [{ word: 'kill you', startIndex: 0, endIndex: 8 }]
 		const d = decideModeration(
@@ -439,6 +448,7 @@ describe('decideModeration — totality property', () => {
 						nowMs,
 						isAllowlisted,
 						threatMatches: [],
+						hasUnapprovedLink: false,
 						obscenityMatches: [],
 						safetySignals,
 						guard: g,

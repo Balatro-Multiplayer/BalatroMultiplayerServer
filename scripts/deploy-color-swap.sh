@@ -6,25 +6,21 @@
 # from nginx/upstream.conf itself -- no separate marker file to drift out
 # of sync with reality.
 #
-# Same script, same behavior, in both environments now that nginx itself is
-# part of docker-compose.yml rather than a separately hand-maintained host
-# install on the prod host -- the only difference between local and prod is
-# which compose files this picks up, not the swap logic itself.
+# The Official server only: Community and Dev servers (compose.local.yml)
+# run one API with no blue/green.
 #
 # Usage (from repo root):
-#   ./scripts/deploy-color-swap.sh                        # local dev (default: base + local overlay)
-#   BASE_ONLY=1 ./scripts/deploy-color-swap.sh             # prod: base file only, no local overlay
-#   COMPOSE_OVERLAY=docker-compose.balatro.yml ./scripts/deploy-color-swap.sh   # prod on a shared host: base + that overlay
+#   ./scripts/deploy-color-swap.sh                        # docker-compose.yml alone
+#   COMPOSE_OVERLAY=docker-compose.balatro.yml ./scripts/deploy-color-swap.sh   # on a shared host: base + that overlay
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# BASE_ONLY=1 (which used to skip a local overlay) is now the default.
 if [ -n "${COMPOSE_OVERLAY:-}" ]; then
 	COMPOSE="docker compose -f docker-compose.yml -f $COMPOSE_OVERLAY"
-elif [ -n "${BASE_ONLY:-}" ]; then
-	COMPOSE="docker compose -f docker-compose.yml"
 else
-	COMPOSE="docker compose -f docker-compose.yml -f docker-compose.local.yml"
+	COMPOSE="docker compose -f docker-compose.yml"
 fi
 UPSTREAM_CONF="nginx/upstream.conf"
 HEALTH_TIMEOUT_S=60
@@ -122,7 +118,7 @@ while true; do
 	fi
 	if [ "$elapsed" -ge "$CUTOVER_VERIFY_TIMEOUT_S" ]; then
 		echo "[deploy] ERROR: nginx is not serving a working upstream ${CUTOVER_VERIFY_TIMEOUT_S}s after cutover -- api-$ACTIVE was NOT stopped." >&2
-		echo "[deploy] Investigate before retrying (check: docker logs bmp-nginx, docker compose exec nginx cat /etc/nginx/conf.d/upstream.conf)." >&2
+		echo "[deploy] Investigate before retrying (check: docker compose exec nginx cat /var/log/nginx/errors/error.log /etc/nginx/conf.d/upstream.conf)." >&2
 		exit 1
 	fi
 	sleep 2

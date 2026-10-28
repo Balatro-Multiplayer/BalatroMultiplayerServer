@@ -1,7 +1,8 @@
 // Single source of truth for the leaderboard taxonomy: which mods (categories)
 // and game modes have ranked boards, plus how each board's secondary metric is
-// displayed. Mirrors the server's metrics.config.ts and the matchmaking gameMode
-// keys. Keep this in sync with the seed (seed-leaderboard.ts).
+// displayed. Mirrors the server's metrics.config.ts (keyed by mod id) and the
+// ranked queue keys each mod's Find Game pillars use (PvP:
+// ui/main_menu/find_game.lua `count_key`), in the mod's pillar order.
 
 export type MetricKind = 'time' | 'score'
 
@@ -41,10 +42,11 @@ export const LEADERBOARD_CATEGORIES: LeaderboardCategory[] = [
     metric: 'score',
     metricLabel: 'Best Score',
     modes: [
-      { id: 'pvp_standard', label: 'Standard' },
-      { id: 'pvp_vanilla', label: 'Vanilla' },
-      { id: 'pvp_expanded', label: 'Expanded' },
-      { id: 'pvp_smallworld', label: 'Smallworld' },
+      { id: 'pvp_ranked_vanilla', label: 'Vanilla' },
+      { id: 'pvp_ranked_balanced', label: 'Balanced' },
+      { id: 'pvp_ranked_expanded', label: 'Expanded' },
+      { id: 'pvp_ranked_majorleague', label: 'MLBa' },
+      { id: 'pvp_ranked_smallworld', label: 'Smallworld' },
     ],
   },
 ]

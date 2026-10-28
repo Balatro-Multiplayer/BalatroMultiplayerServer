@@ -28,6 +28,7 @@ import { spendLobbyCreate } from './create_limit'
 import { noteReturn } from './forfeits'
 import { DIFFERENT_MOD, MAX_PLAYERS, MIN_PLAYERS } from './state'
 import { spectatableLobbies } from './spectate'
+import { settingsOf } from '../server_kind'
 
 // Same alphabet as the API's generateLobbyCode (no I or O), and the same
 // lengths: 6 for manual lobbies, 5 for matchmade ones.
@@ -132,13 +133,13 @@ export function rpcLobbyCreate(
 	}
 
 	// Ranked lobbies count on a rating board. The matchmaker creates the real
-	// ones; only a server run with ALLOW_RANKED_LOBBIES=true (dev) lets a
-	// client ask for one directly.
+	// ones; only a Dev server (ALLOW_RANKED_LOBBIES, on by default there) lets
+	// a client ask for one directly.
 	const rankedMode = input.rankedMode
 	if (rankedMode !== undefined && rankedMode !== null) {
 		if (typeof rankedMode !== 'string' || !RANKED_MODE_PATTERN.test(rankedMode))
 			throw runtimeError(INVALID_ARGUMENT, 'rankedMode is not a valid mode')
-		if (ctx.env.ALLOW_RANKED_LOBBIES !== 'true')
+		if (!settingsOf(ctx).rankedLobbies)
 			throw runtimeError(PERMISSION_DENIED, 'Ranked lobbies are not enabled')
 	}
 
@@ -273,7 +274,7 @@ export function rpcRunActive(
 	const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal)))
 	// With the caller's standing, so the client knows before it tries whether
 	// it meets active.requiredStanding.
-	return JSON.stringify(active ? { active, standing: standingFor(nk, userId, Date.now()) } : {})
+	return JSON.stringify(active ? { active, standing: standingFor(nk, settingsOf(ctx), userId, Date.now()) } : {})
 }
 
 // Leave the current lobby without joining its match first (the reconnect

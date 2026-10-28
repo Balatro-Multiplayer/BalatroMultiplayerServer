@@ -66,7 +66,7 @@ vi.mock('../infrastructure/db/index.js', () => ({
 		delete: vi.fn().mockReturnValue({
 			where: vi.fn().mockResolvedValue(undefined),
 		}),
-		// Only wired up as needed (e.g. purgeExpiredDeletedPlayerHashes); not
+		// Only wired up as needed (e.g. expiredDeletedPlayerHashes); not
 		// every test path touches it. mockResolvedValue([]) as a safe default.
 		query: { players: { findMany: vi.fn().mockResolvedValue([]) } },
 	},
@@ -106,10 +106,17 @@ const mockPlayerRecord = {
 	chatEnabled: false,
 	chatBlocked: false,
 	tosAcceptedVersion: 0,
+	noticeAcceptedAt: null,
 	deletedAt: null,
 }
 
 // Mock player.gateway — no real DB calls in tests
+vi.mock('../infrastructure/gateways/player-anonymization.gateway.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../infrastructure/gateways/player-anonymization.gateway.js')>()),
+	anonymizePlayer: vi.fn().mockResolvedValue(undefined),
+	deletionFacts: vi.fn().mockResolvedValue({ runIds: [], hasBanRecord: false }),
+}))
+
 vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	findPlayerBySteamIdHash: vi.fn().mockResolvedValue(null),
 	findPlayerByDiscordIdHash: vi.fn().mockResolvedValue(null),
@@ -127,11 +134,11 @@ vi.mock('../infrastructure/gateways/player.gateway.js', () => ({
 	updateDiscordUsername: vi.fn().mockResolvedValue(undefined),
 	updateUseDiscordName: vi.fn().mockResolvedValue(undefined),
 	updatePreferredJoker: vi.fn().mockResolvedValue(undefined),
-	updateTosAcceptedVersion: vi.fn().mockResolvedValue(undefined),
+	recordNoticeAcceptance: vi.fn().mockResolvedValue(undefined),
 	updateChatStatus: vi.fn().mockResolvedValue(undefined),
-	softDeletePlayer: vi.fn().mockResolvedValue(undefined),
 	reactivateIfDeleted: vi.fn().mockResolvedValue(undefined),
-	purgeExpiredDeletedPlayerHashes: vi.fn().mockResolvedValue(0),
+	expiredDeletedPlayerHashes: vi.fn().mockResolvedValue([]),
+	clearDeletedPlayerHashes: vi.fn().mockResolvedValue(0),
 }))
 
 // Reset in-memory state between tests
@@ -146,8 +153,7 @@ beforeEach(async () => {
 	const linkState = await import('../features/auth/link-state.js')
 	linkState.linkStateNonces.clear()
 
-	// Reset server config — tosVersion 0 disables TOS gating in tests
-	setConfig({ tosVersion: 0, mods: [], chatAllowlist: new Set() })
+	setConfig({ mods: [], chatAllowlist: new Set() })
 
 	vi.clearAllMocks()
 
@@ -165,7 +171,9 @@ beforeEach(async () => {
 	vi.mocked(playerDb.updateDiscordUsername).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updateUseDiscordName).mockResolvedValue(undefined)
 	vi.mocked(playerDb.updatePreferredJoker).mockResolvedValue(undefined)
-	vi.mocked(playerDb.softDeletePlayer).mockResolvedValue(undefined)
+	const anonymization = await import('../infrastructure/gateways/player-anonymization.gateway.js')
+	vi.mocked(anonymization.anonymizePlayer).mockResolvedValue(undefined)
+	vi.mocked(anonymization.deletionFacts).mockResolvedValue({ runIds: [], hasBanRecord: false })
 	vi.mocked(playerDb.reactivateIfDeleted).mockResolvedValue(undefined)
 
 	// Re-apply ban gateway defaults (cleared by vi.clearAllMocks above)

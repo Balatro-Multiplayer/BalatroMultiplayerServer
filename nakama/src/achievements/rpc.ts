@@ -14,6 +14,7 @@ import { spdrnModeOf } from './facts/setup'
 import { emptyProgress, type Progress, type StoredCounter } from './progress'
 import { progressFor, updateProgress } from './storage'
 import { goalOf, type Goal } from './unlocks'
+import { settingsOf } from '../server_kind'
 
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const PRIVILEGE = /^[a-z0-9_-]{1,64}$/i
@@ -72,10 +73,9 @@ export function rpcAdminAvatarsFor(ctx: nkruntime.Context, logger: nkruntime.Log
 	return JSON.stringify({ ...view, jokers: view.avatars.filter((a) => a.unlocked).map((a) => a.id) })
 }
 
-// Testing RPCs only exist on a server run with the dev switch the local
-// stack sets (docker-compose.local.yml), as device login does.
+// Testing RPCs only exist on a Dev server (server_kind.ts).
 export function testingRpcsAllowed(ctx: nkruntime.Context): boolean {
-	return ctx.env.ALLOW_DEVICE_AUTH === 'true'
+	return settingsOf(ctx).testingRpcs
 }
 
 type Fields = { [field: string]: unknown }

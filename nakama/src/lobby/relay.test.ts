@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { SEED_LENGTH, seedFromHex } from '../actions/registry'
 import { ServerOp } from './protocol'
-import { BURST, MAX_PARAMS_BYTES, action } from './relay'
+import { BURST, MAX_PARAMS_BYTES, type RelayStep, action } from './relay'
 import {
 	type Lobby,
 	type Outbound,
@@ -137,7 +137,7 @@ describe('relayed actions', () => {
 		).toBe('too_large')
 	})
 
-	it('ignores senders who are not in the lobby', () => {
+	it('ignores senders who are not in the lobby, but names the drop for the log', () => {
 		const step = send(lobbyWith('a', 'b'), 'z', {
 			cid: 'c',
 			action: 'x',
@@ -145,6 +145,7 @@ describe('relayed actions', () => {
 			params: {},
 		})
 		expect(step.out).toEqual([])
+		expect((step as RelayStep).refused).toEqual({ key: 'x', reason: 'no_seat' })
 	})
 
 	it('rate-limits a flooding sender', () => {
@@ -155,6 +156,7 @@ describe('relayed actions', () => {
 			lobby = last.lobby
 		}
 		expect(rejection(last as Step)).toBe('rate_limited')
+		expect((last as RelayStep).refused).toEqual({ key: 'x', reason: 'rate_limited' })
 		// Refills with time.
 		const later = action(
 			lobby,
@@ -307,5 +309,22 @@ describe('seedFromHex', () => {
 		const seed = seedFromHex('9f86d081-884c-4d63-9a0e-4e7c8e9b2f1a')
 		expect(seed).toHaveLength(SEED_LENGTH)
 		expect(seed).toMatch(/^[1-9A-NP-Z]+$/)
+	})
+})
+
+describe('action from a player marked away', () => {
+	it('relays it, marks the sender back, and tells the others', () => {
+		const away = disconnect(lobbyWith('a', 'b'), 'a', 'a-s1', 500).lobby
+		const step = send(away, 'a', { cid: 'c1', action: 'spdrn_player_ready', to: '*', params: {} })
+		expect(delivered(step)).toHaveLength(1)
+		expect(step.lobby.players.find((p) => p.id === 'a')?.awaySince).toBeNull()
+		const events = sends(step, ServerOp.EVENT)
+		expect(events.map((e) => (e.payload as { type: string }).type)).toEqual(['player_reconnected'])
+		expect(events[0].to).toEqual(['b'])
+	})
+
+	it('still drops an action from a stranger', () => {
+		const step = send(lobbyWith('a', 'b'), 'x', { cid: 'c1', action: 'spdrn_player_ready', to: '*' })
+		expect(step.out).toEqual([])
 	})
 })

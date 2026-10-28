@@ -22,7 +22,7 @@ services:
   # compose network. Its data lives in a separate "nakama" database on the
   # shared Postgres server; `migrate up` creates it on first start. Secrets
   # come from the root .env -- the entrypoint refuses to start without them.
-  # docker-compose.local.yml swaps in local.yml and dev placeholders.
+  # compose.local.yml (Community and Dev servers) runs it with local.yml.
   nakama:
     image: heroiclabs/nakama:3.41.0
     container_name: bmp-nakama
@@ -43,19 +43,32 @@ services:
           --console.username admin \
           --console.password "$${NAKAMA_CONSOLE_PASSWORD:?}" \
           --console.signing_key "$${NAKAMA_CONSOLE_SIGNING_KEY:?}" \
+          --runtime.env "BMP_SERVER_KIND=$$BMP_SERVER_KIND" \
+          --runtime.env "ALLOW_DEVICE_AUTH=$$ALLOW_DEVICE_AUTH" \
+          --runtime.env "ALLOW_RANKED_LOBBIES=$$ALLOW_RANKED_LOBBIES" \
           --runtime.env "STEAM_APP_ID=$$STEAM_APP_ID" \
           --runtime.env "STEAM_WEB_API_KEY=$${STEAM_WEB_API_KEY:?}" \
           --runtime.env "PLAYER_ID_SALT=$${PLAYER_ID_SALT:?}" \
+          --runtime.env "IP_HASH_SALT=$${IP_HASH_SALT:?}" \
           --runtime.env "MODERATION_BEARER_TOKEN=$$MODERATION_BEARER_TOKEN" \
           --runtime.env "MODERATION_REMOTE=$$MODERATION_REMOTE" \
           --runtime.env "EXPRESS_INTERNAL_URL=http://nginx:8788" \
           --runtime.env "EXPRESS_INTERNAL_KEY=$${INTERNAL_API_KEY:?}"
     environment:
+      # This is the Official server: Steam login only. Nakama refuses to
+      # start if a dev flag (passed through below so a stray one is seen)
+      # is on. See packages/types/src/server-kind.ts.
+      BMP_SERVER_KIND: official
+      ALLOW_DEVICE_AUTH: ${ALLOW_DEVICE_AUTH:-}
+      ALLOW_RANKED_LOBBIES: ${ALLOW_RANKED_LOBBIES:-}
       STEAM_APP_ID: ${STEAM_APP_ID:-2379780}
       STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY:-}
       # Same salt as the API's, so a login's Steam id hashes to the key the
       # legacy ratings import parked its ratings under.
       PLAYER_ID_SALT: ${PLAYER_ID_SALT:-}
+      # Hashes the networks players log in from, for network bans (ADR 0005).
+      # Its own secret, never shared with the API; set it once, never change it.
+      IP_HASH_SALT: ${IP_HASH_SALT:-}
       # The client ships this (MPAPI api/connection/lifecycle.lua
       # SERVER_DEFAULTS.server_key), so the two must match.
       NAKAMA_SERVER_KEY: ${NAKAMA_SERVER_KEY:-defaultkey}
@@ -68,9 +81,10 @@ services:
       # nginx, so a blue/green swap is invisible here).
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       # Chat is judged by moderation-lb (hardcoded in nakama/src/chat). It
-      # must be up, or chat fails closed; SHADOW_MODE (default on) keeps a
-      # missing model from blocking. "off" judges chat with the local word
-      # filter (nakama/src/chat/filter.ts) instead.
+      # must be up, or chat fails closed. The model enforces here
+      # (SHADOW_MODE defaults to 0 below), so a missing model refuses every
+      # message. "off" judges chat with the local word filter
+      # (nakama/src/chat/filter.ts) instead.
       MODERATION_BEARER_TOKEN: ${MODERATION_BEARER_TOKEN:-}
       MODERATION_REMOTE: ${MODERATION_REMOTE:-on}
     volumes:
@@ -97,8 +111,7 @@ services:
   # api-blue/api-green: the blue-green pair (scripts/deploy-color-swap.sh).
   # Neither publishes a host port or is reachable as plain "api" on the bmp
   # network -- the `nginx` service below is the only stable address, for
-  # external traffic (published 80/443 in prod, 127.0.0.1:8788 for local dev
-  # -- see docker-compose.local.yml), web's server-side calls and Nakama's
+  # external traffic (published 80/443), web's server-side calls and Nakama's
   # /internal/nakama/* calls, all through the "api" network alias.
   api-blue: &api-color
     build:
@@ -107,6 +120,8 @@ services:
     container_name: bmp-api-blue
     env_file: ./apps/server/.env
     environment:
+      # The Official server: the API refuses to start with a dev flag on.
+      BMP_SERVER_KIND: official
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/bmp
       WEB_BASE_URL: ${WEB_BASE_URL:-https://new.balatromp.com}
       # The API mirrors Nakama's games into Postgres and drives it through
@@ -114,6 +129,9 @@ services:
       # runtime.http_key); INTERNAL_API_KEY guards /internal/nakama/*.
       NAKAMA_URL: http://nakama:7350
       NAKAMA_HTTP_KEY: ${NAKAMA_HTTP_KEY:-}
+      # Nakama's Prometheus port (prod.yml metrics), for the Stats page's
+      # online player count. Not published to the host.
+      NAKAMA_METRICS_URL: http://nakama:9100/
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:-}
       ARCHIVE_DIR: /app/archives
     volumes:
@@ -157,8 +175,9 @@ services:
     container_name: bmp-moderation-1
     # No host port: only moderation-lb talks to these, over the compose network.
     environment:
-      # Logs what it WOULD block without blocking. Set 0 to enforce.
-      SHADOW_MODE: ${SHADOW_MODE:-1}
+      # The model enforces (the Notice says chat may be blocked). Set 1 to
+      # only log what it WOULD block.
+      SHADOW_MODE: ${SHADOW_MODE:-0}
       GUARD_THREADS: ${MODERATION_GUARD_THREADS:-2}
       GUARD_LOW_THRESHOLD: ${MODERATION_GUARD_LOW_THRESHOLD:-0.35}
       GUARD_HIGH_THRESHOLD: ${MODERATION_GUARD_HIGH_THRESHOLD:-0.8}
@@ -197,6 +216,13 @@ services:
     container_name: bmp-moderation-lb
     volumes:
       - ./nginx/moderation-upstream.conf:/etc/nginx/conf.d/moderation-upstream.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      # The main config and the error log's 7-day limit (nginx/nginx.conf).
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/rotate-error-log.sh:/docker-entrypoint.d/90-rotate-error-log.sh:ro
+    # The error log (client addresses), never on disk or in Docker's log.
+    tmpfs:
+      - /var/log/nginx/errors:size=64m
     depends_on:
       - moderation-1
       - moderation-2
@@ -218,10 +244,9 @@ services:
   # (/etc/nginx/sites-available/bmp), so all server config, TLS included,
   # lives in this repo/compose file instead of split across two places.
   # nginx/prod/server.conf is the prod-realistic default (TLS, Cloudflare,
-  # web/api routing, matching the old host config exactly);
-  # docker-compose.local.yml swaps in nginx/local/server.conf (plain HTTP,
-  # no domain) for local dev. nginx/upstream.conf is the one file
-  # scripts/deploy-color-swap.sh ever rewrites, in either environment.
+  # web/api routing, matching the old host config exactly).
+  # nginx/upstream.conf is the one file scripts/deploy-color-swap.sh ever
+  # rewrites.
   nginx:
     image: nginx:1.27-alpine
     container_name: bmp-nginx
@@ -236,6 +261,9 @@ services:
       - ./nginx/prod/server.conf:/etc/nginx/conf.d/server.conf:ro
       - ./nginx/upstream.conf:/etc/nginx/conf.d/upstream.conf
       - ./nginx/snippets:/etc/nginx/snippets:ro
+      # The main config and the error log's 7-day limit (nginx/nginx.conf).
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/rotate-error-log.sh:/docker-entrypoint.d/90-rotate-error-log.sh:ro
       # Self-signed, 10-year cert for new.balatromp.com (confirmed via
       # `openssl x509` - issuer == subject) - NOT a Cloudflare Origin CA
       # cert despite what an earlier version of this comment claimed. Works
@@ -247,6 +275,9 @@ services:
       # which "Full" mode accepts just as well.
       - /etc/nginx/ssl/bmp.crt:/etc/nginx/ssl/bmp.crt:ro
       - /etc/nginx/ssl/bmp.key:/etc/nginx/ssl/bmp.key:ro
+    # The error log (client addresses), never on disk or in Docker's log.
+    tmpfs:
+      - /var/log/nginx/errors:size=64m
     depends_on:
       api-green:
         condition: service_started

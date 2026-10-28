@@ -1,14 +1,16 @@
 // Account changes made on the website and webadmin (the BMP API), applied to
 // the player's Nakama profile so the game sees them at once: privileges,
-// display name and joker preferences, a Discord unlink, and account deletion.
+// display name and joker preferences, a Discord unlink, a Notice acceptance
+// and age answer, and account deletion.
 // Server only. (Linking Discord is admin_discord_set, in discord.ts.)
-import { FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND, runtimeError } from '../errors'
+import { FAILED_PRECONDITION, INVALID_ARGUMENT, NOT_FOUND, PERMISSION_DENIED, runtimeError } from '../errors'
 import { currentLobby } from '../lobby/rpc'
 import type { LobbySignal } from '../lobby/protocol'
 import { parsePayload, requireServer } from '../rpc'
 import { progressFor } from '../achievements/storage'
 import { DEFAULT_AVATAR } from '../shared/avatars/ids'
 import { isSelectable } from '../shared/avatars/unlocked'
+import { anonymizeAccount } from './anonymize'
 import { releaseDiscord, withoutDiscord } from './discord'
 import { playerView, profileFor, updateProfile, type Profile } from './profile'
 import { profileChanged } from './rpc'
@@ -22,6 +24,10 @@ export interface ProfileEdit {
 	preferredJoker?: string
 	// null unlinks.
 	discord?: null
+	// A Notice accepted on the website (auth.service.ts acceptTos).
+	notice?: { version: number; acceptedAt: number }
+	// The age answer given with it: chat on, or blocked (as rpcTosAccept).
+	chatEligible?: boolean
 }
 
 function requireAccount(nk: nkruntime.Nakama, userId: unknown): string {
@@ -37,7 +43,7 @@ function requireAccount(nk: nkruntime.Nakama, userId: unknown): string {
 // The edit in a request body; INVALID_ARGUMENT for a field of the wrong shape.
 export function parseEdit(input: { [key: string]: unknown }): ProfileEdit {
 	const edit: ProfileEdit = {}
-	const { privileges, useDiscordName, preferredJoker, discord } = input
+	const { privileges, useDiscordName, preferredJoker, discord, notice, chatEligible } = input
 	if (privileges !== undefined) {
 		if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === 'string' && PRIVILEGE.test(p)))
 			throw runtimeError(INVALID_ARGUMENT, 'privileges must be an array of privilege names')
@@ -55,6 +61,16 @@ export function parseEdit(input: { [key: string]: unknown }): ProfileEdit {
 	if (discord !== undefined) {
 		if (discord !== null) throw runtimeError(INVALID_ARGUMENT, 'discord can only be null (unlink)')
 		edit.discord = null
+	}
+	if (notice !== undefined) {
+		const n = notice as { [key: string]: unknown } | null
+		if (!n || typeof n !== 'object' || !Number.isInteger(n.version) || (n.version as number) < 1 || typeof n.acceptedAt !== 'number')
+			throw runtimeError(INVALID_ARGUMENT, 'notice must be {version, acceptedAt}')
+		edit.notice = { version: n.version as number, acceptedAt: n.acceptedAt }
+	}
+	if (chatEligible !== undefined) {
+		if (typeof chatEligible !== 'boolean') throw runtimeError(INVALID_ARGUMENT, 'chatEligible must be a boolean')
+		edit.chatEligible = chatEligible
 	}
 	return edit
 }
@@ -79,10 +95,20 @@ export function applyEdit(profile: Profile, edit: ProfileEdit, unlocked: readonl
 			throw runtimeError(INVALID_ARGUMENT, 'Invalid joker')
 		next.preferredJoker = edit.preferredJoker
 	}
+	if (edit.notice) {
+		next.tosAcceptedVersion = edit.notice.version
+		next.noticeAcceptedAt = edit.notice.acceptedAt
+	}
+	if (edit.chatEligible !== undefined) {
+		next.ageAnswered = true
+		next.chatEnabled = edit.chatEligible
+		next.chatBlocked = !edit.chatEligible
+	}
 	return next
 }
 
-// {userId, privileges?, useDiscordName?, preferredJoker?, discord?: null} -> {player}
+// {userId, privileges?, useDiscordName?, preferredJoker?, discord?: null,
+// notice?: {version, acceptedAt}, chatEligible?} -> {player}
 export function rpcAdminProfileSet(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -105,9 +131,13 @@ export function rpcAdminProfileSet(
 	return JSON.stringify({ player: playerView(userId, profile) })
 }
 
-// {userId} -> {deleted: true}: the account deleted from the website. The
-// player leaves their lobby, and the account and everything it owns is
-// deleted. Its refresh tokens are revoked first ('' tokens: all of them); an
+// {userId, anonymousId, keptRunIds, keepSteamIdHash} -> {deleted: true}: the
+// account deleted from the website. The player leaves their lobby, their
+// system-owned data is deleted or renamed (player/anonymize.ts: own data
+// goes, shared runs take the standard deleted-player id, moderation data
+// takes anonymousId; keptRunIds and keepSteamIdHash say what is moderation
+// data, by the API's rules), and the
+// account and everything it owns is deleted. Its refresh tokens are revoked first ('' tokens: all of them); an
 // already-issued session token can't be revoked in Nakama and lives out its
 // expiry (session.token_expiry_sec), but its account is gone so it owns no
 // storage. Bans outlive the account: they are indexed by login id
@@ -120,7 +150,18 @@ export function rpcAdminAccountDelete(
 	payload: string,
 ) {
 	requireServer(ctx)
-	const userId = requireAccount(nk, parsePayload(payload).userId)
+	const input = parsePayload(payload)
+	const userId = requireAccount(nk, input.userId)
+	if (typeof input.anonymousId !== 'string' || !USER_ID.test(input.anonymousId) || input.anonymousId === userId)
+		throw runtimeError(INVALID_ARGUMENT, 'anonymousId is required')
+	const keptRunIds = input.keptRunIds
+	if (
+		!Array.isArray(keptRunIds) ||
+		!keptRunIds.every((id) => typeof id === 'string')
+	)
+		throw runtimeError(INVALID_ARGUMENT, 'keptRunIds must be a list of run ids')
+	if (typeof input.keepSteamIdHash !== 'boolean')
+		throw runtimeError(INVALID_ARGUMENT, 'keepSteamIdHash is required')
 	const lobby = currentLobby(nk, userId)
 	if (lobby) {
 		const signal: LobbySignal = { type: 'admin_remove', userId, reason: 'account_deleted', onlyIfStarted: false }
@@ -128,7 +169,23 @@ export function rpcAdminAccountDelete(
 	}
 	releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash)
 	nk.sessionLogout(userId, '', '')
+	anonymizeAccount(nk, userId, input.anonymousId, {
+		keptRunIds,
+		keepSteamIdHash: input.keepSteamIdHash,
+	})
 	nk.accountDeleteId(userId, false)
 	logger.info('Deleted account %s', userId)
 	return JSON.stringify({ deleted: true })
+}
+
+// Before-hook for Nakama's own client account delete (DELETE /v2/account):
+// refused. It would skip the anonymization above and leave the Postgres rows
+// under the old id; deletion goes through the website, which runs both with
+// one anonymous id.
+export function refuseClientAccountDelete(
+	ctx: nkruntime.Context,
+	logger: nkruntime.Logger,
+	nk: nkruntime.Nakama,
+): void {
+	throw runtimeError(PERMISSION_DENIED, 'Delete your account on the website (your profile page)')
 }

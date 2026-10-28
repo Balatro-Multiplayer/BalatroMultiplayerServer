@@ -22,13 +22,13 @@ describe('server config', () => {
 	})
 
 	it('merge applies valid fields only', () => {
-		const next = mergeConfig(DEFAULT_CONFIG, { tosVersion: 3, chatEnabled: false, rankedEnabled: 'no', bogus: 1, tosVersion2: 9 })
-		expect(next).toEqual({ ...DEFAULT_CONFIG, tosVersion: 3, chatEnabled: false })
+		const next = mergeConfig(DEFAULT_CONFIG, { chatEnabled: false, rankedEnabled: 'no', bogus: 1 })
+		expect(next).toEqual({ ...DEFAULT_CONFIG, chatEnabled: false })
 		expect(DEFAULT_CONFIG.groupQueueEnabled).toBe(true)
 		expect(mergeConfig(DEFAULT_CONFIG, { groupQueueEnabled: false }).groupQueueEnabled).toBe(false)
 		expect(mergeConfig(DEFAULT_CONFIG, { groupQueueEnabled: 'off' }).groupQueueEnabled).toBe(true)
-		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: -1 }).tosVersion).toBe(1)
-		expect(mergeConfig(DEFAULT_CONFIG, { tosVersion: 1.5 }).tosVersion).toBe(1)
+		// The Notice version is in code (@bmp/types notice.ts); an old API's push of it is dropped.
+		expect('tosVersion' in mergeConfig(DEFAULT_CONFIG, { tosVersion: 3 })).toBe(false)
 		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 'glhf'] }).chatAllowlist).toEqual(['gg', 'glhf'])
 		expect(mergeConfig(DEFAULT_CONFIG, { chatAllowlist: ['gg', 3] }).chatAllowlist).toEqual([])
 	})
@@ -49,9 +49,9 @@ describe('server config', () => {
 
 	it('admin_config_set stores the merged config and returns it', () => {
 		const nk = fakeNk()
-		expect(call(rpcAdminConfigSet, nk, { tosVersion: 2 }).tosVersion).toBe(2)
+		expect(call(rpcAdminConfigSet, nk, { chatEnabled: false }).chatEnabled).toBe(false)
 		const after = call(rpcAdminConfigSet, nk, { lobbyCreationEnabled: false })
-		expect(after).toEqual({ ...DEFAULT_CONFIG, tosVersion: 2, lobbyCreationEnabled: false })
+		expect(after).toEqual({ ...DEFAULT_CONFIG, chatEnabled: false, lobbyCreationEnabled: false })
 		expect(readConfig(nk as never)).toEqual(after)
 	})
 })

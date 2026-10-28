@@ -4,6 +4,7 @@ import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import { deleteNakamaAccount, editNakamaProfile, linkNakamaDiscord } from '../../infrastructure/nakama/profile-sync.js'
 
 const NAKAMA_ID = '11111111-1111-4111-8111-111111111111'
+const ANON = '99999999-9999-4999-8999-999999999999'
 
 describe('website account changes reaching Nakama', () => {
 	const fetchMock = vi.fn()
@@ -14,7 +15,7 @@ describe('website account changes reaching Nakama', () => {
 	beforeEach(() => {
 		vi.stubGlobal('fetch', fetchMock)
 		fetchMock.mockReset()
-		fetchMock.mockResolvedValue(new Response('{}', { status: 200 }))
+		fetchMock.mockImplementation(async () => new Response('{}', { status: 200 }))
 		env.NAKAMA_URL = 'http://nakama:7350'
 		env.NAKAMA_HTTP_KEY = 'hk'
 		vi.mocked(playerGateway.findPlayerById).mockResolvedValue({ nakamaUserId: NAKAMA_ID } as any)
@@ -33,14 +34,19 @@ describe('website account changes reaching Nakama', () => {
 		expect(rpcCall(1).body).toEqual({ userId: NAKAMA_ID, discord: null })
 	})
 
+	const KEEP = { keptRunIds: ['run-1'], keepSteamIdHash: true }
+
 	it('links Discord and deletes the account', async () => {
 		await linkNakamaDiscord('p1', 'hash', 'ally')
 		expect(rpcCall()).toEqual({
 			rpc: 'admin_discord_set',
 			body: { userId: NAKAMA_ID, discordIdHash: 'hash', discordUsername: 'ally' },
 		})
-		await deleteNakamaAccount('p1')
-		expect(rpcCall(1)).toEqual({ rpc: 'admin_account_delete', body: { userId: NAKAMA_ID } })
+		expect(await deleteNakamaAccount('p1', ANON, KEEP)).toEqual({ ok: true, value: 'deleted' })
+		expect(rpcCall(1)).toEqual({
+			rpc: 'admin_account_delete',
+			body: { userId: NAKAMA_ID, anonymousId: ANON, keptRunIds: ['run-1'], keepSteamIdHash: true },
+		})
 	})
 
 	it('skips players without a Nakama account, and reports a failed call', async () => {
@@ -48,6 +54,8 @@ describe('website account changes reaching Nakama', () => {
 		expect(await editNakamaProfile('p1', { useDiscordName: true })).toBe(false)
 		expect(fetchMock).not.toHaveBeenCalled()
 		fetchMock.mockResolvedValueOnce(new Response('{"code":5,"message":"No such user"}', { status: 404 }))
-		expect(await deleteNakamaAccount('p1')).toBe(false)
+		expect(await deleteNakamaAccount('p1', ANON, KEEP)).toEqual({ ok: true, value: 'no_account' })
+		fetchMock.mockResolvedValueOnce(new Response('', { status: 502 }))
+		expect(await deleteNakamaAccount('p1', ANON, KEEP)).toEqual({ ok: false, error: 'unavailable' })
 	})
 })

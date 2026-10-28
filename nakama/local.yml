@@ -1,16 +1,15 @@
-# Nakama config for the LOCAL DEV stack only (docker-compose.local.yml's
-# `nakama` service). Every key and password here is a public placeholder --
-# never reuse this file for a deployed server.
+# Nakama config for Community and Dev servers (compose.local.yml's `nakama`
+# service). Every key and password here is a public placeholder, and
+# compose.local.yml passes each one again as a flag, so a host overrides them
+# from the root .env. Never reuse this file for the Official server.
 #
-# The database address and the Steam key (runtime.env, read by
-# modules/index.js) are passed as flags by docker-compose.local.yml, not set
-# here: the key is the API's STEAM_WEB_API_KEY from the root .env and must not
-# be committed.
+# The database address and runtime.env values (read by modules/index.js) are
+# also flags from compose.local.yml.
 name: bmp-local
 data_dir: /nakama/data
 # On shutdown, lobby matches get this long to checkpoint themselves (their
 # matchTerminate) so they come back after the restart (lobby/checkpoint.ts).
-# docker-compose.local.yml's stop_grace_period must outlast it.
+# compose.local.yml's stop_grace_period must outlast it.
 shutdown_grace_sec: 20
 
 logger:
@@ -36,24 +35,37 @@ socket:
   # src/socket_limit.test.ts checks this against both configs.
   max_message_size_bytes: 32768
 
+match:
+  # Messages a match reads per tick. Nakama's default (128) silently drops the
+  # rest ("Match handler data processing too slow"); a replay burst after a
+  # scored hand or a flush after a drop can pass 128.
+  # src/socket_limit.test.ts checks this against both configs.
+  input_queue_size: 1024
+
 runtime:
   http_key: local-dev-http-key
   # modules/index.js (built from ../src by build.mjs): Steam login through a
   # before-hook on custom auth, plus the bmp_lobby match and lobby RPCs.
   path: /nakama/data/modules
   js_entrypoint: index.js
-  # Merged with docker-compose.local.yml's --runtime.env flags. Matchmaking
-  # needs every reported mod allowed (standing/); the stock dev client also
-  # runs MultiplayerPvP and ClaudeControl, which no ranked pin covers, so
-  # they are added to queueAllowedModIdsExtra at every boot (standing/seed.ts).
-  # A real server never sets it.
-  env:
-    - "QUEUE_ALLOWED_MOD_IDS_EXTRA=MultiplayerPvP,ClaudeControl"
+  # No QUEUE_ALLOWED_MOD_IDS_EXTRA: a Community or Dev server lets any mod
+  # queue (standing/current.ts), so the allowed mods are checked only on the
+  # Official server.
 
 console:
   username: admin
   password: localdevpassword
   signing_key: local-dev-console-signing-key
+
+metrics:
+  # Prometheus endpoint, for the Stats page's online player count: the API
+  # reads the nakama_sessions gauge (open game sockets; a website login has
+  # none) at NAKAMA_METRICS_URL. Reached over the compose network only;
+  # compose.local.yml never publishes this port to the host. Values reach
+  # the endpoint every reporting_freq_sec (default 60), too slow for a
+  # counter the page polls every 15 seconds.
+  prometheus_port: 9100
+  reporting_freq_sec: 5
 
 matchmaker:
   # Default is 15s between matching passes; local tests shouldn't wait that long.

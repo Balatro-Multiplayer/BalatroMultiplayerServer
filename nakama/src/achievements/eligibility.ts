@@ -5,7 +5,7 @@
 // least two players who played a hand. Private lobbies count too, at most
 // PRIVATE_DAILY_CAP times a day against the same opponents (alt farming).
 // A disputed result counts the game but not who won. Pure.
-import type { Placement, RunRecord } from '../lobby/protocol'
+import type { Placement, RunRecord, RunStatus } from '../lobby/protocol'
 import type { CountedGame, GameKind, GameResult, Progress } from './progress'
 import type { LogFacts } from './facts'
 
@@ -13,6 +13,8 @@ export const MIN_HANDS = 3
 export const MIN_GAME_MS = 120 * 1000
 export const MIN_ACTIVE_PLAYERS = 2
 export const PRIVATE_DAILY_CAP = 10
+
+export const FINISHED_STATUSES: readonly RunStatus[] = ['agreed', 'partial', 'disputed']
 
 const MOD_KINDS: { [modId: string]: GameKind } = { MultiplayerPvP: 'pvp', MultiplayerSPDRN: 'spdrn' }
 
@@ -45,7 +47,7 @@ export function eligibilityOf(
 ): Eligibility {
 	const skip = (reason: SkipReason): Eligibility => ({ kind: 'skipped', reason })
 	if (!run.players.some((p) => p.id === playerId)) return skip('not_participant')
-	if (run.status !== 'agreed' && run.status !== 'partial' && run.status !== 'disputed') return skip('not_finished')
+	if (FINISHED_STATUSES.indexOf(run.status) === -1) return skip('not_finished')
 	if (run.flags && run.flags[playerId]) return skip('flagged')
 	if (progress.countedRunIds.indexOf(run.runId) !== -1) return skip('already_counted')
 	const own = facts[playerId]

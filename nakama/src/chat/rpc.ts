@@ -8,7 +8,8 @@ import {
 	UNAVAILABLE,
 	runtimeError,
 } from '../errors'
-import { readConfig, type ServerConfig } from '../config'
+import { NOTICE_VERSION } from '../../../packages/types/src/notice'
+import { readConfig } from '../config'
 import { chatBanRefusal } from '../moderation/access'
 import { readBans } from '../moderation/bans'
 import { currentLobby } from '../lobby/rpc'
@@ -17,15 +18,28 @@ import { parsePayload, requireUser } from '../rpc'
 import { type LobbySignal, lobbyIdOf } from '../lobby/protocol'
 import {
 	MAX_MESSAGE_LENGTH,
+	REVIEW_BAND,
 	callModeration,
 	decideModerationOutcome,
 } from './moderation'
-import { isAllowlisted, obscenityMatches, remoteModerationEnabled } from './filter'
+import { isAllowlisted, obscenityMatches } from './filter'
+import { settingsOf, type ServerSettings } from '../server_kind'
 import { type ChatLogLine, type ChatVerdict, enqueue } from '../mirror/outbox'
 import { lobbyKindOfLabel } from '../review/ranked'
 
-function tosAccepted(profile: Profile, config: ServerConfig): boolean {
-	return profile.tosAcceptedVersion >= config.tosVersion
+// What the player must still give before chatting: the Notice on a kind
+// that requires it, otherwise the age answer (asked once on every kind).
+type MissingConsent = 'notice' | 'age'
+
+const MISSING_CONSENT_MESSAGE: { readonly [K in MissingConsent]: string } = {
+	notice: 'Accept the Notice first',
+	age: 'Answer the age question first',
+}
+
+// null once cleared.
+function consentMissing(profile: Profile, settings: ServerSettings): MissingConsent | null {
+	if (settings.noticeRequired) return profile.tosAcceptedVersion >= NOTICE_VERSION ? null : 'notice'
+	return profile.ageAnswered ? null : 'age'
 }
 
 // {} -> {enabled, player}: turns chat on for the caller (the API's
@@ -38,13 +52,14 @@ export function rpcChatEnable(
 	payload: string,
 ) {
 	const userId = requireUser(ctx)
-	const config = readConfig(nk)
+	const settings = settingsOf(ctx)
 	const profile = updateProfile(
 		nk,
 		userId,
 		(current) => {
 			if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, 'Chat access is permanently restricted')
-			if (!tosAccepted(current, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
+			const missing = consentMissing(current, settings)
+			if (missing) throw runtimeError(PERMISSION_DENIED, MISSING_CONSENT_MESSAGE[missing])
 			return { ...current, chatEnabled: true }
 		},
 		ctx.username,
@@ -55,8 +70,8 @@ export function rpcChatEnable(
 // {message} -> {} once it has been posted to the caller's lobby, or an error:
 // PERMISSION_DENIED for a message moderation blocked (or chat not enabled),
 // UNAVAILABLE when it cannot be judged (fails closed). A message on the
-// allowlist skips moderation; with the service switched off
-// (MODERATION_REMOTE=off) the local word filter judges instead.
+// allowlist skips moderation; with the service switched off (MODERATION_REMOTE
+// =off, the Community and Dev default) the local word filter judges instead.
 export function rpcChatSend(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -74,7 +89,8 @@ export function rpcChatSend(
 	const profile = profileFor(nk, userId, ctx.username)
 	if (profile.chatBlocked || !profile.chatEnabled)
 		throw runtimeError(PERMISSION_DENIED, 'Chat is not enabled for this account')
-	if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, 'Accept the Terms of Service first')
+	const missing = consentMissing(profile, settingsOf(ctx))
+	if (missing) throw runtimeError(PERMISSION_DENIED, MISSING_CONSENT_MESSAGE[missing])
 	const banned = chatBanRefusal(readBans(nk, userId), Date.now())
 	if (banned) throw runtimeError(PERMISSION_DENIED, banned)
 
@@ -93,9 +109,9 @@ export function rpcChatSend(
 		lobbyKind: lobbyKindOfLabel(match ? match.label : null),
 	}
 
-	let text = message
+	let flag: ChatVerdict | null = null
 	if (!isAllowlisted(message, config.chatAllowlist)) {
-		if (remoteModerationEnabled(ctx.env)) {
+		if (settingsOf(ctx).moderationRemote) {
 			const outcome = decideModerationOutcome(
 				callModeration(nk, logger, ctx.env, {
 					playerId: userId,
@@ -113,7 +129,8 @@ export function rpcChatSend(
 				}
 				throw runtimeError(UNAVAILABLE, 'Chat is unavailable right now')
 			}
-			if (outcome.publishText !== null) text = outcome.publishText
+			// Published, and flagged so a moderator sees it.
+			if (outcome.review) flag = { source: 'remote', band: REVIEW_BAND }
 		} else {
 			const matches = obscenityMatches(message)
 			if (matches.length > 0) {
@@ -125,28 +142,27 @@ export function rpcChatSend(
 
 	nk.matchSignal(
 		current.matchId,
-		JSON.stringify({ type: 'chat_post', userId, text } as LobbySignal),
+		JSON.stringify({ type: 'chat_post', userId, text: message } as LobbySignal),
 	)
-	// What the player typed, never the rewrite: a rewrite must not launder it.
-	logChat(nk, logger, lobby, userId, message, null)
-	return JSON.stringify({ text })
+	logChat(nk, logger, lobby, userId, message, flag)
+	return JSON.stringify({ text: message })
 }
 
-// Queues a chat line for the API's chat log (mirror/outbox.ts). A blocked line
-// carries why. Never fails the send: losing a log line beats losing the chat.
+// Queues a chat line for the API's chat log (mirror/outbox.ts). A flagged line
+// (blocked, or published for review) carries why. Never fails the send: losing a log line beats losing the chat.
 function logChat(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
 	lobby: Pick<ChatLogLine, 'lobbyCode' | 'lobbyId' | 'lobbyKind'>,
 	userId: string,
 	message: string,
-	blocked: ChatVerdict | null,
+	flag: ChatVerdict | null,
 ) {
 	try {
 		enqueue(nk, {
 			kind: 'chat',
 			at: Date.now(),
-			line: { ...lobby, userId, message, flagged: blocked !== null, verdict: blocked },
+			line: { ...lobby, userId, message, flagged: flag !== null, verdict: flag },
 		})
 	} catch (e) {
 		logger.error('Could not queue a chat line for the API: %v', e)

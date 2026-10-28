@@ -1510,6 +1510,14 @@ function parsePayload(payload) {
   }
   throw runtimeError(INVALID_ARGUMENT, "Payload must be a JSON object");
 }
+function listCollectionPage(nk, collection, limit, cursor) {
+  try {
+    return nk.storageList(null, collection, limit, cursor);
+  } catch (e) {
+    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+}
 
 // src/lobby/protocol.ts
 var LOBBY_MATCH = "bmp_lobby";
@@ -1524,7 +1532,10 @@ var ClientOp = {
   SET_STATE: 4,
   // ActionMessage -- a relayed action (to a player id or '*'), or an
   // authoritative one (to 'server').
-  ACTION: 5
+  ACTION: 5,
+  // {catchingUp} -- the sender is (or is no longer) replaying its own run
+  // after a crash. The seat is safe either way: nothing waits for it.
+  CATCHING_UP: 6
 };
 var ServerOp = {
   // Snapshot, to the joining player only.
@@ -1582,7 +1593,6 @@ var RATINGS_COLLECTION = "ratings";
 var CONFIG_COLLECTION = "server_config";
 var CONFIG_KEY = "global";
 var DEFAULT_CONFIG = {
-  tosVersion: 1,
   chatEnabled: true,
   rankedEnabled: true,
   casualQueueEnabled: true,
@@ -1590,8 +1600,7 @@ var DEFAULT_CONFIG = {
   lobbyCreationEnabled: true,
   testingMode: false,
   integrityEnforced: false,
-  // Off until the avatar reset (achievements/reset.ts) has run.
-  achievementsEnabled: false,
+  achievementsEnabled: true,
   chatAllowlist: [],
   season: 0,
   queueAllowedModIds: [],
@@ -1606,8 +1615,6 @@ function modIdsOf(value) {
 }
 function mergeConfig(current, update) {
   const next = __spreadValues({}, current);
-  const tos = update.tosVersion;
-  if (typeof tos === "number" && Number.isInteger(tos) && tos >= 0) next.tosVersion = tos;
   const season = update.season;
   if (typeof season === "number" && Number.isInteger(season) && season > 0) next.season = season;
   const flags = [
@@ -1620,9 +1627,9 @@ function mergeConfig(current, update) {
     "integrityEnforced",
     "achievementsEnabled"
   ];
-  for (const flag of flags) {
-    const value = update[flag];
-    if (typeof value === "boolean") next[flag] = value;
+  for (const flag2 of flags) {
+    const value = update[flag2];
+    if (typeof value === "boolean") next[flag2] = value;
   }
   const allowlist = update.chatAllowlist;
   if (Array.isArray(allowlist) && allowlist.every((m) => typeof m === "string"))
@@ -1794,6 +1801,8 @@ function banMessage(what, ban) {
   return text;
 }
 var ACCOUNT_BANNED = "Account banned";
+var NETWORK_BANNED = "Your network is banned from online play.";
+var NETWORK_BAN_MESSAGE = NETWORK_BANNED + " To appeal, email bmp@virtualized.dev";
 
 // src/shared/avatars/ids.ts
 var AVATAR_IDS = [
@@ -1993,6 +2002,8 @@ function defaultProfile(steamName) {
     discordUsername: null,
     privileges: [],
     tosAcceptedVersion: 0,
+    noticeAcceptedAt: null,
+    ageAnswered: false,
     chatEnabled: false,
     chatBlocked: false,
     mutedUserIds: [],
@@ -2005,6 +2016,9 @@ function defaultProfile(steamName) {
 function stringList(value) {
   return Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
 }
+function ageAnsweredBefore(value) {
+  return typeof value.tosAcceptedVersion === "number" && value.tosAcceptedVersion > 0 || value.chatEnabled === true || value.chatBlocked === true;
+}
 function profileOf(value, fallbackName) {
   const base = defaultProfile(cleanName(value.steamName) || fallbackName);
   return __spreadProps(__spreadValues({}, base), {
@@ -2015,6 +2029,8 @@ function profileOf(value, fallbackName) {
     discordUsername: typeof value.discordUsername === "string" ? value.discordUsername : null,
     privileges: stringList(value.privileges),
     tosAcceptedVersion: typeof value.tosAcceptedVersion === "number" ? value.tosAcceptedVersion : 0,
+    noticeAcceptedAt: typeof value.noticeAcceptedAt === "number" ? value.noticeAcceptedAt : null,
+    ageAnswered: typeof value.ageAnswered === "boolean" ? value.ageAnswered : ageAnsweredBefore(value),
     chatEnabled: value.chatEnabled === true,
     chatBlocked: value.chatBlocked === true,
     mutedUserIds: stringList(value.mutedUserIds),
@@ -2035,6 +2051,8 @@ function withSync(profile, sync, unlocked = []) {
     discordUsername: (_b = sync.discordUsername) != null ? _b : null,
     privileges,
     tosAcceptedVersion: typeof sync.tosAcceptedVersion === "number" ? sync.tosAcceptedVersion : 0,
+    noticeAcceptedAt: typeof sync.noticeAcceptedAt === "number" ? sync.noticeAcceptedAt : null,
+    ageAnswered: profile.ageAnswered || ageAnsweredBefore(sync),
     chatEnabled: sync.chatEnabled === true,
     chatBlocked: sync.chatBlocked === true,
     mutedUserIds: stringList(sync.mutedUserIds),
@@ -2671,898 +2689,19 @@ function spendLobbyCreate(nk, userId, now) {
   return true;
 }
 
-// src/lobby/anticheat.ts
-var MIN_MS_PER_HAND = 3e3;
-var HAND_OPCODE = "hand_result";
-function handCount(events) {
-  if (!events) return 0;
-  return events.filter((event2) => event2.opcode === HAND_OPCODE).length;
+// src/player/steam_id.ts
+var STEAM_HASH_CUSTOM_ID_PREFIX = "steamhash:";
+var DEVICE_ID_HASH_PREFIX = "devicehash:";
+var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
+var STEAM_HASH_CUSTOM_ID = new RegExp(`^${STEAM_HASH_CUSTOM_ID_PREFIX}([0-9a-f]{64})$`);
+function steamIdHash(nk, salt, steamId) {
+  return nk.sha256Hash(steamId + salt);
 }
-function runFlags(run, events, checks) {
-  const flags = {};
-  const elapsedMs = run.endedAt - run.startedAt;
-  for (const player of run.players) {
-    if (checks[player.id] === "mismatch") flags[player.id] = "hash_mismatch";
-    else if (handCount(events[player.id]) * MIN_MS_PER_HAND > elapsedMs) flags[player.id] = "elapsed_time_gate";
-  }
-  return flags;
-}
-
-// src/notify.ts
-var NotifyCode = {
-  CHALLENGE: 100,
-  ACCOUNT_UPDATED: 101,
-  BANNED: 102,
-  QUEUE_CANCELLED: 103,
-  // 104 and 106 are retired (never sent); don't reuse them.
-  INTEGRITY: 105,
-  // {avatarIds, runId}: avatars just earned (runId null for one earned
-  // outside a game). Persistent, so an offline player sees it at login.
-  AVATAR_UNLOCKED: 107,
-  // {standing, disallowed, reason} (standing/rpc.ts): the mod allowlist
-  // changed, so the player's standing may have.
-  STANDING_CHANGED: 108,
-  // {message, itemType, warnedAt}: a moderator's warning (service queue).
-  // Persistent, so an offline player sees it at their next login.
-  WARNED: 109
-};
-var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
-function isNotifyCode(code) {
-  return typeof code === "number" && CODES.indexOf(code) !== -1;
-}
-function notify(nk, userId, code, subject, content, persistent = false) {
-  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
-}
-
-// src/achievements/eligibility.ts
-var MIN_HANDS = 3;
-var MIN_GAME_MS = 120 * 1e3;
-var MIN_ACTIVE_PLAYERS = 2;
-var PRIVATE_DAILY_CAP = 10;
-var MOD_KINDS = { MultiplayerPvP: "pvp", MultiplayerSPDRN: "spdrn" };
-function resultOf(run, playerId) {
-  if (run.status === "disputed") return "unknown";
-  const placement = run.placements.filter((p) => p.playerId === playerId)[0];
-  if (!placement) return "unknown";
-  return placement.place === 1 ? "win" : "loss";
-}
-function eligibilityOf(run, playerId, facts, metShowman2, progress, day) {
-  const skip = (reason) => ({ kind: "skipped", reason });
-  if (!run.players.some((p) => p.id === playerId)) return skip("not_participant");
-  if (run.status !== "agreed" && run.status !== "partial" && run.status !== "disputed") return skip("not_finished");
-  if (run.flags && run.flags[playerId]) return skip("flagged");
-  if (progress.countedRunIds.indexOf(run.runId) !== -1) return skip("already_counted");
-  const own = facts[playerId];
-  if (!own || own.hands < MIN_HANDS) return skip("too_few_hands");
-  if (run.endedAt - run.startedAt < MIN_GAME_MS) return skip("too_short");
-  const active = run.players.filter((p) => facts[p.id] && facts[p.id].hands > 0);
-  if (active.length < MIN_ACTIVE_PLAYERS) return skip("too_few_active");
-  const isPrivate = run.lobbyType !== "public";
-  const opponentsKey = isPrivate ? run.players.map((p) => p.id).filter((id) => id !== playerId).sort().join(",") : null;
-  if (opponentsKey !== null && progress.privateGames.day === day && (progress.privateGames.counts[opponentsKey] || 0) >= PRIVATE_DAILY_CAP)
-    return skip("private_cap");
-  return {
-    kind: "counts",
-    game: {
-      runId: run.runId,
-      day,
-      kind: MOD_KINDS[run.modId] || "other",
-      result: resultOf(run, playerId),
-      activeOpponents: active.filter((p) => p.id !== playerId).length,
-      metShowman: metShowman2,
-      privateOpponentsKey: opponentsKey,
-      facts: own
-    }
-  };
-}
-
-// src/achievements/facts/cards.ts
-function isFirstSeenRef(value) {
-  return Array.isArray(value) && typeof value[0] === "number" && value[0] < 0 && value[0] % 1 === 0 && typeof value[1] === "string";
-}
-function learnRefs(keys, args) {
-  if (isFirstSeenRef(args)) {
-    const id = -args[0];
-    if (args[1] !== "pc" && typeof args[2] === "string") keys[id] = args[2];
-    return;
-  }
-  if (Array.isArray(args)) for (const item of args) learnRefs(keys, item);
-  else if (args !== null && typeof args === "object")
-    for (const field3 in args) learnRefs(keys, args[field3]);
-}
-function keyOfRef(keys, ref) {
-  var _a;
-  if (!Array.isArray(ref) || typeof ref[0] !== "number") return null;
-  if (ref[0] < 0) return ref[1] !== "pc" && typeof ref[2] === "string" ? ref[2] : null;
-  return (_a = keys[ref[0]]) != null ? _a : null;
-}
-
-// src/achievements/facts/actions.ts
-var SUIT_CHANGERS = { c_star: true, c_moon: true, c_sun: true, c_world: true, c_sigil: true };
-var USED_REF_INDEX = 2;
-function countOf(events, opcode) {
-  let count2 = 0;
-  for (const event2 of events) if (event2.opcode === opcode) count2++;
-  return count2;
-}
-function suitChangersUsed(events) {
-  const keys = {};
-  let used = 0;
-  for (const event2 of events) {
-    learnRefs(keys, event2.args);
-    if (event2.opcode !== "use" && event2.opcode !== "pack_pick") continue;
-    const ref = Array.isArray(event2.args) ? event2.args[USED_REF_INDEX] : null;
-    const key = keyOfRef(keys, ref);
-    if (key !== null && SUIT_CHANGERS[key]) used++;
-  }
-  return used;
-}
-function livesLost(events) {
-  let lost = 0;
-  for (const event2 of events) {
-    if (event2.opcode !== "life_lost") continue;
-    const args = event2.args;
-    const value = args !== null && typeof args === "object" && !Array.isArray(args) ? args.lost : Array.isArray(args) ? args[0] : void 0;
-    lost += typeof value === "number" && isFinite(value) && value > 0 ? Math.floor(value) : 1;
-  }
-  return lost;
-}
-
-// src/achievements/facts/money.ts
-var PURCHASE_OPCODES = { buy: true, open_pack: true, voucher: true };
-function nonNegative(value) {
-  return typeof value === "number" && isFinite(value) && value >= 0 ? value : null;
-}
-function recordedCost(event2) {
-  const args = event2.args;
-  if (event2.opcode === "reroll") {
-    if (Array.isArray(args)) return nonNegative(args[0]);
-    if (args !== null && typeof args === "object") return nonNegative(args.cost);
-    return null;
-  }
-  return Array.isArray(args) ? nonNegative(args[3]) : null;
-}
-function followingSpend(next) {
-  if (!next || next.opcode !== "money_delta") return 0;
-  const delta = Array.isArray(next.args) ? next.args[0] : next.args;
-  return typeof delta === "number" && isFinite(delta) && delta < 0 ? -delta : 0;
-}
-function moneySpent(events) {
-  let spent = 0;
-  for (let i = 0; i < events.length; i++) {
-    const event2 = events[i];
-    if (event2.opcode !== "reroll" && !PURCHASE_OPCODES[event2.opcode]) continue;
-    const cost = recordedCost(event2);
-    spent += cost !== null ? cost : followingSpend(events[i + 1]);
-  }
-  return spent;
-}
-
-// src/achievements/facts/score.ts
-function parseScore(text) {
-  if (typeof text === "number") return text > 0 ? text : 0;
-  if (typeof text !== "string") return 0;
-  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
-  if (cleaned === "") return 0;
-  const value = Number(cleaned);
-  if (!isNaN(value)) return value > 0 ? value : 0;
-  if (cleaned === "naneinf" || cleaned === "inf" || cleaned === "infinity") return Infinity;
-  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return Infinity;
-  return 0;
-}
-function scoredArg(args) {
-  if (args !== null && typeof args === "object" && !Array.isArray(args)) return args.score;
-  return Array.isArray(args) ? args[0] : args;
-}
-function bestFromHandScored(events) {
-  let best = null;
-  for (const event2 of events) {
-    if (event2.opcode !== "hand_scored") continue;
-    const score = parseScore(scoredArg(event2.args));
-    best = best === null ? score : Math.max(best, score);
-  }
-  return best;
-}
-function bestFromRoundTotals(events) {
-  let best = 0;
-  let previous = 0;
-  for (const event2 of events) {
-    if (event2.opcode !== "hand_result") continue;
-    const total = parseScore(Array.isArray(event2.args) ? event2.args[0] : null);
-    const hand = total >= previous ? total - previous : total;
-    if (total === Infinity) return Infinity;
-    best = Math.max(best, hand);
-    previous = total;
-  }
-  return best;
-}
-function bestHandScore(events) {
-  const scored = bestFromHandScored(events);
-  return scored !== null ? scored : bestFromRoundTotals(events);
-}
-
-// src/shared/avatars/rules.ts
-var COUNTERS = [
-  "wins",
-  "games",
-  "pvpGames",
-  "spdrnGames",
-  "winsVs3Plus",
-  "winsVs7Plus",
-  "hands",
-  "rerolls",
-  "moneySpent",
-  "livesLost",
-  "skips",
-  "suitChangers",
-  "smallworldGames",
-  "daysPlayed",
-  "bestWinStreak"
-];
-var MILESTONES = ["discordLinked", "sub8SpdrnRun", "scoredOver1e11", "metShowman"];
-var VANILLA_DECKS = [
-  "b_red",
-  "b_blue",
-  "b_yellow",
-  "b_green",
-  "b_black",
-  "b_magic",
-  "b_nebula",
-  "b_ghost",
-  "b_abandoned",
-  "b_checkered",
-  "b_zodiac",
-  "b_painted",
-  "b_anaglyph",
-  "b_plasma",
-  "b_erratic"
-];
-var SPDRN_MODES = [
-  "spdrn_white_stake_triple",
-  "spdrn_gold_stake_single",
-  "spdrn_seed_scout",
-  "spdrn_challenge",
-  "spdrn_all_deck",
-  "spdrn_stake_climb"
-];
-function membersOf(collection) {
-  switch (collection) {
-    case "vanillaDecks":
-      return VANILLA_DECKS;
-    case "spdrnModes":
-      return SPDRN_MODES;
-  }
-}
-function isEarnedByPlay(rule) {
-  return rule.kind === "counter" || rule.kind === "deckGames" || rule.kind === "allOf" || rule.kind === "milestone";
-}
-
-// src/achievements/facts/decks.ts
-var DECK_NAMES = {
-  "Red Deck": "b_red",
-  "Blue Deck": "b_blue",
-  "Yellow Deck": "b_yellow",
-  "Green Deck": "b_green",
-  "Black Deck": "b_black",
-  "Magic Deck": "b_magic",
-  "Nebula Deck": "b_nebula",
-  "Ghost Deck": "b_ghost",
-  "Abandoned Deck": "b_abandoned",
-  "Checkered Deck": "b_checkered",
-  "Zodiac Deck": "b_zodiac",
-  "Painted Deck": "b_painted",
-  "Anaglyph Deck": "b_anaglyph",
-  "Plasma Deck": "b_plasma",
-  "Erratic Deck": "b_erratic"
-};
-function deckKeyOf(value) {
-  var _a;
-  if (typeof value === "string") {
-    if (VANILLA_DECKS.indexOf(value) !== -1) return value;
-    return (_a = DECK_NAMES[value]) != null ? _a : null;
-  }
-  if (value !== null && typeof value === "object" && !Array.isArray(value))
-    return deckKeyOf(value.key);
-  return null;
-}
-
-// src/achievements/facts/setup.ts
-var SMALLWORLD_RULESET = "ruleset_mp_smallworld";
-function fieldsOf(args) {
-  return args !== null && typeof args === "object" && !Array.isArray(args) ? args : {};
-}
-function distinct(values) {
-  const out = [];
-  for (const value of values) if (value !== null && out.indexOf(value) === -1) out.push(value);
-  return out;
-}
-function spdrnModeOf(value) {
-  return typeof value === "string" && SPDRN_MODES.indexOf(value) !== -1 ? value : null;
-}
-function gameSetupOf(events, serverGamemode = null) {
-  var _a;
-  const lobbyInfo = fieldsOf((events.filter((e) => e.opcode === "lobby_info")[0] || { args: null }).args);
-  const lobbyOptions = fieldsOf(lobbyInfo.options);
-  const runDecks = distinct(events.filter((e) => e.opcode === "run_info").map((e) => deckKeyOf(fieldsOf(e.args).deck)));
-  const lobbyDecks = Array.isArray(lobbyInfo.decks) ? distinct(lobbyInfo.decks.map(deckKeyOf)) : [];
-  const ruleset = (_a = lobbyInfo.ruleset) != null ? _a : lobbyOptions.ruleset;
-  return {
-    decks: runDecks.length > 0 ? runDecks : lobbyDecks,
-    smallworld: ruleset === SMALLWORLD_RULESET,
-    spdrnMode: spdrnModeOf(serverGamemode) || spdrnModeOf(lobbyInfo.gamemode) || spdrnModeOf(lobbyOptions.gamemode)
-  };
-}
-
-// src/achievements/facts/speedrun.ts
-var LEAST_HANDS_TO_WIN = 8;
-function fastestRunMs(events, serverElapsedMs, minMsPerHand) {
-  let fastest = null;
-  let runStart = null;
-  let plays = 0;
-  for (const event2 of events) {
-    if (event2.opcode === "run_info") {
-      runStart = event2.t;
-      plays = 0;
-    } else if (event2.opcode === "play") {
-      plays++;
-    } else if (event2.opcode === "run_complete" && runStart !== null) {
-      const ms = event2.t - runStart;
-      const plausible = plays >= LEAST_HANDS_TO_WIN && ms >= plays * minMsPerHand && ms <= serverElapsedMs;
-      if (plausible && (fastest === null || ms < fastest)) fastest = ms;
-      runStart = null;
-    }
-  }
-  return fastest;
-}
-
-// src/achievements/facts/index.ts
-function logFactsOf(events, context) {
-  return {
-    hands: countOf(events, "play"),
-    rerolls: countOf(events, "reroll"),
-    skips: countOf(events, "skip_blind"),
-    moneySpent: moneySpent(events),
-    suitChangers: suitChangersUsed(events),
-    livesLost: livesLost(events),
-    bestHandScore: bestHandScore(events),
-    setup: gameSetupOf(events, context.serverGamemode),
-    fastestSpdrnRunMs: fastestRunMs(events, context.serverElapsedMs, context.minMsPerHand)
-  };
-}
-
-// src/achievements/progress.ts
-var PROGRESS_SCHEMA = 1;
-var COUNTED_RUN_IDS_KEPT = 64;
-var STUNT_SCORE = 1e11;
-var SUB_8_MS = 8 * 60 * 1e3;
-function storedCounters() {
-  return COUNTERS.filter((c) => c !== "bestWinStreak");
-}
-function emptyProgress() {
-  const counters = {};
-  for (const counter2 of storedCounters()) counters[counter2] = 0;
-  return {
-    schema: PROGRESS_SCHEMA,
-    counters,
-    deckGames: {},
-    spdrnModesPlayed: [],
-    lastPlayedDay: null,
-    winStreak: { current: 0, best: 0 },
-    milestones: [],
-    unlocked: [],
-    countedRunIds: [],
-    privateGames: { day: "", counts: {} }
-  };
-}
-var fieldsOf2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-var count = (value) => typeof value === "number" && isFinite(value) && value > 0 ? value : 0;
-var strings = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
-function progressOf(value) {
-  const stored = fieldsOf2(value);
-  const base = emptyProgress();
-  const counters = fieldsOf2(stored.counters);
-  for (const counter2 of storedCounters()) base.counters[counter2] = count(counters[counter2]);
-  const decks = fieldsOf2(stored.deckGames);
-  for (const deck of VANILLA_DECKS) if (count(decks[deck]) > 0) base.deckGames[deck] = count(decks[deck]);
-  const streak = fieldsOf2(stored.winStreak);
-  const privateGames = fieldsOf2(stored.privateGames);
-  const privateCounts = fieldsOf2(privateGames.counts);
-  const counts = {};
-  for (const key in privateCounts) if (count(privateCounts[key]) > 0) counts[key] = count(privateCounts[key]);
-  return __spreadProps(__spreadValues({}, base), {
-    spdrnModesPlayed: strings(stored.spdrnModesPlayed).map(spdrnModeOf).filter((m) => m !== null),
-    lastPlayedDay: typeof stored.lastPlayedDay === "string" ? stored.lastPlayedDay : null,
-    winStreak: { current: count(streak.current), best: count(streak.best) },
-    milestones: strings(stored.milestones).filter((m) => MILESTONES.indexOf(m) !== -1),
-    unlocked: strings(stored.unlocked).filter(isAvatarId),
-    countedRunIds: strings(stored.countedRunIds).slice(-COUNTED_RUN_IDS_KEPT),
-    privateGames: { day: typeof privateGames.day === "string" ? privateGames.day : "", counts }
-  });
-}
-function utcDayOf(epochMs) {
-  return new Date(epochMs).toISOString().slice(0, 10);
-}
-function withMilestone(progress, milestone) {
-  if (progress.milestones.indexOf(milestone) !== -1) return progress;
-  return __spreadProps(__spreadValues({}, progress), { milestones: progress.milestones.concat([milestone]) });
-}
-function withUnlocked(progress, ids) {
-  const fresh = ids.filter((id) => progress.unlocked.indexOf(id) === -1);
-  return fresh.length === 0 ? progress : __spreadProps(__spreadValues({}, progress), { unlocked: progress.unlocked.concat(fresh) });
-}
-function streakAfter(streak, result) {
-  switch (result) {
-    case "win": {
-      const current = streak.current + 1;
-      return { current, best: Math.max(streak.best, current) };
-    }
-    case "loss":
-      return { current: 0, best: streak.best };
-    case "unknown":
-      return streak;
-  }
-}
-function privateGamesAfter(progress, game) {
-  if (game.privateOpponentsKey === null) return progress.privateGames;
-  const counts = progress.privateGames.day === game.day ? __spreadValues({}, progress.privateGames.counts) : {};
-  counts[game.privateOpponentsKey] = (counts[game.privateOpponentsKey] || 0) + 1;
-  return { day: game.day, counts };
-}
-function applyGame(progress, game) {
-  if (progress.countedRunIds.indexOf(game.runId) !== -1) return progress;
-  const facts = game.facts;
-  const won = game.result === "win";
-  const c = progress.counters;
-  const newDay = progress.lastPlayedDay !== game.day;
-  const counters = __spreadProps(__spreadValues({}, c), {
-    games: c.games + 1,
-    wins: c.wins + (won ? 1 : 0),
-    pvpGames: c.pvpGames + (game.kind === "pvp" ? 1 : 0),
-    spdrnGames: c.spdrnGames + (game.kind === "spdrn" ? 1 : 0),
-    winsVs3Plus: c.winsVs3Plus + (won && game.activeOpponents >= 3 ? 1 : 0),
-    winsVs7Plus: c.winsVs7Plus + (won && game.activeOpponents >= 7 ? 1 : 0),
-    hands: c.hands + facts.hands,
-    rerolls: c.rerolls + facts.rerolls,
-    moneySpent: c.moneySpent + facts.moneySpent,
-    livesLost: c.livesLost + facts.livesLost,
-    skips: c.skips + facts.skips,
-    suitChangers: c.suitChangers + facts.suitChangers,
-    smallworldGames: c.smallworldGames + (facts.setup.smallworld ? 1 : 0),
-    daysPlayed: c.daysPlayed + (newDay ? 1 : 0)
-  });
-  const deckGames = __spreadValues({}, progress.deckGames);
-  for (const deck of facts.setup.decks) deckGames[deck] = (deckGames[deck] || 0) + 1;
-  const mode = game.kind === "spdrn" ? facts.setup.spdrnMode : null;
-  const spdrnModesPlayed = mode !== null && progress.spdrnModesPlayed.indexOf(mode) === -1 ? progress.spdrnModesPlayed.concat([mode]) : progress.spdrnModesPlayed;
-  let next = __spreadProps(__spreadValues({}, progress), {
-    counters,
-    deckGames,
-    spdrnModesPlayed,
-    lastPlayedDay: progress.lastPlayedDay === null || game.day > progress.lastPlayedDay ? game.day : progress.lastPlayedDay,
-    winStreak: streakAfter(progress.winStreak, game.result),
-    countedRunIds: progress.countedRunIds.concat([game.runId]).slice(-COUNTED_RUN_IDS_KEPT),
-    privateGames: privateGamesAfter(progress, game)
-  });
-  if (facts.bestHandScore >= STUNT_SCORE) next = withMilestone(next, "scoredOver1e11");
-  if (game.kind === "spdrn" && facts.fastestSpdrnRunMs !== null && facts.fastestSpdrnRunMs < SUB_8_MS)
-    next = withMilestone(next, "sub8SpdrnRun");
-  if (game.metShowman) next = withMilestone(next, "metShowman");
-  return next;
-}
-
-// src/achievements/storage.ts
-var PROGRESS_COLLECTION = "avatar_progress";
-var PROGRESS_KEY = "progress";
-var WRITE_ATTEMPTS2 = 3;
-function readProgress(nk, userId) {
-  const objects = nk.storageRead([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId }]);
-  if (objects.length === 0) return null;
-  return { progress: progressOf(objects[0].value), version: objects[0].version || "" };
-}
-function progressFor(nk, userId) {
-  const stored = readProgress(nk, userId);
-  return stored ? stored.progress : emptyProgress();
-}
-function writeProgress(nk, userId, progress, version) {
-  nk.storageWrite([
-    {
-      collection: PROGRESS_COLLECTION,
-      key: PROGRESS_KEY,
-      userId,
-      value: progress,
-      version,
-      permissionRead: 1,
-      permissionWrite: 0
-    }
-  ]);
-}
-function updateProgress(nk, userId, change) {
-  let lastError = null;
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
-    const stored = readProgress(nk, userId);
-    const before = stored ? stored.progress : emptyProgress();
-    const after = change(before);
-    if (after === before) return { before, after };
-    try {
-      writeProgress(nk, userId, after, stored ? stored.version : "*");
-      return { before, after };
-    } catch (e) {
-      lastError = e;
-    }
-  }
-  throw lastError;
-}
-function deleteProgress(nk, userId) {
-  nk.storageDelete([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId }]);
-}
-function holdingsOf(nk, userId, privileges) {
-  return { privileges, unlocked: progressFor(nk, userId).unlocked };
-}
-
-// src/achievements/unlocks.ts
-function counterValue(progress, counter2) {
-  return counter2 === "bestWinStreak" ? progress.winStreak.best : progress.counters[counter2];
-}
-function covered(progress, rule) {
-  const members = membersOf(rule.collection);
-  const played = rule.collection === "vanillaDecks" ? members.filter((deck) => (progress.deckGames[deck] || 0) > 0) : members.filter((mode) => progress.spdrnModesPlayed.indexOf(mode) !== -1);
-  return played.length;
-}
-function unlockables(except) {
-  return CATALOG.filter((entry) => entry.id !== except && isEarnedByPlay(entry.rule));
-}
-function allUnlockableDone(progress, id, holdings) {
-  return unlockables(id).filter((entry) => isSelectable(entry.id, holdings)).length;
-}
-function goalOf(entry, progress, holdings) {
-  const rule = entry.rule;
-  switch (rule.kind) {
-    case "default":
-      return null;
-    case "privilege":
-      return { kind: "privilege", key: rule.privilege, threshold: 1, progress: holdings.privileges.indexOf(rule.privilege) !== -1 ? 1 : 0 };
-    case "counter":
-      return { kind: "counter", key: rule.counter, threshold: rule.threshold, progress: Math.min(counterValue(progress, rule.counter), rule.threshold) };
-    case "deckGames":
-      return { kind: "deckGames", key: rule.deck, threshold: rule.threshold, progress: Math.min(progress.deckGames[rule.deck] || 0, rule.threshold) };
-    case "allOf":
-      return { kind: "allOf", key: rule.collection, threshold: membersOf(rule.collection).length, progress: covered(progress, rule) };
-    case "milestone":
-      return { kind: "milestone", key: rule.milestone, threshold: 1, progress: progress.milestones.indexOf(rule.milestone) !== -1 ? 1 : 0 };
-    case "allUnlockable":
-      return { kind: "allUnlockable", key: "allUnlockable", threshold: unlockables(entry.id).length, progress: allUnlockableDone(progress, entry.id, holdings) };
-    case "reserved":
-      return { kind: "reserved", key: rule.reservedFor, threshold: 1, progress: 0 };
-  }
-}
-function meets(rule, progress) {
-  switch (rule.kind) {
-    case "counter":
-      return counterValue(progress, rule.counter) >= rule.threshold;
-    case "deckGames":
-      return (progress.deckGames[rule.deck] || 0) >= rule.threshold;
-    case "allOf":
-      return covered(progress, rule) >= membersOf(rule.collection).length;
-    case "milestone":
-      return progress.milestones.indexOf(rule.milestone) !== -1;
-    default:
-      return false;
-  }
-}
-function newlyUnlocked(progress, privileges) {
-  const fresh = CATALOG.filter((entry) => progress.unlocked.indexOf(entry.id) === -1 && meets(entry.rule, progress)).map(
-    (entry) => entry.id
+function steamIdHashOf(nk, userId) {
+  const match = STEAM_HASH_CUSTOM_ID.exec(
+    nk.accountGetId(userId).customId || ""
   );
-  const holdings = { privileges, unlocked: progress.unlocked.concat(fresh) };
-  for (const entry of CATALOG) {
-    if (entry.rule.kind !== "allUnlockable" || holdings.unlocked.indexOf(entry.id) !== -1) continue;
-    if (allUnlockableDone(progress, entry.id, holdings) >= unlockables(entry.id).length) fresh.push(entry.id);
-  }
-  return fresh;
-}
-
-// src/achievements/record.ts
-var SHOWMAN = "j_ring_master";
-function factsByPlayer(run, events) {
-  var _a, _b;
-  const context = {
-    serverElapsedMs: run.endedAt - run.startedAt,
-    serverGamemode: (_b = (_a = run.options) == null ? void 0 : _a.gamemode) != null ? _b : null,
-    minMsPerHand: MIN_MS_PER_HAND
-  };
-  const facts = {};
-  for (const player of run.players) facts[player.id] = logFactsOf(events[player.id] || [], context);
-  return facts;
-}
-function metShowman(run, playerId) {
-  return run.players.some((p) => p.id !== playerId && p.avatar === SHOWMAN);
-}
-function withEarned(progress, privileges) {
-  const unlocked = newlyUnlocked(progress, privileges);
-  return { progress: withUnlocked(progress, unlocked), unlocked };
-}
-function outcomeOf(progress, run, playerId, facts, privileges) {
-  const eligibility = eligibilityOf(run, playerId, facts, metShowman(run, playerId), progress, utcDayOf(run.endedAt));
-  if (eligibility.kind === "skipped") return { progress, eligibility, unlocked: [] };
-  const earned = withEarned(applyGame(progress, eligibility.game), privileges);
-  return { progress: earned.progress, eligibility, unlocked: earned.unlocked };
-}
-function announce(nk, userId, avatarIds, runId) {
-  if (avatarIds.length === 0) return;
-  notify(nk, userId, NotifyCode.AVATAR_UNLOCKED, "avatar_unlocked", { avatarIds, runId }, true);
-}
-function recordRun(nk, logger, run, events) {
-  if (!readConfig(nk).achievementsEnabled) return;
-  const facts = factsByPlayer(run, events);
-  for (const player of run.players) {
-    try {
-      const privileges = profileFor(nk, player.id).privileges;
-      let outcome = null;
-      updateProgress(nk, player.id, (progress) => {
-        outcome = outcomeOf(progress, run, player.id, facts, privileges);
-        return outcome.progress;
-      });
-      const result = outcome;
-      if (!result) continue;
-      if (result.eligibility.kind === "skipped")
-        logger.debug("Run %s: not counted for %s (%s)", run.runId, player.id, result.eligibility.reason);
-      announce(nk, player.id, result.unlocked, run.runId);
-    } catch (e) {
-      logger.error("Run %s: could not record achievements for %s: %v", run.runId, player.id, e);
-    }
-  }
-}
-function recordMilestone(nk, logger, userId, milestone, privileges) {
-  if (!readConfig(nk).achievementsEnabled) return;
-  try {
-    let unlocked = [];
-    updateProgress(nk, userId, (progress) => {
-      const marked = withMilestone(progress, milestone);
-      if (marked === progress) {
-        unlocked = [];
-        return progress;
-      }
-      const earned = withEarned(marked, privileges);
-      unlocked = earned.unlocked;
-      return earned.progress;
-    });
-    announce(nk, userId, unlocked, null);
-  } catch (e) {
-    logger.error("Could not record milestone %s for %s: %v", milestone, userId, e);
-  }
-}
-
-// src/express.ts
-var TIMEOUT_MS = 3e3;
-function callExpress(nk, logger, env, path, body) {
-  const base = (env.EXPRESS_INTERNAL_URL || "").replace(/\/+$/, "");
-  if (!base) return null;
-  let response;
-  try {
-    response = nk.httpRequest(
-      `${base}/internal/nakama${path}`,
-      "post",
-      {
-        "Content-Type": "application/json",
-        "X-BMP-Internal-Key": env.EXPRESS_INTERNAL_KEY || ""
-      },
-      JSON.stringify(body),
-      TIMEOUT_MS
-    );
-  } catch (e) {
-    logger.warn("Express call %s failed: %v", path, e);
-    return null;
-  }
-  let parsed = {};
-  try {
-    const data = JSON.parse(response.body || "{}");
-    if (typeof data === "object" && data !== null) parsed = data;
-  } catch (e) {
-    logger.warn("Express call %s returned non-JSON (HTTP %d)", path, response.code);
-  }
-  return { status: response.code, body: parsed };
-}
-
-// src/moderation/enforce.ts
-var BAN_INDEX_COLLECTION = "ban_index";
-function loginKeys(nk, userId) {
-  const account = nk.accountGetId(userId);
-  const keys = [];
-  if (account.customId) keys.push("custom:" + account.customId);
-  for (const device of account.devices || []) keys.push("device:" + device.id);
-  return keys;
-}
-function writeIndex(nk, userId, ban) {
-  const value = { userId, ban };
-  nk.storageWrite(
-    loginKeys(nk, userId).map((key) => ({
-      collection: BAN_INDEX_COLLECTION,
-      key,
-      userId: SYSTEM_USER_ID,
-      value,
-      permissionRead: 0,
-      permissionWrite: 0
-    }))
-  );
-}
-function deleteIndex(nk, userId) {
-  nk.storageDelete(
-    loginKeys(nk, userId).map((key) => ({ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }))
-  );
-}
-function removeFromLobby(nk, userId, reason, onlyIfStarted) {
-  const lobby = currentLobby(nk, userId);
-  if (!lobby) return;
-  const signal2 = { type: "admin_remove", userId, reason, onlyIfStarted };
-  nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
-}
-function pushBan(nk, userId, type, ban) {
-  notify(
-    nk,
-    userId,
-    NotifyCode.BANNED,
-    "banned",
-    { banType: type, banId: ban.banId, reason: ban.reason, expiresAt: ban.expiresAt },
-    type === "account"
-  );
-}
-function enforceAccountBan(nk, userId, ban) {
-  writeIndex(nk, userId, ban);
-  removeFromLobby(nk, userId, "banned", false);
-  nk.usersBanId([userId]);
-}
-function applyBan(nk, logger, userId, type, ban) {
-  const bans = withBan(readBans(nk, userId), type, ban);
-  writeBans(nk, userId, bans);
-  pushBan(nk, userId, type, ban);
-  if (type === "queue") removeFromLobby(nk, userId, "banned", true);
-  if (type === "account" && bans.account) enforceAccountBan(nk, userId, bans.account);
-  logger.info("Applied %s ban %s to %s", type, ban.banId, userId);
-  return bans;
-}
-function releaseAccount(nk, userId, before, after) {
-  if (before.account && !after.account) {
-    deleteIndex(nk, userId);
-    nk.usersUnbanId([userId]);
-  }
-}
-function liftBan(nk, logger, userId, banId) {
-  const before = readBans(nk, userId);
-  const after = withoutBan(before, banId);
-  writeBans(nk, userId, after);
-  releaseAccount(nk, userId, before, after);
-  logger.info("Lifted ban %s of %s", banId, userId);
-  return after;
-}
-function checkLoginBan(nk, logger, key, now) {
-  const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
-  if (objects.length === 0) return;
-  const entry = objects[0].value;
-  if (activeBan({ account: entry.ban }, "account", now))
-    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban));
-  const before = readBans(nk, entry.userId);
-  const after = withoutExpired(before, now);
-  if (after !== before) writeBans(nk, entry.userId, after);
-  if (activeBan(after, "account", now)) {
-    writeIndex(nk, entry.userId, after.account);
-    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, after.account));
-  }
-  deleteIndex(nk, entry.userId);
-  nk.usersUnbanId([entry.userId]);
-  logger.info("Account ban of %s expired; unbanned", entry.userId);
-}
-
-// src/player/session.ts
-var STEAM_CUSTOM_ID = /^steam:(\d+)$/;
-function steamIdOf(nk, userId) {
-  const match = STEAM_CUSTOM_ID.exec(nk.accountGetId(userId).customId || "");
   return match ? match[1] : null;
-}
-function isPlayerSync(value) {
-  return typeof value.playerId === "string" && Array.isArray(value.bans);
-}
-function fetchSync(ctx, logger, nk, userId, steamId, steamName) {
-  const reply = callExpress(nk, logger, ctx.env, "/player-sync", { steamId, nakamaUserId: userId, steamName });
-  if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
-    logger.warn("Player sync for %s failed (HTTP %v); retrying next login", userId, reply && reply.status);
-    return null;
-  }
-  return reply.body;
-}
-function resolveMutes(ctx, logger, nk, profile) {
-  const reply = callExpress(nk, logger, ctx.env, "/resolve-players", { playerIds: profile.unresolvedMutedPlayerIds });
-  const resolved = reply && reply.status === 200 ? reply.body.resolved : null;
-  return resolved && typeof resolved === "object" ? resolved : {};
-}
-function withResolvedMutes(profile, resolved) {
-  const found = profile.unresolvedMutedPlayerIds.filter((id) => typeof resolved[id] === "string");
-  if (found.length === 0) return profile;
-  const muted = profile.mutedUserIds.slice();
-  for (const id of found) if (muted.indexOf(resolved[id]) === -1) muted.push(resolved[id]);
-  return __spreadProps(__spreadValues({}, profile), {
-    mutedUserIds: muted,
-    unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
-  });
-}
-function loginResponse(userId, profile, config) {
-  const tosRequired = profile.tosAcceptedVersion < config.tosVersion;
-  return {
-    tosRequired,
-    // An update to a ToS the player accepted before (only with tosRequired).
-    tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
-    player: playerView(userId, profile),
-    serverConfig: clientConfig(config)
-  };
-}
-function syncDisplayName(nk, userId, profile) {
-  const name = displayNameOf(profile);
-  if (nk.accountGetId(userId).user.displayName !== name)
-    nk.accountUpdateId(userId, null, name, null, null, null, null, null);
-}
-function rpcSessionInit(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  noteReturn(nk, logger, userId, Date.now());
-  const steamName = cleanName(parsePayload(payload).steamName) || ctx.username;
-  const stored = readProfile(nk, userId, steamName);
-  const steamId = steamIdOf(nk, userId);
-  let sync = null;
-  let resolved = {};
-  if (!stored || !stored.profile.synced) {
-    if (steamId) sync = fetchSync(ctx, logger, nk, userId, steamId, steamName);
-  } else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
-    resolved = resolveMutes(ctx, logger, nk, stored.profile);
-  }
-  const unlocked = sync ? progressFor(nk, userId).unlocked : [];
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      let next = __spreadProps(__spreadValues({}, current), { steamName, nakamaLogin: true });
-      if (sync) next = withSync(next, sync, unlocked);
-      else if (!steamId) next.synced = true;
-      return withResolvedMutes(next, resolved);
-    },
-    steamName
-  );
-  if (sync) {
-    let bans = readBans(nk, userId);
-    const synced = bansFromList(sync.bans);
-    for (const type of BAN_TYPES) {
-      const ban = synced[type];
-      if (ban) bans = withBan(bans, type, ban);
-    }
-    writeBans(nk, userId, bans);
-    logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
-  }
-  const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
-  if (accountBan) {
-    enforceAccountBan(nk, userId, accountBan);
-    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
-  }
-  syncDisplayName(nk, userId, profile);
-  if (profile.discordIdHash) recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
-  writeIntegrity(nk, userId, UNVERIFIED);
-  clearModReport(nk, userId);
-  return JSON.stringify(loginResponse(userId, profile, readConfig(nk)));
-}
-function rpcTosAccept(ctx, logger, nk, payload) {
-  const userId = requireUser(ctx);
-  const eligible = parsePayload(payload).chatEligible;
-  const config = readConfig(nk);
-  const profile = updateProfile(
-    nk,
-    userId,
-    (current) => {
-      const next = __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: config.tosVersion });
-      if (typeof eligible === "boolean") {
-        next.chatEnabled = eligible;
-        next.chatBlocked = !eligible;
-      }
-      return next;
-    },
-    ctx.username
-  );
-  return JSON.stringify(loginResponse(userId, profile, config));
 }
 
 // src/mirror/outbox.ts
@@ -3602,17 +2741,20 @@ function expandRun(nk, key, entry) {
   return { key, kind: "run", at: entry.at, run, logs, rating: entry.rating, ratings };
 }
 function mirrorPlayer(nk, userId) {
-  let steamId = null;
+  let steamIdHash2 = null;
+  let deleted = false;
   try {
-    steamId = steamIdOf(nk, userId);
+    steamIdHash2 = steamIdHashOf(nk, userId);
   } catch (e) {
+    deleted = true;
   }
   const stored = readProfile(nk, userId);
   const profile = stored ? stored.profile : null;
   return {
-    steamId,
+    steamIdHash: steamIdHash2,
     legacyPlayerId: profile ? profile.legacyPlayerId : null,
-    displayName: profile ? profile.steamName : ""
+    displayName: profile ? profile.steamName : "",
+    deleted
   };
 }
 function pullEntries(nk, limit) {
@@ -3633,7 +2775,7 @@ function pullEntries(nk, limit) {
     } else if (entry.kind === "chat") {
       userIds[entry.line.userId] = true;
       entries.push({ key: object.key, kind: "chat", at: entry.at, line: entry.line });
-    } else if (entry.kind === "forfeit") {
+    } else if (entry.kind === "forfeit" || entry.kind === "notice") {
       userIds[entry.userId] = true;
       entries.push(__spreadValues({ key: object.key }, entry));
     } else {
@@ -3745,6 +2887,17 @@ function eventsOf(log) {
     const [t, opcode, args] = JSON.parse(line);
     return { t, opcode, args };
   });
+}
+
+// src/lobby/catch_up.ts
+var CATCH_UP_LIMIT_MS_BY_MOD = {
+  MultiplayerPvP: 18e4
+};
+var CATCH_UP_LIMIT_REASON = "catch_up_limit";
+function catchUpLimitMsFor(modId, overrideSeconds) {
+  const limit = CATCH_UP_LIMIT_MS_BY_MOD[modId];
+  if (limit === void 0) return null;
+  return overrideSeconds !== void 0 && overrideSeconds > 0 ? overrideSeconds * 1e3 : limit;
 }
 
 // src/matchmaking/queue_refusal.ts
@@ -3967,7 +3120,7 @@ function homeFactsOf(lobby) {
 function everyone(lobby) {
   return lobby.players.map((p) => p.id);
 }
-function announce2(lobby, reason, requeue = false) {
+function announce(lobby, reason, requeue = false) {
   const view = viewOf(lobby);
   const payload = view && __spreadProps(__spreadValues({}, view), { reason, requeue });
   return { kind: "send", op: ServerOp.GROUP_QUEUE, payload, to: everyone(lobby) };
@@ -3993,7 +3146,7 @@ function openGroupQueue(lobby, byId, request, switches, now) {
   });
   return ok({
     lobby: next,
-    out: [{ kind: "groupBind", partyId: request.partyId, memberIds }, announce2(next, null)]
+    out: [{ kind: "groupBind", partyId: request.partyId, memberIds }, announce(next, null)]
   });
 }
 function groupQueued(lobby, partyId, ticket) {
@@ -4001,22 +3154,23 @@ function groupQueued(lobby, partyId, ticket) {
   if (!gq) return err({ code: "not_bound" });
   if (gq.phase !== "forming") return err({ code: "not_forming" });
   const next = withGroup(lobby, __spreadProps(__spreadValues({}, gq), { phase: "queued", ticket }));
-  return ok({ lobby: next, out: [announce2(next, null)] });
+  return ok({ lobby: next, out: [announce(next, null)] });
 }
 function groupUnqueued(lobby, partyId, requeue) {
   const gq = ownGroup(lobby, partyId);
   if (!gq || gq.phase !== "queued") return { lobby, out: [] };
   const _a = gq, { ticket } = _a, rest = __objRest(_a, ["ticket"]);
   const next = withGroup(lobby, __spreadProps(__spreadValues({}, rest), { phase: "forming" }));
-  return { lobby: next, out: [announce2(next, requeue ? "match_refused" : "ticket_removed", requeue)] };
+  return { lobby: next, out: [announce(next, requeue ? "match_refused" : "ticket_removed", requeue)] };
 }
 function groupMatched(lobby, partyId, matchId, code, now) {
   const gq = ownGroup(lobby, partyId);
   if (!gq) return err({ code: "not_bound" });
   if (gq.phase !== "queued") return err({ code: "not_forming" });
   const _a = gq, { ticket } = _a, rest = __objRest(_a, ["ticket"]);
-  const next = withGroup(lobby, __spreadProps(__spreadValues({}, rest), { phase: "away", matchId, code, until: now + GROUP_AWAY_CAP_MS }));
-  return ok({ lobby: next, out: [{ kind: "groupDissolve", partyId }, announce2(next, null)] });
+  const unready = __spreadProps(__spreadValues({}, lobby), { game: __spreadProps(__spreadValues({}, lobby.game), { ready: {} }) });
+  const next = withGroup(unready, __spreadProps(__spreadValues({}, rest), { phase: "away", matchId, code, until: now + GROUP_AWAY_CAP_MS }));
+  return ok({ lobby: next, out: [{ kind: "groupDissolve", partyId }, announce(next, null)] });
 }
 function endGroup(lobby, reason, refused) {
   const gq = lobby.groupQueue;
@@ -4104,7 +3258,7 @@ var CREATOR_JOIN_TIMEOUT_MS = 3e4;
 var MIN_PLAYERS = 2;
 var MAX_PLAYERS = 128;
 function newLobby(params) {
-  var _a;
+  var _a, _b;
   return {
     code: params.code,
     modId: params.modId,
@@ -4119,7 +3273,8 @@ function newLobby(params) {
     kickedIds: [],
     createdAt: params.now,
     graceMs: params.graceMs,
-    resultTimeoutMs: (_a = params.resultTimeoutMs) != null ? _a : DEFAULT_RESULT_TIMEOUT_MS,
+    catchUpLimitMs: (_a = params.catchUpLimitMs) != null ? _a : null,
+    resultTimeoutMs: (_b = params.resultTimeoutMs) != null ? _b : DEFAULT_RESULT_TIMEOUT_MS,
     closed: false,
     game: emptyGame(),
     actionBudget: {},
@@ -4183,6 +3338,7 @@ function rejectOp(userId, message) {
   };
 }
 var DIFFERENT_MOD = "Lobby is for a different mod";
+var FORFEITED_SEAT = "You forfeited this match";
 function joinRejection(lobby, userId, modId) {
   if (lobby.closed) return "Lobby is closed";
   if (modId !== lobby.modId) return DIFFERENT_MOD;
@@ -4191,6 +3347,7 @@ function joinRejection(lobby, userId, modId) {
     return "You are spectating this lobby";
   if (lobby.kickedIds.indexOf(userId) !== -1)
     return "You were kicked from this lobby";
+  if (forfeitedStill(lobby, userId)) return FORFEITED_SEAT;
   if (lobby.game.started) return "The game has already started";
   if (lobby.groupQueue) return "This lobby is queueing as a group";
   if (lobby.allowedIds) {
@@ -4201,6 +3358,15 @@ function joinRejection(lobby, userId, modId) {
   }
   if (lobby.players.length >= lobby.maxPlayers) return "Lobby is full";
   return null;
+}
+function forfeitedStill(lobby, userId) {
+  const runId = (lobby.forfeitedSeats || {})[userId];
+  if (runId === void 0) return false;
+  const started = lobby.game.started;
+  return started === null || started.runId === runId;
+}
+function isCatchingUp(player) {
+  return typeof player.catchingUpSince === "number";
 }
 function snapshotFor(lobby, userId, now = Date.now()) {
   const self = findPlayer(lobby, userId);
@@ -4217,7 +3383,8 @@ function snapshotFor(lobby, userId, now = Date.now()) {
       preferredJoker: p.info.preferredJoker,
       mods: p.info.mods,
       standing: p.info.standing || null,
-      isAway: p.awaySince !== null
+      isAway: p.awaySince !== null,
+      catchingUp: isCatchingUp(p)
     })),
     ownState: self ? self.ownState : null,
     game: {
@@ -4227,14 +3394,17 @@ function snapshotFor(lobby, userId, now = Date.now()) {
       setup: setupView(setupOf(lobby.game), now)
     },
     groupQueue: viewOf(lobby),
-    teamPlan: lobby.teamPlan || null
+    teamPlan: lobby.teamPlan || null,
+    graceSeconds: Math.ceil(lobby.graceMs / 1e3),
+    serverNow: now
   };
 }
-function join(lobby, userId, sessionId, info) {
+function join(lobby, userId, sessionId, info, now = Date.now()) {
   const existing = findPlayer(lobby, userId);
   if (existing) {
     const wasAway = existing.awaySince !== null;
-    const back = __spreadProps(__spreadValues({}, existing), { sessionId, awaySince: null });
+    const wasCatchingUp = isCatchingUp(existing);
+    const back = __spreadProps(__spreadValues({}, existing), { sessionId, awaySince: null, catchingUpSince: null });
     const next2 = __spreadProps(__spreadValues({}, lobby), {
       players: lobby.players.map((p) => p.id === userId ? back : p)
     });
@@ -4243,7 +3413,7 @@ function join(lobby, userId, sessionId, info) {
       {
         kind: "send",
         op: ServerOp.SNAPSHOT,
-        payload: snapshotFor(next2, userId),
+        payload: snapshotFor(next2, userId, now),
         to: [userId]
       }
     ];
@@ -4259,6 +3429,7 @@ function join(lobby, userId, sessionId, info) {
       const tail = replayTailOf(next2, userId);
       if (tail) out.push({ kind: "send", op: ServerOp.REPLAY_TAIL, payload: tail, to: [userId] });
     }
+    if (wasCatchingUp) out.push(catchingUpEvent(next2, userId, false));
     return then({ lobby: next2, out }, groupReturned);
   }
   const player = {
@@ -4266,6 +3437,7 @@ function join(lobby, userId, sessionId, info) {
     sessionId,
     info,
     awaySince: null,
+    catchingUpSince: null,
     ownState: null
   };
   const next = __spreadProps(__spreadValues({}, lobby), {
@@ -4280,7 +3452,7 @@ function join(lobby, userId, sessionId, info) {
       {
         kind: "send",
         op: ServerOp.SNAPSHOT,
-        payload: snapshotFor(next, userId),
+        payload: snapshotFor(next, userId, now),
         to: [userId]
       },
       event(
@@ -4297,6 +3469,23 @@ function join(lobby, userId, sessionId, info) {
       }
     ]
   };
+}
+function catchingUpEvent(lobby, userId, catchingUp) {
+  const player = findPlayer(lobby, userId);
+  return event(
+    lobby,
+    "player_catching_up",
+    { playerId: userId, displayName: player ? player.info.displayName : void 0, data: { catchingUp } },
+    othersThan(lobby, userId)
+  );
+}
+function setCatchingUp(lobby, userId, catchingUp, now) {
+  const player = findPlayer(lobby, userId);
+  if (!player || isCatchingUp(player) === catchingUp) return { lobby, out: [] };
+  const next = __spreadProps(__spreadValues({}, lobby), {
+    players: lobby.players.map((p) => p.id === userId ? __spreadProps(__spreadValues({}, p), { catchingUpSince: catchingUp ? now : null }) : p)
+  });
+  return { lobby: next, out: [catchingUpEvent(next, userId, catchingUp)] };
 }
 function then(step, f) {
   const next = f(step.lobby);
@@ -4502,6 +3691,26 @@ function setPlayerInfo(lobby, userId, patch) {
     out: [{ kind: "send", op: ServerOp.PLAYER_INFO, payload: { playerId: userId, info }, to: allIds(lobby) }]
   };
 }
+function catchUpLimitReached(lobby, player, now) {
+  const limit = lobby.catchUpLimitMs;
+  return typeof limit === "number" && typeof player.catchingUpSince === "number" && now - player.catchingUpSince >= limit;
+}
+function toldAndKicked(lobby, player, graceRanOut) {
+  if (graceRanOut || player.awaySince !== null) return [];
+  return [
+    event(
+      lobby,
+      "player_kicked",
+      {
+        playerId: player.id,
+        displayName: player.info.displayName,
+        data: { kickedBy: "server", reason: CATCH_UP_LIMIT_REASON }
+      },
+      [player.id]
+    ),
+    { kind: "kick", userId: player.id }
+  ];
+}
 function tick(lobby, now) {
   if (lobby.closed) return { lobby, out: [] };
   if (lobby.players.length === 0) {
@@ -4511,12 +3720,15 @@ function tick(lobby, now) {
   for (const p of lobby.players) {
     if (step.lobby.closed) break;
     const parked = isParked(step.lobby) && step.lobby.groupQueue.memberIds.indexOf(p.id) !== -1;
-    const awaySince = (findPlayer(step.lobby, p.id) || p).awaySince;
-    if (!parked && awaySince !== null && now - awaySince >= lobby.graceMs) {
+    const current = findPlayer(step.lobby, p.id) || p;
+    const awaySince = current.awaySince;
+    const graceRanOut = !parked && awaySince !== null && now - awaySince >= lobby.graceMs;
+    if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
       const started = step.lobby.game.started;
       const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
       const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
-      step = { lobby: removed.lobby, out: step.out.concat(forfeited, removed.out) };
+      const marked = forfeited.length > 0 && started ? __spreadProps(__spreadValues({}, removed.lobby), { forfeitedSeats: __spreadProps(__spreadValues({}, removed.lobby.forfeitedSeats || {}), { [p.id]: started.runId }) }) : removed.lobby;
+      step = { lobby: marked, out: step.out.concat(forfeited, removed.out, toldAndKicked(step.lobby, current, graceRanOut)) };
     }
   }
   return step;
@@ -4642,6 +3854,101 @@ function spectatableLobbies(labels) {
   return lobbies;
 }
 
+// ../packages/types/src/server-kind.ts
+var SERVER_KINDS = ["official", "community", "dev"];
+var DEV_FLAGS = [
+  "ALLOW_DEVICE_AUTH",
+  "ALLOW_RANKED_LOBBIES",
+  "DEV_AUTO_VERIFY_LAUNCHER",
+  "DEV_FAKE_LAUNCHER_STRATEGY"
+];
+var REFUSED_FLAGS = {
+  official: DEV_FLAGS,
+  community: [
+    "ALLOW_RANKED_LOBBIES",
+    "DEV_AUTO_VERIFY_LAUNCHER",
+    "DEV_FAKE_LAUNCHER_STRATEGY"
+  ],
+  dev: []
+};
+function flag(env, key) {
+  const value = env[key];
+  if (value === "true" || value === "1") return true;
+  if (value === "false" || value === "0") return false;
+  return void 0;
+}
+function isServerKind(value) {
+  return SERVER_KINDS.indexOf(value) !== -1;
+}
+function serverSettings(env) {
+  const raw = env.BMP_SERVER_KIND || "official";
+  if (!isServerKind(raw))
+    return { ok: false, error: { code: "unknown_kind", value: raw } };
+  const kind = raw;
+  const refused = REFUSED_FLAGS[kind].filter((key) => flag(env, key) === true);
+  if (refused.length > 0)
+    return {
+      ok: false,
+      error: { code: "dev_flag_not_allowed", kind, flags: refused }
+    };
+  const moderation = env.MODERATION_REMOTE;
+  const moderationRemote = moderation === "off" ? false : moderation === "on" ? true : kind === "official";
+  if (kind === "dev") {
+    return {
+      ok: true,
+      value: {
+        kind,
+        deviceLogin: flag(env, "ALLOW_DEVICE_AUTH") !== false,
+        rankedLobbies: flag(env, "ALLOW_RANKED_LOBBIES") !== false,
+        autoVerifyLauncher: flag(env, "DEV_AUTO_VERIFY_LAUNCHER") === true,
+        fakeLauncherStrategy: flag(env, "DEV_FAKE_LAUNCHER_STRATEGY") === true,
+        moderationRemote,
+        testingRpcs: true,
+        allowedModsChecked: false,
+        networkBans: false,
+        noticeRequired: false
+      }
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      kind,
+      deviceLogin: kind === "community",
+      rankedLobbies: false,
+      autoVerifyLauncher: false,
+      fakeLauncherStrategy: false,
+      moderationRemote,
+      testingRpcs: false,
+      allowedModsChecked: kind === "official",
+      networkBans: kind === "official",
+      noticeRequired: kind === "official"
+    }
+  };
+}
+function serverKindErrorMessage(error) {
+  if (error.code === "unknown_kind")
+    return `BMP_SERVER_KIND="${error.value}" is not a server kind; use one of: ${SERVER_KINDS.join(", ")}`;
+  return `BMP_SERVER_KIND=${error.kind} refuses ${error.flags.join(", ")}: dev flags need BMP_SERVER_KIND=dev`;
+}
+
+// src/server_kind.ts
+function checkServerKind(env, logger) {
+  const result = serverSettings(env);
+  if (!result.ok) {
+    const message = serverKindErrorMessage(result.error);
+    logger.error("Refusing to start: %s", message);
+    throw new Error(message);
+  }
+  logger.info("BMP server kind: %s", result.value.kind);
+  return result.value;
+}
+function settingsOf(ctx) {
+  const result = serverSettings(ctx.env);
+  if (!result.ok) throw new Error(serverKindErrorMessage(result.error));
+  return result.value;
+}
+
 // src/lobby/rpc.ts
 var CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ123456789";
 var CODE_LENGTH = 6;
@@ -4709,7 +4016,7 @@ function rpcLobbyCreate(ctx, logger, nk, payload) {
   if (rankedMode !== void 0 && rankedMode !== null) {
     if (typeof rankedMode !== "string" || !RANKED_MODE_PATTERN.test(rankedMode))
       throw runtimeError(INVALID_ARGUMENT, "rankedMode is not a valid mode");
-    if (ctx.env.ALLOW_RANKED_LOBBIES !== "true")
+    if (!settingsOf(ctx).rankedLobbies)
       throw runtimeError(PERMISSION_DENIED, "Ranked lobbies are not enabled");
   }
   const current = currentLobby(nk, userId);
@@ -4795,7 +4102,7 @@ function rpcRunActive(ctx, logger, nk, payload) {
   if (!current) return JSON.stringify({});
   const signal2 = { type: "get_active", userId };
   const active = JSON.parse(nk.matchSignal(current.matchId, JSON.stringify(signal2)));
-  return JSON.stringify(active ? { active, standing: standingFor(nk, userId, Date.now()) } : {});
+  return JSON.stringify(active ? { active, standing: standingFor(nk, settingsOf(ctx), userId, Date.now()) } : {});
 }
 function rpcLobbyLeave(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -4805,6 +4112,1209 @@ function rpcLobbyLeave(ctx, logger, nk, payload) {
     nk.matchSignal(current.matchId, JSON.stringify(signal2));
   }
   return JSON.stringify({});
+}
+
+// src/notify.ts
+var NotifyCode = {
+  CHALLENGE: 100,
+  ACCOUNT_UPDATED: 101,
+  BANNED: 102,
+  QUEUE_CANCELLED: 103,
+  // 104 and 106 are retired (never sent); don't reuse them.
+  INTEGRITY: 105,
+  // {avatarIds, runId}: avatars just earned (runId null for one earned
+  // outside a game). Persistent, so an offline player sees it at login.
+  AVATAR_UNLOCKED: 107,
+  // {standing, disallowed, reason} (standing/rpc.ts): the mod allowlist
+  // changed, so the player's standing may have.
+  STANDING_CHANGED: 108,
+  // {message, itemType, warnedAt}: a moderator's warning (service queue).
+  // Persistent, so an offline player sees it at their next login.
+  WARNED: 109
+};
+var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
+function isNotifyCode(code) {
+  return typeof code === "number" && CODES.indexOf(code) !== -1;
+}
+function notify(nk, userId, code, subject, content, persistent = false) {
+  nk.notificationSend(userId, subject, content, code, SYSTEM_USER_ID, persistent);
+}
+
+// src/shared/avatars/rules.ts
+var COUNTERS = [
+  "wins",
+  "games",
+  "pvpGames",
+  "spdrnGames",
+  "winsVs3Plus",
+  "winsVs7Plus",
+  "hands",
+  "rerolls",
+  "moneySpent",
+  "livesLost",
+  "skips",
+  "suitChangers",
+  "smallworldGames",
+  "daysPlayed",
+  "bestWinStreak"
+];
+var MILESTONES = ["discordLinked", "sub8SpdrnRun", "scoredOver1e11", "metShowman"];
+var VANILLA_DECKS = [
+  "b_red",
+  "b_blue",
+  "b_yellow",
+  "b_green",
+  "b_black",
+  "b_magic",
+  "b_nebula",
+  "b_ghost",
+  "b_abandoned",
+  "b_checkered",
+  "b_zodiac",
+  "b_painted",
+  "b_anaglyph",
+  "b_plasma",
+  "b_erratic"
+];
+var SPDRN_MODES = [
+  "spdrn_white_stake_triple",
+  "spdrn_gold_stake_single",
+  "spdrn_seed_scout",
+  "spdrn_challenge",
+  "spdrn_all_deck",
+  "spdrn_stake_climb"
+];
+function membersOf(collection) {
+  switch (collection) {
+    case "vanillaDecks":
+      return VANILLA_DECKS;
+    case "spdrnModes":
+      return SPDRN_MODES;
+  }
+}
+function isEarnedByPlay(rule) {
+  return rule.kind === "counter" || rule.kind === "deckGames" || rule.kind === "allOf" || rule.kind === "milestone";
+}
+
+// src/achievements/facts/decks.ts
+var DECK_NAMES = {
+  "Red Deck": "b_red",
+  "Blue Deck": "b_blue",
+  "Yellow Deck": "b_yellow",
+  "Green Deck": "b_green",
+  "Black Deck": "b_black",
+  "Magic Deck": "b_magic",
+  "Nebula Deck": "b_nebula",
+  "Ghost Deck": "b_ghost",
+  "Abandoned Deck": "b_abandoned",
+  "Checkered Deck": "b_checkered",
+  "Zodiac Deck": "b_zodiac",
+  "Painted Deck": "b_painted",
+  "Anaglyph Deck": "b_anaglyph",
+  "Plasma Deck": "b_plasma",
+  "Erratic Deck": "b_erratic"
+};
+function deckKeyOf(value) {
+  var _a;
+  if (typeof value === "string") {
+    if (VANILLA_DECKS.indexOf(value) !== -1) return value;
+    return (_a = DECK_NAMES[value]) != null ? _a : null;
+  }
+  if (value !== null && typeof value === "object" && !Array.isArray(value))
+    return deckKeyOf(value.key);
+  return null;
+}
+
+// src/achievements/facts/setup.ts
+var SMALLWORLD_RULESET = "ruleset_mp_smallworld";
+function fieldsOf(args) {
+  return args !== null && typeof args === "object" && !Array.isArray(args) ? args : {};
+}
+function distinct(values) {
+  const out = [];
+  for (const value of values) if (value !== null && out.indexOf(value) === -1) out.push(value);
+  return out;
+}
+function spdrnModeOf(value) {
+  return typeof value === "string" && SPDRN_MODES.indexOf(value) !== -1 ? value : null;
+}
+function gameSetupOf(events, serverGamemode = null) {
+  var _a;
+  const lobbyInfo = fieldsOf((events.filter((e) => e.opcode === "lobby_info")[0] || { args: null }).args);
+  const lobbyOptions = fieldsOf(lobbyInfo.options);
+  const runDecks = distinct(events.filter((e) => e.opcode === "run_info").map((e) => deckKeyOf(fieldsOf(e.args).deck)));
+  const lobbyDecks = Array.isArray(lobbyInfo.decks) ? distinct(lobbyInfo.decks.map(deckKeyOf)) : [];
+  const ruleset = (_a = lobbyInfo.ruleset) != null ? _a : lobbyOptions.ruleset;
+  return {
+    decks: runDecks.length > 0 ? runDecks : lobbyDecks,
+    smallworld: ruleset === SMALLWORLD_RULESET,
+    spdrnMode: spdrnModeOf(serverGamemode) || spdrnModeOf(lobbyInfo.gamemode) || spdrnModeOf(lobbyOptions.gamemode)
+  };
+}
+
+// src/achievements/progress.ts
+var PROGRESS_SCHEMA = 1;
+var COUNTED_RUN_IDS_KEPT = 64;
+var STUNT_SCORE = 1e11;
+var SUB_8_MS = 8 * 60 * 1e3;
+function storedCounters() {
+  return COUNTERS.filter((c) => c !== "bestWinStreak");
+}
+function emptyProgress() {
+  const counters = {};
+  for (const counter2 of storedCounters()) counters[counter2] = 0;
+  return {
+    schema: PROGRESS_SCHEMA,
+    counters,
+    deckGames: {},
+    spdrnModesPlayed: [],
+    lastPlayedDay: null,
+    winStreak: { current: 0, best: 0 },
+    milestones: [],
+    unlocked: [],
+    countedRunIds: [],
+    privateGames: { day: "", counts: {} },
+    backfilled: false
+  };
+}
+var fieldsOf2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+var count = (value) => typeof value === "number" && isFinite(value) && value > 0 ? value : 0;
+var strings = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string") : [];
+function progressOf(value) {
+  const stored = fieldsOf2(value);
+  const base = emptyProgress();
+  const counters = fieldsOf2(stored.counters);
+  for (const counter2 of storedCounters()) base.counters[counter2] = count(counters[counter2]);
+  const decks = fieldsOf2(stored.deckGames);
+  for (const deck of VANILLA_DECKS) if (count(decks[deck]) > 0) base.deckGames[deck] = count(decks[deck]);
+  const streak = fieldsOf2(stored.winStreak);
+  const privateGames = fieldsOf2(stored.privateGames);
+  const privateCounts = fieldsOf2(privateGames.counts);
+  const counts = {};
+  for (const key in privateCounts) if (count(privateCounts[key]) > 0) counts[key] = count(privateCounts[key]);
+  return __spreadProps(__spreadValues({}, base), {
+    spdrnModesPlayed: strings(stored.spdrnModesPlayed).map(spdrnModeOf).filter((m) => m !== null),
+    lastPlayedDay: typeof stored.lastPlayedDay === "string" ? stored.lastPlayedDay : null,
+    winStreak: { current: count(streak.current), best: count(streak.best) },
+    milestones: strings(stored.milestones).filter((m) => MILESTONES.indexOf(m) !== -1),
+    unlocked: strings(stored.unlocked).filter(isAvatarId),
+    countedRunIds: strings(stored.countedRunIds).slice(-COUNTED_RUN_IDS_KEPT),
+    privateGames: { day: typeof privateGames.day === "string" ? privateGames.day : "", counts },
+    backfilled: stored.backfilled === true
+  });
+}
+function utcDayOf(epochMs) {
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+function withMilestone(progress, milestone) {
+  if (progress.milestones.indexOf(milestone) !== -1) return progress;
+  return __spreadProps(__spreadValues({}, progress), { milestones: progress.milestones.concat([milestone]) });
+}
+function withUnlocked(progress, ids) {
+  const fresh = ids.filter((id) => progress.unlocked.indexOf(id) === -1);
+  return fresh.length === 0 ? progress : __spreadProps(__spreadValues({}, progress), { unlocked: progress.unlocked.concat(fresh) });
+}
+function streakAfter(streak, result) {
+  switch (result) {
+    case "win": {
+      const current = streak.current + 1;
+      return { current, best: Math.max(streak.best, current) };
+    }
+    case "loss":
+      return { current: 0, best: streak.best };
+    case "unknown":
+      return streak;
+  }
+}
+function privateGamesAfter(progress, game) {
+  if (game.privateOpponentsKey === null) return progress.privateGames;
+  const counts = progress.privateGames.day === game.day ? __spreadValues({}, progress.privateGames.counts) : {};
+  counts[game.privateOpponentsKey] = (counts[game.privateOpponentsKey] || 0) + 1;
+  return { day: game.day, counts };
+}
+function applyGame(progress, game) {
+  if (progress.countedRunIds.indexOf(game.runId) !== -1) return progress;
+  const facts = game.facts;
+  const won = game.result === "win";
+  const c = progress.counters;
+  const newDay = progress.lastPlayedDay !== game.day;
+  const counters = __spreadProps(__spreadValues({}, c), {
+    games: c.games + 1,
+    wins: c.wins + (won ? 1 : 0),
+    pvpGames: c.pvpGames + (game.kind === "pvp" ? 1 : 0),
+    spdrnGames: c.spdrnGames + (game.kind === "spdrn" ? 1 : 0),
+    winsVs3Plus: c.winsVs3Plus + (won && game.activeOpponents >= 3 ? 1 : 0),
+    winsVs7Plus: c.winsVs7Plus + (won && game.activeOpponents >= 7 ? 1 : 0),
+    hands: c.hands + facts.hands,
+    rerolls: c.rerolls + facts.rerolls,
+    moneySpent: c.moneySpent + facts.moneySpent,
+    livesLost: c.livesLost + facts.livesLost,
+    skips: c.skips + facts.skips,
+    suitChangers: c.suitChangers + facts.suitChangers,
+    smallworldGames: c.smallworldGames + (facts.setup.smallworld ? 1 : 0),
+    daysPlayed: c.daysPlayed + (newDay ? 1 : 0)
+  });
+  const deckGames = __spreadValues({}, progress.deckGames);
+  for (const deck of facts.setup.decks) deckGames[deck] = (deckGames[deck] || 0) + 1;
+  const mode = game.kind === "spdrn" ? facts.setup.spdrnMode : null;
+  const spdrnModesPlayed = mode !== null && progress.spdrnModesPlayed.indexOf(mode) === -1 ? progress.spdrnModesPlayed.concat([mode]) : progress.spdrnModesPlayed;
+  let next = __spreadProps(__spreadValues({}, progress), {
+    counters,
+    deckGames,
+    spdrnModesPlayed,
+    lastPlayedDay: progress.lastPlayedDay === null || game.day > progress.lastPlayedDay ? game.day : progress.lastPlayedDay,
+    winStreak: streakAfter(progress.winStreak, game.result),
+    countedRunIds: progress.countedRunIds.concat([game.runId]).slice(-COUNTED_RUN_IDS_KEPT),
+    privateGames: privateGamesAfter(progress, game)
+  });
+  if (facts.bestHandScore >= STUNT_SCORE) next = withMilestone(next, "scoredOver1e11");
+  if (game.kind === "spdrn" && facts.fastestSpdrnRunMs !== null && facts.fastestSpdrnRunMs < SUB_8_MS)
+    next = withMilestone(next, "sub8SpdrnRun");
+  if (game.metShowman) next = withMilestone(next, "metShowman");
+  return next;
+}
+
+// src/achievements/storage.ts
+var PROGRESS_COLLECTION = "avatar_progress";
+var PROGRESS_KEY = "progress";
+var WRITE_ATTEMPTS2 = 3;
+function readProgress(nk, userId) {
+  const objects = nk.storageRead([{ collection: PROGRESS_COLLECTION, key: PROGRESS_KEY, userId }]);
+  if (objects.length === 0) return null;
+  return { progress: progressOf(objects[0].value), version: objects[0].version || "" };
+}
+function progressFor(nk, userId) {
+  const stored = readProgress(nk, userId);
+  return stored ? stored.progress : emptyProgress();
+}
+function writeProgress(nk, userId, progress, version) {
+  nk.storageWrite([
+    {
+      collection: PROGRESS_COLLECTION,
+      key: PROGRESS_KEY,
+      userId,
+      value: progress,
+      version,
+      permissionRead: 1,
+      permissionWrite: 0
+    }
+  ]);
+}
+function updateProgress(nk, userId, change) {
+  let lastError = null;
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS2; attempt++) {
+    const stored = readProgress(nk, userId);
+    const before = stored ? stored.progress : emptyProgress();
+    const after = change(before);
+    if (after === before) return { before, after };
+    try {
+      writeProgress(nk, userId, after, stored ? stored.version : "*");
+      return { before, after };
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+function holdingsOf(nk, userId, privileges) {
+  return { privileges, unlocked: progressFor(nk, userId).unlocked };
+}
+
+// src/lobby/anticheat.ts
+var MIN_MS_PER_HAND = 3e3;
+var HAND_OPCODE = "hand_result";
+function handCount(events) {
+  if (!events) return 0;
+  return events.filter((event2) => event2.opcode === HAND_OPCODE).length;
+}
+function runFlags(run, events, checks) {
+  const flags = {};
+  const elapsedMs = run.endedAt - run.startedAt;
+  for (const player of run.players) {
+    if (checks[player.id] === "mismatch") flags[player.id] = "hash_mismatch";
+    else if (handCount(events[player.id]) * MIN_MS_PER_HAND > elapsedMs) flags[player.id] = "elapsed_time_gate";
+  }
+  return flags;
+}
+
+// src/achievements/eligibility.ts
+var MIN_HANDS = 3;
+var MIN_GAME_MS = 120 * 1e3;
+var MIN_ACTIVE_PLAYERS = 2;
+var PRIVATE_DAILY_CAP = 10;
+var FINISHED_STATUSES = ["agreed", "partial", "disputed"];
+var MOD_KINDS = { MultiplayerPvP: "pvp", MultiplayerSPDRN: "spdrn" };
+function resultOf(run, playerId) {
+  if (run.status === "disputed") return "unknown";
+  const placement = run.placements.filter((p) => p.playerId === playerId)[0];
+  if (!placement) return "unknown";
+  return placement.place === 1 ? "win" : "loss";
+}
+function eligibilityOf(run, playerId, facts, metShowman2, progress, day) {
+  const skip = (reason) => ({ kind: "skipped", reason });
+  if (!run.players.some((p) => p.id === playerId)) return skip("not_participant");
+  if (FINISHED_STATUSES.indexOf(run.status) === -1) return skip("not_finished");
+  if (run.flags && run.flags[playerId]) return skip("flagged");
+  if (progress.countedRunIds.indexOf(run.runId) !== -1) return skip("already_counted");
+  const own = facts[playerId];
+  if (!own || own.hands < MIN_HANDS) return skip("too_few_hands");
+  if (run.endedAt - run.startedAt < MIN_GAME_MS) return skip("too_short");
+  const active = run.players.filter((p) => facts[p.id] && facts[p.id].hands > 0);
+  if (active.length < MIN_ACTIVE_PLAYERS) return skip("too_few_active");
+  const isPrivate = run.lobbyType !== "public";
+  const opponentsKey = isPrivate ? run.players.map((p) => p.id).filter((id) => id !== playerId).sort().join(",") : null;
+  if (opponentsKey !== null && progress.privateGames.day === day && (progress.privateGames.counts[opponentsKey] || 0) >= PRIVATE_DAILY_CAP)
+    return skip("private_cap");
+  return {
+    kind: "counts",
+    game: {
+      runId: run.runId,
+      day,
+      kind: MOD_KINDS[run.modId] || "other",
+      result: resultOf(run, playerId),
+      activeOpponents: active.filter((p) => p.id !== playerId).length,
+      metShowman: metShowman2,
+      privateOpponentsKey: opponentsKey,
+      facts: own
+    }
+  };
+}
+
+// src/achievements/facts/cards.ts
+function isFirstSeenRef(value) {
+  return Array.isArray(value) && typeof value[0] === "number" && value[0] < 0 && value[0] % 1 === 0 && typeof value[1] === "string";
+}
+function learnRefs(keys, args) {
+  if (isFirstSeenRef(args)) {
+    const id = -args[0];
+    if (args[1] !== "pc" && typeof args[2] === "string") keys[id] = args[2];
+    return;
+  }
+  if (Array.isArray(args)) for (const item of args) learnRefs(keys, item);
+  else if (args !== null && typeof args === "object")
+    for (const field3 in args) learnRefs(keys, args[field3]);
+}
+function keyOfRef(keys, ref) {
+  var _a;
+  if (!Array.isArray(ref) || typeof ref[0] !== "number") return null;
+  if (ref[0] < 0) return ref[1] !== "pc" && typeof ref[2] === "string" ? ref[2] : null;
+  return (_a = keys[ref[0]]) != null ? _a : null;
+}
+
+// src/achievements/facts/actions.ts
+var SUIT_CHANGERS = { c_star: true, c_moon: true, c_sun: true, c_world: true, c_sigil: true };
+var USED_REF_INDEX = 2;
+function countOf(events, opcode) {
+  let count2 = 0;
+  for (const event2 of events) if (event2.opcode === opcode) count2++;
+  return count2;
+}
+function suitChangersUsed(events) {
+  const keys = {};
+  let used = 0;
+  for (const event2 of events) {
+    learnRefs(keys, event2.args);
+    if (event2.opcode !== "use" && event2.opcode !== "pack_pick") continue;
+    const ref = Array.isArray(event2.args) ? event2.args[USED_REF_INDEX] : null;
+    const key = keyOfRef(keys, ref);
+    if (key !== null && SUIT_CHANGERS[key]) used++;
+  }
+  return used;
+}
+function livesLost(events) {
+  let lost = 0;
+  for (const event2 of events) {
+    if (event2.opcode !== "life_lost") continue;
+    const args = event2.args;
+    const value = args !== null && typeof args === "object" && !Array.isArray(args) ? args.lost : Array.isArray(args) ? args[0] : void 0;
+    lost += typeof value === "number" && isFinite(value) && value > 0 ? Math.floor(value) : 1;
+  }
+  return lost;
+}
+
+// src/achievements/facts/money.ts
+var PURCHASE_OPCODES = { buy: true, open_pack: true, voucher: true };
+function nonNegative(value) {
+  return typeof value === "number" && isFinite(value) && value >= 0 ? value : null;
+}
+function recordedCost(event2) {
+  const args = event2.args;
+  if (event2.opcode === "reroll") {
+    if (Array.isArray(args)) return nonNegative(args[0]);
+    if (args !== null && typeof args === "object") return nonNegative(args.cost);
+    return null;
+  }
+  return Array.isArray(args) ? nonNegative(args[3]) : null;
+}
+function followingSpend(next) {
+  if (!next || next.opcode !== "money_delta") return 0;
+  const delta = Array.isArray(next.args) ? next.args[0] : next.args;
+  return typeof delta === "number" && isFinite(delta) && delta < 0 ? -delta : 0;
+}
+function moneySpent(events) {
+  let spent = 0;
+  for (let i = 0; i < events.length; i++) {
+    const event2 = events[i];
+    if (event2.opcode !== "reroll" && !PURCHASE_OPCODES[event2.opcode]) continue;
+    const cost = recordedCost(event2);
+    spent += cost !== null ? cost : followingSpend(events[i + 1]);
+  }
+  return spent;
+}
+
+// src/achievements/facts/score.ts
+function parseScore(text) {
+  if (typeof text === "number") return text > 0 ? text : 0;
+  if (typeof text !== "string") return 0;
+  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
+  if (cleaned === "") return 0;
+  const value = Number(cleaned);
+  if (!isNaN(value)) return value > 0 ? value : 0;
+  if (cleaned === "naneinf" || cleaned === "inf" || cleaned === "infinity") return Infinity;
+  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return Infinity;
+  return 0;
+}
+function scoredArg(args) {
+  if (args !== null && typeof args === "object" && !Array.isArray(args)) return args.score;
+  return Array.isArray(args) ? args[0] : args;
+}
+function bestFromHandScored(events) {
+  let best = null;
+  for (const event2 of events) {
+    if (event2.opcode !== "hand_scored") continue;
+    const score = parseScore(scoredArg(event2.args));
+    best = best === null ? score : Math.max(best, score);
+  }
+  return best;
+}
+function bestFromRoundTotals(events) {
+  let best = 0;
+  let previous = 0;
+  for (const event2 of events) {
+    if (event2.opcode !== "hand_result") continue;
+    const total = parseScore(Array.isArray(event2.args) ? event2.args[0] : null);
+    const hand = total >= previous ? total - previous : total;
+    if (total === Infinity) return Infinity;
+    best = Math.max(best, hand);
+    previous = total;
+  }
+  return best;
+}
+function bestHandScore(events) {
+  const scored = bestFromHandScored(events);
+  return scored !== null ? scored : bestFromRoundTotals(events);
+}
+
+// src/achievements/facts/speedrun.ts
+var LEAST_HANDS_TO_WIN = 8;
+function fastestRunMs(events, serverElapsedMs, minMsPerHand) {
+  let fastest = null;
+  let runStart = null;
+  let plays = 0;
+  for (const event2 of events) {
+    if (event2.opcode === "run_info") {
+      runStart = event2.t;
+      plays = 0;
+    } else if (event2.opcode === "play") {
+      plays++;
+    } else if (event2.opcode === "run_complete" && runStart !== null) {
+      const ms = event2.t - runStart;
+      const plausible = plays >= LEAST_HANDS_TO_WIN && ms >= plays * minMsPerHand && ms <= serverElapsedMs;
+      if (plausible && (fastest === null || ms < fastest)) fastest = ms;
+      runStart = null;
+    }
+  }
+  return fastest;
+}
+
+// src/achievements/facts/index.ts
+function logFactsOf(events, context) {
+  return {
+    hands: countOf(events, "play"),
+    rerolls: countOf(events, "reroll"),
+    skips: countOf(events, "skip_blind"),
+    moneySpent: moneySpent(events),
+    suitChangers: suitChangersUsed(events),
+    livesLost: livesLost(events),
+    bestHandScore: bestHandScore(events),
+    setup: gameSetupOf(events, context.serverGamemode),
+    fastestSpdrnRunMs: fastestRunMs(events, context.serverElapsedMs, context.minMsPerHand)
+  };
+}
+
+// src/achievements/unlocks.ts
+function counterValue(progress, counter2) {
+  return counter2 === "bestWinStreak" ? progress.winStreak.best : progress.counters[counter2];
+}
+function covered(progress, rule) {
+  const members = membersOf(rule.collection);
+  const played = rule.collection === "vanillaDecks" ? members.filter((deck) => (progress.deckGames[deck] || 0) > 0) : members.filter((mode) => progress.spdrnModesPlayed.indexOf(mode) !== -1);
+  return played.length;
+}
+function unlockables(except) {
+  return CATALOG.filter((entry) => entry.id !== except && isEarnedByPlay(entry.rule));
+}
+function allUnlockableDone(progress, id, holdings) {
+  return unlockables(id).filter((entry) => isSelectable(entry.id, holdings)).length;
+}
+function goalOf(entry, progress, holdings) {
+  const rule = entry.rule;
+  switch (rule.kind) {
+    case "default":
+      return null;
+    case "privilege":
+      return { kind: "privilege", key: rule.privilege, threshold: 1, progress: holdings.privileges.indexOf(rule.privilege) !== -1 ? 1 : 0 };
+    case "counter":
+      return { kind: "counter", key: rule.counter, threshold: rule.threshold, progress: Math.min(counterValue(progress, rule.counter), rule.threshold) };
+    case "deckGames":
+      return { kind: "deckGames", key: rule.deck, threshold: rule.threshold, progress: Math.min(progress.deckGames[rule.deck] || 0, rule.threshold) };
+    case "allOf":
+      return { kind: "allOf", key: rule.collection, threshold: membersOf(rule.collection).length, progress: covered(progress, rule) };
+    case "milestone":
+      return { kind: "milestone", key: rule.milestone, threshold: 1, progress: progress.milestones.indexOf(rule.milestone) !== -1 ? 1 : 0 };
+    case "allUnlockable":
+      return { kind: "allUnlockable", key: "allUnlockable", threshold: unlockables(entry.id).length, progress: allUnlockableDone(progress, entry.id, holdings) };
+    case "reserved":
+      return { kind: "reserved", key: rule.reservedFor, threshold: 1, progress: 0 };
+  }
+}
+function meets(rule, progress) {
+  switch (rule.kind) {
+    case "counter":
+      return counterValue(progress, rule.counter) >= rule.threshold;
+    case "deckGames":
+      return (progress.deckGames[rule.deck] || 0) >= rule.threshold;
+    case "allOf":
+      return covered(progress, rule) >= membersOf(rule.collection).length;
+    case "milestone":
+      return progress.milestones.indexOf(rule.milestone) !== -1;
+    default:
+      return false;
+  }
+}
+function newlyUnlocked(progress, privileges) {
+  const fresh = CATALOG.filter((entry) => progress.unlocked.indexOf(entry.id) === -1 && meets(entry.rule, progress)).map(
+    (entry) => entry.id
+  );
+  const holdings = { privileges, unlocked: progress.unlocked.concat(fresh) };
+  for (const entry of CATALOG) {
+    if (entry.rule.kind !== "allUnlockable" || holdings.unlocked.indexOf(entry.id) !== -1) continue;
+    if (allUnlockableDone(progress, entry.id, holdings) >= unlockables(entry.id).length) fresh.push(entry.id);
+  }
+  return fresh;
+}
+
+// src/achievements/record.ts
+var SHOWMAN = "j_ring_master";
+function factsByPlayer(run, events) {
+  var _a, _b;
+  const context = {
+    serverElapsedMs: run.endedAt - run.startedAt,
+    serverGamemode: (_b = (_a = run.options) == null ? void 0 : _a.gamemode) != null ? _b : null,
+    minMsPerHand: MIN_MS_PER_HAND
+  };
+  const facts = {};
+  for (const player of run.players) facts[player.id] = logFactsOf(events[player.id] || [], context);
+  return facts;
+}
+function metShowman(run, playerId) {
+  return run.players.some((p) => p.id !== playerId && p.avatar === SHOWMAN);
+}
+function withEarned(progress, privileges) {
+  const unlocked = newlyUnlocked(progress, privileges);
+  return { progress: withUnlocked(progress, unlocked), unlocked };
+}
+function outcomeOf(progress, run, playerId, facts, privileges) {
+  const eligibility = eligibilityOf(run, playerId, facts, metShowman(run, playerId), progress, utcDayOf(run.endedAt));
+  if (eligibility.kind === "skipped") return { progress, eligibility, unlocked: [] };
+  const earned = withEarned(applyGame(progress, eligibility.game), privileges);
+  return { progress: earned.progress, eligibility, unlocked: earned.unlocked };
+}
+function announce2(nk, userId, avatarIds, runId) {
+  if (avatarIds.length === 0) return;
+  notify(nk, userId, NotifyCode.AVATAR_UNLOCKED, "avatar_unlocked", { avatarIds, runId }, true);
+}
+function recordRun(nk, logger, run, events) {
+  if (!readConfig(nk).achievementsEnabled) return;
+  const facts = factsByPlayer(run, events);
+  for (const player of run.players) {
+    try {
+      const privileges = profileFor(nk, player.id).privileges;
+      let outcome = null;
+      updateProgress(nk, player.id, (progress) => {
+        outcome = outcomeOf(progress, run, player.id, facts, privileges);
+        return outcome.progress;
+      });
+      const result = outcome;
+      if (!result) continue;
+      if (result.eligibility.kind === "skipped")
+        logger.debug("Run %s: not counted for %s (%s)", run.runId, player.id, result.eligibility.reason);
+      announce2(nk, player.id, result.unlocked, run.runId);
+    } catch (e) {
+      logger.error("Run %s: could not record achievements for %s: %v", run.runId, player.id, e);
+    }
+  }
+}
+function recordMilestone(nk, logger, userId, milestone, privileges) {
+  if (!readConfig(nk).achievementsEnabled) return;
+  try {
+    let unlocked = [];
+    updateProgress(nk, userId, (progress) => {
+      const marked = withMilestone(progress, milestone);
+      if (marked === progress) {
+        unlocked = [];
+        return progress;
+      }
+      const earned = withEarned(marked, privileges);
+      unlocked = earned.unlocked;
+      return earned.progress;
+    });
+    announce2(nk, userId, unlocked, null);
+  } catch (e) {
+    logger.error("Could not record milestone %s for %s: %v", milestone, userId, e);
+  }
+}
+
+// ../packages/types/src/notice.ts
+var NOTICE_VERSION = 2;
+
+// src/express.ts
+var TIMEOUT_MS = 3e3;
+function callExpress(nk, logger, env, path, body) {
+  const base = (env.EXPRESS_INTERNAL_URL || "").replace(/\/+$/, "");
+  if (!base) return null;
+  let response;
+  try {
+    response = nk.httpRequest(
+      `${base}/internal/nakama${path}`,
+      "post",
+      {
+        "Content-Type": "application/json",
+        "X-BMP-Internal-Key": env.EXPRESS_INTERNAL_KEY || ""
+      },
+      JSON.stringify(body),
+      TIMEOUT_MS
+    );
+  } catch (e) {
+    logger.warn("Express call %s failed: %v", path, e);
+    return null;
+  }
+  let parsed = {};
+  try {
+    const data = JSON.parse(response.body || "{}");
+    if (typeof data === "object" && data !== null) parsed = data;
+  } catch (e) {
+    logger.warn("Express call %s returned non-JSON (HTTP %d)", path, response.code);
+  }
+  return { status: response.code, body: parsed };
+}
+
+// src/shared/storage.ts
+var LIST_PAGE2 = 100;
+function forEachStored(nk, owner, collection, visit) {
+  let cursor = "";
+  do {
+    const page = nk.storageList(owner, collection, LIST_PAGE2, cursor);
+    for (const o of page.objects || []) if (visit(o) === "stop") return true;
+    cursor = page.cursor || "";
+  } while (cursor);
+  return false;
+}
+
+// src/moderation/enforce.ts
+var BAN_INDEX_COLLECTION = "ban_index";
+var BAN_INDEX_CUSTOM_PREFIX = "custom:";
+function loginKeys(nk, userId) {
+  const account = nk.accountGetId(userId);
+  const keys = [];
+  if (account.customId) keys.push(BAN_INDEX_CUSTOM_PREFIX + account.customId);
+  for (const device of account.devices || []) keys.push("device:" + device.id);
+  return keys;
+}
+function writeIndex(nk, userId, ban) {
+  const value = { userId, ban };
+  nk.storageWrite(
+    loginKeys(nk, userId).map((key) => ({
+      collection: BAN_INDEX_COLLECTION,
+      key,
+      userId: SYSTEM_USER_ID,
+      value,
+      permissionRead: 0,
+      permissionWrite: 0
+    }))
+  );
+}
+function deleteIndex(nk, userId) {
+  nk.storageDelete(
+    loginKeys(nk, userId).map((key) => ({ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }))
+  );
+}
+function removeFromLobby(nk, userId, reason, onlyIfStarted) {
+  const lobby = currentLobby(nk, userId);
+  if (!lobby) return;
+  const signal2 = { type: "admin_remove", userId, reason, onlyIfStarted };
+  nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
+}
+function pushBan(nk, userId, type, ban) {
+  notify(
+    nk,
+    userId,
+    NotifyCode.BANNED,
+    "banned",
+    { banType: type, banId: ban.banId, reason: ban.reason, expiresAt: ban.expiresAt },
+    type === "account"
+  );
+}
+function enforceAccountBan(nk, userId, ban) {
+  writeIndex(nk, userId, ban);
+  removeFromLobby(nk, userId, "banned", false);
+  nk.usersBanId([userId]);
+}
+function applyBan(nk, logger, userId, type, ban) {
+  const bans = withBan(readBans(nk, userId), type, ban);
+  writeBans(nk, userId, bans);
+  pushBan(nk, userId, type, ban);
+  if (type === "queue") removeFromLobby(nk, userId, "banned", true);
+  if (type === "account" && bans.account) enforceAccountBan(nk, userId, bans.account);
+  logger.info("Applied %s ban %s to %s", type, ban.banId, userId);
+  return bans;
+}
+function releaseAccount(nk, userId, before, after) {
+  if (before.account && !after.account) {
+    deleteIndex(nk, userId);
+    nk.usersUnbanId([userId]);
+  }
+}
+function liftBan(nk, logger, userId, banId) {
+  const before = readBans(nk, userId);
+  const after = withoutBan(before, banId);
+  writeBans(nk, userId, after);
+  releaseAccount(nk, userId, before, after);
+  logger.info("Lifted ban %s of %s", banId, userId);
+  return after;
+}
+function moveLoginKey(nk, from, to) {
+  const [entry] = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }]);
+  if (!entry) return;
+  nk.storageWrite([
+    {
+      collection: BAN_INDEX_COLLECTION,
+      key: to,
+      userId: SYSTEM_USER_ID,
+      value: entry.value,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+  nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key: from, userId: SYSTEM_USER_ID }]);
+}
+function accountExists(nk, userId) {
+  try {
+    nk.accountGetId(userId);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function deleteIndexKey(nk, key) {
+  nk.storageDelete([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
+}
+function checkLoginBan(nk, logger, key, now) {
+  const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
+  if (objects.length === 0) return;
+  const entry = objects[0].value;
+  if (activeBan({ account: entry.ban }, "account", now))
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban));
+  if (!accountExists(nk, entry.userId)) {
+    deleteIndexKey(nk, key);
+    logger.info("Account ban of deleted account %s expired; index entry dropped at a login on its id", entry.userId);
+    return;
+  }
+  const before = readBans(nk, entry.userId);
+  const after = withoutExpired(before, now);
+  if (after !== before) writeBans(nk, entry.userId, after);
+  if (activeBan(after, "account", now)) {
+    writeIndex(nk, entry.userId, after.account);
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, after.account));
+  }
+  deleteIndex(nk, entry.userId);
+  nk.usersUnbanId([entry.userId]);
+  logger.info("Account ban of %s expired; unbanned", entry.userId);
+}
+function forgetBanIndex(nk, steamIdHashes, now) {
+  if (steamIdHashes.length === 0) return { deleted: 0 };
+  const forgotten = {};
+  const entries = nk.storageRead(
+    steamIdHashes.map((hash) => ({
+      collection: BAN_INDEX_COLLECTION,
+      key: BAN_INDEX_CUSTOM_PREFIX + STEAM_HASH_CUSTOM_ID_PREFIX + hash,
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  for (const o of entries) {
+    const entry = o.value;
+    if (activeBan({ account: entry.ban }, "account", now) || accountExists(nk, entry.userId)) continue;
+    forgotten[entry.userId] = true;
+  }
+  const keys = [];
+  forEachStored(nk, SYSTEM_USER_ID, BAN_INDEX_COLLECTION, (o) => {
+    if (forgotten[o.value.userId]) keys.push(o.key);
+  });
+  for (const key of keys) deleteIndexKey(nk, key);
+  return { deleted: keys.length };
+}
+
+// src/shared/time.ts
+var DAY_MS = 24 * 60 * 60 * 1e3;
+
+// src/moderation/network.ts
+var IP_HASHES_COLLECTION = "ip_hashes";
+var IP_HASHES_KEY = "networks";
+var NETWORK_BANS_COLLECTION = "network_bans";
+var NETWORK_BAN_INDEX_COLLECTION = "network_ban_index";
+var IP_HASH_DAYS = 30;
+var IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+var HEX_GROUP = /^[0-9a-f]{1,4}$/;
+function ipv4(text) {
+  const m = IPV4.exec(text);
+  if (!m) return null;
+  for (let i = 1; i <= 4; i++) if (Number(m[i]) > 255) return null;
+  return [m[1], m[2], m[3], m[4]].map(Number).join(".");
+}
+function ipv6Groups(text) {
+  let head = text.toLowerCase();
+  const tail = [];
+  const lastColon = head.lastIndexOf(":");
+  const v4 = ipv4(head.slice(lastColon + 1));
+  if (v4 !== null) {
+    const parts = v4.split(".").map(Number);
+    tail.push(parts[0] * 256 + parts[1], parts[2] * 256 + parts[3]);
+    head = head.slice(0, lastColon + 1);
+    if (!head.endsWith("::")) head = head.slice(0, -1);
+  }
+  const halves = head.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part) => {
+    if (part === "") return [];
+    const groups = part.split(":");
+    for (const g of groups) if (!HEX_GROUP.test(g)) return null;
+    return groups.map((g) => Number.parseInt(g, 16));
+  };
+  const left = parse(halves[0]);
+  const right = halves.length === 2 ? parse(halves[1]) : [];
+  if (!left || !right) return null;
+  const given = left.length + right.length + tail.length;
+  if (halves.length === 1) return given === 8 ? left.concat(tail) : null;
+  if (given > 7) return null;
+  const zeros = [];
+  for (let i = given; i < 8; i++) zeros.push(0);
+  return left.concat(zeros, right, tail);
+}
+function isIpv4Mapped(groups) {
+  for (let i = 0; i < 5; i++) if (groups[i] !== 0) return false;
+  return groups[5] === 65535;
+}
+function networkOf(ip) {
+  let text = ip.trim();
+  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(text);
+  if (bracketed) text = bracketed[1];
+  else if (/^[\d.]+:\d+$/.test(text)) text = text.slice(0, text.indexOf(":"));
+  const zone = text.indexOf("%");
+  if (zone !== -1) text = text.slice(0, zone);
+  if (text.indexOf(":") === -1) return ipv4(text);
+  const groups = ipv6Groups(text);
+  if (!groups) return null;
+  if (isIpv4Mapped(groups))
+    return [
+      groups[6] >> 8,
+      groups[6] & 255,
+      groups[7] >> 8,
+      groups[7] & 255
+    ].join(".");
+  return `${groups.slice(0, 4).map((g) => g.toString(16)).join(":")}::/64`;
+}
+function networkHash(sha256, salt, ip) {
+  const network = networkOf(ip);
+  return network === null ? null : sha256(`${salt}:${network}`);
+}
+function withoutStale(hashes, now) {
+  const cutoff = now - IP_HASH_DAYS * DAY_MS;
+  let changed2 = false;
+  const next = {};
+  for (const hash of Object.keys(hashes)) {
+    if (hashes[hash] > cutoff) next[hash] = hashes[hash];
+    else changed2 = true;
+  }
+  return changed2 ? next : hashes;
+}
+function viewOf2(ban) {
+  return {
+    banId: ban.banId,
+    userId: ban.userId,
+    networks: ban.hashes.length,
+    bannedAt: ban.bannedAt,
+    liftedAt: ban.liftedAt
+  };
+}
+var SERVER_ONLY = { permissionRead: 0, permissionWrite: 0 };
+function readIpHashes(nk, userId) {
+  const objects = nk.storageRead([
+    { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
+  ]);
+  return objects.length === 0 ? {} : objects[0].value;
+}
+function writeIpHashes(nk, userId, hashes) {
+  if (Object.keys(hashes).length === 0) {
+    nk.storageDelete([
+      { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
+    ]);
+    return;
+  }
+  nk.storageWrite([
+    __spreadValues({
+      collection: IP_HASHES_COLLECTION,
+      key: IP_HASHES_KEY,
+      userId,
+      value: hashes
+    }, SERVER_ONLY)
+  ]);
+}
+function readNetworkBan(nk, banId) {
+  const objects = nk.storageRead([
+    { collection: NETWORK_BANS_COLLECTION, key: banId, userId: SYSTEM_USER_ID }
+  ]);
+  return objects.length === 0 ? null : objects[0].value;
+}
+function writeNetworkBan(nk, ban) {
+  nk.storageWrite([
+    __spreadValues({
+      collection: NETWORK_BANS_COLLECTION,
+      key: ban.banId,
+      userId: SYSTEM_USER_ID,
+      value: ban
+    }, SERVER_ONLY)
+  ]);
+}
+function readIndex(nk, hash) {
+  const objects = nk.storageRead([
+    {
+      collection: NETWORK_BAN_INDEX_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID
+    }
+  ]);
+  return objects.length === 0 ? [] : objects[0].value.banIds || [];
+}
+function writeIndex2(nk, hash, banIds) {
+  if (banIds.length === 0) {
+    nk.storageDelete([
+      {
+        collection: NETWORK_BAN_INDEX_COLLECTION,
+        key: hash,
+        userId: SYSTEM_USER_ID
+      }
+    ]);
+    return;
+  }
+  const value = { banIds };
+  nk.storageWrite([
+    __spreadValues({
+      collection: NETWORK_BAN_INDEX_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID,
+      value
+    }, SERVER_ONLY)
+  ]);
+}
+function clientNetworkHash(ctx, nk, settings) {
+  const salt = ctx.env.IP_HASH_SALT;
+  if (!settings.networkBans || !salt || !ctx.clientIp) return null;
+  return networkHash((input) => nk.sha256Hash(input), salt, ctx.clientIp);
+}
+function recordNetworkLogin(nk, userId, hash, now) {
+  const hashes = __spreadValues({}, withoutStale(readIpHashes(nk, userId), now));
+  hashes[hash] = now;
+  writeIpHashes(nk, userId, hashes);
+}
+function isNetworkBanned(nk, hash) {
+  return readIndex(nk, hash).length > 0;
+}
+function banNetworks(nk, settings, userId, ban, now) {
+  if (!settings.networkBans || ban.expiresAt !== null) return false;
+  if (readNetworkBan(nk, ban.banId)) return false;
+  const hashes = Object.keys(withoutStale(readIpHashes(nk, userId), now));
+  writeNetworkBan(nk, {
+    banId: ban.banId,
+    userId,
+    hashes,
+    bannedAt: now,
+    liftedAt: null
+  });
+  for (const hash of hashes) {
+    const banIds = readIndex(nk, hash);
+    if (banIds.indexOf(ban.banId) === -1)
+      writeIndex2(nk, hash, banIds.concat([ban.banId]));
+  }
+  return true;
+}
+function liftNetworkBan(nk, banId, now) {
+  const ban = readNetworkBan(nk, banId);
+  if (!ban || ban.liftedAt !== null) return false;
+  for (const hash of ban.hashes)
+    writeIndex2(
+      nk,
+      hash,
+      readIndex(nk, hash).filter((id) => id !== banId)
+    );
+  writeNetworkBan(nk, __spreadProps(__spreadValues({}, ban), { hashes: [], liftedAt: now }));
+  return true;
+}
+function listNetworkBans(nk) {
+  const bans = [];
+  forEachStored(nk, SYSTEM_USER_ID, NETWORK_BANS_COLLECTION, (o) => {
+    bans.push(o.value);
+  });
+  return bans;
+}
+function networkBansFor(nk, userId) {
+  const own = readIpHashes(nk, userId);
+  return listNetworkBans(nk).filter(
+    (ban) => ban.userId === userId || ban.hashes.some((hash) => hash in own)
+  ).map(viewOf2);
+}
+function purgeIpHashes(nk, now, max) {
+  let deleted = 0;
+  let seen = 0;
+  const more = forEachStored(nk, null, IP_HASHES_COLLECTION, (o) => {
+    if (seen >= max) return "stop";
+    seen++;
+    const before = o.value;
+    const after = withoutStale(before, now);
+    if (after === before) return;
+    deleted += Object.keys(before).length - Object.keys(after).length;
+    writeIpHashes(nk, o.userId, after);
+  });
+  return { deleted, more };
+}
+function requireIpHashSalt(settings, env) {
+  if (settings.networkBans && !env.IP_HASH_SALT)
+    throw new Error("IP_HASH_SALT must be set on the Official server");
+}
+
+// src/player/session.ts
+function isPlayerSync(value) {
+  return typeof value.playerId === "string" && Array.isArray(value.bans);
+}
+function fetchSync(ctx, logger, nk, userId, steamIdHash2, steamName) {
+  const reply = callExpress(nk, logger, ctx.env, "/player-sync", { steamIdHash: steamIdHash2, nakamaUserId: userId, steamName });
+  if (!reply || reply.status !== 200 || !isPlayerSync(reply.body)) {
+    logger.warn("Player sync for %s failed (HTTP %v); retrying next login", userId, reply && reply.status);
+    return null;
+  }
+  return reply.body;
+}
+function resolveMutes(ctx, logger, nk, profile) {
+  const reply = callExpress(nk, logger, ctx.env, "/resolve-players", { playerIds: profile.unresolvedMutedPlayerIds });
+  const resolved = reply && reply.status === 200 ? reply.body.resolved : null;
+  return resolved && typeof resolved === "object" ? resolved : {};
+}
+function withResolvedMutes(profile, resolved) {
+  const found = profile.unresolvedMutedPlayerIds.filter((id) => typeof resolved[id] === "string");
+  if (found.length === 0) return profile;
+  const muted = profile.mutedUserIds.slice();
+  for (const id of found) if (muted.indexOf(resolved[id]) === -1) muted.push(resolved[id]);
+  return __spreadProps(__spreadValues({}, profile), {
+    mutedUserIds: muted,
+    unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
+  });
+}
+function loginResponse(userId, profile, config, settings) {
+  const tosRequired = settings.noticeRequired && profile.tosAcceptedVersion < NOTICE_VERSION;
+  return {
+    tosRequired,
+    // An update to a Notice the player accepted before (only with tosRequired).
+    tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
+    // The age question is still open (with tosRequired, inside the Notice).
+    ageRequired: !profile.ageAnswered,
+    player: playerView(userId, profile),
+    serverConfig: clientConfig(config)
+  };
+}
+function syncDisplayName(nk, userId, profile) {
+  const name = displayNameOf(profile);
+  if (nk.accountGetId(userId).user.displayName !== name)
+    nk.accountUpdateId(userId, null, name, null, null, null, null, null);
+}
+function rpcSessionInit(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  noteReturn(nk, logger, userId, Date.now());
+  const steamName = cleanName(parsePayload(payload).steamName) || ctx.username;
+  const stored = readProfile(nk, userId, steamName);
+  const steamIdHash2 = steamIdHashOf(nk, userId);
+  let sync = null;
+  let resolved = {};
+  if (!stored || !stored.profile.synced) {
+    if (steamIdHash2) sync = fetchSync(ctx, logger, nk, userId, steamIdHash2, steamName);
+  } else if (stored.profile.unresolvedMutedPlayerIds.length > 0) {
+    resolved = resolveMutes(ctx, logger, nk, stored.profile);
+  }
+  const unlocked = sync ? progressFor(nk, userId).unlocked : [];
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      let next = __spreadProps(__spreadValues({}, current), { steamName, nakamaLogin: true });
+      if (sync) next = withSync(next, sync, unlocked);
+      else if (!steamIdHash2) next.synced = true;
+      return withResolvedMutes(next, resolved);
+    },
+    steamName
+  );
+  if (sync) {
+    let bans = readBans(nk, userId);
+    const synced = bansFromList(sync.bans);
+    for (const type of BAN_TYPES) {
+      const ban = synced[type];
+      if (ban) bans = withBan(bans, type, ban);
+    }
+    writeBans(nk, userId, bans);
+    logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
+  }
+  const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
+  if (accountBan) {
+    enforceAccountBan(nk, userId, accountBan);
+    banNetworks(nk, settingsOf(ctx), userId, accountBan, Date.now());
+    throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, accountBan));
+  }
+  syncDisplayName(nk, userId, profile);
+  if (profile.discordIdHash) recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
+  writeIntegrity(nk, userId, UNVERIFIED);
+  clearModReport(nk, userId);
+  return JSON.stringify(loginResponse(userId, profile, readConfig(nk), settingsOf(ctx)));
+}
+function rpcTosAccept(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const eligible = parsePayload(payload).chatEligible;
+  const config = readConfig(nk);
+  const settings = settingsOf(ctx);
+  const acceptedAt = Date.now();
+  const profile = updateProfile(
+    nk,
+    userId,
+    (current) => {
+      const next = settings.noticeRequired ? __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }) : __spreadValues({}, current);
+      if (typeof eligible === "boolean") {
+        next.ageAnswered = true;
+        next.chatEnabled = eligible;
+        next.chatBlocked = !eligible;
+      }
+      return next;
+    },
+    ctx.username
+  );
+  if (settings.noticeRequired)
+    enqueue(nk, { kind: "notice", at: acceptedAt, userId, version: NOTICE_VERSION });
+  return JSON.stringify(loginResponse(userId, profile, config, settings));
 }
 
 // src/player/rpc.ts
@@ -4872,7 +5382,7 @@ function rpcProfileSetMods(ctx, logger, nk, payload) {
   updateProfile(nk, userId, (current) => __spreadProps(__spreadValues({}, current), { mods: list }), ctx.username);
   const now = Date.now();
   writeModReport(nk, userId, { mods: list, reportedAt: now });
-  const standing = standingFor(nk, userId, now);
+  const standing = standingFor(nk, settingsOf(ctx), userId, now);
   pushToLobby(nk, userId, { mods: list, standing: standing.standing });
   return JSON.stringify({ mods: list, standing });
 }
@@ -4980,7 +5490,7 @@ function rpcAdminIntegritySet(ctx, logger, nk, payload) {
     reason: optionalString(input.reason),
     message: optionalString(input.message)
   });
-  pushToLobby(nk, userId, { standing: standingFor(nk, userId, Date.now()).standing });
+  pushToLobby(nk, userId, { standing: standingFor(nk, settingsOf(ctx), userId, Date.now()).standing });
   return JSON.stringify({});
 }
 function rpcAdminQueueCancel(ctx, logger, nk, payload) {
@@ -5058,6 +5568,7 @@ var VALID = { standing: "valid", disallowed: [], reason: null };
 function standingOf(input) {
   if (input.verified) return VERIFIED;
   if (!input.report) return { standing: "none", disallowed: [], reason: "unreported" };
+  if (input.allowedIds === "any") return VALID;
   const disallowed = disallowedMods(input.report.mods, input.allowedIds);
   if (disallowed.length > 0) return { standing: "none", disallowed, reason: "mods_not_allowed" };
   return VALID;
@@ -5071,18 +5582,18 @@ function requiredStandingFor(ranked, integrityEnforced) {
 }
 
 // src/standing/current.ts
-function standingFor(nk, userId, now, config = readConfig(nk)) {
+function standingFor(nk, settings, userId, now, config = readConfig(nk)) {
   return standingOf({
     verified: isVerified(readIntegrity(nk, userId), now),
     report: readModReport(nk, userId),
-    allowedIds: allowedModIds(config)
+    allowedIds: settings.allowedModsChecked ? allowedModIds(config) : "any"
   });
 }
 
 // src/standing/rpc.ts
 function rpcAccountStanding(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  return JSON.stringify(standingFor(nk, userId, Date.now()));
+  return JSON.stringify(standingFor(nk, settingsOf(ctx), userId, Date.now()));
 }
 
 // src/achievements/rpc.ts
@@ -5099,7 +5610,7 @@ function catalogView(progress, holdings, selected, enabled) {
     enabled
   };
 }
-function viewOf2(nk, userId, fallbackName) {
+function viewOf3(nk, userId, fallbackName) {
   const profile = profileFor(nk, userId, fallbackName);
   const progress = progressFor(nk, userId);
   const holdings = { privileges: profile.privileges, unlocked: progress.unlocked };
@@ -5107,7 +5618,7 @@ function viewOf2(nk, userId, fallbackName) {
 }
 function rpcAvatarCatalog(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  return JSON.stringify(viewOf2(nk, userId, ctx.username));
+  return JSON.stringify(viewOf3(nk, userId, ctx.username));
 }
 function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -5116,7 +5627,7 @@ function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   if (input.userId !== void 0) {
     if (typeof input.userId !== "string" || !USER_ID2.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
     if (!readProfile(nk, input.userId)) throw runtimeError(NOT_FOUND, "No such player");
-    view = viewOf2(nk, input.userId, "");
+    view = viewOf3(nk, input.userId, "");
   } else {
     const privileges = input.privileges;
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
@@ -5127,7 +5638,7 @@ function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   return JSON.stringify(__spreadProps(__spreadValues({}, view), { jokers: view.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
 }
 function testingRpcsAllowed(ctx) {
-  return ctx.env.ALLOW_DEVICE_AUTH === "true";
+  return settingsOf(ctx).testingRpcs;
 }
 var isFields = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 var isCount = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -5183,664 +5694,6 @@ function rpcAdminProgressSet(ctx, logger, nk, payload) {
   const { after } = updateProgress(nk, userId, (progress) => editedProgress(input.reset === true ? emptyProgress() : progress, input));
   logger.info("Achievement progress of %s set for testing", userId);
   return JSON.stringify({ progress: after });
-}
-
-// src/achievements/reset.ts
-var PAGE = 100;
-function parseCursor(value) {
-  if (value === void 0 || value === "") return { phase: "profiles", cursor: "" };
-  if (typeof value === "string") {
-    const at = value.indexOf(":");
-    const phase = value.slice(0, at);
-    if (at > 0 && (phase === "profiles" || phase === "progress")) return { phase, cursor: value.slice(at + 1) };
-  }
-  throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-}
-function cursorOf(position) {
-  return position ? `${position.phase}:${position.cursor}` : "";
-}
-function keepsJoker(joker, privileges) {
-  return isSelectable(joker, { privileges, unlocked: [] });
-}
-function listPage(nk, collection, cursor) {
-  try {
-    return nk.storageList(null, collection, PAGE, cursor);
-  } catch (e) {
-    if (cursor !== "") throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
-    throw e;
-  }
-}
-function rpcAdminAvatarsReset(ctx, logger, nk, payload) {
-  requireServer(ctx);
-  const input = parsePayload(payload);
-  const position = parseCursor(input.cursor);
-  if (input.dryRun !== void 0 && typeof input.dryRun !== "boolean") throw runtimeError(INVALID_ARGUMENT, "dryRun must be a boolean");
-  const dryRun = input.dryRun === true;
-  let checked = 0;
-  let jokersReset = 0;
-  let progressDeleted = 0;
-  let next;
-  if (position.phase === "profiles") {
-    const page = listPage(nk, PLAYER_COLLECTION, position.cursor);
-    for (const object of page.objects || []) {
-      if (object.key !== PROFILE_KEY) continue;
-      checked++;
-      const stored = profileOf(object.value, "");
-      if (keepsJoker(stored.preferredJoker, stored.privileges)) continue;
-      jokersReset++;
-      if (dryRun) continue;
-      const profile = updateProfile(
-        nk,
-        object.userId,
-        (current) => keepsJoker(current.preferredJoker, current.privileges) ? current : __spreadProps(__spreadValues({}, current), { preferredJoker: DEFAULT_AVATAR })
-      );
-      profileChanged(nk, object.userId, profile);
-    }
-    next = page.cursor ? { phase: "profiles", cursor: page.cursor } : { phase: "progress", cursor: "" };
-  } else {
-    const page = listPage(nk, PROGRESS_COLLECTION, position.cursor);
-    for (const object of page.objects || []) {
-      progressDeleted++;
-      if (!dryRun) deleteProgress(nk, object.userId);
-    }
-    next = page.cursor ? { phase: "progress", cursor: dryRun ? page.cursor : "" } : null;
-  }
-  logger.info("Avatar reset%s: %d checked, %d jokers reset, %d progress deleted", dryRun ? " (dry run)" : "", checked, jokersReset, progressDeleted);
-  return JSON.stringify({ dryRun, checked, jokersReset, progressDeleted, cursor: cursorOf(next) });
-}
-
-// src/matchmaking/group/binding.ts
-var BINDING_COLLECTION = "group_parties";
-var MEMBER_COLLECTION = "group_member";
-var MEMBER_KEY = "current";
-var PARTY_STREAM = 7;
-var REMOVED_PREFIX = "removed:";
-function bindingKey(partyId) {
-  return { collection: BINDING_COLLECTION, key: partyId, userId: SYSTEM_USER_ID };
-}
-function memberKey(userId) {
-  return { collection: MEMBER_COLLECTION, key: MEMBER_KEY, userId };
-}
-function writeBinding(nk, binding) {
-  const write3 = (key, value) => __spreadProps(__spreadValues({}, key), { value, permissionRead: 0, permissionWrite: 0 });
-  nk.storageWrite(
-    [write3(bindingKey(binding.partyId), __spreadValues({}, binding))].concat(
-      binding.memberIds.map((id) => write3(memberKey(id), { partyId: binding.partyId, homeCode: binding.homeCode }))
-    )
-  );
-}
-function readBinding(nk, partyId) {
-  const objects = nk.storageRead([bindingKey(partyId)]);
-  return objects.length > 0 ? objects[0].value : null;
-}
-function deleteBinding(nk, partyId, memberIds) {
-  const pointers = nk.storageRead(memberIds.map(memberKey)).filter((o) => o.value.partyId === partyId);
-  nk.storageDelete([bindingKey(partyId)].concat(pointers.map((o) => memberKey(o.userId))));
-}
-function signalHome(nk, homeCode, signal2) {
-  const entry = lookupCode(nk, homeCode);
-  if (!entry) return null;
-  return nk.matchSignal(entry.matchId, JSON.stringify(signal2));
-}
-function statusOf(nk, partyId) {
-  const binding = readBinding(nk, partyId);
-  if (!binding) return null;
-  const reply = signalHome(nk, binding.homeCode, { type: "group_status", partyId });
-  const status = reply ? JSON.parse(reply) : null;
-  if (!status) {
-    deleteBinding(nk, partyId, binding.memberIds);
-    return null;
-  }
-  return { status, binding };
-}
-function groupOf(nk, userId) {
-  const objects = nk.storageRead([memberKey(userId)]);
-  if (objects.length === 0) return null;
-  const found = statusOf(nk, String(objects[0].value.partyId));
-  if (!found || found.status.memberIds.indexOf(userId) === -1) {
-    nk.storageDelete([memberKey(userId)]);
-    return null;
-  }
-  return found.status;
-}
-function partyStream(partyId) {
-  const dot = partyId.indexOf(".");
-  return { mode: PARTY_STREAM, subject: partyId.slice(0, dot), label: partyId.slice(dot + 1) };
-}
-function partyPresences(nk, partyId) {
-  if (partyId.indexOf(".") === -1) return [];
-  return nk.streamUserList(partyStream(partyId), true, true);
-}
-function dissolveParty(nk, partyId) {
-  const stream = partyStream(partyId);
-  for (const p of partyPresences(nk, partyId)) {
-    const node = p.node || p.nodeId || stream.label;
-    nk.streamUserKick({ userId: p.userId, sessionId: p.sessionId, node }, stream);
-  }
-}
-function markTicketRemoved(nk, ticket) {
-  nk.storageWrite([
-    {
-      collection: BINDING_COLLECTION,
-      key: REMOVED_PREFIX + ticket,
-      userId: SYSTEM_USER_ID,
-      value: { at: Date.now() },
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-function takeTicketRemoved(nk, ticket) {
-  const key = { collection: BINDING_COLLECTION, key: REMOVED_PREFIX + ticket, userId: SYSTEM_USER_ID };
-  if (nk.storageRead([key]).length === 0) return false;
-  nk.storageDelete([key]);
-  return true;
-}
-
-// src/matchmaking/gate.ts
-function queueRefusalFor(nk, userId, ranked, now) {
-  const config = readConfig(nk);
-  const access = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
-  if (access) return { code: "access_denied", message: access };
-  if (ranked && integrityRefusal(config, readIntegrity(nk, userId), now)) return { code: "integrity_required" };
-  return standingRefusal(standingFor(nk, userId, now, config));
-}
-function matchmakerAdd(envelope) {
-  return envelope.matchmakerAdd || envelope.matchmaker_add || {};
-}
-function stringProperties(envelope) {
-  const add = matchmakerAdd(envelope);
-  return add.stringProperties || add.string_properties || {};
-}
-var IN_GROUP_QUEUE = "You are queueing with your lobby.";
-function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
-  if (!ctx.userId) return envelope;
-  const props = stringProperties(envelope);
-  const unpinned = ticketQueryRefusal(matchmakerAdd(envelope).query, props);
-  if (unpinned) throw runtimeError(INVALID_ARGUMENT, TICKET_QUERY_MESSAGES[unpinned]);
-  const ranked = props.kind === "ranked";
-  const refused = queueRefusalFor(nk, ctx.userId, ranked, Date.now());
-  if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused));
-  const group = groupOf(nk, ctx.userId);
-  if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE);
-  if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
-  return envelope;
-}
-function refusedMemberOf(player) {
-  return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) };
-}
-function refusedPlayers(nk, plan) {
-  const now = Date.now();
-  const ranked = plan.rankedMode !== "";
-  const out = [];
-  for (const userId of plan.playerIds) {
-    const refusal = queueRefusalFor(nk, userId, ranked, now);
-    if (refusal) out.push({ userId, refusal });
-  }
-  return out;
-}
-function cancelSoloQueue(nk, userId, modId, mode, refusal) {
-  notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
-    modId,
-    mode,
-    reason: queueRefusalMessage(refusal),
-    code: refusal.code,
-    mods: refusedMods(refusal),
-    requeue: false
-  });
-}
-function requeueSolos(nk, plan, refused) {
-  const mode = plan.rankedMode !== "" ? plan.rankedMode : plan.gameMode;
-  const grouped = plan.groups.reduce((ids, g) => ids.concat(g.memberIds), []);
-  for (const id of plan.playerIds) {
-    if (grouped.indexOf(id) !== -1) continue;
-    const own = refused.filter((r) => r.userId === id)[0];
-    if (own) {
-      if (isStandingRefusal(own.refusal)) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal);
-      continue;
-    }
-    notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
-      modId: plan.modId,
-      mode,
-      reason: "A matched player can no longer play",
-      requeue: true
-    });
-  }
-}
-
-// src/matchmaking/group/teams.ts
-function partitionTeams(groups) {
-  const total = groups.reduce((n, g) => n + g.length, 0);
-  if (total % 2 !== 0) return err("odd_players");
-  const half = total / 2;
-  const order = groups.map((members, index) => ({ members, index })).sort((a, b) => b.members.length - a.members.length || a.index - b.index);
-  const reach = [[]];
-  for (let s = 1; s <= half; s++) reach.push(null);
-  for (let i = 0; i < order.length; i++) {
-    const size = order[i].members.length;
-    for (let s = half; s >= size; s--) {
-      const from = reach[s - size];
-      if (reach[s] === null && from !== null && from.indexOf(i) === -1) reach[s] = from.concat([i]);
-    }
-  }
-  const chosen = reach[half];
-  if (chosen === null) return err("groups_unsplittable");
-  const first = [];
-  const second = [];
-  order.forEach((g, i) => {
-    const team = chosen.indexOf(i) !== -1 ? first : second;
-    for (const id of g.members) team.push(id);
-  });
-  return ok([first, second]);
-}
-
-// src/matchmaking/queue.ts
-var QUEUE_COLLECTION = "queue_presence";
-var QUEUE_STALE_MS = 30 * 6e4;
-var LIST_PAGE2 = 100;
-var MATCH_LIST_LIMIT = 100;
-var NOTIFICATIONS_STREAM = 0;
-var TOMBSTONE_MS = 6e4;
-var MOD_ID_PATTERN3 = /^[A-Za-z0-9_.-]{1,64}$/;
-function recordKey(modId, gameMode) {
-  return modId + ":" + gameMode;
-}
-function field(obj, camel, snake) {
-  if (!obj || typeof obj !== "object") return void 0;
-  const o = obj;
-  return o[camel] !== void 0 ? o[camel] : o[snake];
-}
-function recordOf(input, output, sessionId, now) {
-  const add = field(input, "matchmakerAdd", "matchmaker_add");
-  const props = field(add, "stringProperties", "string_properties") || {};
-  const ticket = field(field(output, "matchmakerTicket", "matchmaker_ticket"), "ticket", "ticket");
-  const modId = props.modId;
-  const mode = props.mode;
-  if (typeof ticket !== "string" || typeof modId !== "string" || typeof mode !== "string") return null;
-  if (!MOD_ID_PATTERN3.test(modId) || !MOD_ID_PATTERN3.test(mode)) return null;
-  const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
-  return { modId, gameMode, ticket, sessionId, at: now };
-}
-function countQueues(modId, records, labels, now) {
-  const gameModes = {};
-  const entry = (mode) => gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 };
-  for (const r of records) {
-    if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue;
-    entry(r.gameMode).queued++;
-  }
-  for (const raw of labels) {
-    let label;
-    try {
-      label = JSON.parse(raw);
-    } catch (e) {
-      continue;
-    }
-    if (!label || label.modId !== modId || label.type !== "public" || !label.mode || !(label.size > 0)) continue;
-    entry(label.mode).inMatch += label.size;
-  }
-  return { modId, gameModes };
-}
-function deleteRecords(nk, userId, keys) {
-  if (keys.length === 0) return;
-  nk.storageDelete(keys.map((key) => ({ collection: QUEUE_COLLECTION, key, userId })));
-}
-function ownRecords(nk, userId) {
-  const out = [];
-  let cursor = "";
-  do {
-    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE2, cursor);
-    for (const o of page.objects || []) out.push(o);
-    cursor = page.cursor || "";
-  } while (cursor);
-  return out;
-}
-var REMOVED_PREFIX2 = "removed:";
-function isRecord(o) {
-  return o.key.indexOf(REMOVED_PREFIX2) !== 0;
-}
-function afterMatchmakerAdd(ctx, logger, nk, output, input) {
-  if (!ctx.userId) return;
-  const record = recordOf(input, output, ctx.sessionId || "", Date.now());
-  if (!record) return;
-  const tombstone = REMOVED_PREFIX2 + record.ticket;
-  const removed = nk.storageRead([{ collection: QUEUE_COLLECTION, key: tombstone, userId: ctx.userId }]);
-  if (removed.length > 0) {
-    deleteRecords(nk, ctx.userId, [tombstone]);
-    return;
-  }
-  nk.storageWrite([
-    {
-      collection: QUEUE_COLLECTION,
-      key: recordKey(record.modId, record.gameMode),
-      userId: ctx.userId,
-      value: __spreadValues({}, record),
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-function beforeMatchmakerRemove(ctx, logger, nk, envelope) {
-  const ticket = field(field(envelope, "matchmakerRemove", "matchmaker_remove"), "ticket", "ticket");
-  if (!ctx.userId || typeof ticket !== "string" || !ticket) return envelope;
-  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord(o) && o.value.ticket === ticket).map((o) => o.key);
-  if (keys.length > 0) {
-    deleteRecords(nk, ctx.userId, keys);
-  } else {
-    nk.storageWrite([
-      {
-        collection: QUEUE_COLLECTION,
-        key: REMOVED_PREFIX2 + ticket,
-        userId: ctx.userId,
-        value: { at: Date.now() },
-        permissionRead: 0,
-        permissionWrite: 0
-      }
-    ]);
-  }
-  return envelope;
-}
-function clearMatched(nk, modId, gameMode, userIds) {
-  for (const userId of userIds) deleteRecords(nk, userId, [recordKey(modId, gameMode)]);
-}
-function writeGroupRecords(nk, record, members) {
-  if (members.length === 0) return;
-  nk.storageWrite(
-    members.map((m) => ({
-      collection: QUEUE_COLLECTION,
-      key: recordKey(record.modId, record.gameMode),
-      userId: m.userId,
-      value: __spreadProps(__spreadValues({}, record), { sessionId: m.sessionId }),
-      permissionRead: 0,
-      permissionWrite: 0
-    }))
-  );
-}
-function sessionsOf(nk, userId) {
-  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
-}
-function liveTicketHolders(nk, userIds, exceptTicket, now) {
-  return userIds.filter((userId) => {
-    const records = ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => r.ticket !== exceptTicket && now - r.at <= QUEUE_STALE_MS);
-    if (records.length === 0) return false;
-    const sessions = sessionsOf(nk, userId);
-    return records.some((r) => sessions.indexOf(r.sessionId) !== -1);
-  });
-}
-function liveRecordsOf(nk, userId, now) {
-  const sessions = sessionsOf(nk, userId);
-  return ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => now - r.at <= QUEUE_STALE_MS && sessions.indexOf(r.sessionId) !== -1);
-}
-function liveQueuedPlayers(nk, modId, now) {
-  const byUser = {};
-  let cursor = "";
-  do {
-    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE2, cursor);
-    for (const o of page.objects || []) {
-      if (!isRecord(o)) {
-        if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
-        continue;
-      }
-      if (modId !== null && o.value.modId !== modId) continue;
-      (byUser[o.userId] = byUser[o.userId] || []).push(o);
-    }
-    cursor = page.cursor || "";
-  } while (cursor);
-  const live = [];
-  for (const userId in byUser) {
-    const sessions = sessionsOf(nk, userId);
-    const dead = [];
-    for (const o of byUser[userId]) {
-      const record = o.value;
-      if (sessions.indexOf(record.sessionId) === -1) dead.push(o.key);
-      else live.push({ userId, record });
-    }
-    deleteRecords(nk, userId, dead);
-  }
-  return live;
-}
-function liveRecords(nk, modId, now) {
-  return liveQueuedPlayers(nk, modId, now).map((q) => q.record);
-}
-function rpcQueueCounts(ctx, logger, nk, payload) {
-  const modId = parsePayload(payload).modId;
-  if (typeof modId !== "string" || !MOD_ID_PATTERN3.test(modId))
-    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
-  const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
-  const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
-  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()));
-}
-
-// src/matchmaking/matched.ts
-function queueKey(mode, kind) {
-  return kind === "ranked" ? "ranked:" + mode : mode;
-}
-var NAME_PATTERN2 = /^[A-Za-z0-9_.-]{1,64}$/;
-function groupsOf(entries) {
-  const party = [];
-  const all = [];
-  for (const entry of entries) {
-    const size = entry.properties[GROUP_SIZE_PROPERTY];
-    if (!entry.partyId) {
-      if (size !== void 0 && size !== 1) return "A solo ticket claims a group";
-      all.push([entry.presence.userId]);
-      continue;
-    }
-    let group = party.filter((g) => g.partyId === entry.partyId)[0];
-    if (!group) {
-      group = { partyId: entry.partyId, memberIds: [] };
-      party.push(group);
-      all.push(group.memberIds);
-    }
-    group.memberIds.push(entry.presence.userId);
-  }
-  for (const group of party) {
-    for (const entry of entries) {
-      if (entry.partyId === group.partyId && entry.properties[GROUP_SIZE_PROPERTY] !== group.memberIds.length)
-        return "A group ticket disagrees with its group size";
-    }
-  }
-  return { party, all };
-}
-function planMatch(entries, integrityEnforced = false) {
-  if (entries.length < 2) return "A match needs at least two players";
-  const first = entries[0].properties;
-  const modId = first.modId;
-  const mode = first.mode;
-  const kind = first.kind === "ranked" ? "ranked" : "casual";
-  const teams = first[TEAMS_PROPERTY] === 1;
-  if (typeof modId !== "string" || typeof mode !== "string" || !NAME_PATTERN2.test(modId) || !NAME_PATTERN2.test(mode))
-    return "Ticket has no valid modId and mode";
-  const ids = [];
-  for (const entry of entries) {
-    const p = entry.properties;
-    if (p.modId !== modId || p.mode !== mode || (p.kind === "ranked" ? "ranked" : "casual") !== kind)
-      return "Tickets disagree on what they queued for";
-    if (p[TEAMS_PROPERTY] === 1 !== teams) return "Tickets disagree on Teams";
-    if (ids.indexOf(entry.presence.userId) !== -1)
-      return "A player is in the match twice";
-    ids.push(entry.presence.userId);
-  }
-  const groups = groupsOf(entries);
-  if (typeof groups === "string") return groups;
-  if (groups.party.length > 0 && kind === "ranked") return "A group may not queue ranked";
-  let teamPlan = null;
-  if (teams) {
-    const split = partitionTeams(groups.all);
-    if (!split.ok) return "Teams cannot be split: " + split.error;
-    teamPlan = split.value;
-  }
-  return {
-    modId,
-    rankedMode: kind === "ranked" ? mode : "",
-    gameMode: queueKey(mode, kind),
-    playerIds: ids,
-    groups: groups.party,
-    teamPlan,
-    requiredStanding: requiredStandingFor(kind === "ranked", integrityEnforced)
-  };
-}
-function matchmakerMatched(ctx, logger, nk, matches) {
-  const plan = planMatch(matches, readConfig(nk).integrityEnforced);
-  if (typeof plan === "string") {
-    logger.warn("Matchmaker group refused: %s", plan);
-    requeuePartiesOf(nk, partyIdsOf(matches));
-    throw new Error(plan);
-  }
-  const refused = refusedPlayers(nk, plan);
-  const groups = resolveGroups(nk, plan);
-  if (refused.length > 0 || groups.faulty.length > 0) {
-    refuseMatch(nk, plan, refused, groups);
-    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
-    logger.warn(
-      "Matched group refused: %d player(s) may not queue, %d group(s) not queueing",
-      refused.length,
-      groups.faulty.length
-    );
-    throw new Error("A matched player may not queue");
-  }
-  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
-    const code = generateCode(MATCHMADE_CODE_LENGTH);
-    if (!reserveCode(nk, code, plan.modId)) continue;
-    let matchId;
-    try {
-      matchId = nk.matchCreate(LOBBY_MATCH, {
-        code,
-        modId: plan.modId,
-        maxPlayers: plan.playerIds.length,
-        creatorId: plan.playerIds[0],
-        rankedMode: plan.rankedMode,
-        allowedIds: plan.playerIds.join(","),
-        gameMode: plan.gameMode,
-        groups: groups.homes.length > 0 ? JSON.stringify(groups.homes) : "",
-        teamPlan: plan.teamPlan ? JSON.stringify(plan.teamPlan) : "",
-        requiredStanding: plan.requiredStanding
-      });
-    } catch (e) {
-      releaseCode(nk, code, "");
-      throw e;
-    }
-    bindCode(nk, code, matchId, plan.modId);
-    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
-    for (const home of groups.homes) announceMatched(nk, home, matchId, code);
-    logger.info(
-      "Matchmaker made lobby %s for %d players (%s%s)",
-      code,
-      plan.playerIds.length,
-      plan.modId,
-      plan.rankedMode ? ", ranked " + plan.rankedMode : ""
-    );
-    return matchId;
-  }
-  throw new Error("Could not allocate a lobby code");
-}
-function partyIdsOf(matches) {
-  const ids = [];
-  for (const m of matches) if (m.partyId && ids.indexOf(m.partyId) === -1) ids.push(m.partyId);
-  return ids;
-}
-function refuseMatch(nk, plan, refused, groups) {
-  requeueSolos(nk, plan, refused);
-  for (const home of groups.homes) {
-    const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0];
-    if (member) cancelGroupFor(nk, home.homeCode, home.partyId, "member_refused", refusedMemberOf(member));
-    else requeueGroup(nk, home);
-  }
-  for (const fault of groups.faulty) {
-    if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, "match_refused");
-  }
-}
-
-// src/matchmaking/group/matched.ts
-function sameMembers2(a, b) {
-  return a.length === b.length && a.every((id) => b.indexOf(id) !== -1);
-}
-function groupFits(status, group, plan) {
-  return status !== null && status.phase === "queued" && status.modId === plan.modId && queueKey(status.mode, "casual") === plan.gameMode && sameMembers2(status.memberIds, group.memberIds);
-}
-function resolveGroups(nk, plan) {
-  const resolved = { homes: [], faulty: [] };
-  for (const group of plan.groups) {
-    const found = statusOf(nk, group.partyId);
-    if (found && groupFits(found.status, group, plan))
-      resolved.homes.push({ partyId: group.partyId, homeCode: found.binding.homeCode, memberIds: group.memberIds });
-    else resolved.faulty.push({ partyId: group.partyId, binding: found ? found.binding : null });
-  }
-  return resolved;
-}
-function tell(nk, homeCode, signal2) {
-  signalHome(nk, homeCode, signal2);
-}
-function requeueGroup(nk, home) {
-  tell(nk, home.homeCode, { type: "group_requeue", partyId: home.partyId });
-}
-function cancelGroupFor(nk, homeCode, partyId, reason, refused) {
-  tell(nk, homeCode, refused ? { type: "group_cancel", partyId, reason, refused } : { type: "group_cancel", partyId, reason });
-}
-function announceMatched(nk, home, matchId, code) {
-  tell(nk, home.homeCode, { type: "group_matched", partyId: home.partyId, matchId, code });
-}
-function requeuePartiesOf(nk, partyIds) {
-  for (const partyId of partyIds) {
-    const binding = readBinding(nk, partyId);
-    if (!binding) continue;
-    const found = statusOf(nk, partyId);
-    if (!found || found.status.phase !== "queued") continue;
-    clearMatched(nk, binding.modId, queueKey(found.status.mode, "casual"), found.status.memberIds);
-    requeueGroup(nk, { partyId, homeCode: binding.homeCode, memberIds: found.status.memberIds });
-  }
-}
-
-// src/standing/changed.ts
-var NOTIFICATIONS_STREAM2 = 0;
-var RANKED_PREFIX = "ranked:";
-function isOnline(nk, userId) {
-  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM2, subject: userId }, true, true).length > 0;
-}
-function announceStandings(nk, now) {
-  const config = readConfig(nk);
-  let told = 0;
-  for (const userId of reporterIds(nk)) {
-    if (!isOnline(nk, userId)) continue;
-    const view = standingFor(nk, userId, now, config);
-    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view));
-    pushToLobby(nk, userId, { standing: view.standing });
-    told++;
-  }
-  return told;
-}
-function regateQueued(nk, now) {
-  const cancelledParties = [];
-  let solos = 0;
-  for (const queued of liveQueuedPlayers(nk, null, now)) {
-    const { userId, record } = queued;
-    const group = groupOf(nk, userId);
-    if (group && group.phase === "queued") {
-      if (cancelledParties.indexOf(group.partyId) !== -1) continue;
-      const refusal2 = queueRefusalFor(nk, userId, false, now);
-      if (!refusal2 || !isStandingRefusal(refusal2)) continue;
-      cancelGroupFor(nk, group.homeCode, group.partyId, "member_refused", refusedMemberOf({ userId, refusal: refusal2 }));
-      cancelledParties.push(group.partyId);
-      continue;
-    }
-    const ranked = record.gameMode.indexOf(RANKED_PREFIX) === 0;
-    const refusal = queueRefusalFor(nk, userId, ranked, now);
-    if (!refusal || !isStandingRefusal(refusal)) continue;
-    const mode = ranked ? record.gameMode.slice(RANKED_PREFIX.length) : record.gameMode;
-    cancelSoloQueue(nk, userId, record.modId, mode, refusal);
-    clearMatched(nk, record.modId, record.gameMode, [userId]);
-    solos++;
-  }
-  return { solos, groups: cancelledParties.length };
-}
-function standingInputsUpdated(nk, logger, now) {
-  const told = announceStandings(nk, now);
-  const cancelled = regateQueued(nk, now);
-  logger.info(
-    "Standing inputs changed: told %d player(s); cancelled %d solo ticket(s), %d group(s)",
-    told,
-    cancelled.solos,
-    cancelled.groups
-  );
 }
 
 // src/lobby/log_check.ts
@@ -6001,6 +5854,879 @@ function rpcRunsMine(ctx, logger, nk, payload) {
   });
 }
 
+// src/shared/replay/events.ts
+function eventOf(tuple) {
+  var _a;
+  if (!Array.isArray(tuple) || typeof tuple[1] !== "string") return null;
+  return { t: typeof tuple[0] === "number" ? tuple[0] : 0, opcode: tuple[1], args: (_a = tuple[2]) != null ? _a : null };
+}
+function eventsOfTuples(tuples) {
+  const events = [];
+  for (const tuple of tuples) {
+    const event2 = eventOf(tuple);
+    if (event2) events.push(event2);
+  }
+  return events;
+}
+function eventsOf2(log) {
+  if (!log) return [];
+  return eventsOfTuples(log.lines.map((line) => JSON.parse(line)));
+}
+function eventsOfStored(value) {
+  const events = value !== null && typeof value === "object" ? value.events : void 0;
+  return Array.isArray(events) ? eventsOfTuples(events) : [];
+}
+function eventsByPlayer(logs) {
+  const events = {};
+  for (const userId in logs) events[userId] = eventsOf2(logs[userId]);
+  return events;
+}
+
+// src/achievements/backfill.ts
+var BACKFILL_COLLECTION = "achievements_backfill";
+var BACKFILL_KEY = "state";
+var RUN_KEY = "run";
+var DISCORD_MILESTONE = "discordLinked";
+var PLAYER_PAGE = 20;
+var LIST_PAGE3 = 100;
+var READ_BATCH = 100;
+var byEndThenId = (a, b) => a.run.endedAt - b.run.endedAt || (a.run.runId < b.run.runId ? -1 : a.run.runId > b.run.runId ? 1 : 0);
+function backfilledProgress(before, playerId, games, privileges, discordLinked) {
+  let progress = __spreadProps(__spreadValues({}, emptyProgress()), {
+    milestones: before.milestones,
+    unlocked: before.unlocked
+  });
+  for (const game of games.slice().sort(byEndThenId))
+    progress = outcomeOf(
+      progress,
+      game.run,
+      playerId,
+      game.facts,
+      privileges
+    ).progress;
+  if (discordLinked) progress = withMilestone(progress, DISCORD_MILESTONE);
+  return __spreadProps(__spreadValues({}, withEarned(progress, privileges).progress), { backfilled: true });
+}
+function chunks(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size)
+    out.push(items.slice(i, i + size));
+  return out;
+}
+function runIdsOf(nk, userId) {
+  const ids = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(userId, MY_RUNS_COLLECTION, LIST_PAGE3, cursor);
+    for (const o of page.objects || []) {
+      const runId = o.value.runId;
+      if (typeof runId === "string") ids.push(runId);
+    }
+    cursor = page.cursor || "";
+  } while (cursor !== "");
+  return ids;
+}
+function storedGamesOf(nk, userId) {
+  const runs = [];
+  for (const ids of chunks(runIdsOf(nk, userId), READ_BATCH)) {
+    const objects = nk.storageRead(
+      ids.map((key) => ({
+        collection: RUNS_COLLECTION,
+        key,
+        userId: SYSTEM_USER_ID
+      }))
+    );
+    for (const o of objects) {
+      const run = o.value;
+      if (FINISHED_STATUSES.indexOf(run.status) !== -1) runs.push(run);
+    }
+  }
+  const games = [];
+  for (const batch of chunks(runs, Math.max(1, Math.floor(READ_BATCH / 2)))) {
+    const reads = batch.flatMap(
+      (run) => run.players.map((p) => ({
+        collection: LOGS_COLLECTION,
+        key: logKey(run.runId, p.id),
+        userId: SYSTEM_USER_ID
+      }))
+    );
+    const logs = {};
+    for (const o of nk.storageRead(reads)) logs[o.key] = o.value;
+    for (const run of batch) {
+      const events = {};
+      for (const p of run.players)
+        events[p.id] = eventsOfStored(logs[logKey(run.runId, p.id)]);
+      games.push({ run, facts: factsByPlayer(run, events) });
+    }
+  }
+  return games;
+}
+function backfillPlayer(nk, userId, privileges, discordLinked) {
+  const stored = readProgress(nk, userId);
+  if (stored && stored.progress.backfilled) return false;
+  let filled = false;
+  updateProgress(nk, userId, (before) => {
+    if (before.backfilled) {
+      filled = false;
+      return before;
+    }
+    filled = true;
+    return backfilledProgress(
+      before,
+      userId,
+      storedGamesOf(nk, userId),
+      privileges,
+      discordLinked
+    );
+  });
+  return filled;
+}
+function isDone(nk) {
+  return nk.storageRead([
+    {
+      collection: BACKFILL_COLLECTION,
+      key: BACKFILL_KEY,
+      userId: SYSTEM_USER_ID
+    }
+  ]).length > 0;
+}
+function markDone(nk) {
+  nk.storageWrite([
+    {
+      collection: BACKFILL_COLLECTION,
+      key: BACKFILL_KEY,
+      userId: SYSTEM_USER_ID,
+      value: { doneAt: Date.now() },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+var NO_COUNTS = { filled: 0, skipped: 0, failed: 0 };
+var answer = (enabled, done, counts, cursor) => JSON.stringify(__spreadProps(__spreadValues({ enabled, done }, counts), { cursor }));
+function readRunFailures(nk) {
+  const stored = nk.storageRead([
+    { collection: BACKFILL_COLLECTION, key: RUN_KEY, userId: SYSTEM_USER_ID }
+  ])[0];
+  const failures = stored ? stored.value.failures : 0;
+  return typeof failures === "number" ? failures : 0;
+}
+function writeRunFailures(nk, failures) {
+  nk.storageWrite([
+    {
+      collection: BACKFILL_COLLECTION,
+      key: RUN_KEY,
+      userId: SYSTEM_USER_ID,
+      value: { failures },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function fillPage(nk, logger, objects) {
+  const counts = __spreadValues({}, NO_COUNTS);
+  for (const object of objects) {
+    if (object.key !== PROFILE_KEY) continue;
+    const profile = profileOf(object.value, "");
+    try {
+      if (backfillPlayer(
+        nk,
+        object.userId,
+        profile.privileges,
+        profile.discordIdHash !== null
+      ))
+        counts.filled++;
+      else counts.skipped++;
+    } catch (e) {
+      counts.failed++;
+      logger.error(
+        "Achievement backfill: could not fill %s: %v",
+        object.userId,
+        e
+      );
+    }
+  }
+  return counts;
+}
+function parseInput(payload) {
+  const input = parsePayload(payload);
+  if (input.cursor !== void 0 && typeof input.cursor !== "string")
+    throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+  if (input.force !== void 0 && typeof input.force !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "force must be a boolean");
+  return {
+    cursor: input.cursor || "",
+    force: input.force === true
+  };
+}
+function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const { cursor, force } = parseInput(payload);
+  if (!readConfig(nk).achievementsEnabled)
+    return answer(false, false, NO_COUNTS, "");
+  if (cursor === "" && !force && isDone(nk))
+    return answer(true, true, NO_COUNTS, "");
+  const page = listCollectionPage(nk, PLAYER_COLLECTION, PLAYER_PAGE, cursor);
+  const counts = fillPage(nk, logger, page.objects || []);
+  const next = page.cursor || "";
+  const failures = (cursor === "" ? 0 : readRunFailures(nk)) + counts.failed;
+  if (next !== "" || failures > 0) writeRunFailures(nk, failures);
+  const done = next === "" && failures === 0;
+  if (done) markDone(nk);
+  logger.info(
+    "Achievement backfill: %d filled, %d already filled, %d failed%s",
+    counts.filled,
+    counts.skipped,
+    counts.failed,
+    done ? ", done" : ""
+  );
+  return answer(true, done, counts, next);
+}
+
+// src/achievements/reset.ts
+var PAGE = 100;
+function keepsJoker(joker, privileges, unlocked) {
+  return isSelectable(joker, { privileges, unlocked });
+}
+function rpcAdminAvatarsReset(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  if (input.cursor !== void 0 && typeof input.cursor !== "string")
+    throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+  if (input.dryRun !== void 0 && typeof input.dryRun !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "dryRun must be a boolean");
+  const dryRun = input.dryRun === true;
+  let checked = 0;
+  let jokersReset = 0;
+  const page = listCollectionPage(
+    nk,
+    PLAYER_COLLECTION,
+    PAGE,
+    input.cursor || ""
+  );
+  for (const object of page.objects || []) {
+    if (object.key !== PROFILE_KEY) continue;
+    checked++;
+    const stored = profileOf(object.value, "");
+    const unlocked = progressFor(nk, object.userId).unlocked;
+    if (keepsJoker(stored.preferredJoker, stored.privileges, unlocked)) continue;
+    jokersReset++;
+    if (dryRun) continue;
+    const profile = updateProfile(
+      nk,
+      object.userId,
+      (current) => keepsJoker(current.preferredJoker, current.privileges, unlocked) ? current : __spreadProps(__spreadValues({}, current), { preferredJoker: DEFAULT_AVATAR })
+    );
+    profileChanged(nk, object.userId, profile);
+  }
+  logger.info(
+    "Avatar reset%s: %d checked, %d jokers reset",
+    dryRun ? " (dry run)" : "",
+    checked,
+    jokersReset
+  );
+  return JSON.stringify({
+    dryRun,
+    checked,
+    jokersReset,
+    cursor: page.cursor || ""
+  });
+}
+
+// src/matchmaking/group/binding.ts
+var BINDING_COLLECTION = "group_parties";
+var MEMBER_COLLECTION = "group_member";
+var MEMBER_KEY = "current";
+var PARTY_STREAM = 7;
+var REMOVED_PREFIX = "removed:";
+function bindingKey(partyId) {
+  return { collection: BINDING_COLLECTION, key: partyId, userId: SYSTEM_USER_ID };
+}
+function memberKey(userId) {
+  return { collection: MEMBER_COLLECTION, key: MEMBER_KEY, userId };
+}
+function writeBinding(nk, binding) {
+  const write3 = (key, value) => __spreadProps(__spreadValues({}, key), { value, permissionRead: 0, permissionWrite: 0 });
+  nk.storageWrite(
+    [write3(bindingKey(binding.partyId), __spreadValues({}, binding))].concat(
+      binding.memberIds.map((id) => write3(memberKey(id), { partyId: binding.partyId, homeCode: binding.homeCode }))
+    )
+  );
+}
+function readBinding(nk, partyId) {
+  const objects = nk.storageRead([bindingKey(partyId)]);
+  return objects.length > 0 ? objects[0].value : null;
+}
+function deleteBinding(nk, partyId, memberIds) {
+  const pointers = nk.storageRead(memberIds.map(memberKey)).filter((o) => o.value.partyId === partyId);
+  nk.storageDelete([bindingKey(partyId)].concat(pointers.map((o) => memberKey(o.userId))));
+}
+function signalHome(nk, homeCode, signal2) {
+  const entry = lookupCode(nk, homeCode);
+  if (!entry) return null;
+  return nk.matchSignal(entry.matchId, JSON.stringify(signal2));
+}
+function statusOf(nk, partyId) {
+  const binding = readBinding(nk, partyId);
+  if (!binding) return null;
+  const reply = signalHome(nk, binding.homeCode, { type: "group_status", partyId });
+  const status = reply ? JSON.parse(reply) : null;
+  if (!status) {
+    deleteBinding(nk, partyId, binding.memberIds);
+    return null;
+  }
+  return { status, binding };
+}
+function groupOf(nk, userId) {
+  const objects = nk.storageRead([memberKey(userId)]);
+  if (objects.length === 0) return null;
+  const found = statusOf(nk, String(objects[0].value.partyId));
+  if (!found || found.status.memberIds.indexOf(userId) === -1) {
+    nk.storageDelete([memberKey(userId)]);
+    return null;
+  }
+  return found.status;
+}
+function partyStream(partyId) {
+  const dot = partyId.indexOf(".");
+  return { mode: PARTY_STREAM, subject: partyId.slice(0, dot), label: partyId.slice(dot + 1) };
+}
+function partyPresences(nk, partyId) {
+  if (partyId.indexOf(".") === -1) return [];
+  return nk.streamUserList(partyStream(partyId), true, true);
+}
+function dissolveParty(nk, partyId) {
+  const stream = partyStream(partyId);
+  for (const p of partyPresences(nk, partyId)) {
+    const node = p.node || p.nodeId || stream.label;
+    nk.streamUserKick({ userId: p.userId, sessionId: p.sessionId, node }, stream);
+  }
+}
+function markTicketRemoved(nk, ticket) {
+  nk.storageWrite([
+    {
+      collection: BINDING_COLLECTION,
+      key: REMOVED_PREFIX + ticket,
+      userId: SYSTEM_USER_ID,
+      value: { at: Date.now() },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function takeTicketRemoved(nk, ticket) {
+  const key = { collection: BINDING_COLLECTION, key: REMOVED_PREFIX + ticket, userId: SYSTEM_USER_ID };
+  if (nk.storageRead([key]).length === 0) return false;
+  nk.storageDelete([key]);
+  return true;
+}
+
+// src/matchmaking/gate.ts
+function queueRefusalFor(nk, settings, userId, ranked, now) {
+  const config = readConfig(nk);
+  const access = queueRefusal(config, profileFor(nk, userId).privileges, readBans(nk, userId), ranked, now);
+  if (access) return { code: "access_denied", message: access };
+  if (ranked && integrityRefusal(config, readIntegrity(nk, userId), now)) return { code: "integrity_required" };
+  return standingRefusal(standingFor(nk, settings, userId, now, config));
+}
+function matchmakerAdd(envelope) {
+  return envelope.matchmakerAdd || envelope.matchmaker_add || {};
+}
+function stringProperties(envelope) {
+  const add = matchmakerAdd(envelope);
+  return add.stringProperties || add.string_properties || {};
+}
+var IN_GROUP_QUEUE = "You are queueing with your lobby.";
+function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
+  if (!ctx.userId) return envelope;
+  const props = stringProperties(envelope);
+  const unpinned = ticketQueryRefusal(matchmakerAdd(envelope).query, props);
+  if (unpinned) throw runtimeError(INVALID_ARGUMENT, TICKET_QUERY_MESSAGES[unpinned]);
+  const ranked = props.kind === "ranked";
+  const refused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, ranked, Date.now());
+  if (refused) throw runtimeError(PERMISSION_DENIED, queueRefusalMessage(refused));
+  const group = groupOf(nk, ctx.userId);
+  if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE);
+  if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
+  return envelope;
+}
+function refusedMemberOf(player) {
+  return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) };
+}
+function refusedPlayers(nk, settings, plan) {
+  const now = Date.now();
+  const ranked = plan.rankedMode !== "";
+  const out = [];
+  for (const userId of plan.playerIds) {
+    const refusal = queueRefusalFor(nk, settings, userId, ranked, now);
+    if (refusal) out.push({ userId, refusal });
+  }
+  return out;
+}
+function cancelSoloQueue(nk, userId, modId, mode, refusal) {
+  notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+    modId,
+    mode,
+    reason: queueRefusalMessage(refusal),
+    code: refusal.code,
+    mods: refusedMods(refusal),
+    requeue: false
+  });
+}
+function requeueSolos(nk, plan, refused) {
+  const mode = plan.rankedMode !== "" ? plan.rankedMode : plan.gameMode;
+  const grouped = plan.groups.reduce((ids, g) => ids.concat(g.memberIds), []);
+  for (const id of plan.playerIds) {
+    if (grouped.indexOf(id) !== -1) continue;
+    const own = refused.filter((r) => r.userId === id)[0];
+    if (own) {
+      if (isStandingRefusal(own.refusal)) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal);
+      continue;
+    }
+    notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+      modId: plan.modId,
+      mode,
+      reason: "A matched player can no longer play",
+      requeue: true
+    });
+  }
+}
+
+// src/matchmaking/group/teams.ts
+function partitionTeams(groups) {
+  const total = groups.reduce((n, g) => n + g.length, 0);
+  if (total % 2 !== 0) return err("odd_players");
+  const half = total / 2;
+  const order = groups.map((members, index) => ({ members, index })).sort((a, b) => b.members.length - a.members.length || a.index - b.index);
+  const reach = [[]];
+  for (let s = 1; s <= half; s++) reach.push(null);
+  for (let i = 0; i < order.length; i++) {
+    const size = order[i].members.length;
+    for (let s = half; s >= size; s--) {
+      const from = reach[s - size];
+      if (reach[s] === null && from !== null && from.indexOf(i) === -1) reach[s] = from.concat([i]);
+    }
+  }
+  const chosen = reach[half];
+  if (chosen === null) return err("groups_unsplittable");
+  const first = [];
+  const second = [];
+  order.forEach((g, i) => {
+    const team = chosen.indexOf(i) !== -1 ? first : second;
+    for (const id of g.members) team.push(id);
+  });
+  return ok([first, second]);
+}
+
+// src/matchmaking/queue.ts
+var QUEUE_COLLECTION = "queue_presence";
+var QUEUE_STALE_MS = 30 * 6e4;
+var LIST_PAGE4 = 100;
+var MATCH_LIST_LIMIT = 100;
+var NOTIFICATIONS_STREAM = 0;
+var TOMBSTONE_MS = 6e4;
+var MOD_ID_PATTERN3 = /^[A-Za-z0-9_.-]{1,64}$/;
+function recordKey(modId, gameMode) {
+  return modId + ":" + gameMode;
+}
+function field(obj, camel, snake) {
+  if (!obj || typeof obj !== "object") return void 0;
+  const o = obj;
+  return o[camel] !== void 0 ? o[camel] : o[snake];
+}
+function recordOf(input, output, sessionId, now) {
+  const add = field(input, "matchmakerAdd", "matchmaker_add");
+  const props = field(add, "stringProperties", "string_properties") || {};
+  const ticket = field(field(output, "matchmakerTicket", "matchmaker_ticket"), "ticket", "ticket");
+  const modId = props.modId;
+  const mode = props.mode;
+  if (typeof ticket !== "string" || typeof modId !== "string" || typeof mode !== "string") return null;
+  if (!MOD_ID_PATTERN3.test(modId) || !MOD_ID_PATTERN3.test(mode)) return null;
+  const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
+  return { modId, gameMode, ticket, sessionId, at: now };
+}
+function countQueues(modId, records, labels, now) {
+  const gameModes = {};
+  const entry = (mode) => gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 };
+  for (const r of records) {
+    if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue;
+    entry(r.gameMode).queued++;
+  }
+  for (const raw of labels) {
+    let label;
+    try {
+      label = JSON.parse(raw);
+    } catch (e) {
+      continue;
+    }
+    if (!label || label.modId !== modId || label.type !== "public" || !label.mode || !(label.size > 0)) continue;
+    entry(label.mode).inMatch += label.size;
+  }
+  return { modId, gameModes };
+}
+function deleteRecords(nk, userId, keys) {
+  if (keys.length === 0) return;
+  nk.storageDelete(keys.map((key) => ({ collection: QUEUE_COLLECTION, key, userId })));
+}
+function ownRecords(nk, userId) {
+  const out = [];
+  let cursor = "";
+  do {
+    const page = nk.storageList(userId, QUEUE_COLLECTION, LIST_PAGE4, cursor);
+    for (const o of page.objects || []) out.push(o);
+    cursor = page.cursor || "";
+  } while (cursor);
+  return out;
+}
+var REMOVED_PREFIX2 = "removed:";
+function isRecord(o) {
+  return o.key.indexOf(REMOVED_PREFIX2) !== 0;
+}
+function afterMatchmakerAdd(ctx, logger, nk, output, input) {
+  if (!ctx.userId) return;
+  const record = recordOf(input, output, ctx.sessionId || "", Date.now());
+  if (!record) return;
+  const tombstone = REMOVED_PREFIX2 + record.ticket;
+  const removed = nk.storageRead([{ collection: QUEUE_COLLECTION, key: tombstone, userId: ctx.userId }]);
+  if (removed.length > 0) {
+    deleteRecords(nk, ctx.userId, [tombstone]);
+    return;
+  }
+  nk.storageWrite([
+    {
+      collection: QUEUE_COLLECTION,
+      key: recordKey(record.modId, record.gameMode),
+      userId: ctx.userId,
+      value: __spreadValues({}, record),
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function beforeMatchmakerRemove(ctx, logger, nk, envelope) {
+  const ticket = field(field(envelope, "matchmakerRemove", "matchmaker_remove"), "ticket", "ticket");
+  if (!ctx.userId || typeof ticket !== "string" || !ticket) return envelope;
+  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord(o) && o.value.ticket === ticket).map((o) => o.key);
+  if (keys.length > 0) {
+    deleteRecords(nk, ctx.userId, keys);
+  } else {
+    nk.storageWrite([
+      {
+        collection: QUEUE_COLLECTION,
+        key: REMOVED_PREFIX2 + ticket,
+        userId: ctx.userId,
+        value: { at: Date.now() },
+        permissionRead: 0,
+        permissionWrite: 0
+      }
+    ]);
+  }
+  return envelope;
+}
+function clearMatched(nk, modId, gameMode, userIds) {
+  for (const userId of userIds) deleteRecords(nk, userId, [recordKey(modId, gameMode)]);
+}
+function writeGroupRecords(nk, record, members) {
+  if (members.length === 0) return;
+  nk.storageWrite(
+    members.map((m) => ({
+      collection: QUEUE_COLLECTION,
+      key: recordKey(record.modId, record.gameMode),
+      userId: m.userId,
+      value: __spreadProps(__spreadValues({}, record), { sessionId: m.sessionId }),
+      permissionRead: 0,
+      permissionWrite: 0
+    }))
+  );
+}
+function sessionsOf(nk, userId) {
+  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
+}
+function liveTicketHolders(nk, userIds, exceptTicket, now) {
+  return userIds.filter((userId) => {
+    const records = ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => r.ticket !== exceptTicket && now - r.at <= QUEUE_STALE_MS);
+    if (records.length === 0) return false;
+    const sessions = sessionsOf(nk, userId);
+    return records.some((r) => sessions.indexOf(r.sessionId) !== -1);
+  });
+}
+function liveRecordsOf(nk, userId, now) {
+  const sessions = sessionsOf(nk, userId);
+  return ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => now - r.at <= QUEUE_STALE_MS && sessions.indexOf(r.sessionId) !== -1);
+}
+function liveQueuedPlayers(nk, modId, now) {
+  const byUser = {};
+  let cursor = "";
+  do {
+    const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE4, cursor);
+    for (const o of page.objects || []) {
+      if (!isRecord(o)) {
+        if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
+        continue;
+      }
+      if (modId !== null && o.value.modId !== modId) continue;
+      (byUser[o.userId] = byUser[o.userId] || []).push(o);
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  const live = [];
+  for (const userId in byUser) {
+    const sessions = sessionsOf(nk, userId);
+    const dead = [];
+    for (const o of byUser[userId]) {
+      const record = o.value;
+      if (sessions.indexOf(record.sessionId) === -1) dead.push(o.key);
+      else live.push({ userId, record });
+    }
+    deleteRecords(nk, userId, dead);
+  }
+  return live;
+}
+function liveRecords(nk, modId, now) {
+  return liveQueuedPlayers(nk, modId, now).map((q) => q.record);
+}
+function rpcQueueCounts(ctx, logger, nk, payload) {
+  const modId = parsePayload(payload).modId;
+  if (typeof modId !== "string" || !MOD_ID_PATTERN3.test(modId))
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
+  const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
+  const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
+  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()));
+}
+
+// src/matchmaking/matched.ts
+function queueKey(mode, kind) {
+  return kind === "ranked" ? "ranked:" + mode : mode;
+}
+var NAME_PATTERN2 = /^[A-Za-z0-9_.-]{1,64}$/;
+function groupsOf(entries) {
+  const party = [];
+  const all = [];
+  for (const entry of entries) {
+    const size = entry.properties[GROUP_SIZE_PROPERTY];
+    if (!entry.partyId) {
+      if (size !== void 0 && size !== 1) return "A solo ticket claims a group";
+      all.push([entry.presence.userId]);
+      continue;
+    }
+    let group = party.filter((g) => g.partyId === entry.partyId)[0];
+    if (!group) {
+      group = { partyId: entry.partyId, memberIds: [] };
+      party.push(group);
+      all.push(group.memberIds);
+    }
+    group.memberIds.push(entry.presence.userId);
+  }
+  for (const group of party) {
+    for (const entry of entries) {
+      if (entry.partyId === group.partyId && entry.properties[GROUP_SIZE_PROPERTY] !== group.memberIds.length)
+        return "A group ticket disagrees with its group size";
+    }
+  }
+  return { party, all };
+}
+function planMatch(entries, integrityEnforced = false) {
+  if (entries.length < 2) return "A match needs at least two players";
+  const first = entries[0].properties;
+  const modId = first.modId;
+  const mode = first.mode;
+  const kind = first.kind === "ranked" ? "ranked" : "casual";
+  const teams = first[TEAMS_PROPERTY] === 1;
+  if (typeof modId !== "string" || typeof mode !== "string" || !NAME_PATTERN2.test(modId) || !NAME_PATTERN2.test(mode))
+    return "Ticket has no valid modId and mode";
+  const ids = [];
+  for (const entry of entries) {
+    const p = entry.properties;
+    if (p.modId !== modId || p.mode !== mode || (p.kind === "ranked" ? "ranked" : "casual") !== kind)
+      return "Tickets disagree on what they queued for";
+    if (p[TEAMS_PROPERTY] === 1 !== teams) return "Tickets disagree on Teams";
+    if (ids.indexOf(entry.presence.userId) !== -1)
+      return "A player is in the match twice";
+    ids.push(entry.presence.userId);
+  }
+  const groups = groupsOf(entries);
+  if (typeof groups === "string") return groups;
+  if (groups.party.length > 0 && kind === "ranked") return "A group may not queue ranked";
+  let teamPlan = null;
+  if (teams) {
+    const split = partitionTeams(groups.all);
+    if (!split.ok) return "Teams cannot be split: " + split.error;
+    teamPlan = split.value;
+  }
+  return {
+    modId,
+    rankedMode: kind === "ranked" ? mode : "",
+    gameMode: queueKey(mode, kind),
+    playerIds: ids,
+    groups: groups.party,
+    teamPlan,
+    requiredStanding: requiredStandingFor(kind === "ranked", integrityEnforced)
+  };
+}
+function matchmakerMatched(ctx, logger, nk, matches) {
+  const plan = planMatch(matches, readConfig(nk).integrityEnforced);
+  if (typeof plan === "string") {
+    logger.warn("Matchmaker group refused: %s", plan);
+    requeuePartiesOf(nk, partyIdsOf(matches));
+    throw new Error(plan);
+  }
+  const refused = refusedPlayers(nk, settingsOf(ctx), plan);
+  const groups = resolveGroups(nk, plan);
+  if (refused.length > 0 || groups.faulty.length > 0) {
+    refuseMatch(nk, plan, refused, groups);
+    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
+    logger.warn(
+      "Matched group refused: %d player(s) may not queue, %d group(s) not queueing",
+      refused.length,
+      groups.faulty.length
+    );
+    throw new Error("A matched player may not queue");
+  }
+  for (let attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
+    const code = generateCode(MATCHMADE_CODE_LENGTH);
+    if (!reserveCode(nk, code, plan.modId)) continue;
+    let matchId;
+    try {
+      matchId = nk.matchCreate(LOBBY_MATCH, {
+        code,
+        modId: plan.modId,
+        maxPlayers: plan.playerIds.length,
+        creatorId: plan.playerIds[0],
+        rankedMode: plan.rankedMode,
+        allowedIds: plan.playerIds.join(","),
+        gameMode: plan.gameMode,
+        groups: groups.homes.length > 0 ? JSON.stringify(groups.homes) : "",
+        teamPlan: plan.teamPlan ? JSON.stringify(plan.teamPlan) : "",
+        requiredStanding: plan.requiredStanding
+      });
+    } catch (e) {
+      releaseCode(nk, code, "");
+      throw e;
+    }
+    bindCode(nk, code, matchId, plan.modId);
+    clearMatched(nk, plan.modId, plan.gameMode, plan.playerIds);
+    for (const home of groups.homes) announceMatched(nk, home, matchId, code);
+    logger.info(
+      "Matchmaker made lobby %s for %d players (%s%s)",
+      code,
+      plan.playerIds.length,
+      plan.modId,
+      plan.rankedMode ? ", ranked " + plan.rankedMode : ""
+    );
+    return matchId;
+  }
+  throw new Error("Could not allocate a lobby code");
+}
+function partyIdsOf(matches) {
+  const ids = [];
+  for (const m of matches) if (m.partyId && ids.indexOf(m.partyId) === -1) ids.push(m.partyId);
+  return ids;
+}
+function refuseMatch(nk, plan, refused, groups) {
+  requeueSolos(nk, plan, refused);
+  for (const home of groups.homes) {
+    const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0];
+    if (member) cancelGroupFor(nk, home.homeCode, home.partyId, "member_refused", refusedMemberOf(member));
+    else requeueGroup(nk, home);
+  }
+  for (const fault of groups.faulty) {
+    if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, "match_refused");
+  }
+}
+
+// src/matchmaking/group/matched.ts
+function sameMembers2(a, b) {
+  return a.length === b.length && a.every((id) => b.indexOf(id) !== -1);
+}
+function groupFits(status, group, plan) {
+  return status !== null && status.phase === "queued" && status.modId === plan.modId && queueKey(status.mode, "casual") === plan.gameMode && sameMembers2(status.memberIds, group.memberIds);
+}
+function resolveGroups(nk, plan) {
+  const resolved = { homes: [], faulty: [] };
+  for (const group of plan.groups) {
+    const found = statusOf(nk, group.partyId);
+    if (found && groupFits(found.status, group, plan))
+      resolved.homes.push({ partyId: group.partyId, homeCode: found.binding.homeCode, memberIds: group.memberIds });
+    else resolved.faulty.push({ partyId: group.partyId, binding: found ? found.binding : null });
+  }
+  return resolved;
+}
+function tell(nk, homeCode, signal2) {
+  signalHome(nk, homeCode, signal2);
+}
+function requeueGroup(nk, home) {
+  tell(nk, home.homeCode, { type: "group_requeue", partyId: home.partyId });
+}
+function cancelGroupFor(nk, homeCode, partyId, reason, refused) {
+  tell(nk, homeCode, refused ? { type: "group_cancel", partyId, reason, refused } : { type: "group_cancel", partyId, reason });
+}
+function announceMatched(nk, home, matchId, code) {
+  tell(nk, home.homeCode, { type: "group_matched", partyId: home.partyId, matchId, code });
+}
+function requeuePartiesOf(nk, partyIds) {
+  for (const partyId of partyIds) {
+    const binding = readBinding(nk, partyId);
+    if (!binding) continue;
+    const found = statusOf(nk, partyId);
+    if (!found || found.status.phase !== "queued") continue;
+    clearMatched(nk, binding.modId, queueKey(found.status.mode, "casual"), found.status.memberIds);
+    requeueGroup(nk, { partyId, homeCode: binding.homeCode, memberIds: found.status.memberIds });
+  }
+}
+
+// src/standing/changed.ts
+var NOTIFICATIONS_STREAM2 = 0;
+var RANKED_PREFIX = "ranked:";
+function isOnline(nk, userId) {
+  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM2, subject: userId }, true, true).length > 0;
+}
+function announceStandings(nk, settings, now) {
+  const config = readConfig(nk);
+  let told = 0;
+  for (const userId of reporterIds(nk)) {
+    if (!isOnline(nk, userId)) continue;
+    const view = standingFor(nk, settings, userId, now, config);
+    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view));
+    pushToLobby(nk, userId, { standing: view.standing });
+    told++;
+  }
+  return told;
+}
+function regateQueued(nk, settings, now) {
+  const cancelledParties = [];
+  let solos = 0;
+  for (const queued of liveQueuedPlayers(nk, null, now)) {
+    const { userId, record } = queued;
+    const group = groupOf(nk, userId);
+    if (group && group.phase === "queued") {
+      if (cancelledParties.indexOf(group.partyId) !== -1) continue;
+      const refusal2 = queueRefusalFor(nk, settings, userId, false, now);
+      if (!refusal2 || !isStandingRefusal(refusal2)) continue;
+      cancelGroupFor(nk, group.homeCode, group.partyId, "member_refused", refusedMemberOf({ userId, refusal: refusal2 }));
+      cancelledParties.push(group.partyId);
+      continue;
+    }
+    const ranked = record.gameMode.indexOf(RANKED_PREFIX) === 0;
+    const refusal = queueRefusalFor(nk, settings, userId, ranked, now);
+    if (!refusal || !isStandingRefusal(refusal)) continue;
+    const mode = ranked ? record.gameMode.slice(RANKED_PREFIX.length) : record.gameMode;
+    cancelSoloQueue(nk, userId, record.modId, mode, refusal);
+    clearMatched(nk, record.modId, record.gameMode, [userId]);
+    solos++;
+  }
+  return { solos, groups: cancelledParties.length };
+}
+function standingInputsUpdated(nk, settings, logger, now) {
+  const told = announceStandings(nk, settings, now);
+  const cancelled = regateQueued(nk, settings, now);
+  logger.info(
+    "Standing inputs changed: told %d player(s); cancelled %d solo ticket(s), %d group(s)",
+    told,
+    cancelled.solos,
+    cancelled.groups
+  );
+}
+
 // src/review/result.ts
 function parseResultPlacements(value) {
   if (!Array.isArray(value) || value.length === 0) return null;
@@ -6105,12 +6831,12 @@ function rpcAdminRunSetResult(ctx, logger, nk, payload) {
   logger.info("Run %s result overturned by the service queue", next.runId);
   return JSON.stringify({ run: next });
 }
-function moderationContextOf(nk, userId, now) {
+function moderationContextOf(nk, settings, userId, now) {
   const seat = currentLobby(nk, userId);
   const match = seat ? nk.matchGet(seat.matchId) : null;
   return {
     mods: readModReport(nk, userId),
-    standing: standingFor(nk, userId, now),
+    standing: standingFor(nk, settings, userId, now),
     integrity: readIntegrity(nk, userId),
     ranked: rankedContextOf(liveRecordsOf(nk, userId, now), match ? match.label : null)
   };
@@ -6153,7 +6879,7 @@ function rpcAdminConfigSet(ctx, logger, nk, payload) {
   const config = mergeConfig(before, parsePayload(payload));
   writeConfig(nk, config);
   logger.info("Server config updated: %v", JSON.stringify(config));
-  if (standingInputsChanged(before, config)) standingInputsUpdated(nk, logger, Date.now());
+  if (standingInputsChanged(before, config)) standingInputsUpdated(nk, settingsOf(ctx), logger, Date.now());
   return JSON.stringify(config);
 }
 function requireUserId2(nk, input) {
@@ -6185,6 +6911,8 @@ function rpcAdminBanApply(ctx, logger, nk, payload) {
   if (expiresAt === void 0) throw runtimeError(INVALID_ARGUMENT, "expiresAt must be a time or null");
   const reason = typeof input.reason === "string" ? input.reason : "";
   const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason });
+  if (bans.account && banNetworks(nk, settingsOf(ctx), userId, bans.account, Date.now()))
+    logger.info("Network ban %s from %s", bans.account.banId, userId);
   return JSON.stringify({ bans });
 }
 function rpcAdminBanLift(ctx, logger, nk, payload) {
@@ -6193,6 +6921,15 @@ function rpcAdminBanLift(ctx, logger, nk, payload) {
   const userId = requireUserId2(nk, input);
   if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
   return JSON.stringify({ bans: liftBan(nk, logger, userId, input.banId) });
+}
+function rpcAdminBanIndexForget(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const hashes = parsePayload(payload).steamIdHashes;
+  if (!Array.isArray(hashes) || !hashes.every((h) => typeof h === "string"))
+    throw runtimeError(INVALID_ARGUMENT, "steamIdHashes must be a list of hashes");
+  const result = forgetBanIndex(nk, hashes, Date.now());
+  if (result.deleted > 0) logger.info("Forgot %d ban index entries of deleted accounts", result.deleted);
+  return JSON.stringify(result);
 }
 var MOD_ID_PATTERN4 = /^[A-Za-z0-9_.-]{1,64}$/;
 var LOBBY_LIST_LIMIT = 100;
@@ -6261,7 +6998,7 @@ function rpcAdminPlayerGet(ctx, logger, nk, payload) {
     bans: readBans(nk, userId),
     lobby: currentLobby(nk, userId),
     online
-  }, moderationContextOf(nk, userId, Date.now())));
+  }, moderationContextOf(nk, settingsOf(ctx), userId, Date.now())));
 }
 var MIRROR_PULL_DEFAULT = 10;
 var MIRROR_PULL_MAX = 50;
@@ -6467,7 +7204,6 @@ function nextSeasonBest(modId, reported, current) {
 var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
 var DECAY_RATE_PER_DAY = 5;
 var DECAY_FLOOR = 1200;
-var DAY_MS = 24 * 60 * 60 * 1e3;
 var bootSeason = 1;
 function currentSeason(nk) {
   const pushed = readConfig(nk).season;
@@ -6626,12 +7362,8 @@ function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
 
 // src/rating/legacy.ts
 var LEGACY_RATINGS_COLLECTION = "legacy_ratings";
-var STEAM_CUSTOM_ID_PREFIX = "steam:";
 var HASH_PATTERN = /^[0-9a-f]{64}$/;
 var IMPORT_BATCH_LIMIT = 100;
-function steamIdHash(nk, salt, steamId) {
-  return nk.sha256Hash(steamId + salt);
-}
 function isLegacyBoard(value) {
   const b = value;
   return typeof b === "object" && b !== null && typeof b.modId === "string" && typeof b.mode === "string" && Number.isInteger(b.season) && b.season > 0 && Number.isFinite(b.rating) && Number.isInteger(b.wins) && Number.isInteger(b.losses) && Number.isInteger(b.gamesPlayed) && Number.isFinite(b.lastMatchAt) && (b.seasonBest === null || Number.isFinite(b.seasonBest));
@@ -6738,12 +7470,11 @@ function claimLegacyRatings(nk, logger, userId, username, hash, now) {
 }
 function claimLegacyRatingsAtLogin(ctx, logger, nk) {
   try {
-    const salt = ctx.env.PLAYER_ID_SALT;
-    if (!salt || !ctx.userId) return;
-    const account = nk.accountGetId(ctx.userId);
-    if (!account.customId.startsWith(STEAM_CUSTOM_ID_PREFIX)) return;
-    const hash = steamIdHash(nk, salt, account.customId.slice(STEAM_CUSTOM_ID_PREFIX.length));
-    claimLegacyRatings(nk, logger, ctx.userId, account.user.username, hash, Date.now());
+    if (!ctx.userId) return;
+    const hash = steamIdHashOf(nk, ctx.userId);
+    if (!hash) return;
+    const username = nk.accountGetId(ctx.userId).user.username;
+    claimLegacyRatings(nk, logger, ctx.userId, username, hash, Date.now());
   } catch (e) {
     logger.error("Legacy rating claim failed: %v", e);
   }
@@ -6751,9 +7482,16 @@ function claimLegacyRatingsAtLogin(ctx, logger, nk) {
 
 // src/auth.ts
 var STEAM_AUTH_URL = "https://api.steampowered.com/ISteamUserAuth/AuthenticateUserTicket/v1/";
-var STEAM_CUSTOM_ID_PREFIX2 = "steam:";
 var STEAM_TICKET_PATTERN = /^[0-9a-fA-F]{16,4096}$/;
 var STEAM_TIMEOUT_MS = 1e4;
+function playerIdSalt(ctx, logger) {
+  const salt = ctx.env.PLAYER_ID_SALT;
+  if (!salt) {
+    logger.error("Login is not configured: PLAYER_ID_SALT is empty");
+    throw runtimeError(UNAVAILABLE, "Login is not configured");
+  }
+  return salt;
+}
 function verifySteamTicket(ctx, logger, nk, ticket) {
   const key = ctx.env.STEAM_WEB_API_KEY;
   const appId = ctx.env.STEAM_APP_ID || "2379780";
@@ -6802,9 +7540,11 @@ function beforeAuthenticateCustom(ctx, logger, nk, data) {
       "Custom login needs a Steam ticket in vars.steam_ticket"
     );
   }
+  refuseBannedNetwork(ctx, nk);
+  const salt = playerIdSalt(ctx, logger);
   const steamId = verifySteamTicket(ctx, logger, nk, ticket);
-  account.id = STEAM_CUSTOM_ID_PREFIX2 + steamId;
-  checkLoginBan(nk, logger, "custom:" + account.id, Date.now());
+  account.id = STEAM_HASH_CUSTOM_ID_PREFIX + steamIdHash(nk, salt, steamId);
+  checkLoginBan(nk, logger, BAN_INDEX_CUSTOM_PREFIX + account.id, Date.now());
   delete vars.steam_ticket;
   account.vars = vars;
   data.account = account;
@@ -6817,14 +7557,52 @@ function refuseCustomIdChange(ctx, logger, nk, data) {
   );
 }
 function beforeAuthenticateDevice(ctx, logger, nk, data) {
-  if (ctx.env.ALLOW_DEVICE_AUTH !== "true") {
+  if (!settingsOf(ctx).deviceLogin) {
     throw runtimeError(PERMISSION_DENIED, "Device login is disabled");
   }
-  if (data.account && data.account.id) checkLoginBan(nk, logger, "device:" + data.account.id, Date.now());
+  const account = data.account;
+  if (account && account.id) {
+    const rawId = account.id;
+    const hashedId = DEVICE_ID_HASH_PREFIX + steamIdHash(nk, playerIdSalt(ctx, logger), rawId);
+    moveRawDeviceAccount(nk, logger, rawId, hashedId);
+    account.id = hashedId;
+    if (STEAM_ID64_PATTERN.test(rawId)) delete data.username;
+  }
+  if (account && account.id) checkLoginBan(nk, logger, "device:" + account.id, Date.now());
   return data;
+}
+function moveRawDeviceAccount(nk, logger, rawId, hashedId) {
+  const rows = nk.sqlQuery("SELECT user_id::text AS user_id FROM user_device WHERE id = $1", [rawId]);
+  if (rows.length === 0) return;
+  const userId = String(rows[0].user_id);
+  try {
+    nk.linkDevice(userId, hashedId);
+  } catch (e) {
+    logger.warn("Device login move for %s failed: %v", userId, e);
+    return;
+  }
+  nk.unlinkDevice(userId, rawId);
+  moveLoginKey(nk, "device:" + rawId, "device:" + hashedId);
+  logger.info("Moved the Device login of %s to its hash", userId);
+}
+function refuseBannedNetwork(ctx, nk) {
+  const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));
+  if (hash !== null && isNetworkBanned(nk, hash))
+    throw runtimeError(PERMISSION_DENIED, NETWORK_BAN_MESSAGE);
 }
 function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
   claimLegacyRatingsAtLogin(ctx, logger, nk);
+  try {
+    const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));
+    if (hash !== null && ctx.userId)
+      recordNetworkLogin(nk, ctx.userId, hash, Date.now());
+  } catch (e) {
+    logger.error("Recording the login network failed: %v", e);
+  }
+}
+function beforeSessionRefresh(ctx, logger, nk, data) {
+  refuseBannedNetwork(ctx, nk);
+  return data;
 }
 
 // src/actions/results.ts
@@ -7112,37 +7890,73 @@ var reportResult = {
 var MAX_LOG_EVENTS = 2e4;
 var MAX_LOG_BYTES = 1024 * 1024;
 var MAX_OPCODE_LENGTH = 64;
+function appendLogEvent(lobby, from, now, params) {
+  if (!isPlainObject3(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
+    return { reject: "bad_params" };
+  const started = lobby.game.started;
+  if (!started) return { reject: "not_in_game" };
+  if (typeof params.run === "string" && params.run !== started.runId)
+    return { game: lobby.game, relayed: null };
+  const args = params.args === void 0 ? null : params.args;
+  const line = JSON.stringify([params.t, params.opcode, args]);
+  const size = line.length;
+  const game = lobby.game;
+  const log = game.logs[from] || { lines: [], bytes: 0, truncated: false };
+  if (log.truncated || log.lines.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
+    const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
+    return {
+      game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [from]: truncated }) }),
+      relayed: null
+    };
+  }
+  const grown = {
+    lines: log.lines.concat([line]),
+    bytes: log.bytes + size,
+    truncated: false
+  };
+  const stamped = started.raceStartedAt === void 0 ? __spreadProps(__spreadValues({}, started), { raceStartedAt: now }) : started;
+  return {
+    game: __spreadProps(__spreadValues({}, game), { started: stamped, logs: __spreadProps(__spreadValues({}, game.logs), { [from]: grown }) }),
+    relayed: { playerId: from, t: params.t, opcode: params.opcode, args }
+  };
+}
 var logEvent = {
   key: "mpapi_log_event",
   reduce(lobby, ctx, params) {
     if (!lobby.game.started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
-    if (!isPlainObject3(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
-      return { reject: "bad_params" };
-    if (typeof params.run === "string" && params.run !== lobby.game.started.runId)
-      return { game: lobby.game, params: null, to: "none" };
-    const args = params.args === void 0 ? null : params.args;
-    const line = JSON.stringify([params.t, params.opcode, args]);
-    const size = line.length;
-    const game = lobby.game;
-    const log = game.logs[ctx.from] || { lines: [], bytes: 0, truncated: false };
-    if (log.truncated || log.lines.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
-      const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
-      return {
-        game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: truncated }) }),
-        params: null,
-        to: "none"
-      };
-    }
-    const grown = {
-      lines: log.lines.concat([line]),
-      bytes: log.bytes + size,
-      truncated: false
-    };
+    const appended = appendLogEvent(lobby, ctx.from, ctx.now, params);
+    if ("reject" in appended) return appended;
     return {
-      game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [ctx.from]: grown }) }),
-      params: { playerId: ctx.from, t: params.t, opcode: params.opcode, args },
-      to: "others"
+      game: appended.game,
+      params: appended.relayed,
+      to: appended.relayed ? "others" : "none"
+    };
+  }
+};
+var MAX_LOG_BATCH = 50;
+var logEvents = {
+  key: "mpapi_log_events",
+  reduce(lobby, ctx, params) {
+    if (!lobby.game.started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    if (!isPlainObject3(params) || !Array.isArray(params.events) || params.events.length === 0 || params.events.length > MAX_LOG_BATCH)
+      return { reject: "bad_params" };
+    let current = lobby;
+    const relayed2 = [];
+    for (const event2 of params.events) {
+      const appended = appendLogEvent(current, ctx.from, ctx.now, event2);
+      if ("reject" in appended) return appended;
+      current = __spreadProps(__spreadValues({}, current), { game: appended.game });
+      if (appended.relayed) relayed2.push(appended.relayed);
+    }
+    if (relayed2.length === 0) return { game: current.game, params: null, to: "none" };
+    const last = relayed2[relayed2.length - 1];
+    return {
+      game: current.game,
+      params: __spreadProps(__spreadValues({}, last), { count: relayed2.length }),
+      to: "others",
+      spectate: relayed2
     };
   }
 };
@@ -7152,10 +7966,12 @@ var REGISTRY = {
   [restartGame.key]: restartGame,
   [abandonGame.key]: abandonGame,
   [reportResult.key]: reportResult,
-  [logEvent.key]: logEvent
+  [logEvent.key]: logEvent,
+  [logEvents.key]: logEvents
 };
 for (const setupAction of SETUP_ACTIONS) REGISTRY[setupAction.key] = setupAction;
 var LOG_EVENT_KEY = logEvent.key;
+var LOG_EVENTS_KEY = logEvents.key;
 function authoritativeAction(key) {
   return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
 }
@@ -7285,7 +8101,7 @@ var MAX_CID_LENGTH = 64;
 var RATE_PER_SECOND = 40;
 var BURST = 100;
 var LOG_RATE_PER_SECOND = 20;
-var LOG_BURST = 200;
+var LOG_BURST = 1024;
 function reject(to, rejection) {
   return {
     kind: "send",
@@ -7294,8 +8110,8 @@ function reject(to, rejection) {
     to: [to]
   };
 }
-function spend(lobby, userId, key, now) {
-  const isLog = key === LOG_EVENT_KEY;
+function spend(lobby, userId, key, now, cost = 1) {
+  const isLog = key === LOG_EVENT_KEY || key === LOG_EVENTS_KEY;
   const budgetKey = isLog ? logBudgetKey(userId) : userId;
   const burst = isLog ? LOG_BURST : BURST;
   const rate = isLog ? LOG_RATE_PER_SECOND : RATE_PER_SECOND;
@@ -7304,32 +8120,58 @@ function spend(lobby, userId, key, now) {
     burst,
     bucket.tokens + (now - bucket.at) / 1e3 * rate
   );
-  if (refilled < 1) return null;
+  if (refilled < cost) return null;
   return __spreadProps(__spreadValues({}, lobby), {
     actionBudget: __spreadProps(__spreadValues({}, lobby.actionBudget), {
-      [budgetKey]: { tokens: refilled - 1, at: now }
+      [budgetKey]: { tokens: refilled - cost, at: now }
     })
   });
+}
+function spendCost(key, params) {
+  if (key !== LOG_EVENTS_KEY) return 1;
+  const events = params == null ? void 0 : params.events;
+  return Array.isArray(events) ? Math.max(1, events.length) : 1;
 }
 function stringField(data, key) {
   const value = data[key];
   return typeof value === "string" ? value : "";
 }
 function action(lobby, senderId, data, ctx) {
+  const sender = findPlayer(lobby, senderId);
+  if (!sender || sender.awaySince === null) return relayAction(lobby, senderId, data, ctx);
+  const back = __spreadProps(__spreadValues({}, lobby), {
+    players: lobby.players.map((p) => p.id === senderId ? __spreadProps(__spreadValues({}, p), { awaySince: null }) : p)
+  });
+  const payload = {
+    type: "player_reconnected",
+    lobbyCode: lobby.code,
+    playerId: senderId,
+    displayName: sender.info.displayName
+  };
+  const announce3 = {
+    kind: "send",
+    op: ServerOp.EVENT,
+    payload,
+    to: back.players.map((p) => p.id).filter((id) => id !== senderId)
+  };
+  const step = relayAction(back, senderId, data, ctx);
+  return __spreadProps(__spreadValues({}, step), { out: [announce3, ...step.out] });
+}
+function relayAction(lobby, senderId, data, ctx) {
   const cid = stringField(data, "cid").slice(0, MAX_CID_LENGTH);
   const key = stringField(data, "action");
   const to = stringField(data, "to");
   const refuse2 = (reason) => ({
     lobby,
-    out: [reject(senderId, { cid, action: key, reason })]
+    out: [reject(senderId, { cid, action: key, reason })],
+    refused: { key, reason }
   });
-  const sender = findPlayer(lobby, senderId);
-  if (!sender || sender.awaySince !== null) return { lobby, out: [] };
+  if (!findPlayer(lobby, senderId)) return { lobby, out: [], refused: { key, reason: "no_seat" } };
   if (!ACTION_KEY_PATTERN.test(key)) return refuse2("bad_action");
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
     return refuse2("too_large");
-  const budgeted = spend(lobby, senderId, key, ctx.now);
+  const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params));
   if (!budgeted) return refuse2("rate_limited");
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
@@ -7361,6 +8203,8 @@ function action(lobby, senderId, data, ctx) {
     if (result.out) out.push(...result.out);
     if (key === LOG_EVENT_KEY && audience !== "none" && result.params)
       out.push(...spectateEvent(next, result.params));
+    if (key === LOG_EVENTS_KEY && result.spectate)
+      for (const event2 of result.spectate) out.push(...spectateEvent(next, event2));
     const settled = settle(next, ctx.now);
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
@@ -7455,24 +8299,6 @@ function reportEvidence(lobby, reporterId, reportedId) {
       }))
     }
   };
-}
-
-// src/shared/replay/events.ts
-function eventsOf2(log) {
-  var _a;
-  if (!log) return [];
-  const events = [];
-  for (const line of log.lines) {
-    const tuple = JSON.parse(line);
-    if (!Array.isArray(tuple) || typeof tuple[1] !== "string") continue;
-    events.push({ t: typeof tuple[0] === "number" ? tuple[0] : 0, opcode: tuple[1], args: (_a = tuple[2]) != null ? _a : null });
-  }
-  return events;
-}
-function eventsByPlayer(logs) {
-  const events = {};
-  for (const userId in logs) events[userId] = eventsOf2(logs[userId]);
-  return events;
 }
 
 // src/standing/rejoin.ts
@@ -7724,6 +8550,7 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     requiredStanding: requiredStandingParam(params),
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
+    catchUpLimitMs: catchUpLimitMsFor(stringParam(params, "modId"), Number(ctx.env.LOBBY_CATCH_UP_LIMIT_SECONDS) || void 0),
     resultTimeoutMs: secondsFromEnv(
       ctx,
       "RESULT_TIMEOUT_SECONDS",
@@ -7749,9 +8576,9 @@ function parseMods(raw) {
     return null;
   }
 }
-function joinInfoOf(nk, presence, meta) {
+function joinInfoOf(nk, settings, presence, meta) {
   const sentMods = parseMods(meta.mods);
-  const standing = standingFor(nk, presence.userId, Date.now()).standing;
+  const standing = standingFor(nk, settings, presence.userId, Date.now()).standing;
   const stored = readProfile(nk, presence.userId, presence.username);
   const joker = stored ? selectableOrDefault(stored.profile.preferredJoker, holdingsOf(nk, presence.userId, stored.profile.privileges)) : DEFAULT_AVATAR;
   if (stored && stored.profile.nakamaLogin) {
@@ -7769,7 +8596,7 @@ function joinInfoOf(nk, presence, meta) {
     standing
   };
 }
-function accountExists(nk, userId) {
+function accountExists2(nk, userId) {
   try {
     nk.accountGetId(userId);
     return true;
@@ -7790,7 +8617,7 @@ function otherLobbyOf(nk, ctx, userId) {
 }
 function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, presence, metadata) {
   const meta = metadata || {};
-  if (!accountExists(nk, presence.userId)) {
+  if (!accountExists2(nk, presence.userId)) {
     return { state, accept: false, rejectMessage: "No such account" };
   }
   if (meta.role === SPECTATOR_ROLE) {
@@ -7810,7 +8637,7 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
   if (rejection) {
     return { state, accept: false, rejectMessage: rejection };
   }
-  const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, presence.userId, Date.now()));
+  const standingRefused = rejoinRefusal(state.lobby.requiredStanding, standingFor(nk, settingsOf(ctx), presence.userId, Date.now()));
   if (standingRefused) {
     logger.info("Lobby %s refused %s: %s", state.lobby.code, presence.userId, standingRefused.reason);
     return { state, accept: false, rejectMessage: rejoinRejectMessage(standingRefused) };
@@ -7823,7 +8650,7 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
       rejectMessage: `Already in lobby ${otherCode}`
     };
   }
-  const info = joinInfoOf(nk, presence, meta);
+  const info = joinInfoOf(nk, settingsOf(ctx), presence, meta);
   return {
     state: __spreadProps(__spreadValues({}, state), {
       pendingInfo: __spreadProps(__spreadValues({}, state.pendingInfo), { [presence.userId]: info })
@@ -7861,7 +8688,7 @@ function lobbyMatchJoin(ctx, logger, nk, dispatcher, tickNumber, state, presence
       nk,
       dispatcher,
       attached,
-      join(attached.lobby, presence.userId, presence.sessionId, info)
+      join(attached.lobby, presence.userId, presence.sessionId, info, Date.now())
     );
   }
   return current ? { state: current } : null;
@@ -7932,6 +8759,8 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
         senderId,
         data.state === void 0 ? null : data.state
       );
+    case ClientOp.CATCHING_UP:
+      return setCatchingUp(lobby, senderId, data.catchingUp === true, Date.now());
     default:
       return null;
   }
@@ -7957,6 +8786,15 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
         message.sender.userId
       );
       continue;
+    }
+    if (step.refused) {
+      logger.warn(
+        "Lobby %s: refused %s from %s (%s)",
+        current.lobby.code,
+        step.refused.key,
+        message.sender.userId,
+        step.refused.reason
+      );
     }
     if (step.dropped) {
       const d = step.dropped;
@@ -8006,9 +8844,9 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     return { state, data: hasPlayerAnswer(state.lobby, signal2.userId, signal2.forMatchId) };
   }
   if (isGroupSignal(signal2)) {
-    const answer = answerGroupSignal(state.lobby, signal2, readConfig(nk), Date.now());
-    const next = apply(ctx, logger, nk, dispatcher, state, answer.step);
-    return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer.reply };
+    const answer2 = answerGroupSignal(state.lobby, signal2, readConfig(nk), Date.now());
+    const next = apply(ctx, logger, nk, dispatcher, state, answer2.step);
+    return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer2.reply };
   }
   if (signal2.type === "get_active") {
     return { state, data: JSON.stringify(activeRunOf(state.lobby, signal2.userId)) };
@@ -8117,6 +8955,7 @@ function lobbyMatchTerminate(ctx, logger, nk, dispatcher, tickNumber, state, gra
 }
 
 // src/chat/moderation.ts
+var REVIEW_BAND = "review";
 var MAX_MESSAGE_LENGTH = 500;
 function verdictOf(value) {
   if (typeof value !== "object" || value === null) return null;
@@ -8126,15 +8965,7 @@ function verdictOf(value) {
 function decideModerationOutcome(attempt) {
   const body = attempt && attempt.status === 200 ? verdictOf(attempt.body) : null;
   if (!body) return { allowed: false, reason: "unavailable" };
-  if (body.verdict === "allow") {
-    const rewrite = body.publishText;
-    if (rewrite === void 0) return { allowed: true, publishText: null };
-    if (typeof rewrite !== "string" || !rewrite.trim())
-      return { allowed: false, reason: "moderated", band: "unusable_rewrite" };
-    if (rewrite.length > MAX_MESSAGE_LENGTH)
-      return { allowed: false, reason: "moderated", band: "oversized_rewrite" };
-    return { allowed: true, publishText: rewrite };
-  }
+  if (body.verdict === "allow") return { allowed: true, review: body.band === REVIEW_BAND };
   const band = typeof body.band === "string" ? body.band : void 0;
   if (band === "guard_unavailable") return { allowed: false, reason: "unavailable" };
   return { allowed: false, reason: "moderated", band };
@@ -8220,23 +9051,26 @@ function obscenityMatches(message) {
     return { word: metadata && metadata.originalWord || "", startIndex: m.startIndex, endIndex: m.endIndex };
   });
 }
-function remoteModerationEnabled(env) {
-  return env.MODERATION_REMOTE !== "off";
-}
 
 // src/chat/rpc.ts
-function tosAccepted(profile, config) {
-  return profile.tosAcceptedVersion >= config.tosVersion;
+var MISSING_CONSENT_MESSAGE = {
+  notice: "Accept the Notice first",
+  age: "Answer the age question first"
+};
+function consentMissing(profile, settings) {
+  if (settings.noticeRequired) return profile.tosAcceptedVersion >= NOTICE_VERSION ? null : "notice";
+  return profile.ageAnswered ? null : "age";
 }
 function rpcChatEnable(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  const config = readConfig(nk);
+  const settings = settingsOf(ctx);
   const profile = updateProfile(
     nk,
     userId,
     (current) => {
       if (current.chatBlocked) throw runtimeError(PERMISSION_DENIED, "Chat access is permanently restricted");
-      if (!tosAccepted(current, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
+      const missing = consentMissing(current, settings);
+      if (missing) throw runtimeError(PERMISSION_DENIED, MISSING_CONSENT_MESSAGE[missing]);
       return __spreadProps(__spreadValues({}, current), { chatEnabled: true });
     },
     ctx.username
@@ -8255,7 +9089,8 @@ function rpcChatSend(ctx, logger, nk, payload) {
   const profile = profileFor(nk, userId, ctx.username);
   if (profile.chatBlocked || !profile.chatEnabled)
     throw runtimeError(PERMISSION_DENIED, "Chat is not enabled for this account");
-  if (!tosAccepted(profile, config)) throw runtimeError(PERMISSION_DENIED, "Accept the Terms of Service first");
+  const missing = consentMissing(profile, settingsOf(ctx));
+  if (missing) throw runtimeError(PERMISSION_DENIED, MISSING_CONSENT_MESSAGE[missing]);
   const banned = chatBanRefusal(readBans(nk, userId), Date.now());
   if (banned) throw runtimeError(PERMISSION_DENIED, banned);
   const current = currentLobby(nk, userId);
@@ -8271,9 +9106,9 @@ function rpcChatSend(ctx, logger, nk, payload) {
     lobbyId: lobbyIdOf(current.matchId),
     lobbyKind: lobbyKindOfLabel(match ? match.label : null)
   };
-  let text = message;
+  let flag2 = null;
   if (!isAllowlisted(message, config.chatAllowlist)) {
-    if (remoteModerationEnabled(ctx.env)) {
+    if (settingsOf(ctx).moderationRemote) {
       const outcome = decideModerationOutcome(
         callModeration(nk, logger, ctx.env, {
           playerId: userId,
@@ -8289,7 +9124,7 @@ function rpcChatSend(ctx, logger, nk, payload) {
         }
         throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
       }
-      if (outcome.publishText !== null) text = outcome.publishText;
+      if (outcome.review) flag2 = { source: "remote", band: REVIEW_BAND };
     } else {
       const matches = obscenityMatches(message);
       if (matches.length > 0) {
@@ -8300,17 +9135,17 @@ function rpcChatSend(ctx, logger, nk, payload) {
   }
   nk.matchSignal(
     current.matchId,
-    JSON.stringify({ type: "chat_post", userId, text })
+    JSON.stringify({ type: "chat_post", userId, text: message })
   );
-  logChat(nk, logger, lobby, userId, message, null);
-  return JSON.stringify({ text });
+  logChat(nk, logger, lobby, userId, message, flag2);
+  return JSON.stringify({ text: message });
 }
-function logChat(nk, logger, lobby, userId, message, blocked) {
+function logChat(nk, logger, lobby, userId, message, flag2) {
   try {
     enqueue(nk, {
       kind: "chat",
       at: Date.now(),
-      line: __spreadProps(__spreadValues({}, lobby), { userId, message, flagged: blocked !== null, verdict: blocked })
+      line: __spreadProps(__spreadValues({}, lobby), { userId, message, flagged: flag2 !== null, verdict: flag2 })
     });
   } catch (e) {
     logger.error("Could not queue a chat line for the API: %v", e);
@@ -8330,10 +9165,10 @@ function partyIdOf(message) {
 function refuse(refusal) {
   return runtimeError(PERMISSION_DENIED, refusalMessage(refusal));
 }
-function memberFactsOf(nk, memberIds, exceptTicket, now) {
+function memberFactsOf(nk, settings, memberIds, exceptTicket, now) {
   const refusals = {};
   for (const id of memberIds) {
-    const refused = queueRefusalFor(nk, id, false, now);
+    const refused = queueRefusalFor(nk, settings, id, false, now);
     if (refused) refusals[id] = refused;
   }
   return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) };
@@ -8358,7 +9193,7 @@ function beforePartyJoin(ctx, logger, nk, envelope) {
   if (!found) return envelope;
   const refused = joinRefusal(found.status, ctx.userId);
   if (refused) throw refuse(refused);
-  const queueRefused = queueRefusalFor(nk, ctx.userId, false, Date.now());
+  const queueRefused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, false, Date.now());
   if (queueRefused) throw refuse(memberRefused(ctx.userId, queueRefused));
   return envelope;
 }
@@ -8373,7 +9208,7 @@ function beforePartyMatchmakerAdd(ctx, logger, nk, envelope) {
     status: found ? found.status : null,
     leaderId: ctx.userId,
     partyUserIds: partyPresences(nk, partyId).map((p) => p.userId),
-    members: memberFactsOf(nk, memberIds, null, Date.now()),
+    members: memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()),
     ticket: partyTicketOf(add)
   });
   if (refused) {
@@ -8465,7 +9300,7 @@ function rpcGroupQueueOpen(ctx, logger, nk, payload) {
   if (!seat) return refusedReply({ code: "not_in_lobby" });
   const home = JSON.parse(signal(nk, seat.matchId, { type: "group_members" }));
   const memberIds = home.members.map((m) => m.id);
-  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, memberIds, null, Date.now()));
+  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()));
   if (refused) return refusedReply(refused);
   const reply = signal(nk, seat.matchId, {
     type: "group_open",
@@ -8554,11 +9389,78 @@ function boardEntries(records, stored, now) {
   }).sort((a, b) => b.rating - a.rating || b.wins - a.wins).map((e, i) => __spreadValues({ rank: firstRank + i }, e));
 }
 
+// src/lobby/checkpoint_sweep.ts
+var LIST_PAGE5 = 100;
+var SWEEP_MAX = 200;
+function isSweepable(checkpoint, now, ttlMs) {
+  const expired = ttlMs === void 0 ? isExpired(checkpoint, now) : now >= checkpoint.at + ttlMs;
+  if (!expired) return false;
+  return checkpoint.claimedAt === null || now - checkpoint.claimedAt >= CLAIM_TIMEOUT_MS;
+}
+function recordNoContest(nk, logger, checkpoint, now) {
+  const lobby = checkpoint.lobby;
+  const finished = finishGame(lobby, now, { status: "abandoned", announce: false });
+  for (const effect of finished.out) {
+    if (effect.kind !== "saveRun") continue;
+    saveRun(nk, effect.run, effect.logs);
+    try {
+      enqueue(nk, { kind: "run", at: now, runId: effect.run.runId, rating: null });
+    } catch (e) {
+      logger.warn("Checkpoint %s: could not queue run %s for the mirror: %v", lobby.code, effect.run.runId, e);
+    }
+    logger.warn(
+      "Lobby %s: run %s ended as no contest: every player stayed away past the checkpoint time limit (%d players, no Elo change)",
+      lobby.code,
+      effect.run.runId,
+      effect.run.players.length
+    );
+  }
+}
+function sweepCheckpoints(nk, logger, now, max, ttlMs) {
+  const result = { deleted: 0, noContest: 0, more: false };
+  let cursor = "";
+  do {
+    const page = nk.storageList(SYSTEM_USER_ID, LOBBY_CHECKPOINT_COLLECTION, LIST_PAGE5, cursor);
+    for (const o of page.objects || []) {
+      const checkpoint = o.value;
+      if (!isSweepable(checkpoint, now, ttlMs)) continue;
+      if (result.deleted >= max) {
+        result.more = true;
+        return result;
+      }
+      try {
+        if (checkpoint.lobby.game.started) {
+          recordNoContest(nk, logger, checkpoint, now);
+          result.noContest++;
+        }
+        nk.storageDelete([{ collection: LOBBY_CHECKPOINT_COLLECTION, key: o.key, userId: SYSTEM_USER_ID }]);
+        result.deleted++;
+      } catch (e) {
+        logger.error("Checkpoint %s: could not sweep: %v", o.key, e);
+      }
+    }
+    cursor = page.cursor || "";
+  } while (cursor);
+  return result;
+}
+function rpcAdminCheckpointsSweep(ctx, logger, nk, payload) {
+  var _a;
+  requireServer(ctx);
+  const max = (_a = parsePayload(payload).max) != null ? _a : SWEEP_MAX;
+  if (typeof max !== "number" || !Number.isInteger(max) || max < 1)
+    throw runtimeError(INVALID_ARGUMENT, "max must be a positive whole number");
+  const ttlMs = parsePayload(payload).ttlMs;
+  if (ttlMs !== void 0 && (typeof ttlMs !== "number" || !Number.isInteger(ttlMs) || ttlMs < 0))
+    throw runtimeError(INVALID_ARGUMENT, "ttlMs must be a whole number of 0 or more");
+  const result = sweepCheckpoints(nk, logger, Date.now(), max, ttlMs);
+  if (result.deleted > 0) logger.info("Swept %d expired checkpoints (%d no contest)", result.deleted, result.noContest);
+  return JSON.stringify(result);
+}
+
 // src/lobby/retention.ts
 var RUN_RETENTION_DAYS = 180;
-var DAY_MS2 = 24 * 60 * 60 * 1e3;
-var LIST_PAGE3 = 100;
-var PURGE_MAX = 500;
+var LIST_PAGE6 = 100;
+var EXPIRED_MAX = 100;
 function isKept(run) {
   return Object.keys(run.flags || {}).length > 0 || run.status === "disputed";
 }
@@ -8575,31 +9477,45 @@ function runObjects(run) {
   }
   return objects;
 }
-function purgeRuns(nk, cutoff, max) {
-  let deleted = 0;
-  let cursor = "";
+function expiredRuns(nk, cutoff, max, cursor) {
+  const runs = [];
+  let next = cursor;
   do {
-    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE3, cursor);
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE6, next);
     for (const o of page.objects || []) {
       const run = o.value;
-      if (!isPurgeable(run, cutoff)) continue;
-      if (deleted >= max) return { deleted, more: true };
-      nk.storageDelete(runObjects(run));
-      deleted++;
+      if (isPurgeable(run, cutoff)) runs.push({ runId: run.runId, endedAt: run.endedAt });
     }
-    cursor = page.cursor || "";
-  } while (cursor);
-  return { deleted, more: false };
+    next = page.cursor || "";
+  } while (next && runs.length < max);
+  return { runs, cursor: next };
 }
-function rpcAdminRunsPurge(ctx, logger, nk, payload) {
-  var _a;
+var PURGE_NAMED_MAX = 100;
+function purgeNamedRuns(nk, runIds) {
+  if (runIds.length === 0) return { deleted: 0 };
+  const found = nk.storageRead(runIds.map((key) => ({ collection: RUNS_COLLECTION, key, userId: SYSTEM_USER_ID })));
+  for (const o of found) nk.storageDelete(runObjects(o.value));
+  return { deleted: found.length };
+}
+function rpcAdminRunsPurgeNamed(ctx, logger, nk, payload) {
   requireServer(ctx);
-  const days = (_a = parsePayload(payload).olderThanDays) != null ? _a : RUN_RETENTION_DAYS;
+  const runIds = parsePayload(payload).runIds;
+  if (!Array.isArray(runIds) || runIds.length > PURGE_NAMED_MAX || !runIds.every((id) => typeof id === "string" && id.length > 0))
+    throw runtimeError(INVALID_ARGUMENT, `runIds must be a list of at most ${PURGE_NAMED_MAX} run ids`);
+  const result = purgeNamedRuns(nk, runIds);
+  if (result.deleted > 0) logger.info("Purged %d named runs past their evidence limit", result.deleted);
+  return JSON.stringify(result);
+}
+function rpcAdminRunsExpired(ctx, logger, nk, payload) {
+  var _a, _b;
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const days = (_a = input.olderThanDays) != null ? _a : RUN_RETENTION_DAYS;
   if (typeof days !== "number" || !Number.isInteger(days) || days < 1)
     throw runtimeError(INVALID_ARGUMENT, "olderThanDays must be a positive whole number");
-  const result = purgeRuns(nk, Date.now() - days * DAY_MS2, PURGE_MAX);
-  if (result.deleted > 0) logger.info("Purged %d runs older than %d days", result.deleted, days);
-  return JSON.stringify(result);
+  const cursor = (_b = input.cursor) != null ? _b : "";
+  if (typeof cursor !== "string") throw runtimeError(INVALID_ARGUMENT, "cursor must be a string");
+  return JSON.stringify(expiredRuns(nk, Date.now() - days * DAY_MS, EXPIRED_MAX, cursor));
 }
 
 // src/rating/admin.ts
@@ -8700,6 +9616,205 @@ function seedAllowedModIdsExtra(nk, logger, env) {
   logger.info("Seeded queueAllowedModIdsExtra from %s: %v", EXTRA_SEED_ENV, JSON.stringify(extra));
 }
 
+// src/player/anonymize.ts
+var DELETED_PLAYER_ID = "00000000-0000-4000-8000-000000000000";
+var DELETED_PLAYER_NAME = "[deleted player]";
+function replaceId(value, from, to) {
+  if (value === from) return to;
+  if (Array.isArray(value))
+    return value.map((v) => replaceId(v, from, to));
+  if (value !== null && typeof value === "object") {
+    const next = {};
+    for (const key of Object.keys(value))
+      next[key === from ? to : key] = replaceId(
+        value[key],
+        from,
+        to
+      );
+    return next;
+  }
+  return value;
+}
+function anonymizedRun(run, userId, to) {
+  const next = replaceId(run, userId, to);
+  return __spreadProps(__spreadValues({}, next), {
+    players: next.players.map(
+      (p) => p.id === to ? __spreadProps(__spreadValues({}, p), { displayName: DELETED_PLAYER_NAME }) : p
+    )
+  });
+}
+var SERVER_ONLY2 = { permissionRead: 0, permissionWrite: 0 };
+function listAll(nk, owner, collection) {
+  const all = [];
+  forEachStored(nk, owner, collection, (o) => {
+    all.push(o);
+  });
+  return all;
+}
+function anonymizeRuns(nk, userId, anonymousId, keptRunIds) {
+  for (const pointer of listAll(nk, userId, MY_RUNS_COLLECTION)) {
+    const runId = pointer.value.runId;
+    if (typeof runId !== "string") continue;
+    const runKey = {
+      collection: RUNS_COLLECTION,
+      key: runId,
+      userId: SYSTEM_USER_ID
+    };
+    const ownLog = {
+      collection: LOGS_COLLECTION,
+      key: logKey(runId, userId),
+      userId: SYSTEM_USER_ID
+    };
+    const [object] = nk.storageRead([runKey]);
+    if (!object) continue;
+    const run = object.value;
+    const kept = keptRunIds.indexOf(runId) !== -1;
+    const shared = run.players.some((p) => p.id !== userId);
+    if (!kept && !shared) {
+      nk.storageDelete([runKey, ownLog]);
+      continue;
+    }
+    const to = kept ? anonymousId : DELETED_PLAYER_ID;
+    const writes = [
+      __spreadProps(__spreadValues({}, runKey), {
+        value: anonymizedRun(run, userId, to),
+        permissionRead: 2,
+        permissionWrite: 0
+      })
+    ];
+    const [log] = kept ? nk.storageRead([ownLog]) : [];
+    if (log)
+      writes.push(__spreadValues({
+        collection: LOGS_COLLECTION,
+        key: logKey(runId, anonymousId),
+        userId: SYSTEM_USER_ID,
+        value: log.value
+      }, SERVER_ONLY2));
+    nk.storageWrite(writes);
+    nk.storageDelete([ownLog]);
+  }
+}
+function anonymizeMirror(nk, userId, anonymousId) {
+  const writes = [];
+  const deletes = [];
+  for (const o of listAll(nk, SYSTEM_USER_ID, MIRROR_COLLECTION)) {
+    const entry = o.value;
+    const owner = entry.kind === "chat" ? entry.line.userId : entry.kind === "run" ? null : entry.userId;
+    if (owner !== userId) continue;
+    const own = entry.kind === "notice" || entry.kind === "chat" && !entry.line.flagged;
+    if (own) {
+      deletes.push({
+        collection: MIRROR_COLLECTION,
+        key: o.key,
+        userId: SYSTEM_USER_ID
+      });
+      continue;
+    }
+    writes.push(__spreadValues({
+      collection: MIRROR_COLLECTION,
+      key: o.key,
+      userId: SYSTEM_USER_ID,
+      value: replaceId(o.value, userId, anonymousId)
+    }, SERVER_ONLY2));
+  }
+  if (writes.length > 0) nk.storageWrite(writes);
+  if (deletes.length > 0) nk.storageDelete(deletes);
+}
+var namesPlayer = (value, userId) => JSON.stringify(value).indexOf(userId) !== -1;
+function deleteLobbyState(nk, userId) {
+  const checkpoints = listAll(
+    nk,
+    SYSTEM_USER_ID,
+    LOBBY_CHECKPOINT_COLLECTION
+  ).filter((o) => namesPlayer(o.value, userId));
+  if (checkpoints.length > 0)
+    nk.storageDelete(
+      checkpoints.map((o) => ({
+        collection: LOBBY_CHECKPOINT_COLLECTION,
+        key: o.key,
+        userId: SYSTEM_USER_ID
+      }))
+    );
+  for (const o of listAll(nk, SYSTEM_USER_ID, BINDING_COLLECTION)) {
+    const binding = o.value;
+    if (namesPlayer(binding, userId))
+      deleteBinding(nk, binding.partyId, binding.memberIds);
+  }
+}
+function rewriteSystemObjects(nk, collection, userId, anonymousId) {
+  const writes = [];
+  for (const o of listAll(nk, SYSTEM_USER_ID, collection)) {
+    const next = replaceId(o.value, userId, anonymousId);
+    if (JSON.stringify(next) === JSON.stringify(o.value)) continue;
+    writes.push(__spreadValues({
+      collection,
+      key: o.key,
+      userId: SYSTEM_USER_ID,
+      value: next
+    }, SERVER_ONLY2));
+  }
+  if (writes.length > 0) nk.storageWrite(writes);
+}
+function anonymizeBanIndex(nk, userId, anonymousId, keep) {
+  const objects = nk.storageRead(
+    loginKeys(nk, userId).map((key) => ({
+      collection: BAN_INDEX_COLLECTION,
+      key,
+      userId: SYSTEM_USER_ID
+    }))
+  );
+  if (objects.length === 0) return;
+  if (!keep) {
+    nk.storageDelete(
+      objects.map((o) => ({
+        collection: BAN_INDEX_COLLECTION,
+        key: o.key,
+        userId: SYSTEM_USER_ID
+      }))
+    );
+    return;
+  }
+  nk.storageWrite(
+    objects.map((o) => __spreadValues({
+      collection: BAN_INDEX_COLLECTION,
+      key: o.key,
+      userId: SYSTEM_USER_ID,
+      value: replaceId(o.value, userId, anonymousId)
+    }, SERVER_ONLY2))
+  );
+}
+function deleteLegacyRatings(nk, userId) {
+  const hash = steamIdHashOf(nk, userId);
+  if (!hash) return;
+  const [parked] = nk.storageRead([
+    {
+      collection: LEGACY_RATINGS_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID
+    }
+  ]);
+  if (!parked || parked.value.claimedBy !== userId)
+    return;
+  nk.storageDelete([
+    {
+      collection: LEGACY_RATINGS_COLLECTION,
+      key: hash,
+      userId: SYSTEM_USER_ID
+    }
+  ]);
+}
+function anonymizeAccount(nk, userId, anonymousId, keep) {
+  anonymizeRuns(nk, userId, anonymousId, keep.keptRunIds);
+  deleteLegacyRatings(nk, userId);
+  anonymizeMirror(nk, userId, anonymousId);
+  deleteLobbyState(nk, userId);
+  rewriteSystemObjects(nk, NETWORK_BANS_COLLECTION, userId, anonymousId);
+  anonymizeBanIndex(nk, userId, anonymousId, keep.keepSteamIdHash);
+  nk.storageDelete([
+    { collection: IP_HASHES_COLLECTION, key: IP_HASHES_KEY, userId }
+  ]);
+}
+
 // src/player/discord.ts
 var DISCORD_INDEX_COLLECTION = "discord_index";
 var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -8790,7 +9905,7 @@ function requireAccount(nk, userId) {
 }
 function parseEdit(input) {
   const edit = {};
-  const { privileges, useDiscordName, preferredJoker, discord } = input;
+  const { privileges, useDiscordName, preferredJoker, discord, notice, chatEligible } = input;
   if (privileges !== void 0) {
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE2.test(p)))
       throw runtimeError(INVALID_ARGUMENT, "privileges must be an array of privilege names");
@@ -8809,6 +9924,16 @@ function parseEdit(input) {
     if (discord !== null) throw runtimeError(INVALID_ARGUMENT, "discord can only be null (unlink)");
     edit.discord = null;
   }
+  if (notice !== void 0) {
+    const n = notice;
+    if (!n || typeof n !== "object" || !Number.isInteger(n.version) || n.version < 1 || typeof n.acceptedAt !== "number")
+      throw runtimeError(INVALID_ARGUMENT, "notice must be {version, acceptedAt}");
+    edit.notice = { version: n.version, acceptedAt: n.acceptedAt };
+  }
+  if (chatEligible !== void 0) {
+    if (typeof chatEligible !== "boolean") throw runtimeError(INVALID_ARGUMENT, "chatEligible must be a boolean");
+    edit.chatEligible = chatEligible;
+  }
   return edit;
 }
 function applyEdit(profile, edit, unlocked = []) {
@@ -8826,6 +9951,15 @@ function applyEdit(profile, edit, unlocked = []) {
     if (!isSelectable(edit.preferredJoker, { privileges: next.privileges, unlocked }))
       throw runtimeError(INVALID_ARGUMENT, "Invalid joker");
     next.preferredJoker = edit.preferredJoker;
+  }
+  if (edit.notice) {
+    next.tosAcceptedVersion = edit.notice.version;
+    next.noticeAcceptedAt = edit.notice.acceptedAt;
+  }
+  if (edit.chatEligible !== void 0) {
+    next.ageAnswered = true;
+    next.chatEnabled = edit.chatEligible;
+    next.chatBlocked = !edit.chatEligible;
   }
   return next;
 }
@@ -8847,7 +9981,15 @@ function rpcAdminProfileSet(ctx, logger, nk, payload) {
 }
 function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   requireServer(ctx);
-  const userId = requireAccount(nk, parsePayload(payload).userId);
+  const input = parsePayload(payload);
+  const userId = requireAccount(nk, input.userId);
+  if (typeof input.anonymousId !== "string" || !USER_ID4.test(input.anonymousId) || input.anonymousId === userId)
+    throw runtimeError(INVALID_ARGUMENT, "anonymousId is required");
+  const keptRunIds = input.keptRunIds;
+  if (!Array.isArray(keptRunIds) || !keptRunIds.every((id) => typeof id === "string"))
+    throw runtimeError(INVALID_ARGUMENT, "keptRunIds must be a list of run ids");
+  if (typeof input.keepSteamIdHash !== "boolean")
+    throw runtimeError(INVALID_ARGUMENT, "keepSteamIdHash is required");
   const lobby = currentLobby(nk, userId);
   if (lobby) {
     const signal2 = { type: "admin_remove", userId, reason: "account_deleted", onlyIfStarted: false };
@@ -8855,9 +9997,16 @@ function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   }
   releaseDiscord(nk, userId, profileFor(nk, userId).discordIdHash);
   nk.sessionLogout(userId, "", "");
+  anonymizeAccount(nk, userId, input.anonymousId, {
+    keptRunIds,
+    keepSteamIdHash: input.keepSteamIdHash
+  });
   nk.accountDeleteId(userId, false);
   logger.info("Deleted account %s", userId);
   return JSON.stringify({ deleted: true });
+}
+function refuseClientAccountDelete(ctx, logger, nk) {
+  throw runtimeError(PERMISSION_DENIED, "Delete your account on the website (your profile page)");
 }
 
 // src/moderation/report.ts
@@ -8935,15 +10084,43 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   return JSON.stringify({ ok: true, reportId: reply.body.reportId });
 }
 
+// src/moderation/network_admin.ts
+var IP_HASH_PURGE_MAX = 500;
+function rpcAdminNetworkBans(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const userId = requireUserId2(nk, parsePayload(payload));
+  return JSON.stringify({ networkBans: networkBansFor(nk, userId) });
+}
+function rpcAdminNetworkBanLift(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const banId = parsePayload(payload).banId;
+  if (typeof banId !== "string" || !banId)
+    throw runtimeError(INVALID_ARGUMENT, "banId is required");
+  const lifted = liftNetworkBan(nk, banId, Date.now());
+  if (lifted) logger.info("Lifted network ban %s", banId);
+  return JSON.stringify({ lifted });
+}
+function rpcAdminIpHashesPurge(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const result = purgeIpHashes(nk, Date.now(), IP_HASH_PURGE_MAX);
+  if (result.deleted > 0)
+    logger.info("Purged %d login network hashes", result.deleted);
+  return JSON.stringify(result);
+}
+
 // src/main.ts
 function InitModule(ctx, logger, nk, initializer) {
+  const settings = checkServerKind(ctx.env, logger);
+  requireIpHashSalt(settings, ctx.env);
   configureSeason(ctx.env["RATING_SEASON"]);
   seedAllowedModIdsExtra(nk, logger, ctx.env);
   initializer.registerBeforeAuthenticateCustom(beforeAuthenticateCustom);
   initializer.registerAfterAuthenticateCustom(afterAuthenticateCustom);
   initializer.registerBeforeLinkCustom(refuseCustomIdChange);
   initializer.registerBeforeUnlinkCustom(refuseCustomIdChange);
+  initializer.registerBeforeDeleteAccount(refuseClientAccountDelete);
   initializer.registerBeforeAuthenticateDevice(beforeAuthenticateDevice);
+  initializer.registerBeforeSessionRefresh(beforeSessionRefresh);
   logger.info("BMP Steam login module loaded");
   initializer.registerMatch("bmp_lobby", {
     matchInit: lobbyMatchInit,
@@ -9000,6 +10177,10 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);
   initializer.registerRpc("admin_ban_lift", rpcAdminBanLift);
+  initializer.registerRpc("admin_ban_index_forget", rpcAdminBanIndexForget);
+  initializer.registerRpc("admin_network_bans", rpcAdminNetworkBans);
+  initializer.registerRpc("admin_network_ban_lift", rpcAdminNetworkBanLift);
+  initializer.registerRpc("admin_ip_hashes_purge", rpcAdminIpHashesPurge);
   initializer.registerRpc("admin_lobby_list", rpcAdminLobbyList);
   initializer.registerRpc("admin_lobby_get", rpcAdminLobbyGet);
   initializer.registerRpc("admin_lobby_kick", rpcAdminLobbyKick);
@@ -9015,7 +10196,10 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_avatars_for", rpcAdminAvatarsFor);
   initializer.registerRpc("admin_progress_set", rpcAdminProgressSet);
   initializer.registerRpc("admin_avatars_reset", rpcAdminAvatarsReset);
-  initializer.registerRpc("admin_runs_purge", rpcAdminRunsPurge);
+  initializer.registerRpc("admin_achievements_backfill", rpcAdminAchievementsBackfill);
+  initializer.registerRpc("admin_runs_expired", rpcAdminRunsExpired);
+  initializer.registerRpc("admin_runs_purge_named", rpcAdminRunsPurgeNamed);
+  initializer.registerRpc("admin_checkpoints_sweep", rpcAdminCheckpointsSweep);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
   initializer.registerRpc("admin_run_get", rpcAdminRunGet);
   initializer.registerRpc("admin_run_set_result", rpcAdminRunSetResult);

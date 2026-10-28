@@ -7,7 +7,7 @@ import { emptyProgress } from './progress'
 import { editedProgress, rpcAdminAvatarsFor, rpcAdminProgressSet, rpcAvatarCatalog } from './rpc'
 import { PROGRESS_COLLECTION, PROGRESS_KEY, progressFor, writeProgress } from './storage'
 
-const TESTING = { ALLOW_DEVICE_AUTH: 'true' }
+const TESTING = { BMP_SERVER_KIND: 'dev' }
 
 function stack() {
 	const nk = fakeNk()

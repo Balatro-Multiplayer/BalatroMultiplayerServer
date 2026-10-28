@@ -8,7 +8,7 @@ function nakama(): any {
 	let next = 0
 	return fakeNk({
 		uuidv4: () => `u${++next}`,
-		accountGetId: (id: string) => ({ customId: id === 'a' ? 'steam:76561198000000001' : '' }),
+		accountGetId: (id: string) => ({ customId: id === 'a' ? 'steamhash:dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d' : '' }),
 	})
 }
 
@@ -46,10 +46,19 @@ describe('the mirror outbox', () => {
 		expect(entries[0].logs).toEqual({ a: { events: [[1, 'x', null]] } })
 		expect(entries[0].ratings).toEqual({ a: { rating: 640 } })
 		expect(players).toEqual({
-			a: { steamId: '76561198000000001', legacyPlayerId: null, displayName: '' },
-			b: { steamId: null, legacyPlayerId: 'pg-b', displayName: 'Bee' },
+			a: { steamIdHash: 'dcd52e52066edc9e05b6b85944a5d20bbb703e11de4b075c7cab8e4810b8f72d', legacyPlayerId: null, displayName: '', deleted: false },
+			b: { steamIdHash: null, legacyPlayerId: 'pg-b', displayName: 'Bee', deleted: false },
 		})
 		expect(pull(nk, { limit: 1 }).entries).toHaveLength(1)
+	})
+
+	it('says when a player\'s account is gone', () => {
+		const nk = nakama()
+		nk.accountGetId = () => {
+			throw new Error('not found')
+		}
+		enqueue(nk, { kind: 'notice', at: 10, userId: 'x', version: 2 })
+		expect(pull(nk).players).toEqual({ x: { steamIdHash: null, legacyPlayerId: null, displayName: '', deleted: true } })
 	})
 
 	it('keeps an entry until it is acked', () => {

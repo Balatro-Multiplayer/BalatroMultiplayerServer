@@ -22,7 +22,7 @@ import {
 import { listWarnings } from '../../../infrastructure/gateways/warning.gateway.js'
 import { callNakamaRpc } from '../../../infrastructure/nakama/admin-client.js'
 import type { ServiceQueueItemRecord } from '../../../infrastructure/gateways/service-queue.gateway.js'
-import { numericSourceId, parseAntiCheatSourceId, parseIntegritySourceId } from '../source-ids.js'
+import { numericSourceId, parseAntiCheatSourceId, parseIntegritySourceId } from '../../../shared/service-queue/source-ids.js'
 import { contextOf } from '../types.js'
 import {
 	type ChatLine,

@@ -20,7 +20,8 @@ interface ModEntry {
 }
 
 interface ConfigResponse {
-  tosVersion: number
+  noticeVersion: number
+  noticeDate: string
   mods: ModEntry[]
   chatAllowlist: string[]
   chatEnabled: boolean
@@ -51,7 +52,7 @@ const FEATURE_FLAGS: { key: FeatureFlag; label: string; description: string }[] 
   {
     key: 'achievementsEnabled',
     label: 'Avatar Achievements',
-    description: 'Games count toward unlocking avatars. Turn on only after the avatar reset has run.',
+    description: 'Games count toward unlocking avatars. On by default.',
   },
 ]
 
@@ -81,21 +82,6 @@ export default function AdminConfigPage() {
       apiFetch('/webadmin/config/feature-flags', { method: 'PATCH', body: JSON.stringify(patch) }),
     onSuccess: () => {
       toast.success('Feature flag updated')
-      invalidate()
-    },
-    onError: onErr,
-  })
-
-  const [tosVersion, setTosVersion] = useState('')
-  useEffect(() => {
-    if (data) setTosVersion(String(data.tosVersion))
-  }, [data])
-
-  const tosVersionMut = useMutation({
-    mutationFn: (v: number) =>
-      apiFetch('/webadmin/config/tos-version', { method: 'PATCH', body: JSON.stringify({ tosVersion: v }) }),
-    onSuccess: () => {
-      toast.success('ToS version updated')
       invalidate()
     },
     onError: onErr,
@@ -162,28 +148,13 @@ export default function AdminConfigPage() {
         <>
           <Card>
             <CardHeader>
-              <CardTitle>Terms of Service Version</CardTitle>
-              <CardDescription>Bumping this re-prompts every player to accept the ToS on next sign-in.</CardDescription>
+              <CardTitle>Notice</CardTitle>
+              <CardDescription>
+                Set in code (packages/types/src/notice.ts). A deploy with a higher version asks every player to accept again.
+              </CardDescription>
             </CardHeader>
-            <CardContent className='flex items-end gap-3'>
-              <div className='space-y-2'>
-                <Label htmlFor='tos-version'>Version</Label>
-                <Input
-                  id='tos-version'
-                  type='number'
-                  min={1}
-                  className='w-32'
-                  value={tosVersion}
-                  onChange={(e) => setTosVersion(e.target.value)}
-                  disabled={!isAdmin}
-                />
-              </div>
-              <Button
-                disabled={!isAdmin || tosVersionMut.isPending || Number(tosVersion) === data.tosVersion}
-                onClick={() => tosVersionMut.mutate(Number(tosVersion))}
-              >
-                {tosVersionMut.isPending ? 'Saving…' : 'Save'}
-              </Button>
+            <CardContent className='text-sm'>
+              Version {data.noticeVersion}, dated {data.noticeDate}
             </CardContent>
           </Card>
 

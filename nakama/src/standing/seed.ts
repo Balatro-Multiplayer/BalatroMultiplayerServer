@@ -1,7 +1,7 @@
-// At boot, QUEUE_ALLOWED_MOD_IDS_EXTRA (the runtime env; local stacks set it
-// in nakama/local.yml, a real server never does) is added to the stored
-// queueAllowedModIdsExtra, so test clients' dev mods (MultiplayerPvP,
-// ClaudeControl) stay allowed across restarts. Ids already there are kept:
+// At boot, QUEUE_ALLOWED_MOD_IDS_EXTRA (the runtime env; no stack sets it
+// now, since only the Official server checks the allowed mods) is added to
+// the stored queueAllowedModIdsExtra, so extra ids stay allowed across
+// restarts. Ids already there are kept:
 // the seed only adds.
 import { readConfig, writeConfig } from '../config'
 import { parseExtraSeed, seededExtra } from './allowed'
