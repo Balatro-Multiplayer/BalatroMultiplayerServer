@@ -100,6 +100,21 @@ describe('runRowsOf', () => {
 		])
 	})
 
+	it('maps a PvP season best onto the score columns, past 1e15 too', () => {
+		const entry = run()
+		const pvp = {
+			...entry,
+			rating: { modId: 'MultiplayerPvP', mode: 'duel', season: 2 },
+			ratings: { na: { ...entry.ratings.na, seasonBest: '20.17609125905568,3' } },
+		}
+		expect(runRowsOf(pvp, ids).ratings[0]).toMatchObject({
+			seasonBest: null,
+			seasonBestLen: 2,
+			seasonBestRev: [3, 20.17609125905568],
+			seasonBestText: '20.17609125905568,3',
+		})
+	})
+
 	it('maps a private, abandoned or restarted run without a match or ratings', () => {
 		const entry = { ...run({ gameMode: undefined, rankedMode: undefined, lobbyType: undefined, status: 'abandoned', logChecks: {} }), rating: null }
 		const rows = runRowsOf(entry, ids)

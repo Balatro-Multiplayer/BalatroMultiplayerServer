@@ -10,9 +10,11 @@
 	},
 	"scripts": {
 		"build": "tsc",
-		"lint": "biome check ."
+		"lint": "biome check .",
+		"test": "vitest run"
 	},
 	"devDependencies": {
-		"typescript": "^5.7.0"
+		"typescript": "^5.7.0",
+		"vitest": "^3.2.4"
 	}
 }

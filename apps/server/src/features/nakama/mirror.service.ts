@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { seasonBestColumns } from '../ratings/season-best.js'
 import { compressToBase64 } from '../../shared/utils/compression.js'
 import { DELETED_PLAYER_ID, DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
 import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
@@ -31,6 +32,7 @@ export interface NakamaRun {
 		place: number
 		performance?: number
 		metric?: number
+		metricText?: string
 	}[]
 	reports: { [userId: string]: { playerId: string; place: number }[] }
 	reportOrder?: string[]
@@ -62,7 +64,7 @@ export interface NakamaRating {
 	wins: number
 	losses: number
 	gamesPlayed: number
-	seasonBest: number | null
+	seasonBest: number | string | null
 	lastMatchAt: number
 }
 
@@ -187,6 +189,9 @@ export interface RunRows {
 		losses: number
 		gamesPlayed: number
 		seasonBest: number | null
+		seasonBestLen: number | null
+		seasonBestRev: number[] | null
+		seasonBestText: string | null
 		lastMatchAt: Date | null
 	}[]
 	// Flagged players: an anti_cheat service-queue item.
@@ -369,7 +374,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 				wins: r.wins,
 				losses: r.losses,
 				gamesPlayed: r.gamesPlayed,
-				seasonBest: r.seasonBest,
+				...seasonBestColumns(entry.rating.modId, r.seasonBest),
 				lastMatchAt: r.lastMatchAt ? new Date(r.lastMatchAt) : null,
 			})
 		}

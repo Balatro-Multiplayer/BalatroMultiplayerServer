@@ -10,6 +10,7 @@ import {
 	groupUnqueued,
 	hasPlayerAnswer,
 	openGroupQueue,
+	refuseOpen,
 	releaseGroups,
 } from './group_queue'
 import { CHECKPOINT_TTL_MS, ServerOp, type GroupQueueMessage } from './protocol'
@@ -126,6 +127,35 @@ describe('the queue phases', () => {
 		expect(refused(cancelGroup(queued(home('a', 'b')), PARTY, 'cancelled', 'z'))).toBe('not_member')
 		expect(refused(cancelGroup(away(home('a', 'b')), PARTY, 'member_left_party', null))).toBe('group_away')
 		expect(refused(cancelGroup(home('a', 'b'), PARTY, 'cancelled', 'a'))).toBe('not_bound')
+	})
+})
+
+describe('a refused group queue open', () => {
+	const refusedMember = { userId: 'b', reason: 'version_mismatch' as const, mods: [] }
+
+	it('tells every player but the host who is in the way, and changes nothing', () => {
+		const lobby = home('a', 'b', 'c')
+		const step = refuseOpen(lobby, 'a', PARTY, refusedMember)
+		expect(step.lobby).toBe(lobby)
+		expect(step.out).toEqual([
+			{
+				kind: 'send',
+				op: ServerOp.GROUP_QUEUE,
+				payload: {
+					phase: 'idle',
+					partyId: PARTY,
+					homeCode: 'HOME12',
+					reason: 'member_refused',
+					requeue: false,
+					refused: refusedMember,
+				},
+				to: ['b', 'c'],
+			},
+		])
+	})
+
+	it('says nothing while the lobby already has a group queue', () => {
+		expect(refuseOpen(forming(home('a', 'b')), 'a', PARTY, refusedMember).out).toEqual([])
 	})
 })
 

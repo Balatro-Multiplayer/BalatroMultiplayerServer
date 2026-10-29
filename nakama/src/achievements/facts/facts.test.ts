@@ -135,6 +135,23 @@ describe('scores', () => {
 		expect(parseScore(250)).toBe(250)
 	})
 
+	it('parses score text', () => {
+		expect(parseScore('12345')).toBe(12345)
+		expect(parseScore('150000000000')).toBe(1.5e11)
+		expect(parseScore('500.1760912590557,1')).toBe(Infinity)
+		expect(parseScore('20.17609125905568,3')).toBe(Infinity)
+		expect(parseScore('100,1')).toBeCloseTo(1e100, -90)
+	})
+
+	it('counts a hand score above 1e308 as a stunt score', () => {
+		const events = eventsFrom([
+			[1, 'hand_scored', { score: '300' }],
+			[2, 'hand_scored', { score: '500.1760912590557,1' }],
+		])
+		expect(bestHandScore(events)).toBe(Infinity)
+		expect(bestHandScore(eventsFrom([[1, 'hand_result', ['500.1760912590557,1', 0]]]))).toBe(Infinity)
+	})
+
 	it('takes the best hand from hand_scored', () => {
 		const events = eventsFrom([
 			[1, 'hand_scored', { score: '300' }],

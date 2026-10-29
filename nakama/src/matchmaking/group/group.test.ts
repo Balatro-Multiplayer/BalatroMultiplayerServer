@@ -2,7 +2,7 @@
 // hook) against a fake Nakama whose one home lobby answers its signals the
 // way lobby/match.ts does: through answerGroupSignal, running the group's
 // effects.
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, writeConfig } from '../../config'
 import { bindCode } from '../../lobby/codes'
 import { answerGroupSignal, isGroupSignal } from '../../lobby/group_signals'
@@ -30,7 +30,8 @@ import { rpcGroupQueueCancel, rpcGroupQueueOpen } from './rpc'
 
 const PARTY = '0b0c4a9e-7f43-4f43-9f6e-1d2c3b4a5f60.bmp-local'
 const HOME_MATCH = 'home-uuid.bmp-local'
-const MOD = 'MultiplayerSPDRN'
+// Reassigned by the PvP version tests (versionsIn) and restored after each.
+let MOD = 'MultiplayerSPDRN'
 const CASUAL = { modId: MOD, mode: 'standard', kind: 'casual' }
 const CASUAL_QUERY = `+properties.modId:${MOD} +properties.mode:standard +properties.kind:casual`
 const info = (name: string) => ({ displayName: name, preferredJoker: null, mods: null })
@@ -448,5 +449,40 @@ describe('the group queue and standings', () => {
 			['b', 'none'],
 			['s', 'none'],
 		])
+	})
+})
+
+describe('PvP versions in a group', () => {
+	beforeEach(() => {
+		MOD = 'MultiplayerPvP'
+		CASUAL.modId = MOD
+	})
+	afterEach(() => {
+		MOD = 'MultiplayerSPDRN'
+		CASUAL.modId = MOD
+	})
+	const versions = (w: World, byId: { [userId: string]: string }) => {
+		for (const id of Object.keys(byId)) reportFor(w, id, ['MultiplayerPvP-' + byId[id]])
+	}
+
+	it('refuses to queue a group whose members run different PvP versions, naming the older one', () => {
+		const w = world('a', 'b')
+		versions(w, { a: '1.0.3', b: '1.0.4' })
+		w.party.add('a')
+		expect(openFor(w).refused).toMatchObject({ code: 'member_refused', userId: 'a', reason: 'version_mismatch', mods: [] })
+		versions(w, { a: '1.0.4' })
+		expect(openFor(w).groupQueue).toMatchObject({ phase: 'forming' })
+	})
+	it('cancels a matched group over the member off the common version, saying who and why', () => {
+		const w = queuedWorld()
+		versions(w, { a: '1.0.4', b: '1.0.3', s: '1.0.4' })
+		expect(() =>
+			matchmakerMatched(playerCtx('a'), fakeLogger, w.nk as any, [grouped('a'), grouped('b'), entry('s', CASUAL)]),
+		).toThrow()
+		expect(w.sent[w.sent.length - 1]).toMatchObject({
+			phase: 'idle',
+			reason: 'member_refused',
+			refused: { userId: 'b', reason: 'version_mismatch', mods: [] },
+		})
 	})
 })

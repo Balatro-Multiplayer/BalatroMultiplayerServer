@@ -4,6 +4,7 @@
 // others can see also reaches the player's lobby, and the player's other
 // sessions hear of it through ACCOUNT_UPDATED.
 import { standingFor } from '../standing/current'
+import { pvpVersionOf } from '../standing/pvp_version'
 import { writeModReport } from '../standing/storage'
 import { FAILED_PRECONDITION, INVALID_ARGUMENT, runtimeError } from '../errors'
 import { currentLobby } from '../lobby/rpc'
@@ -110,7 +111,7 @@ export function rpcProfileSetMods(
 	const now = Date.now()
 	writeModReport(nk, userId, { mods: list, reportedAt: now })
 	const standing = standingFor(nk, settingsOf(ctx), userId, now)
-	pushToLobby(nk, userId, { mods: list, standing: standing.standing })
+	pushToLobby(nk, userId, { mods: list, standing: standing.standing, pvpVersion: pvpVersionOf(list) })
 	return JSON.stringify({ mods: list, standing })
 }
 

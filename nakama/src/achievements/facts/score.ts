@@ -1,24 +1,16 @@
 // A player's best single-hand score. hand_scored {score} carries each played
-// hand's score as a string (Talisman's big numbers don't fit a double).
+// hand's score as score text (big numbers don't fit a double).
 // Logs from before hand_scored only have PvP's hand_result [roundScore, ...],
 // the round's running total: a hand's score is the rise since the previous
 // one, and a fall means a new round began. Pure.
+import { parseLegacyScore, scoreToNumber } from '../../../../packages/types/src/big-score'
 import type { LogEvent } from '../../shared/replay/events'
 
-// The score text as a number: Infinity for anything too big for a double
-// (e-notation past 1e308, Talisman's "e10##"/"ee" forms, "naneinf"), 0 for
-// anything unreadable.
+// The score as a number: Infinity for anything too big for a double, 0 for
+// anything unreadable. Reads score text and the free-form text of old logs
+// (commas, Lua exponents, Balatro notation, "naneinf").
 export function parseScore(text: unknown): number {
-	if (typeof text === 'number') return text > 0 ? text : 0
-	if (typeof text !== 'string') return 0
-	const cleaned = text.replace(/[,\s]/g, '').toLowerCase()
-	if (cleaned === '') return 0
-	const value = Number(cleaned)
-	if (!isNaN(value)) return value > 0 ? value : 0
-	if (cleaned === 'naneinf' || cleaned === 'inf' || cleaned === 'infinity') return Infinity
-	// Talisman notations for numbers beyond a double: "e1.2e10", "1.2ee10", "10##...".
-	if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf('#') !== -1) return Infinity
-	return 0
+	return scoreToNumber(parseLegacyScore(text))
 }
 
 function scoredArg(args: unknown): unknown {

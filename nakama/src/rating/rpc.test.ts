@@ -17,6 +17,7 @@ describe('boardEntries', () => {
 				e: { rating: 900, gamesPlayed: 6, lastMatchAt: NOW - 200 * DAY },
 			},
 			NOW,
+			'MultiplayerPvP',
 		)
 		expect(entries.map((e) => [e.playerId, e.rating, e.rank])).toEqual([
 			['c', 1580, 1],
@@ -34,6 +35,7 @@ describe('boardEntries', () => {
 				tied: { rating: 1650, gamesPlayed: 6, lastMatchAt: NOW - DAY },
 			},
 			NOW,
+			'MultiplayerPvP',
 		)
 		expect(entries.map((e) => [e.rank, e.playerId, e.rating])).toEqual([
 			[11, 'tied', 1650],
@@ -42,8 +44,18 @@ describe('boardEntries', () => {
 		])
 	})
 
+	it('carries a score season best as score text, also one stored as an old number', () => {
+		const withBest = (seasonBest: unknown) =>
+			({ ownerId: 'x', username: 'x', score: 700, subscore: 1, rank: 1, metadata: { losses: 0, gamesPlayed: 6, seasonBest } }) as unknown as nkruntime.LeaderboardRecord
+		const best = (seasonBest: unknown, modId: string) => boardEntries([withBest(seasonBest)], {}, NOW, modId)[0].seasonBest
+		expect(best('20.17609125905568,3', 'MultiplayerPvP')).toBe('20.17609125905568,3')
+		expect(best(1e15, 'MultiplayerPvP')).toBe('1000000000000000')
+		expect(best(null, 'MultiplayerPvP')).toBeNull()
+		expect(best(95_000, 'MultiplayerSPDRN')).toBe(95_000)
+	})
+
 	it('keeps the stored score when the rating object is missing', () => {
-		expect(boardEntries([rec('x', 700, 1, 1)], {}, NOW)[0].rating).toBe(700)
-		expect(boardEntries([], {}, NOW)).toEqual([])
+		expect(boardEntries([rec('x', 700, 1, 1)], {}, NOW, 'MultiplayerPvP')[0].rating).toBe(700)
+		expect(boardEntries([], {}, NOW, 'MultiplayerPvP')).toEqual([])
 	})
 })

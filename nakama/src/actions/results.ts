@@ -11,6 +11,7 @@ import {
 	ServerOp,
 } from '../lobby/protocol'
 import { type Lobby, type Outbound, type Step, emptyGame } from '../lobby/state'
+import { normalizeScore } from '../../../packages/types/src/big-score'
 
 // A report's placements, or why it's malformed. Every participant must be
 // placed exactly once.
@@ -26,7 +27,7 @@ export function parsePlacements(
 	const placements: Placement[] = []
 	for (const entry of value) {
 		if (typeof entry !== 'object' || entry === null) return null
-		const { playerId, place, performance, metric } = entry as {
+		const { playerId, place, performance, metric, metricText } = entry as {
 			[key: string]: unknown
 		}
 		if (typeof playerId !== 'string' || !expected[playerId] || seen[playerId])
@@ -44,6 +45,11 @@ export function parsePlacements(
 				return null
 			// Whole units: the season-best mirror stores it as a bigint.
 			placement.metric = Math.round(metric)
+		}
+		// Bad score text (or one over the array limit) drops only the season best.
+		if (typeof metricText === 'string') {
+			const text = normalizeScore(metricText)
+			if (text !== null) placement.metricText = text
 		}
 		seen[playerId] = true
 		placements.push(placement)

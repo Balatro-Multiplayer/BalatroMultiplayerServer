@@ -33,7 +33,7 @@ interface LeaderboardEntry {
   wins: number
   losses: number
   gamesPlayed: number
-  seasonBest: number | null
+  seasonBest: number | string | null
 }
 
 interface SeasonsResponse {

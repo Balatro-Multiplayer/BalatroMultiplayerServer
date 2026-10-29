@@ -1,6 +1,7 @@
 // Why a player may not queue, as a closed set the client can tell apart, each
 // with an English message built here as the fallback text. Pure.
 import { INTEGRITY_REQUIRED } from '../integrity'
+import { VERSION_MISMATCH, VERSION_MISMATCH_MESSAGE } from '../standing/pvp_version'
 import type { StandingResult } from '../standing/standing'
 
 export type QueueRefusal =
@@ -12,6 +13,8 @@ export type QueueRefusal =
 	| { code: 'mods_not_allowed'; mods: string[] }
 	// No mod report this session.
 	| { code: 'mods_unreported' }
+	// Matched with players on another PvP version (standing/pvp_version.ts).
+	| { code: typeof VERSION_MISMATCH }
 
 export type QueueRefusalCode = QueueRefusal['code']
 
@@ -26,6 +29,8 @@ export function queueRefusalMessage(refusal: QueueRefusal): string {
 			return INTEGRITY_REQUIRED
 		case 'mods_not_allowed':
 			return "These mods aren't allowed in matchmaking: " + refusal.mods.join(', ') + '. ' + PRIVATE_LOBBIES_ALLOW_ANY_MODS
+		case 'version_mismatch':
+			return VERSION_MISMATCH_MESSAGE
 		case 'mods_unreported':
 			return "Your game hasn't reported its mods yet. Reconnect and try again."
 	}

@@ -138,6 +138,23 @@ export function openGroupQueue(
 	})
 }
 
+// The host's open was refused over a member's standing: the host has the RPC
+// reply, and the other players are told who is in the way (as when a queue
+// ends over a member), since no queue exists to end. Nothing changes.
+export function refuseOpen(lobby: Lobby, hostId: string, partyId: string, refused: RefusedMember): Step {
+	if (lobby.groupQueue) return { lobby, out: [] }
+	const idle: GroupQueueMessage = {
+		phase: 'idle',
+		partyId,
+		homeCode: lobby.code,
+		reason: 'member_refused',
+		requeue: false,
+		refused,
+	}
+	const to = everyone(lobby).filter((id) => id !== hostId)
+	return { lobby, out: [{ kind: 'send', op: ServerOp.GROUP_QUEUE, payload: idle, to }] }
+}
+
 // The host's party ticket is out (the PartyMatchmakerAdd after-hook).
 export function groupQueued(lobby: Lobby, partyId: string, ticket: string): Result<Step, GroupRefusal> {
 	const gq = ownGroup(lobby, partyId)

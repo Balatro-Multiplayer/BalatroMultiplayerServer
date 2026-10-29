@@ -11,6 +11,7 @@ import {
 	getMetricConfig,
 	withinMetricBounds,
 } from '../../features/ratings/metrics.config.js'
+import { seasonBestColumns } from '../../features/ratings/season-best.js'
 import type { PlacementEntry } from '../../shared/types/index.js'
 import { db } from '../db/index.js'
 import {
@@ -251,6 +252,30 @@ async function applySecondaryMetric(
 	const minPlace = Math.min(...placements.map((p) => p.place))
 
 	for (const p of placements) {
+		const where = and(
+			eq(matchmakingRatings.playerId, p.playerId),
+			eq(matchmakingRatings.modId, match.modId),
+			eq(matchmakingRatings.gameMode, match.gameMode),
+			eq(matchmakingRatings.season, seasonId),
+		)
+
+		// A score board reads the score text; a plain number metric is ignored.
+		if (cfg.kind === 'score') {
+			const cols = seasonBestColumns(match.modId, p.metricText)
+			if (cols.seasonBestText === null || cols.seasonBestLen === null || cols.seasonBestRev === null) continue
+			const rev = sql`ARRAY[${sql.join(
+				cols.seasonBestRev.map((n) => sql`${n}`),
+				sql`, `,
+			)}]::double precision[]`
+			// A NULL row compares as NULL, so test for no best first.
+			const better = sql`(${matchmakingRatings.seasonBestText} IS NULL OR ROW(${cols.seasonBestLen}::smallint, ${rev}) > ROW(${matchmakingRatings.seasonBestLen}, ${matchmakingRatings.seasonBestRev}))`
+			await tx
+				.update(matchmakingRatings)
+				.set({ ...cols, bestMatchId: match.matchId, bestAt: at })
+				.where(and(where, better))
+			continue
+		}
+
 		let value: number | null = null
 		if (cfg.serverMeasured) {
 			if (p.place === minPlace && durationMs !== null) value = durationMs
@@ -275,15 +300,7 @@ async function applySecondaryMetric(
 		await tx
 			.update(matchmakingRatings)
 			.set({ seasonBest: rounded, bestMatchId: match.matchId, bestAt: at })
-			.where(
-				and(
-					eq(matchmakingRatings.playerId, p.playerId),
-					eq(matchmakingRatings.modId, match.modId),
-					eq(matchmakingRatings.gameMode, match.gameMode),
-					eq(matchmakingRatings.season, seasonId),
-					better,
-				),
-			)
+			.where(and(where, better))
 	}
 }
 
@@ -304,6 +321,7 @@ export async function listScopeRatings(
 			losses: matchmakingRatings.losses,
 			gamesPlayed: matchmakingRatings.gamesPlayed,
 			seasonBest: matchmakingRatings.seasonBest,
+			seasonBestText: matchmakingRatings.seasonBestText,
 			lastMatchAt: matchmakingRatings.lastMatchAt,
 		})
 		.from(matchmakingRatings)
