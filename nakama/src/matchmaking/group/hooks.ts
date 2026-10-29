@@ -5,7 +5,8 @@
 import { readConfig } from '../../config'
 import { PERMISSION_DENIED, runtimeError } from '../../errors'
 import type { GroupEndReason, LobbySignal } from '../../lobby/protocol'
-import { queueRefusalFor } from '../gate'
+import { pvpVersionOutliers, queueRefusalFor } from '../gate'
+import { PVP_MOD_ID, VERSION_MISMATCH } from '../../standing/pvp_version'
 import { queueKey } from '../matched'
 import { clearMatched, liveTicketHolders, writeGroupRecords } from '../queue'
 import {
@@ -50,6 +51,7 @@ function refuse(refusal: GroupRefusal): nkruntime.Error {
 export function memberFactsOf(
 	nk: nkruntime.Nakama,
 	settings: ServerSettings,
+	modId: string,
 	memberIds: string[],
 	exceptTicket: string | null,
 	now: number,
@@ -58,6 +60,12 @@ export function memberFactsOf(
 	for (const id of memberIds) {
 		const refused = queueRefusalFor(nk, settings, id, false, now)
 		if (refused) refusals[id] = refused
+	}
+	// A PvP group must run one PvP version, or the matched game would be refused.
+	if (modId === PVP_MOD_ID) {
+		for (const id of pvpVersionOutliers(nk, memberIds)) {
+			if (!refusals[id]) refusals[id] = { code: VERSION_MISMATCH }
+		}
 	}
 	return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) }
 }
@@ -116,7 +124,7 @@ export function beforePartyMatchmakerAdd(
 		status: found ? found.status : null,
 		leaderId: ctx.userId,
 		partyUserIds: partyPresences(nk, partyId).map((p) => p.userId),
-		members: memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()),
+		members: memberFactsOf(nk, settingsOf(ctx), found ? found.status.modId : '', memberIds, null, Date.now()),
 		ticket: partyTicketOf(add),
 	})
 	if (refused) {

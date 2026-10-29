@@ -82,6 +82,16 @@ export function refusedMemberOf(player: RefusedPlayer): RefusedMember {
 	return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) }
 }
 
+// The players off the PvP version most of them run, by the stored mod reports.
+export function pvpVersionOutliers(nk: nkruntime.Nakama, userIds: string[]): string[] {
+	const versions: { [userId: string]: string } = {}
+	for (const userId of userIds) {
+		const report = readModReport(nk, userId)
+		versions[userId] = pvpVersionOf(report ? report.mods : [])
+	}
+	return versionOutliers(versions)
+}
+
 // The matched players who may no longer queue, and why. In a PvP match, the
 // players who are not on the PvP version most of them run are refused too:
 // they are told, the others queue again. The versions come from the stored
@@ -95,12 +105,7 @@ export function refusedPlayers(nk: nkruntime.Nakama, settings: ServerSettings, p
 		if (refusal) out.push({ userId, refusal })
 	}
 	if (plan.modId === PVP_MOD_ID) {
-		const versions: { [userId: string]: string } = {}
-		for (const userId of plan.playerIds) {
-			const report = readModReport(nk, userId)
-			versions[userId] = pvpVersionOf(report ? report.mods : [])
-		}
-		for (const userId of versionOutliers(versions)) {
+		for (const userId of pvpVersionOutliers(nk, plan.playerIds)) {
 			if (out.every((r) => r.userId !== userId)) out.push({ userId, refusal: { code: VERSION_MISMATCH } })
 		}
 	}

@@ -6453,6 +6453,14 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
 function refusedMemberOf(player) {
   return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) };
 }
+function pvpVersionOutliers(nk, userIds) {
+  const versions = {};
+  for (const userId of userIds) {
+    const report = readModReport(nk, userId);
+    versions[userId] = pvpVersionOf(report ? report.mods : []);
+  }
+  return versionOutliers(versions);
+}
 function refusedPlayers(nk, settings, plan) {
   const now = Date.now();
   const ranked = plan.rankedMode !== "";
@@ -6462,12 +6470,7 @@ function refusedPlayers(nk, settings, plan) {
     if (refusal) out.push({ userId, refusal });
   }
   if (plan.modId === PVP_MOD_ID) {
-    const versions = {};
-    for (const userId of plan.playerIds) {
-      const report = readModReport(nk, userId);
-      versions[userId] = pvpVersionOf(report ? report.mods : []);
-    }
-    for (const userId of versionOutliers(versions)) {
+    for (const userId of pvpVersionOutliers(nk, plan.playerIds)) {
       if (out.every((r) => r.userId !== userId)) out.push({ userId, refusal: { code: VERSION_MISMATCH } });
     }
   }
@@ -6837,7 +6840,6 @@ function refuseMatch(nk, plan, refused, groups) {
   for (const home of groups.homes) {
     const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0];
     if (!member) requeueGroup(nk, home);
-    else if (member.refusal.code === VERSION_MISMATCH) cancelGroupFor(nk, home.homeCode, home.partyId, "match_refused");
     else cancelGroupFor(nk, home.homeCode, home.partyId, "member_refused", refusedMemberOf(member));
   }
   for (const fault of groups.faulty) {
@@ -9495,11 +9497,16 @@ function partyIdOf(message) {
 function refuse(refusal) {
   return runtimeError(PERMISSION_DENIED, refusalMessage(refusal));
 }
-function memberFactsOf(nk, settings, memberIds, exceptTicket, now) {
+function memberFactsOf(nk, settings, modId, memberIds, exceptTicket, now) {
   const refusals = {};
   for (const id of memberIds) {
     const refused = queueRefusalFor(nk, settings, id, false, now);
     if (refused) refusals[id] = refused;
+  }
+  if (modId === PVP_MOD_ID) {
+    for (const id of pvpVersionOutliers(nk, memberIds)) {
+      if (!refusals[id]) refusals[id] = { code: VERSION_MISMATCH };
+    }
   }
   return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) };
 }
@@ -9538,7 +9545,7 @@ function beforePartyMatchmakerAdd(ctx, logger, nk, envelope) {
     status: found ? found.status : null,
     leaderId: ctx.userId,
     partyUserIds: partyPresences(nk, partyId).map((p) => p.userId),
-    members: memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()),
+    members: memberFactsOf(nk, settingsOf(ctx), found ? found.status.modId : "", memberIds, null, Date.now()),
     ticket: partyTicketOf(add)
   });
   if (refused) {
@@ -9630,7 +9637,7 @@ function rpcGroupQueueOpen(ctx, logger, nk, payload) {
   if (!seat) return refusedReply({ code: "not_in_lobby" });
   const home = JSON.parse(signal(nk, seat.matchId, { type: "group_members" }));
   const memberIds = home.members.map((m) => m.id);
-  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()));
+  const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), home.modId, memberIds, null, Date.now()));
   if (refused) return refusedReply(refused);
   const reply = signal(nk, seat.matchId, {
     type: "group_open",
