@@ -1,3 +1,5 @@
+import { compareScores, fromNumber, normalizeScore } from '../../../packages/types/src/big-score'
+
 // Secondary leaderboard metrics: a per-mod personal best tracked alongside
 // the rating. The same table as apps/server's features/ratings/metrics.config.ts
 // (client-reported and plausibility-bounded, never re-simulated).
@@ -15,26 +17,53 @@ const METRIC_CONFIG: { [modId: string]: MetricConfig } = {
 	MultiplayerSPDRN: { kind: 'time_ms', direction: 'asc' },
 }
 
-const BOUNDS: { [kind in MetricKind]: { min: number; max: number } } = {
-	score: { min: 0, max: 1e15 },
+const BOUNDS = {
 	// A legitimate ranked run can't complete in under 10s nor take over 6h.
 	time_ms: { min: 10_000, max: 6 * 60 * 60 * 1000 },
 }
 
+// What a placement reports for the season best: the old number, or score
+// text. A score board reads only the text; a time board reads only the number.
+export interface ReportedMetric {
+	metric?: number
+	metricText?: string
+}
+
+// A stored season best, shown the way its board keeps it: score text for a
+// score board (an old number becomes its score text), a number for a time
+// board. Anything else is null.
+export function seasonBestOf(modId: string, stored: unknown): number | string | null {
+	const config = METRIC_CONFIG[modId]
+	if (!config) return null
+	if (config.kind === 'score') {
+		if (typeof stored === 'string') return normalizeScore(stored)
+		if (typeof stored === 'number' && Number.isFinite(stored)) return fromNumber(stored)
+		return null
+	}
+	return typeof stored === 'number' && Number.isFinite(stored) ? stored : null
+}
+
 // The value to store as the player's season best, or the current best when
-// the reported value is missing, out of range (rejected, not clamped) or no
-// better.
+// the report has none, it is out of range or malformed (dropped, not clamped)
+// or no better.
 export function nextSeasonBest(
 	modId: string,
-	reported: number | undefined,
-	current: number | null,
-): number | null {
+	reported: ReportedMetric,
+	current: number | string | null,
+): number | string | null {
 	const config = METRIC_CONFIG[modId]
-	if (!config || reported === undefined) return current
-	const bounds = BOUNDS[config.kind]
-	if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
-		return current
-	if (current === null) return reported
-	const better = config.direction === 'asc' ? reported < current : reported > current
-	return better ? reported : current
+	if (!config) return current
+	if (config.kind === 'score') {
+		const best = seasonBestOf(modId, current)
+		const text = reported.metricText === undefined ? null : normalizeScore(reported.metricText)
+		if (text === null) return best
+		if (best === null) return text
+		return compareScores(text, best as string) === 1 ? text : best
+	}
+	const value = reported.metric
+	if (value === undefined) return current
+	const bounds = BOUNDS.time_ms
+	if (!Number.isFinite(value) || value < bounds.min || value > bounds.max) return current
+	if (typeof current !== 'number') return value
+	return value < current ? value : current
 }

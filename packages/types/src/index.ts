@@ -18,6 +18,8 @@ export interface PlacementEntry {
 	// Optional secondary metric for this player (e.g. PvP final score). Interpreted per the
 	// mod's metrics.config entry; ignored for server-measured boards (e.g. speedrun time).
 	metric?: number
+	// The season best as score text (see big-score.ts). Score boards read this, not `metric`.
+	metricText?: string
 }
 
 export type Privilege = 'admin' | 'moderator' | 'tester' | (string & {})

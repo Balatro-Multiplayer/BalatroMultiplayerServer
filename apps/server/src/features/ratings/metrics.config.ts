@@ -42,8 +42,8 @@ export function getMetricConfig(modId: string): MetricConfig | undefined {
 // Plausibility bounds — the only guard on client-influenced values in this lightweight
 // (no re-simulation) model. Values outside the range are rejected, not clamped.
 const BOUNDS: Record<MetricKind, { min: number; max: number }> = {
-	// Scores below 0 are impossible; cap stays within IEEE-754 / bigint-safe integer range.
-	score: { min: 0, max: 1e15 },
+	// A score has no bound: score text is checked by @bmp/types (array length limit).
+	score: { min: 0, max: Number.MAX_VALUE },
 	// A legitimate ranked run can't complete in under 10s nor take longer than 6h.
 	time_ms: { min: 10_000, max: 6 * 60 * 60 * 1000 },
 }

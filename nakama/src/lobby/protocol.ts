@@ -92,6 +92,8 @@ export interface Placement {
 	place: number
 	performance?: number
 	metric?: number
+	// The season best as score text, in canonical form.
+	metricText?: string
 }
 
 // A participant of a started game, captured at the start (they may leave).

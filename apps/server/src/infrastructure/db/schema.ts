@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
 	bigint,
 	boolean,
+	doublePrecision,
 	index,
 	integer,
 	jsonb,
@@ -9,6 +10,7 @@ import {
 	pgTable,
 	primaryKey,
 	serial,
+	smallint,
 	text,
 	timestamp,
 	uniqueIndex,
@@ -489,6 +491,12 @@ export const matchmakingRatings = pgTable(
 		// Meaning is mod-defined (see metrics.config.ts): score for PvP (higher better),
 		// duration in ms for speedrun (lower better). NULL until the player sets one.
 		seasonBest: bigint('season_best', { mode: 'number' }),
+		// A score board (PvP) also keeps the season best as score text, with the
+		// sort key: array length, then the array from the top entry down. A row
+		// compare on (len, rev) gives the OmegaNum order. NULL on a time board.
+		seasonBestLen: smallint('season_best_len'),
+		seasonBestRev: doublePrecision('season_best_rev').array(),
+		seasonBestText: text('season_best_text'),
 		bestMatchId: varchar('best_match_id', { length: 36 }),
 		bestAt: timestamp('best_at', { withTimezone: true }),
 		lastMatchAt: timestamp('last_match_at', { withTimezone: true }),

@@ -4,6 +4,8 @@
 // ranked queue keys each mod's Find Game pillars use (PvP:
 // ui/main_menu/find_game.lua `count_key`), in the mod's pillar order.
 
+import { displayScore, fromNumber } from '@bmp/types'
+
 export type MetricKind = 'time' | 'score'
 
 export interface LeaderboardMode {
@@ -93,8 +95,10 @@ export function formatDuration(ms: number): string {
 /** Format a board's secondary metric value for display. */
 export function formatMetric(
   kind: MetricKind,
-  value: number | null | undefined,
+  value: number | string | null | undefined,
 ): string {
   if (value === null || value === undefined) return '-'
-  return kind === 'time' ? formatDuration(value) : Math.round(value).toLocaleString()
+  if (kind === 'time') return formatDuration(Number(value))
+  // A score is score text; an old number shows as the same score.
+  return displayScore(typeof value === 'string' ? value : fromNumber(value)) ?? '-'
 }

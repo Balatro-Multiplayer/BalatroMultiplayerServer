@@ -22,7 +22,7 @@ interface PlayerProfile {
   wins: number | null
   losses: number | null
   gamesPlayed: number | null
-  seasonBest: number | null
+  seasonBest: number | string | null
 }
 
 interface SeasonsResponse {

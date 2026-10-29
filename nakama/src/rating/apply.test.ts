@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RunRecord } from '../lobby/protocol'
 import { type RatingRecord, applyRatings, newRating, planRatings } from './apply'
 import { PLACEMENT_GAMES } from './elo'
-import { nextSeasonBest } from './metrics'
+import { nextSeasonBest, seasonBestOf } from './metrics'
 import { configureSeason } from './season'
 
 function run(overrides: Partial<RunRecord> = {}): RunRecord {
@@ -116,15 +116,50 @@ describe('planRatings', () => {
 
 describe('nextSeasonBest', () => {
 	it('rejects an implausible time rather than clamping it', () => {
-		expect(nextSeasonBest('MultiplayerSPDRN', 5_000, null)).toBeNull()
-		expect(nextSeasonBest('MultiplayerSPDRN', 7 * 3_600_000, 200_000)).toBe(200_000)
+		expect(nextSeasonBest('MultiplayerSPDRN', { metric: 5_000 }, null)).toBeNull()
+		expect(nextSeasonBest('MultiplayerSPDRN', { metric: 7 * 3_600_000 }, 200_000)).toBe(200_000)
 	})
 	it('treats a higher PvP score as better', () => {
-		expect(nextSeasonBest('MultiplayerPvP', 50, 40)).toBe(50)
-		expect(nextSeasonBest('MultiplayerPvP', 30, 40)).toBe(40)
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '50' }, '40')).toBe('50')
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '30' }, '40')).toBe('40')
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '50' }, null)).toBe('50')
+	})
+	it('stores a PvP score past 1e15 as it was reported', () => {
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '20.17609125905568,3' }, '1000000000000000')).toBe(
+			'20.17609125905568,3',
+		)
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '20,2' }, '20.17609125905568,3')).toBe(
+			'20.17609125905568,3',
+		)
+	})
+	it('keeps a score at exactly 1e15 over an equal one', () => {
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '1000000000000000' }, '1000000000000000')).toBe(
+			'1000000000000000',
+		)
+	})
+	it('compares against a score stored as an old number', () => {
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '1000000000000001' }, 1e15)).toBe('1000000000000001')
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '5' }, 1e15)).toBe('1000000000000000')
+	})
+	it('ignores the old number metric and bad text for a score board', () => {
+		expect(nextSeasonBest('MultiplayerPvP', { metric: 50 }, '40')).toBe('40')
+		expect(nextSeasonBest('MultiplayerPvP', { metric: 50 }, null)).toBeNull()
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: 'nope' }, '40')).toBe('40')
 	})
 	it('ignores a mod with no metric', () => {
-		expect(nextSeasonBest('OtherMod', 100_000, null)).toBeNull()
+		expect(nextSeasonBest('OtherMod', { metric: 100_000, metricText: '5' }, null)).toBeNull()
+	})
+})
+
+describe('seasonBestOf', () => {
+	it('shows a PvP score as score text, also one stored as an old number', () => {
+		expect(seasonBestOf('MultiplayerPvP', 1e15)).toBe('1000000000000000')
+		expect(seasonBestOf('MultiplayerPvP', '20,2')).toBe('20,2')
+		expect(seasonBestOf('MultiplayerPvP', null)).toBeNull()
+		expect(seasonBestOf('MultiplayerPvP', undefined)).toBeNull()
+	})
+	it('keeps a time as a number', () => {
+		expect(seasonBestOf('MultiplayerSPDRN', 95_000)).toBe(95_000)
 	})
 })
 

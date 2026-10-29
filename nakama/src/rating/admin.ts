@@ -1,6 +1,7 @@
 // Admin RPC that overwrites a board's ratings: the API recomputes them when a
 // moderator voids a match (it keeps the full match history; Nakama purges old
 // runs) and sends the result here.
+import { normalizeScore } from '../../../packages/types/src/big-score'
 import { INVALID_ARGUMENT, runtimeError } from '../errors'
 import { RATINGS_COLLECTION } from '../lobby/protocol'
 import { parsePayload, requireServer } from '../rpc'
@@ -29,19 +30,26 @@ function isCount(value: unknown): value is number {
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0
 }
 
+// A time (a number) or a score (score text).
+function isSeasonBest(value: unknown): boolean {
+	if (value === null) return true
+	if (typeof value === 'number') return Number.isFinite(value)
+	return typeof value === 'string' && normalizeScore(value) !== null
+}
+
 function recordOf(value: unknown): RatingRecord | null | undefined {
 	if (value === null) return null
 	if (typeof value !== 'object' || Array.isArray(value)) return undefined
 	const r = value as { [key: string]: unknown }
 	if (typeof r.rating !== 'number' || !Number.isFinite(r.rating)) return undefined
 	if (!isCount(r.wins) || !isCount(r.losses) || !isCount(r.gamesPlayed) || !isCount(r.lastMatchAt)) return undefined
-	if (r.seasonBest !== null && (typeof r.seasonBest !== 'number' || !Number.isFinite(r.seasonBest))) return undefined
+	if (!isSeasonBest(r.seasonBest)) return undefined
 	return {
 		rating: r.rating,
 		wins: r.wins,
 		losses: r.losses,
 		gamesPlayed: r.gamesPlayed,
-		seasonBest: r.seasonBest as number | null,
+		seasonBest: r.seasonBest as number | string | null,
 		lastMatchAt: r.lastMatchAt,
 	}
 }

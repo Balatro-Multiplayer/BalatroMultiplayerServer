@@ -14,6 +14,7 @@ import {
 	fromArray,
 	fromNumber,
 	normalizeScore,
+	scoreSortKey,
 } from './big-score'
 
 const LARGEST_DOUBLE_TEXT = '308.25471555991675,1'
@@ -218,5 +219,51 @@ describe('display', () => {
 
 	it('is null for malformed text', () => {
 		expect(displayScore('x')).toBeNull()
+	})
+})
+
+describe('sort key', () => {
+	it('is the array length and the array from the top entry down', () => {
+		expect(scoreSortKey('5')).toEqual({ len: 1, rev: [5] })
+		expect(scoreSortKey('20.5,2')).toEqual({ len: 2, rev: [2, 20.5] })
+		expect(scoreSortKey('20,2,3')).toEqual({ len: 3, rev: [3, 2, 20] })
+	})
+
+	it('is the canonical form, not the text as sent', () => {
+		expect(scoreSortKey('0005')).toBeNull()
+		expect(scoreSortKey('9007199254740992')).toEqual({
+			len: 2,
+			rev: [1, 15.954589770191003],
+		})
+	})
+
+	it('is null for malformed text', () => {
+		expect(scoreSortKey('x')).toBeNull()
+		expect(scoreSortKey('')).toBeNull()
+	})
+
+	it('orders like compareScores (length first, then from the top entry)', () => {
+		const texts = [
+			'0',
+			'5',
+			'1000000000000000',
+			'308.25471555991675,1',
+			'20,2',
+			'3,2',
+			'20,1,1',
+			TOP,
+		]
+		const rowCompare = (a: string, b: string) => {
+			const x = scoreSortKey(a)
+			const y = scoreSortKey(b)
+			if (x === null || y === null) return null
+			if (x.len !== y.len) return x.len > y.len ? 1 : -1
+			for (let i = 0; i < x.rev.length; i++) {
+				if (x.rev[i] !== y.rev[i]) return x.rev[i] > y.rev[i] ? 1 : -1
+			}
+			return 0
+		}
+		for (const a of texts)
+			for (const b of texts) expect(rowCompare(a, b)).toBe(compareScores(a, b))
 	})
 })

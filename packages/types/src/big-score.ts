@@ -170,6 +170,20 @@ export function compareScores(a: string, b: string): -1 | 0 | 1 | null {
 	return 0
 }
 
+/**
+ * The Postgres sort key: the normalized array length, and the array from the
+ * top entry down. Comparing (len, rev) row-wise gives the OmegaNum order.
+ * Null when the text is malformed.
+ */
+export function scoreSortKey(
+	text: string,
+): { len: number; rev: number[] } | null {
+	const array = readArray(text)
+	if (array === null) return null
+	const x = normalizeArray(array)
+	return { len: x.length, rev: x.slice().reverse() }
+}
+
 // --- Display: Balatro notation (the Talisman "Balatro" notation) ---
 // Mantissas are rounded half up to 3 decimals. A mantissa that rounds to 10
 // becomes 1 with the exponent plus one. Digits come from integer math so both

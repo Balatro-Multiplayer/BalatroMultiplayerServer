@@ -38,9 +38,9 @@ describe('metrics.config', () => {
 			expect(withinMetricBounds('score', Number.NaN)).toBe(false)
 		})
 
-		it('accepts a plausible score and rejects an absurd one', () => {
+		it('has no upper bound on a score below the largest double', () => {
 			expect(withinMetricBounds('score', 1_000_000)).toBe(true)
-			expect(withinMetricBounds('score', 1e18)).toBe(false)
+			expect(withinMetricBounds('score', 1e18)).toBe(true)
 		})
 
 		it('rejects times below the floor and above the ceiling', () => {

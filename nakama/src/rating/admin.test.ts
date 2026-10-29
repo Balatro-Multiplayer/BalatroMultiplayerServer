@@ -46,6 +46,13 @@ describe('parseRatingsSet', () => {
 		})
 	})
 
+	it('takes a season best as score text and refuses text that is not', () => {
+		const withBest = (seasonBest: unknown) => request([{ userId: A, name: 'A', record: { ...record(6), seasonBest } }])
+		expect(typeof parseRatingsSet(withBest('20.17609125905568,3'))).toBe('object')
+		expect(typeof parseRatingsSet(withBest('nope'))).toBe('string')
+		expect(typeof parseRatingsSet(withBest(Array(101).fill('1').join(',')))).toBe('string')
+	})
+
 	it('refuses a bad board, user id or record', () => {
 		expect(typeof parseRatingsSet({ ...request([]), season: 0 })).toBe('string')
 		expect(typeof parseRatingsSet({ ...request([]), mode: 'bad mode' })).toBe('string')

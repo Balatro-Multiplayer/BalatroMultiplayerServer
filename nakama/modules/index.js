@@ -7247,25 +7247,154 @@ function computeRatingDeltas(mode, placements, ratings) {
   return computeTeam(teams, winnerTeamIdx);
 }
 
+// ../packages/types/src/big-score.ts
+var MAX_SAFE = 9007199254740991;
+var MAX_ARRAY_LENGTH = 100;
+var MAX_TEXT_LENGTH = 4096;
+var LOG_MAX_SAFE = Math.log10(MAX_SAFE);
+var ZERO_SCORE = "0";
+var TOP_SCORE = new Array(MAX_ARRAY_LENGTH).fill(String(MAX_SAFE)).join(",");
+var ENTRY_FIRST = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+var ENTRY_HIGHER = /^(0|[1-9][0-9]*)$/;
+var TOP_ARRAY = () => new Array(MAX_ARRAY_LENGTH).fill(MAX_SAFE);
+function normalizeArray(input) {
+  if (input.length === 0) return [0];
+  if (input.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
+  const x = input.slice();
+  for (let i = 0; i < x.length; i++) {
+    const e = x[i];
+    if (Number.isNaN(e) || e === Number.POSITIVE_INFINITY || e === Number.NEGATIVE_INFINITY) {
+      return TOP_ARRAY();
+    }
+    if (i !== 0 && e !== Math.floor(e)) x[i] = Math.floor(e);
+  }
+  let again;
+  do {
+    again = false;
+    while (x.length > 0 && x[x.length - 1] === 0) {
+      x.pop();
+      again = true;
+    }
+    if (x[0] > MAX_SAFE) {
+      x[1] = (x[1] || 0) + 1;
+      x[0] = Math.log10(x[0]);
+      again = true;
+    }
+    while (x[0] < LOG_MAX_SAFE && x[1]) {
+      x[0] = __pow(10, x[0]);
+      x[1]--;
+      again = true;
+    }
+    if (x.length > 2 && !x[1]) {
+      let i = 2;
+      while (!x[i]) i++;
+      x[i - 1] = Math.floor(x[0]);
+      x[0] = __pow(10, x[0] - Math.floor(x[0]));
+      x[i]--;
+      again = true;
+    }
+    for (let i = 1; i < x.length; i++) {
+      if (x[i] > MAX_SAFE) {
+        x[i + 1] = (x[i + 1] || 0) + 1;
+        x[0] = x[i] + 1;
+        for (let j = 1; j <= i; j++) x[j] = 0;
+        again = true;
+      }
+    }
+    if (x.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
+  } while (again);
+  if (x.length === 0) return [0];
+  for (let i = 0; i < x.length; i++) if (x[i] === void 0) x[i] = 0;
+  if (x.length === 1) x[0] = Math.floor(x[0]);
+  return x;
+}
+function writeFirst(x) {
+  if (x === Math.floor(x)) return x.toFixed(0);
+  for (let digits = 15; digits <= 17; digits++) {
+    const s = x.toPrecision(digits);
+    if (s.indexOf("e") === -1 && Number(s) === x) {
+      return s.indexOf(".") === -1 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
+    }
+  }
+  return x.toPrecision(17);
+}
+function writeArray(array) {
+  const parts = [writeFirst(array[0])];
+  for (let i = 1; i < array.length; i++) parts.push(array[i].toFixed(0));
+  return parts.join(",");
+}
+function readArray(text) {
+  if (typeof text !== "string" || text.length === 0 || text.length > MAX_TEXT_LENGTH)
+    return null;
+  const parts = text.split(",");
+  if (parts.length > MAX_ARRAY_LENGTH) return null;
+  const array = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!(i === 0 ? ENTRY_FIRST : ENTRY_HIGHER).test(parts[i])) return null;
+    const n = Number(parts[i]);
+    if (!Number.isFinite(n)) return null;
+    array.push(n);
+  }
+  return array;
+}
+function fromNumber(n) {
+  const value = Number.isNaN(n) || n === Number.POSITIVE_INFINITY ? Number.MAX_VALUE : n;
+  if (value < 1) return ZERO_SCORE;
+  return writeArray(normalizeArray([Math.floor(value)]));
+}
+function normalizeScore(text) {
+  const array = readArray(text);
+  return array === null ? null : writeArray(normalizeArray(array));
+}
+function compareScores(a, b) {
+  const x = readArray(a);
+  const y = readArray(b);
+  if (x === null || y === null) return null;
+  const p = normalizeArray(x);
+  const q = normalizeArray(y);
+  if (p.length !== q.length) return p.length > q.length ? 1 : -1;
+  for (let i = p.length - 1; i >= 0; i--) {
+    if (p[i] > q[i]) return 1;
+    if (p[i] < q[i]) return -1;
+  }
+  return 0;
+}
+
 // src/rating/metrics.ts
 var METRIC_CONFIG = {
   MultiplayerPvP: { kind: "score", direction: "desc" },
   MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
 };
 var BOUNDS = {
-  score: { min: 0, max: 1e15 },
   // A legitimate ranked run can't complete in under 10s nor take over 6h.
   time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
 };
+function seasonBestOf(modId, stored) {
+  const config = METRIC_CONFIG[modId];
+  if (!config) return null;
+  if (config.kind === "score") {
+    if (typeof stored === "string") return normalizeScore(stored);
+    if (typeof stored === "number" && Number.isFinite(stored)) return fromNumber(stored);
+    return null;
+  }
+  return typeof stored === "number" && Number.isFinite(stored) ? stored : null;
+}
 function nextSeasonBest(modId, reported, current) {
   const config = METRIC_CONFIG[modId];
-  if (!config || reported === void 0) return current;
-  const bounds = BOUNDS[config.kind];
-  if (!Number.isFinite(reported) || reported < bounds.min || reported > bounds.max)
-    return current;
-  if (current === null) return reported;
-  const better = config.direction === "asc" ? reported < current : reported > current;
-  return better ? reported : current;
+  if (!config) return current;
+  if (config.kind === "score") {
+    const best = seasonBestOf(modId, current);
+    const text = reported.metricText === void 0 ? null : normalizeScore(reported.metricText);
+    if (text === null) return best;
+    if (best === null) return text;
+    return compareScores(text, best) === 1 ? text : best;
+  }
+  const value = reported.metric;
+  if (value === void 0) return current;
+  const bounds = BOUNDS.time_ms;
+  if (!Number.isFinite(value) || value < bounds.min || value > bounds.max) return current;
+  if (typeof current !== "number") return value;
+  return value < current ? value : current;
 }
 
 // src/rating/season.ts
@@ -7331,7 +7460,7 @@ function planRatings(run, current) {
       wins: before.wins + (won ? 1 : 0),
       losses: before.losses + (won ? 0 : 1),
       gamesPlayed: before.gamesPlayed + 1,
-      seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
+      seasonBest: nextSeasonBest(run.modId, p, before.seasonBest),
       lastMatchAt: run.endedAt
     };
     plan.updates[p.playerId] = after;
@@ -7685,7 +7814,7 @@ function parsePlacements(value, participants) {
   const placements = [];
   for (const entry of value) {
     if (typeof entry !== "object" || entry === null) return null;
-    const { playerId, place, performance, metric } = entry;
+    const { playerId, place, performance, metric, metricText } = entry;
     if (typeof playerId !== "string" || !expected[playerId] || seen[playerId])
       return null;
     if (typeof place !== "number" || place % 1 !== 0 || place < 1)
@@ -7700,6 +7829,10 @@ function parsePlacements(value, participants) {
       if (typeof metric !== "number" || !Number.isFinite(metric) || metric < 0)
         return null;
       placement.metric = Math.round(metric);
+    }
+    if (typeof metricText === "string") {
+      const text = normalizeScore(metricText);
+      if (text !== null) placement.metricText = text;
     }
     seen[playerId] = true;
     placements.push(placement);
@@ -9512,7 +9645,7 @@ function rpcRatingGet(ctx, logger, nk, payload) {
   if (typeof playerId !== "string" || !USER_ID_PATTERN3.test(playerId))
     throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
   const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating();
-  return JSON.stringify(__spreadProps(__spreadValues({}, rating), { isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
+  return JSON.stringify(__spreadProps(__spreadValues({}, rating), { seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
 }
 function rpcLeaderboardGet(ctx, logger, nk, payload) {
   if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
@@ -9527,7 +9660,7 @@ function rpcLeaderboardGet(ctx, logger, nk, payload) {
   const records = page.records || [];
   const stored = storedRatings(nk, records.map((r) => r.ownerId), boardId(modId, mode, currentSeason(nk)));
   return JSON.stringify({
-    entries: boardEntries(records, stored, Date.now()),
+    entries: boardEntries(records, stored, Date.now(), modId),
     cursor: page.nextCursor || ""
   });
 }
@@ -9538,7 +9671,7 @@ function storedRatings(nk, userIds, key) {
     out[object.userId] = object.value;
   return out;
 }
-function boardEntries(records, stored, now) {
+function boardEntries(records, stored, now, modId) {
   if (records.length === 0) return [];
   const firstRank = Math.min(...records.map((r) => r.rank));
   return records.map((r) => {
@@ -9550,7 +9683,7 @@ function boardEntries(records, stored, now) {
       wins: r.subscore,
       losses: r.metadata.losses,
       gamesPlayed: r.metadata.gamesPlayed,
-      seasonBest: r.metadata.seasonBest
+      seasonBest: seasonBestOf(modId, r.metadata.seasonBest)
     };
   }).sort((a, b) => b.rating - a.rating || b.wins - a.wins).map((e, i) => __spreadValues({ rank: firstRank + i }, e));
 }
@@ -9691,13 +9824,18 @@ var MAX_ENTRIES = 1e3;
 function isCount2(value) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
+function isSeasonBest(value) {
+  if (value === null) return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  return typeof value === "string" && normalizeScore(value) !== null;
+}
 function recordOf3(value) {
   if (value === null) return null;
   if (typeof value !== "object" || Array.isArray(value)) return void 0;
   const r = value;
   if (typeof r.rating !== "number" || !Number.isFinite(r.rating)) return void 0;
   if (!isCount2(r.wins) || !isCount2(r.losses) || !isCount2(r.gamesPlayed) || !isCount2(r.lastMatchAt)) return void 0;
-  if (r.seasonBest !== null && (typeof r.seasonBest !== "number" || !Number.isFinite(r.seasonBest))) return void 0;
+  if (!isSeasonBest(r.seasonBest)) return void 0;
   return {
     rating: r.rating,
     wins: r.wins,

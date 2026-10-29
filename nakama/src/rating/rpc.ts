@@ -5,6 +5,7 @@ import { RATINGS_COLLECTION } from '../lobby/protocol'
 import type { Rated } from './season'
 import { currentSeason, decayedRating } from './season'
 import { PLACEMENT_GAMES } from './elo'
+import { seasonBestOf } from './metrics'
 
 const BOARD_PAGE = 50
 const USER_ID_PATTERN = /^[0-9a-f-]{36}$/
@@ -40,7 +41,7 @@ export function rpcRatingGet(
 	if (typeof playerId !== 'string' || !USER_ID_PATTERN.test(playerId))
 		throw runtimeError(INVALID_ARGUMENT, 'playerId is not a user id')
 	const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating()
-	return JSON.stringify({ ...rating, isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
+	return JSON.stringify({ ...rating, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
 }
 
 // {modId, mode, cursor?} -> {entries: [{rank, playerId, name, rating, wins,
@@ -65,7 +66,7 @@ export function rpcLeaderboardGet(
 	const records = page.records || []
 	const stored = storedRatings(nk, records.map((r) => r.ownerId), boardId(modId, mode, currentSeason(nk)))
 	return JSON.stringify({
-		entries: boardEntries(records, stored, Date.now()),
+		entries: boardEntries(records, stored, Date.now(), modId),
 		cursor: page.nextCursor || '',
 	})
 }
@@ -99,6 +100,7 @@ export function boardEntries(
 	records: nkruntime.LeaderboardRecord[],
 	stored: { [userId: string]: Rated },
 	now: number,
+	modId: string,
 ): BoardEntry[] {
 	if (records.length === 0) return []
 	const firstRank = Math.min(...records.map((r) => r.rank))
@@ -112,7 +114,7 @@ export function boardEntries(
 				wins: r.subscore,
 				losses: r.metadata.losses,
 				gamesPlayed: r.metadata.gamesPlayed,
-				seasonBest: r.metadata.seasonBest,
+				seasonBest: seasonBestOf(modId, r.metadata.seasonBest),
 			}
 		})
 		.sort((a, b) => b.rating - a.rating || b.wins - a.wins)
