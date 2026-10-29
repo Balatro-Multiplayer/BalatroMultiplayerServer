@@ -60,6 +60,7 @@ import {
 	spectateRejection,
 } from './spectate'
 import { recordRun } from '../achievements/record'
+import { sendLateResults } from './late_result'
 import { holdingsOf } from '../achievements/storage'
 import { DEFAULT_AVATAR } from '../shared/avatars/ids'
 import { selectableOrDefault } from '../shared/avatars/unlocked'
@@ -263,6 +264,13 @@ function runEffect(
 					effect.run.runId,
 					e,
 				)
+			}
+			if (stored) {
+				try {
+					sendLateResults(nk, stored, effect.lateResultTo)
+				} catch (e) {
+					logger.warn('Lobby %s: could not tell leavers the result of run %s: %v', lobby.code, stored.runId, e)
+				}
 			}
 			// Achievements read the stored run; a failure here never touches it.
 			if (stored) {

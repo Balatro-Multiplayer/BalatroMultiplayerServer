@@ -371,6 +371,31 @@ describe('reporting results', () => {
 		expect(lobby.game.resultPending).toBeFalsy()
 	})
 
+	it('names the player who left as owed the late result of a once-pending run', () => {
+		let lobby = started('a', 'b')
+		lobby = leave(lobby, 'a').lobby
+		lobby = send(lobby, 'b', 'mpapi_set_result_pending', { pending: true }, 2000).lobby
+		lobby = report(lobby, 'b', places('b', 'a'), 4000).lobby
+		const cleared = send(lobby, 'b', 'mpapi_set_result_pending', { pending: false }, 5000)
+		expect(saved(cleared)?.lateResultTo).toEqual(['a'])
+	})
+
+	it('names nobody when the run was never pending', () => {
+		let lobby = started('a', 'b')
+		lobby = leave(lobby, 'a').lobby
+		const done = report(lobby, 'b', places('b', 'a'), 4000)
+		expect(saved(done)?.lateResultTo).toEqual([])
+	})
+
+	it('names nobody when everyone stayed to the end', () => {
+		let lobby = started('a', 'b')
+		lobby = send(lobby, 'b', 'mpapi_set_result_pending', { pending: true }, 2000).lobby
+		lobby = report(lobby, 'b', places('b', 'a'), 4000).lobby
+		lobby = report(lobby, 'a', places('b', 'a'), 4100).lobby
+		const cleared = send(lobby, 'b', 'mpapi_set_result_pending', { pending: false }, 5000)
+		expect(saved(cleared)?.lateResultTo).toEqual([])
+	})
+
 	it('hands reports and the run id back in the snapshot', () => {
 		let lobby = started('a', 'b')
 		lobby = report(lobby, 'a', places('a', 'b')).lobby

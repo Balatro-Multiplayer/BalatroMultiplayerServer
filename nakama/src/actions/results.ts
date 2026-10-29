@@ -162,8 +162,15 @@ export function finishGame(
 		lobbyType: lobby.rankedMode || lobby.allowedIds ? 'public' : 'private',
 	}
 
+	const seated: { [id: string]: boolean } = {}
+	for (const p of lobby.players) seated[p.id] = true
+	const lateResultTo =
+		game.resultWasPending && status !== 'abandoned'
+			? started.players.filter((p) => !seated[p.id]).map((p) => p.id)
+			: []
+
 	const next = { ...lobby, lastRunId: started.runId, game: emptyGame() }
-	const out: Outbound[] = [{ kind: 'saveRun', run, logs: game.logs }]
+	const out: Outbound[] = [{ kind: 'saveRun', run, logs: game.logs, lateResultTo }]
 	if (!override || override.announce) {
 		const ended: GameEnded = { runId: started.runId, status, placements }
 		out.push({

@@ -225,6 +225,9 @@ export interface GameState {
 	// settle neither starts nor honours the result clock, and the run closes on
 	// clear or when its last participant is gone. Absent means not pending.
 	resultPending?: boolean
+	// The result was pending at some point in this run. Stays set after the
+	// flag clears, so the settled run knows to tell players who left earlier.
+	resultWasPending?: boolean
 }
 
 // What clients see of GameState (logs stay on the server).

@@ -18,6 +18,10 @@ export const NotifyCode = {
 	// {message, itemType, warnedAt}: a moderator's warning (service queue).
 	// Persistent, so an offline player sees it at their next login.
 	WARNED: 109,
+	// {runId, code, modId, status, place, rating}: the result of a run the
+	// player left before it settled (lobby/late_result.ts). Transient: an
+	// offline player reads it in their match history instead.
+	RESULT_LATE: 110,
 }
 
 const CODES: number[] = Object.keys(NotifyCode).map((k) => (NotifyCode as { [k: string]: number })[k])

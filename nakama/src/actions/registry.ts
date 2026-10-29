@@ -238,7 +238,11 @@ const setResultPending: AuthoritativeAction = {
 		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
 		if (!isPlainObject(params) || typeof params.pending !== 'boolean')
 			return { reject: 'bad_params' }
-		const game = { ...lobby.game, resultPending: params.pending }
+		const game = {
+			...lobby.game,
+			resultPending: params.pending,
+			resultWasPending: lobby.game.resultWasPending || params.pending,
+		}
 		return { game, params: { playerId: ctx.from, pending: params.pending } }
 	},
 }
