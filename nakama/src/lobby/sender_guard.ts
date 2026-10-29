@@ -22,6 +22,7 @@ export const SENDER_RULES = {
 	pvp_win: 'host',
 	pvp_player_won: 'host', // check_single_survivor: host only
 	pvp_end_pvp: 'host',
+	pvp_round_state: 'host',
 	pvp_player_lives: 'host',
 	pvp_eliminated: 'host',
 	pvp_start_blind: 'host',
