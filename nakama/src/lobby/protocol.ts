@@ -221,6 +221,10 @@ export interface GameState {
 	logs: { [userId: string]: PlayerLog }
 	// Absent in match state from before Setup existed.
 	setup?: SetupState
+	// The started game's result is not known yet (mpapi_set_result_pending):
+	// settle neither starts nor honours the result clock, and the run closes on
+	// clear or when its last participant is gone. Absent means not pending.
+	resultPending?: boolean
 }
 
 // What clients see of GameState (logs stay on the server).

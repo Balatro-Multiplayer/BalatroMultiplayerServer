@@ -186,6 +186,10 @@ export function settle(lobby: Lobby, now: number): Step {
 	const remaining = remainingParticipants(lobby)
 	if (remaining.length === 0) return finishGame(lobby, now)
 
+	// A pending result holds the run open: no clock, and reports alone do not
+	// end it. Clearing the flag settles it as usual.
+	if (lobby.game.resultPending) return { lobby, out: [] }
+
 	const reports = lobby.game.reports
 	const anyReport = lobby.game.reportOrder.length > 0
 	if (anyReport && remaining.every((id) => reports[id] !== undefined))

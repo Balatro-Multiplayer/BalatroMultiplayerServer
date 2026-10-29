@@ -17,6 +17,7 @@ import {
 	snapshotFor,
 	tick,
 } from '../lobby/state'
+import { type Checkpoint, checkpointOf, resumeFrom } from '../lobby/checkpoint'
 import { runWrites } from '../lobby/storage'
 import { MAX_LOG_BATCH, MAX_LOG_EVENTS } from './registry'
 import { reconcile, settle } from './results'
@@ -305,6 +306,69 @@ describe('reporting results', () => {
 		lobby = tick(lobby, 1000 + 10_000).lobby
 		const step = settle(lobby, 12_000)
 		expect(step.lobby.game.settleFrom).toBe(12_000)
+	})
+
+	it('holds a pending run open past the result clock after a player leaves', () => {
+		let lobby = started('a', 'b')
+		lobby = leave(lobby, 'a').lobby
+		const marked = send(lobby, 'b', 'mpapi_set_result_pending', { pending: true }, 2000)
+		expect(rejection(marked)).toBeUndefined()
+		lobby = settle(marked.lobby, 3000).lobby
+		expect(lobby.game.settleFrom).toBeNull()
+		expect(saved(settle(lobby, 3000 + 600_000))).toBeUndefined()
+		expect(settle(lobby, 3000 + 600_000).lobby.game.started).not.toBeNull()
+	})
+
+	it('does not settle a pending run when the stayer reports, only once it is cleared', () => {
+		let lobby = started('a', 'b')
+		lobby = leave(lobby, 'a').lobby
+		lobby = send(lobby, 'b', 'mpapi_set_result_pending', { pending: true }, 2000).lobby
+		const reported = report(lobby, 'b', places('b', 'a'), 4000)
+		expect(saved(reported)).toBeUndefined()
+		expect(saved(settle(reported.lobby, 4000 + 600_000))).toBeUndefined()
+		const cleared = send(reported.lobby, 'b', 'mpapi_set_result_pending', { pending: false }, 5000)
+		const run = saved(cleared)?.run as RunRecord
+		expect(run.status).toBe('partial')
+		// The player who left is still placed, so the rating step rates them.
+		expect(run.placements).toEqual([
+			{ playerId: 'a', place: 2 },
+			{ playerId: 'b', place: 1 },
+		])
+		expect(cleared.lobby.game.started).toBeNull()
+	})
+
+	it('closes a pending run when the last participant is gone', () => {
+		let lobby = started('a', 'b')
+		lobby = send(lobby, 'b', 'mpapi_set_result_pending', { pending: true }, 2000).lobby
+		lobby = leave(lobby, 'a').lobby
+		lobby = leave(lobby, 'b').lobby
+		expect(saved(settle(lobby, 3000))?.run.status).toBe('abandoned')
+	})
+
+	it('only lets a participant of a started game mark a run pending', () => {
+		let idle = newLobby({
+			code: 'ABC123',
+			modId: 'MultiplayerPvP',
+			maxPlayers: 2,
+			creatorId: 'a',
+			now: 0,
+			graceMs: 10_000,
+			resultTimeoutMs: 60_000,
+		})
+		idle = join(idle, 'a', 'a-s1', info('a')).lobby
+		expect(rejection(send(idle, 'a', 'mpapi_set_result_pending', { pending: true }))).toBe('not_in_game')
+		const lobby = started('a', 'b')
+		expect(rejection(send(lobby, 'a', 'mpapi_set_result_pending', { pending: 'yes' }))).toBe('bad_params')
+	})
+
+	it('keeps the pending flag through a checkpoint resume and clears it with the run', () => {
+		let lobby = started('a', 'b')
+		lobby = send(lobby, 'a', 'mpapi_set_result_pending', { pending: true }, 2000).lobby
+		const resumed = resumeFrom(checkpointOf(lobby, 5000) as Checkpoint, 9000)
+		expect(resumed.game.resultPending).toBe(true)
+		lobby = report(lobby, 'a', places('a', 'b')).lobby
+		lobby = report(send(lobby, 'a', 'mpapi_set_result_pending', { pending: false }, 3000).lobby, 'b', places('a', 'b'), 3500).lobby
+		expect(lobby.game.resultPending).toBeFalsy()
 	})
 
 	it('hands reports and the run id back in the snapshot', () => {

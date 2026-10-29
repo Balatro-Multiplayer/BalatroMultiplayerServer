@@ -227,6 +227,22 @@ const reportResult: AuthoritativeAction = {
 	},
 }
 
+// {pending: boolean} -- any participant of the started game. Marks the run as
+// having a pending result (a pending death waits on the others) or clears it.
+// While pending, results.ts keeps the run open; clearing lets it settle.
+const setResultPending: AuthoritativeAction = {
+	key: 'mpapi_set_result_pending',
+	reduce(lobby, ctx, params) {
+		const started = lobby.game.started
+		if (!started) return { reject: 'not_in_game' }
+		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
+		if (!isPlainObject(params) || typeof params.pending !== 'boolean')
+			return { reject: 'bad_params' }
+		const game = { ...lobby.game, resultPending: params.pending }
+		return { game, params: { playerId: ctx.from, pending: params.pending } }
+	},
+}
+
 // A player's replay log is capped; past it, further events are dropped (not
 // refused, so the client isn't warned on every event).
 export const MAX_LOG_EVENTS = 20_000
@@ -350,6 +366,7 @@ const REGISTRY: { [key: string]: AuthoritativeAction } = {
 	[restartGame.key]: restartGame,
 	[abandonGame.key]: abandonGame,
 	[reportResult.key]: reportResult,
+	[setResultPending.key]: setResultPending,
 	[logEvent.key]: logEvent,
 	[logEvents.key]: logEvents,
 }

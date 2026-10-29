@@ -7731,6 +7731,7 @@ function settle(lobby, now) {
   if (!started) return { lobby, out: [] };
   const remaining = remainingParticipants(lobby);
   if (remaining.length === 0) return finishGame(lobby, now);
+  if (lobby.game.resultPending) return { lobby, out: [] };
   const reports = lobby.game.reports;
   const anyReport = lobby.game.reportOrder.length > 0;
   if (anyReport && remaining.every((id) => reports[id] !== void 0))
@@ -7887,6 +7888,18 @@ var reportResult = {
     };
   }
 };
+var setResultPending = {
+  key: "mpapi_set_result_pending",
+  reduce(lobby, ctx, params) {
+    const started = lobby.game.started;
+    if (!started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    if (!isPlainObject3(params) || typeof params.pending !== "boolean")
+      return { reject: "bad_params" };
+    const game = __spreadProps(__spreadValues({}, lobby.game), { resultPending: params.pending });
+    return { game, params: { playerId: ctx.from, pending: params.pending } };
+  }
+};
 var MAX_LOG_EVENTS = 2e4;
 var MAX_LOG_BYTES = 1024 * 1024;
 var MAX_OPCODE_LENGTH = 64;
@@ -7966,6 +7979,7 @@ var REGISTRY = {
   [restartGame.key]: restartGame,
   [abandonGame.key]: abandonGame,
   [reportResult.key]: reportResult,
+  [setResultPending.key]: setResultPending,
   [logEvent.key]: logEvent,
   [logEvents.key]: logEvents
 };
