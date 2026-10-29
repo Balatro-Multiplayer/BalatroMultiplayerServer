@@ -95,12 +95,25 @@ export function reportOf(games: number, state: ReplayState): SeasonReplayReport 
 	return { games, changedPlayers, players, token: tokenOf(games, players) }
 }
 
+// Nakama returns a stored record's keys in no fixed order, and a field can be
+// null or absent for the same data. The digest sorts keys and drops both.
+function canonical(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map((v) => canonical(v) ?? null)
+	if (value === null || typeof value !== 'object') return value
+	const out: Record<string, unknown> = {}
+	for (const key of Object.keys(value).sort()) {
+		const v = (value as Record<string, unknown>)[key]
+		if (v !== null && v !== undefined) out[key] = canonical(v)
+	}
+	return out
+}
+
 function tokenOf(games: number, players: ReplayPlayer[]): string {
 	return createHash('sha256')
 		.update(
 			JSON.stringify([
 				games,
-				players.map((p) => [p.userId, p.modId, p.mode, p.before, p.after]),
+				players.map((p) => canonical([p.userId, p.modId, p.mode, p.before, p.after])),
 			]),
 		)
 		.digest('hex')

@@ -29,6 +29,40 @@ describe('reportOf', () => {
 			['same', 'ModA', 'solo'],
 		])
 	})
+
+	describe('token', () => {
+		const shuffled = (r: ReturnType<typeof record>) => ({
+			lastMatchAt: r.lastMatchAt,
+			seasonBest: r.seasonBest,
+			gamesPlayed: r.gamesPlayed,
+			losses: r.losses,
+			wins: r.wins,
+			rating: r.rating,
+		})
+		const stateOf = (before: any, after: any) => ({
+			'ModA:solo': { u1: { name: 'U', before, after } },
+		})
+
+		it('ignores the key order of the stored records', () => {
+			const a = reportOf(3, stateOf(record(600), record(620)))
+			const b = reportOf(3, stateOf(shuffled(record(600)), shuffled(record(620))))
+			expect(b.token).toBe(a.token)
+		})
+
+		it('treats a missing optional field like null', () => {
+			const { seasonBest: _, ...bare } = record(600)
+			const a = reportOf(3, stateOf(record(600), record(620)))
+			const b = reportOf(3, stateOf(bare, record(620)))
+			expect(b.token).toBe(a.token)
+		})
+
+		it('changes with a rating, a missing before or the game count', () => {
+			const base = reportOf(3, stateOf(record(600), record(620))).token
+			expect(reportOf(3, stateOf(record(600), record(621))).token).not.toBe(base)
+			expect(reportOf(3, stateOf(null, record(620))).token).not.toBe(base)
+			expect(reportOf(4, stateOf(record(600), record(620))).token).not.toBe(base)
+		})
+	})
 })
 
 describe('replaySeason', () => {
