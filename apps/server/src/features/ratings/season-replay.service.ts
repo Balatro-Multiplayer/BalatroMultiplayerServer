@@ -1,0 +1,122 @@
+import {
+	type NakamaRpcError,
+	callNakamaRpc,
+} from '../../infrastructure/nakama/admin-client.js'
+import { type Result, ok } from '../../shared/utils/result.js'
+
+// The owner's dry run of a Season replay. Nakama replays the stored ranked
+// games (nakama/src/rating/replay.ts) and writes nothing. Runtime state does
+// not survive between its calls, so the API lists the runs page by page, sorts
+// them by end time, then feeds them back in small batches with the state so
+// far.
+
+export interface RatingRecord {
+	rating: number
+	wins: number
+	losses: number
+	gamesPlayed: number
+	seasonBest: number | null
+	lastMatchAt: number
+}
+
+interface ReplayEntry {
+	name: string
+	before: RatingRecord | null
+	after: RatingRecord
+}
+
+type ReplayState = Record<string, Record<string, ReplayEntry>>
+
+interface RunRef {
+	runId: string
+	endedAt: number
+}
+
+export interface ReplayPlayer {
+	userId: string
+	name: string
+	modId: string
+	mode: string
+	before: RatingRecord | null
+	after: RatingRecord
+}
+
+export interface SeasonReplayReport {
+	games: number
+	changedPlayers: number
+	players: ReplayPlayer[]
+}
+
+export type SeasonReplayError = NakamaRpcError | 'no_season'
+
+export type ReplayCall = <T>(
+	id: string,
+	body: Record<string, unknown>,
+) => Promise<Result<T, NakamaRpcError>>
+
+// Runs per fold call: each one reads its runs and the players' stored ratings.
+const FOLD_BATCH = 100
+// A list call scans up to 1000 stored runs; a fold call reads a batch.
+const CALL_TIMEOUT_MS = 60_000
+
+const callNakama: ReplayCall = (id, body) =>
+	callNakamaRpc(id, body, { timeoutMs: CALL_TIMEOUT_MS })
+
+const byEndThenId = (a: RunRef, b: RunRef) =>
+	a.endedAt - b.endedAt || (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0)
+
+// Pure: a player counts as changed when the replay ends on another rating
+// than the one stored now (or nothing is stored).
+export function reportOf(games: number, state: ReplayState): SeasonReplayReport {
+	const players: ReplayPlayer[] = []
+	for (const board of Object.keys(state).sort()) {
+		const split = board.indexOf(':')
+		for (const userId of Object.keys(state[board]).sort()) {
+			const entry = state[board][userId]
+			players.push({
+				userId,
+				name: entry.name,
+				modId: board.slice(0, split),
+				mode: board.slice(split + 1),
+				before: entry.before,
+				after: entry.after,
+			})
+		}
+	}
+	const changedPlayers = players.filter(
+		(p) => p.before === null || p.before.rating !== p.after.rating,
+	).length
+	return { games, changedPlayers, players }
+}
+
+export async function replaySeason(
+	startedAt: Date,
+	call: ReplayCall = callNakama,
+): Promise<Result<SeasonReplayReport, NakamaRpcError>> {
+	const refs: RunRef[] = []
+	let cursor = ''
+	do {
+		const page = await call<{ runs: RunRef[]; cursor: string }>(
+			'admin_ratings_replay_list',
+			{ startedAt: startedAt.getTime(), cursor },
+		)
+		if (!page.ok) return page
+		refs.push(...page.value.runs)
+		cursor = page.value.cursor
+	} while (cursor !== '')
+	refs.sort(byEndThenId)
+
+	let state: ReplayState = {}
+	let games = 0
+	for (let i = 0; i < refs.length; i += FOLD_BATCH) {
+		const batch = await call<{ state: ReplayState; rated: number }>(
+			'admin_ratings_replay_fold',
+			{ runIds: refs.slice(i, i + FOLD_BATCH).map((r) => r.runId), state },
+		)
+		if (!batch.ok) return batch
+		state = batch.value.state
+		games += batch.value.rated
+	}
+	return ok(reportOf(games, state))
+}
+

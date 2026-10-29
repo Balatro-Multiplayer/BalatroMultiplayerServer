@@ -126,6 +126,9 @@ export const env = {
 	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
 	// Unset = those routes refuse everything.
 	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),
+	// The one player id (an admin) allowed to run the owner-only repair tools,
+	// such as the Season replay. Unset = nobody is the owner.
+	OWNER_PLAYER_ID: optional('OWNER_PLAYER_ID', ''),
 
 	// Directory containing archived Discord channel bundles (features/webadmin/
 	// archives.route.ts), each produced externally by the discord-channel-archiver

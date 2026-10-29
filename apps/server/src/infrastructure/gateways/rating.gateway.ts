@@ -51,6 +51,20 @@ export async function getCurrentSeason(): Promise<
 	return rows[0]
 }
 
+// The season Nakama rates into: the active one, else the latest.
+export async function getSeasonForReplay(): Promise<
+	{ id: number; name: string; startedAt: Date } | undefined
+> {
+	const active = await getCurrentSeason()
+	if (active) return active
+	const [latest] = await db
+		.select()
+		.from(seasons)
+		.orderBy(desc(seasons.id))
+		.limit(1)
+	return latest
+}
+
 // Resolve the season to read from. If an explicit id is given, use it as-is.
 // Otherwise default to the active season, falling back to the most recent season
 // by id when none is currently active (e.g. between seasons). Returns undefined

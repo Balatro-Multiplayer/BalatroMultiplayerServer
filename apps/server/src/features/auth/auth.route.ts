@@ -23,6 +23,7 @@ import type { AuthService } from './auth.service.js'
 import { getDiscordAuthUrl, validateDiscordCode } from './discord.js'
 import { signTosPendingToken, verifyTosPendingToken } from './jwt.js'
 import { generateLinkState, verifyLinkState } from './link-state.js'
+import { isOwner } from '../../shared/utils/require-owner.js'
 import {
 	getSteamOpenIdUrl,
 	getSteamPlayerName,
@@ -39,6 +40,7 @@ function playerPayload(session: PlayerSession) {
 		discordLinked: session.discordIdHash != null,
 		discordUsername: session.discordUsername ?? null,
 		privileges: session.privileges,
+		isOwner: isOwner(session.playerId, session.privileges),
 		chatEnabled: session.chatEnabled,
 		chatBlocked: session.chatBlocked,
 	}
@@ -148,6 +150,7 @@ export function createAuthRouter(service: AuthService): Router {
 				discordLinked: jwt.discordIdHash != null,
 				discordUsername: jwt.discordUsername ?? null,
 				privileges: dbPlayer?.privileges ?? [],
+				isOwner: isOwner(jwt.playerId, dbPlayer?.privileges ?? []),
 			})
 		} catch (err) {
 			next(err)

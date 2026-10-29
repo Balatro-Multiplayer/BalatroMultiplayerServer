@@ -15,6 +15,7 @@ import matchesRouter from './matches.route.js'
 import modsRouter from './mods.route.js'
 import playersRouter from './players.route.js'
 import reportsRouter from './reports.route.js'
+import seasonReplayRouter from './season-replay.route.js'
 import seasonsRouter from './seasons.route.js'
 import serviceQueueRouter from './service-queue.route.js'
 
@@ -54,5 +55,6 @@ router.use(blogRouter)
 router.use(archivesRouter)
 router.use(serviceQueueRouter)
 router.use(achievementsRouter)
+router.use(seasonReplayRouter)
 
 export default router
