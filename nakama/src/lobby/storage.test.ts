@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { fakeNk } from '../testing/fake_nk'
 import { RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from './protocol'
-import { rpcRunGet, rpcRunsMine } from './storage'
+import { MY_RUNS_COLLECTION } from './protocol'
+import { rpcRunGet, rpcRunsMine, runWrites } from './storage'
 
 const logger = {} as nkruntime.Logger
 const ctx = (userId: string) => ({ userId }) as unknown as nkruntime.Context
@@ -83,5 +84,30 @@ describe('rpcRunsMine', () => {
 			},
 		}) as unknown as nkruntime.Nakama
 		expect(() => rpcRunsMine(ctx('a'), logger, nk, '{}')).toThrow('db down')
+	})
+})
+
+describe('runWrites', () => {
+	it('gives a player who left before the run settled their place and rating in their history', () => {
+		const run = {
+			runId: 'r1',
+			code: 'ABC123',
+			modId: 'MultiplayerPvP',
+			startedAt: 1,
+			endedAt: 2,
+			status: 'partial',
+			players: [
+				{ id: 'a', displayName: 'A' },
+				{ id: 'b', displayName: 'B' },
+			],
+			placements: [
+				{ playerId: 'b', place: 1 },
+				{ playerId: 'a', place: 2 },
+			],
+			ratings: { a: { delta: -12, newRating: 988, isPlacement: false, gamesPlayed: 9 } },
+		} as unknown as RunRecord
+		const writes = runWrites(run, {}, () => 'h')
+		const mine = writes.filter((w) => w.collection === MY_RUNS_COLLECTION && w.userId === 'a')[0]
+		expect(mine.value).toMatchObject({ status: 'partial', place: 2, rating: { delta: -12 } })
 	})
 })

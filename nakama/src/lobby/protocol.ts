@@ -228,6 +228,9 @@ export interface GameState {
 	// A player contested the started game (mpapi_contest). The run is stored as
 	// 'contested' and rated by nobody until a moderator decides.
 	contest?: Contest
+	// The result was pending at some point in this run. Stays set after the
+	// flag clears, so the settled run knows to tell players who left earlier.
+	resultWasPending?: boolean
 }
 
 export interface Contest {

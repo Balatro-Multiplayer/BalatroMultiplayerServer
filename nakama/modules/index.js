@@ -4130,7 +4130,11 @@ var NotifyCode = {
   STANDING_CHANGED: 108,
   // {message, itemType, warnedAt}: a moderator's warning (service queue).
   // Persistent, so an offline player sees it at their next login.
-  WARNED: 109
+  WARNED: 109,
+  // {runId, code, modId, status, place, rating}: the result of a run the
+  // player left before it settled (lobby/late_result.ts). Transient: an
+  // offline player reads it in their match history instead.
+  RESULT_LATE: 110
 };
 var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
 function isNotifyCode(code) {
@@ -7714,8 +7718,11 @@ function finishGame(lobby, now, override) {
     gameMode: lobby.gameMode,
     lobbyType: lobby.rankedMode || lobby.allowedIds ? "public" : "private"
   }, game.contest ? { contest: game.contest } : {});
+  const seated = {};
+  for (const p of lobby.players) seated[p.id] = true;
+  const lateResultTo = game.resultWasPending && status !== "abandoned" ? started.players.filter((p) => !seated[p.id]).map((p) => p.id) : [];
   const next = __spreadProps(__spreadValues({}, lobby), { lastRunId: started.runId, game: emptyGame() });
-  const out = [{ kind: "saveRun", run, logs: game.logs }];
+  const out = [{ kind: "saveRun", run, logs: game.logs, lateResultTo }];
   if (!override || override.announce) {
     const ended = { runId: started.runId, status, placements };
     out.push({
@@ -7897,7 +7904,10 @@ var setResultPending = {
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
     if (!isPlainObject3(params) || typeof params.pending !== "boolean")
       return { reject: "bad_params" };
-    const game = __spreadProps(__spreadValues({}, lobby.game), { resultPending: params.pending });
+    const game = __spreadProps(__spreadValues({}, lobby.game), {
+      resultPending: params.pending,
+      resultWasPending: lobby.game.resultWasPending || params.pending
+    });
     return { game, params: { playerId: ctx.from, pending: params.pending } };
   }
 };
@@ -8101,6 +8111,8 @@ var SENDER_RULES = {
   pvp_team_score_board: "host",
   pvp_team_lives: "host",
   pvp_team_roster: "host",
+  pvp_death_pending: "host",
+  // pvp_api/referee.lua: the host broadcasts a pending death
   pvp_reseed: "host",
   // run_actions.lua: host on a unanimous seed vote
   // SPDRN host decisions.
@@ -8344,6 +8356,24 @@ function reportEvidence(lobby, reporterId, reportedId) {
   };
 }
 
+// src/lobby/late_result.ts
+function lateResultContent(run, playerId) {
+  const placement = run.placements.filter((p) => p.playerId === playerId)[0];
+  return {
+    runId: run.runId,
+    code: run.code,
+    modId: run.modId,
+    status: run.status,
+    place: placement ? placement.place : null,
+    rating: run.ratings && run.ratings[playerId] || null
+  };
+}
+function sendLateResults(nk, run, playerIds) {
+  for (const playerId of playerIds) {
+    notify(nk, playerId, NotifyCode.RESULT_LATE, "result_late", __spreadValues({}, lateResultContent(run, playerId)), false);
+  }
+}
+
 // src/standing/rejoin.ts
 var REJOIN_REFUSED_PREFIX = "standing_refused:";
 function rejoinRefusal(required, result) {
@@ -8487,6 +8517,13 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
           effect.run.runId,
           e
         );
+      }
+      if (stored) {
+        try {
+          sendLateResults(nk, stored, effect.lateResultTo);
+        } catch (e) {
+          logger.warn("Lobby %s: could not tell leavers the result of run %s: %v", lobby.code, stored.runId, e);
+        }
       }
       if (stored) {
         try {

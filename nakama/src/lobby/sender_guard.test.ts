@@ -65,6 +65,7 @@ describe('SENDER_RULES', () => {
 			'pvp_win',
 			'pvp_player_won',
 			'pvp_end_pvp',
+			'pvp_death_pending',
 			'pvp_player_lives',
 			'spdrn_match_timeout',
 			'spdrn_seed_change_apply',

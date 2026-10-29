@@ -131,6 +131,9 @@ export type Outbound =
 			kind: 'saveRun'
 			run: RunRecord
 			logs: { [userId: string]: PlayerLog }
+			// Participants no longer seated when a once-pending run settled:
+			// they are told the result (lobby/late_result.ts).
+			lateResultTo: string[]
 	  }
 	| GroupOutbound
 

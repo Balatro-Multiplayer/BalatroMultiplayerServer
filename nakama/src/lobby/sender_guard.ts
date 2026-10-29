@@ -33,6 +33,7 @@ export const SENDER_RULES = {
 	pvp_team_score_board: 'host',
 	pvp_team_lives: 'host',
 	pvp_team_roster: 'host',
+	pvp_death_pending: 'host', // pvp_api/referee.lua: the host broadcasts a pending death
 	pvp_reseed: 'host', // run_actions.lua: host on a unanimous seed vote
 	// SPDRN host decisions.
 	spdrn_match_timeout: 'host', // matchmaking/duration.lua: host clock
