@@ -184,6 +184,56 @@ export function scoreSortKey(
 	return { len: x.length, rev: x.slice().reverse() }
 }
 
+const GROUPED_INTEGER = /^\d{1,3}(,\d{3})+$/
+const HYPER_E = /^(e*)([0-9]+(?:\.[0-9]+)?)e\+?([0-9]+)$/
+
+/**
+ * Score text of text from a log written before score text existed: commas
+ * ("2,832"), Lua exponent text ("1.5e+20"), Balatro notation ("1.235e1,234",
+ * "e1.2e10"), "naneinf", and Talisman's array forms (the top score). A number
+ * is read as a double. Anything unreadable is "0". Text that is already score
+ * text comes back normalized, except comma-grouped digits: those are read as
+ * an integer, because every old client wrote them that way.
+ */
+export function parseLegacyScore(input: unknown): string {
+	if (typeof input === 'number') return fromNumber(input)
+	if (typeof input !== 'string') return ZERO_SCORE
+	const text = input.trim()
+	if (GROUPED_INTEGER.test(text)) return fromNumber(Number(text.replace(/,/g, '')))
+	const normal = normalizeScore(text)
+	if (normal !== null) return normal
+	const cleaned = text.replace(/[,\s]/g, '').toLowerCase()
+	if (cleaned === '') return ZERO_SCORE
+	const value = Number(cleaned)
+	if (!Number.isNaN(value) && (Number.isFinite(value) || !HYPER_E.test(cleaned))) return fromNumber(value)
+	if (cleaned === 'naneinf' || cleaned === 'inf' || cleaned === 'infinity')
+		return fromNumber(Number.POSITIVE_INFINITY)
+	const tower = HYPER_E.exec(cleaned)
+	if (tower !== null) {
+		const layers = tower[1].length
+		const inner = Number(tower[2] + 'e' + tower[3])
+		if (Number.isFinite(inner)) return fromArray([inner, layers], 1)
+		return fromArray([Number(tower[3]) + Math.log10(Number(tower[2])), layers + 1], 1)
+	}
+	if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf('#') !== -1) return TOP_SCORE
+	return ZERO_SCORE
+}
+
+/**
+ * The score as a double: Infinity above the largest double, 0 for malformed
+ * text. For thresholds only; never store it.
+ */
+export function scoreToNumber(text: string): number {
+	const array = readArray(text)
+	if (array === null) return 0
+	const a = normalizeArray(array)
+	if (a.length === 1) return a[0]
+	if (a.length > 2) return Number.POSITIVE_INFINITY
+	let value = a[0]
+	for (let i = 0; i < a[1] && value !== Number.POSITIVE_INFINITY; i++) value = Math.pow(10, value)
+	return value
+}
+
 // --- Display: Balatro notation (the Talisman "Balatro" notation) ---
 // Mantissas are rounded half up to 3 decimals. A mantissa that rounds to 10
 // becomes 1 with the exponent plus one. Digits come from integer math so both

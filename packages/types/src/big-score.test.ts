@@ -15,6 +15,8 @@ import {
 	fromNumber,
 	normalizeScore,
 	scoreSortKey,
+	parseLegacyScore,
+	scoreToNumber,
 } from './big-score'
 
 const LARGEST_DOUBLE_TEXT = '308.25471555991675,1'
@@ -265,5 +267,62 @@ describe('sort key', () => {
 		}
 		for (const a of texts)
 			for (const b of texts) expect(rowCompare(a, b)).toBe(compareScores(a, b))
+	})
+})
+
+// Text from logs written before score text existed. Expected values: Python
+// math.log10 for the exponent forms, plain digits for the integer forms.
+const LEGACY_VECTORS: [string, string][] = [
+	['300', '300'],
+	['2,832', '2832'],
+	['1,234,567', '1234567'],
+	['20000000000000', '20000000000000'],
+	['1.2345678901234e+14', '123456789012340'],
+	['1.5e11', '150000000000'],
+	['1.5e+20', '20.17609125905568,1'],
+	['1.5e500', '500.1760912590557,1'],
+	['1.5e5,00', '500.1760912590557,1'],
+	['e1.2e10', '12000000000,1'],
+	['e1.235e56,789', '56789.091666957596,2'],
+	['20.17609125905568,3', '20.17609125905568,3'],
+	['naneinf', LARGEST_DOUBLE_TEXT],
+	['inf', LARGEST_DOUBLE_TEXT],
+	['Infinity', LARGEST_DOUBLE_TEXT],
+	['1e400', '400,1'],
+	['1e+400', '400,1'],
+	['ee1.2e10', '12000000000,2'],
+	['e12#34#56', TOP_SCORE],
+	['10##5', TOP_SCORE],
+	['-5', '0'],
+	['nan', '0'],
+	['banana', '0'],
+	['', '0'],
+]
+
+describe('legacy score text', () => {
+	for (const [text, want] of LEGACY_VECTORS) {
+		it(`${JSON.stringify(text)} gives ${want.slice(0, 24)}`, () => {
+			expect(parseLegacyScore(text)).toBe(want)
+		})
+	}
+
+	it('reads a number and refuses anything else', () => {
+		expect(parseLegacyScore(250)).toBe('250')
+		expect(parseLegacyScore(-1)).toBe('0')
+		expect(parseLegacyScore(null)).toBe('0')
+		expect(parseLegacyScore({})).toBe('0')
+	})
+})
+
+describe('score as a double', () => {
+	it('is exact below 1e308 and Infinity above', () => {
+		expect(scoreToNumber('0')).toBe(0)
+		expect(scoreToNumber('300')).toBe(300)
+		expect(scoreToNumber('150000000000')).toBe(1.5e11)
+		expect(scoreToNumber('300,1') / 1e300).toBeCloseTo(1, 5)
+		expect(scoreToNumber('400,1')).toBe(Infinity)
+		expect(scoreToNumber('20,2')).toBe(Infinity)
+		expect(scoreToNumber(TOP_SCORE)).toBe(Infinity)
+		expect(scoreToNumber('x')).toBe(0)
 	})
 })

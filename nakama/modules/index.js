@@ -4633,17 +4633,161 @@ function moneySpent(events) {
   return spent;
 }
 
+// ../packages/types/src/big-score.ts
+var MAX_SAFE = 9007199254740991;
+var MAX_ARRAY_LENGTH = 100;
+var MAX_TEXT_LENGTH = 4096;
+var LOG_MAX_SAFE = Math.log10(MAX_SAFE);
+var ZERO_SCORE = "0";
+var TOP_SCORE = new Array(MAX_ARRAY_LENGTH).fill(String(MAX_SAFE)).join(",");
+var ENTRY_FIRST = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+var ENTRY_HIGHER = /^(0|[1-9][0-9]*)$/;
+var TOP_ARRAY = () => new Array(MAX_ARRAY_LENGTH).fill(MAX_SAFE);
+function normalizeArray(input) {
+  if (input.length === 0) return [0];
+  if (input.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
+  const x = input.slice();
+  for (let i = 0; i < x.length; i++) {
+    const e = x[i];
+    if (Number.isNaN(e) || e === Number.POSITIVE_INFINITY || e === Number.NEGATIVE_INFINITY) {
+      return TOP_ARRAY();
+    }
+    if (i !== 0 && e !== Math.floor(e)) x[i] = Math.floor(e);
+  }
+  let again;
+  do {
+    again = false;
+    while (x.length > 0 && x[x.length - 1] === 0) {
+      x.pop();
+      again = true;
+    }
+    if (x[0] > MAX_SAFE) {
+      x[1] = (x[1] || 0) + 1;
+      x[0] = Math.log10(x[0]);
+      again = true;
+    }
+    while (x[0] < LOG_MAX_SAFE && x[1]) {
+      x[0] = __pow(10, x[0]);
+      x[1]--;
+      again = true;
+    }
+    if (x.length > 2 && !x[1]) {
+      let i = 2;
+      while (!x[i]) i++;
+      x[i - 1] = Math.floor(x[0]);
+      x[0] = __pow(10, x[0] - Math.floor(x[0]));
+      x[i]--;
+      again = true;
+    }
+    for (let i = 1; i < x.length; i++) {
+      if (x[i] > MAX_SAFE) {
+        x[i + 1] = (x[i + 1] || 0) + 1;
+        x[0] = x[i] + 1;
+        for (let j = 1; j <= i; j++) x[j] = 0;
+        again = true;
+      }
+    }
+    if (x.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
+  } while (again);
+  if (x.length === 0) return [0];
+  for (let i = 0; i < x.length; i++) if (x[i] === void 0) x[i] = 0;
+  if (x.length === 1) x[0] = Math.floor(x[0]);
+  return x;
+}
+function writeFirst(x) {
+  if (x === Math.floor(x)) return x.toFixed(0);
+  for (let digits = 15; digits <= 17; digits++) {
+    const s = x.toPrecision(digits);
+    if (s.indexOf("e") === -1 && Number(s) === x) {
+      return s.indexOf(".") === -1 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
+    }
+  }
+  return x.toPrecision(17);
+}
+function writeArray(array) {
+  const parts = [writeFirst(array[0])];
+  for (let i = 1; i < array.length; i++) parts.push(array[i].toFixed(0));
+  return parts.join(",");
+}
+function readArray(text) {
+  if (typeof text !== "string" || text.length === 0 || text.length > MAX_TEXT_LENGTH)
+    return null;
+  const parts = text.split(",");
+  if (parts.length > MAX_ARRAY_LENGTH) return null;
+  const array = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!(i === 0 ? ENTRY_FIRST : ENTRY_HIGHER).test(parts[i])) return null;
+    const n = Number(parts[i]);
+    if (!Number.isFinite(n)) return null;
+    array.push(n);
+  }
+  return array;
+}
+function fromNumber(n) {
+  const value = Number.isNaN(n) || n === Number.POSITIVE_INFINITY ? Number.MAX_VALUE : n;
+  if (value < 1) return ZERO_SCORE;
+  return writeArray(normalizeArray([Math.floor(value)]));
+}
+function fromArray(array, sign) {
+  if (sign < 0) return ZERO_SCORE;
+  return writeArray(normalizeArray(array));
+}
+function normalizeScore(text) {
+  const array = readArray(text);
+  return array === null ? null : writeArray(normalizeArray(array));
+}
+function compareScores(a, b) {
+  const x = readArray(a);
+  const y = readArray(b);
+  if (x === null || y === null) return null;
+  const p = normalizeArray(x);
+  const q = normalizeArray(y);
+  if (p.length !== q.length) return p.length > q.length ? 1 : -1;
+  for (let i = p.length - 1; i >= 0; i--) {
+    if (p[i] > q[i]) return 1;
+    if (p[i] < q[i]) return -1;
+  }
+  return 0;
+}
+var GROUPED_INTEGER = /^\d{1,3}(,\d{3})+$/;
+var HYPER_E = /^(e*)([0-9]+(?:\.[0-9]+)?)e\+?([0-9]+)$/;
+function parseLegacyScore(input) {
+  if (typeof input === "number") return fromNumber(input);
+  if (typeof input !== "string") return ZERO_SCORE;
+  const text = input.trim();
+  if (GROUPED_INTEGER.test(text)) return fromNumber(Number(text.replace(/,/g, "")));
+  const normal = normalizeScore(text);
+  if (normal !== null) return normal;
+  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
+  if (cleaned === "") return ZERO_SCORE;
+  const value = Number(cleaned);
+  if (!Number.isNaN(value) && (Number.isFinite(value) || !HYPER_E.test(cleaned))) return fromNumber(value);
+  if (cleaned === "naneinf" || cleaned === "inf" || cleaned === "infinity")
+    return fromNumber(Number.POSITIVE_INFINITY);
+  const tower = HYPER_E.exec(cleaned);
+  if (tower !== null) {
+    const layers = tower[1].length;
+    const inner = Number(tower[2] + "e" + tower[3]);
+    if (Number.isFinite(inner)) return fromArray([inner, layers], 1);
+    return fromArray([Number(tower[3]) + Math.log10(Number(tower[2])), layers + 1], 1);
+  }
+  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return TOP_SCORE;
+  return ZERO_SCORE;
+}
+function scoreToNumber(text) {
+  const array = readArray(text);
+  if (array === null) return 0;
+  const a = normalizeArray(array);
+  if (a.length === 1) return a[0];
+  if (a.length > 2) return Number.POSITIVE_INFINITY;
+  let value = a[0];
+  for (let i = 0; i < a[1] && value !== Number.POSITIVE_INFINITY; i++) value = Math.pow(10, value);
+  return value;
+}
+
 // src/achievements/facts/score.ts
 function parseScore(text) {
-  if (typeof text === "number") return text > 0 ? text : 0;
-  if (typeof text !== "string") return 0;
-  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
-  if (cleaned === "") return 0;
-  const value = Number(cleaned);
-  if (!isNaN(value)) return value > 0 ? value : 0;
-  if (cleaned === "naneinf" || cleaned === "inf" || cleaned === "infinity") return Infinity;
-  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return Infinity;
-  return 0;
+  return scoreToNumber(parseLegacyScore(text));
 }
 function scoredArg(args) {
   if (args !== null && typeof args === "object" && !Array.isArray(args)) return args.score;
@@ -7245,119 +7389,6 @@ function computeRatingDeltas(mode, placements, ratings) {
     })
   );
   return computeTeam(teams, winnerTeamIdx);
-}
-
-// ../packages/types/src/big-score.ts
-var MAX_SAFE = 9007199254740991;
-var MAX_ARRAY_LENGTH = 100;
-var MAX_TEXT_LENGTH = 4096;
-var LOG_MAX_SAFE = Math.log10(MAX_SAFE);
-var ZERO_SCORE = "0";
-var TOP_SCORE = new Array(MAX_ARRAY_LENGTH).fill(String(MAX_SAFE)).join(",");
-var ENTRY_FIRST = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
-var ENTRY_HIGHER = /^(0|[1-9][0-9]*)$/;
-var TOP_ARRAY = () => new Array(MAX_ARRAY_LENGTH).fill(MAX_SAFE);
-function normalizeArray(input) {
-  if (input.length === 0) return [0];
-  if (input.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
-  const x = input.slice();
-  for (let i = 0; i < x.length; i++) {
-    const e = x[i];
-    if (Number.isNaN(e) || e === Number.POSITIVE_INFINITY || e === Number.NEGATIVE_INFINITY) {
-      return TOP_ARRAY();
-    }
-    if (i !== 0 && e !== Math.floor(e)) x[i] = Math.floor(e);
-  }
-  let again;
-  do {
-    again = false;
-    while (x.length > 0 && x[x.length - 1] === 0) {
-      x.pop();
-      again = true;
-    }
-    if (x[0] > MAX_SAFE) {
-      x[1] = (x[1] || 0) + 1;
-      x[0] = Math.log10(x[0]);
-      again = true;
-    }
-    while (x[0] < LOG_MAX_SAFE && x[1]) {
-      x[0] = __pow(10, x[0]);
-      x[1]--;
-      again = true;
-    }
-    if (x.length > 2 && !x[1]) {
-      let i = 2;
-      while (!x[i]) i++;
-      x[i - 1] = Math.floor(x[0]);
-      x[0] = __pow(10, x[0] - Math.floor(x[0]));
-      x[i]--;
-      again = true;
-    }
-    for (let i = 1; i < x.length; i++) {
-      if (x[i] > MAX_SAFE) {
-        x[i + 1] = (x[i + 1] || 0) + 1;
-        x[0] = x[i] + 1;
-        for (let j = 1; j <= i; j++) x[j] = 0;
-        again = true;
-      }
-    }
-    if (x.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
-  } while (again);
-  if (x.length === 0) return [0];
-  for (let i = 0; i < x.length; i++) if (x[i] === void 0) x[i] = 0;
-  if (x.length === 1) x[0] = Math.floor(x[0]);
-  return x;
-}
-function writeFirst(x) {
-  if (x === Math.floor(x)) return x.toFixed(0);
-  for (let digits = 15; digits <= 17; digits++) {
-    const s = x.toPrecision(digits);
-    if (s.indexOf("e") === -1 && Number(s) === x) {
-      return s.indexOf(".") === -1 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
-    }
-  }
-  return x.toPrecision(17);
-}
-function writeArray(array) {
-  const parts = [writeFirst(array[0])];
-  for (let i = 1; i < array.length; i++) parts.push(array[i].toFixed(0));
-  return parts.join(",");
-}
-function readArray(text) {
-  if (typeof text !== "string" || text.length === 0 || text.length > MAX_TEXT_LENGTH)
-    return null;
-  const parts = text.split(",");
-  if (parts.length > MAX_ARRAY_LENGTH) return null;
-  const array = [];
-  for (let i = 0; i < parts.length; i++) {
-    if (!(i === 0 ? ENTRY_FIRST : ENTRY_HIGHER).test(parts[i])) return null;
-    const n = Number(parts[i]);
-    if (!Number.isFinite(n)) return null;
-    array.push(n);
-  }
-  return array;
-}
-function fromNumber(n) {
-  const value = Number.isNaN(n) || n === Number.POSITIVE_INFINITY ? Number.MAX_VALUE : n;
-  if (value < 1) return ZERO_SCORE;
-  return writeArray(normalizeArray([Math.floor(value)]));
-}
-function normalizeScore(text) {
-  const array = readArray(text);
-  return array === null ? null : writeArray(normalizeArray(array));
-}
-function compareScores(a, b) {
-  const x = readArray(a);
-  const y = readArray(b);
-  if (x === null || y === null) return null;
-  const p = normalizeArray(x);
-  const q = normalizeArray(y);
-  if (p.length !== q.length) return p.length > q.length ? 1 : -1;
-  for (let i = p.length - 1; i >= 0; i--) {
-    if (p[i] > q[i]) return 1;
-    if (p[i] < q[i]) return -1;
-  }
-  return 0;
 }
 
 // src/rating/metrics.ts
