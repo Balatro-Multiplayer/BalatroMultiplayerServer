@@ -141,7 +141,12 @@ export function finishGame(
 		started.players,
 		started.hostId,
 	)
-	const status = override ? override.status : reconciled.status
+	// A contest outranks every other ending: the run waits on a moderator.
+	const status: RunStatus = game.contest
+		? 'contested'
+		: override
+			? override.status
+			: reconciled.status
 	const placements = status === 'abandoned' ? [] : reconciled.placements
 	const run: RunRecord = {
 		runId: started.runId,
@@ -160,6 +165,7 @@ export function finishGame(
 		rankedMode: lobby.rankedMode,
 		gameMode: lobby.gameMode,
 		lobbyType: lobby.rankedMode || lobby.allowedIds ? 'public' : 'private',
+		...(game.contest ? { contest: game.contest } : {}),
 	}
 
 	const next = { ...lobby, lastRunId: started.runId, game: emptyGame() }

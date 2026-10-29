@@ -55,7 +55,7 @@ describe('planRatings', () => {
 		expect(plan.updates.a.rating).toBe(620)
 	})
 
-	it.each(['disputed', 'abandoned', 'restarted'] as const)('does not rate a %s game', (status) => {
+	it.each(['disputed', 'abandoned', 'restarted', 'contested'] as const)('does not rate a %s game', (status) => {
 		const plan = planRatings(run({ status }), clean, { a: seasoned(600), b: seasoned(600) })
 		expect(plan).toEqual({ updates: {}, results: {} })
 	})
@@ -182,6 +182,12 @@ describe('applyRatings', () => {
 	it('rates nobody, and writes nothing, for a disputed game', () => {
 		const nk = fakeNk()
 		expect(applyRatings(nk as never, logger, run({ status: 'disputed' }), 'solo', clean)).toEqual({})
+		expect(nk.writes).toBe(0)
+	})
+
+	it('rates nobody, and writes nothing, for a contested game', () => {
+		const nk = fakeNk()
+		expect(applyRatings(nk as never, logger, run({ status: 'contested' }), 'solo', clean)).toEqual({})
 		expect(nk.writes).toBe(0)
 	})
 

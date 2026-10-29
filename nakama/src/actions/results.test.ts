@@ -381,6 +381,96 @@ describe('reporting results', () => {
 	})
 })
 
+function startedMatchmade(...players: string[]): Lobby {
+	let lobby = newLobby({
+		code: 'ABC123',
+		modId: 'MultiplayerPvP',
+		maxPlayers: 8,
+		creatorId: players[0],
+		gameMode: 'ranked:duel',
+		rankedMode: 'duel',
+		allowedIds: players,
+		now: 0,
+		graceMs: 10_000,
+		resultTimeoutMs: 60_000,
+	})
+	for (const id of players) lobby = join(lobby, id, `${id}-s1`, info(id)).lobby
+	for (const id of players.slice(1)) lobby = send(lobby, id, 'mpapi_ready', { ready: true }).lobby
+	return send(lobby, players[0], 'mpapi_start_game', { stake: 2 }).lobby
+}
+
+describe('contest', () => {
+	it('records who contested whom and tells everyone', () => {
+		const lobby = startedMatchmade('a', 'b')
+		const step = send(lobby, 'a', 'mpapi_contest', {}, 2000)
+		expect(rejection(step)).toBeUndefined()
+		expect(step.lobby.game.contest).toEqual({ by: 'a', against: 'b', at: 2000 })
+		const echoed = step.out.filter((o): o is Send => o.kind === 'send' && o.op === ServerOp.ACTION)
+		expect(echoed.length).toBeGreaterThan(0)
+	})
+
+	it('needs the opponent named in a match of more than 2', () => {
+		const lobby = startedMatchmade('a', 'b', 'c')
+		expect(rejection(send(lobby, 'a', 'mpapi_contest', {}))).toBe('bad_params')
+		expect(rejection(send(lobby, 'a', 'mpapi_contest', { opponentId: 'a' }))).toBe('bad_params')
+		expect(rejection(send(lobby, 'a', 'mpapi_contest', { opponentId: 'z' }))).toBe('bad_params')
+		const step = send(lobby, 'a', 'mpapi_contest', { opponentId: 'c' }, 2000)
+		expect(step.lobby.game.contest).toEqual({ by: 'a', against: 'c', at: 2000 })
+	})
+
+	it('refuses outside a started matchmade game, from a bystander, or twice', () => {
+		expect(rejection(send(started('a', 'b'), 'a', 'mpapi_contest', {}))).toBe('not_matchmade')
+		const lobby = startedMatchmade('a', 'b', 'c')
+		const first = send(lobby, 'a', 'mpapi_contest', { opponentId: 'b' }, 2000)
+		expect(rejection(send(first.lobby, 'c', 'mpapi_contest', { opponentId: 'b' }))).toBe('already_contested')
+		let idle = newLobby({ code: 'X', modId: 'm', maxPlayers: 2, creatorId: 'a', gameMode: 'duel', now: 0, graceMs: 1 })
+		idle = join(idle, 'a', 'a-s1', info('a')).lobby
+		expect(rejection(send(idle, 'a', 'mpapi_contest', {}))).toBe('not_in_game')
+		const duel = startedMatchmade('a', 'b')
+		const outsider = join(duel, 'z', 'z-s1', info('z')).lobby
+		expect(rejection(send(outsider, 'z', 'mpapi_contest', {}))).toBe('not_participant')
+	})
+
+	it('stores the run as contested, with its reported result, so nobody is rated', () => {
+		let lobby = startedMatchmade('a', 'b')
+		lobby = report(lobby, 'a', places('a', 'b'), 1500).lobby
+		lobby = send(lobby, 'b', 'mpapi_contest', {}, 2000).lobby
+		lobby = leave(lobby, 'b').lobby
+		const closed = settle(lobby, 2000 + 60_000)
+		const run = saved(closed)?.run as RunRecord
+		expect(run.status).toBe('contested')
+		expect(run.contest).toEqual({ by: 'b', against: 'a', at: 2000 })
+		expect(run.placements).toEqual(places('a', 'b'))
+		expect(gameEnded(closed)).toMatchObject({ status: 'contested' })
+	})
+
+	it('still stores a contested run when nobody reported', () => {
+		let lobby = startedMatchmade('a', 'b')
+		lobby = send(lobby, 'a', 'mpapi_contest', {}, 2000).lobby
+		lobby = leave(lobby, 'a').lobby
+		lobby = leave(lobby, 'b').lobby
+		const run = saved(settle(lobby, 3000))?.run as RunRecord
+		expect(run.status).toBe('contested')
+		expect(run.placements).toEqual([])
+	})
+
+	it('stays contested when the host restarts or abandons, and a pending-flag clear does not lift it', () => {
+		let lobby = startedMatchmade('a', 'b')
+		lobby = send(lobby, 'b', 'mpapi_contest', {}, 2000).lobby
+		lobby = send(lobby, 'a', 'mpapi_set_result_pending', { pending: false }, 2100).lobby
+		expect(lobby.game.contest).toBeDefined()
+		const abandoned = send(lobby, 'a', 'mpapi_abandon_game', {}, 3000)
+		expect(saved(abandoned)?.run.status).toBe('contested')
+	})
+
+	it('keeps the contest through a checkpoint resume', () => {
+		let lobby = startedMatchmade('a', 'b')
+		lobby = send(lobby, 'a', 'mpapi_contest', {}, 2000).lobby
+		const resumed = resumeFrom(checkpointOf(lobby, 5000) as Checkpoint, 9000)
+		expect(resumed.game.contest).toEqual({ by: 'a', against: 'b', at: 2000 })
+	})
+})
+
 describe('abandon and restart', () => {
 	it('lets only the host abandon, storing no result', () => {
 		const lobby = report(started('a', 'b'), 'a', places('a', 'b')).lobby

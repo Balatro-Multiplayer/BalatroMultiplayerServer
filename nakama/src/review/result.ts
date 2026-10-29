@@ -47,7 +47,10 @@ function placesKey(placements: ResultPlacement[]): string {
 // The run with `placements` as its result. The new result must place exactly
 // the players the old one did; each keeps their reported performance/metric.
 export function overturnRun(run: RunRecord, placements: ResultPlacement[], now: number): Overturn {
-	if (!sameIds(run.placements.map((p) => p.playerId), placements.map((p) => p.playerId)))
+	// A contested run nobody reported on has no placements yet: its players
+	// stand in for them.
+	const placed = run.placements.length > 0 ? run.placements.map((p) => p.playerId) : run.players.map((p) => p.id)
+	if (!sameIds(placed, placements.map((p) => p.playerId)))
 		return { ok: false, refusal: { kind: 'players_differ' } }
 	if (placesKey(run.placements) === placesKey(placements)) return { ok: false, refusal: { kind: 'unchanged' } }
 	const previousBy: { [userId: string]: Placement } = {}

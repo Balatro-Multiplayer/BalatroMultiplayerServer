@@ -45,6 +45,24 @@ describe('overturning a run result', () => {
 		expect(result.places).toEqual({ a: 2, b: 1 })
 	})
 
+	it('names a winner for a contested run nobody reported on', () => {
+		const result = overturnRun(run({ status: 'contested', placements: [] }), [
+			{ playerId: 'b', place: 1 },
+			{ playerId: 'a', place: 2 },
+		], 7000)
+		expect(result.ok).toBe(true)
+		if (!result.ok) return
+		expect(result.run.placements).toEqual([
+			{ playerId: 'b', place: 1 },
+			{ playerId: 'a', place: 2 },
+		])
+		expect(result.run.overturned).toEqual({ at: 7000, previous: [] })
+		expect(overturnRun(run({ placements: [] }), [{ playerId: 'a', place: 1 }], 0)).toEqual({
+			ok: false,
+			refusal: { kind: 'players_differ' },
+		})
+	})
+
 	it('keeps the first original across a second overturn', () => {
 		const once = overturnRun(run(), [{ playerId: 'a', place: 2 }, { playerId: 'b', place: 1 }], 7000)
 		if (!once.ok) throw new Error('first overturn refused')

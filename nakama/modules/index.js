@@ -6749,7 +6749,8 @@ function placesKey(placements) {
   return placements.map((p) => `${p.playerId}=${p.place}`).sort().join(",");
 }
 function overturnRun(run, placements, now) {
-  if (!sameIds(run.placements.map((p) => p.playerId), placements.map((p) => p.playerId)))
+  const placed = run.placements.length > 0 ? run.placements.map((p) => p.playerId) : run.players.map((p) => p.id);
+  if (!sameIds(placed, placements.map((p) => p.playerId)))
     return { ok: false, refusal: { kind: "players_differ" } };
   if (placesKey(run.placements) === placesKey(placements)) return { ok: false, refusal: { kind: "unchanged" } };
   const previousBy = {};
@@ -7693,9 +7694,9 @@ function finishGame(lobby, now, override) {
     started.players,
     started.hostId
   );
-  const status = override ? override.status : reconciled.status;
+  const status = game.contest ? "contested" : override ? override.status : reconciled.status;
   const placements = status === "abandoned" ? [] : reconciled.placements;
-  const run = {
+  const run = __spreadValues({
     runId: started.runId,
     code: lobby.code,
     modId: lobby.modId,
@@ -7712,7 +7713,7 @@ function finishGame(lobby, now, override) {
     rankedMode: lobby.rankedMode,
     gameMode: lobby.gameMode,
     lobbyType: lobby.rankedMode || lobby.allowedIds ? "public" : "private"
-  };
+  }, game.contest ? { contest: game.contest } : {});
   const next = __spreadProps(__spreadValues({}, lobby), { lastRunId: started.runId, game: emptyGame() });
   const out = [{ kind: "saveRun", run, logs: game.logs }];
   if (!override || override.announce) {
@@ -7900,6 +7901,33 @@ var setResultPending = {
     return { game, params: { playerId: ctx.from, pending: params.pending } };
   }
 };
+var contest = {
+  key: "mpapi_contest",
+  reduce(lobby, ctx, params) {
+    const started = lobby.game.started;
+    if (!started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    if (!lobby.rankedMode && !lobby.gameMode) return { reject: "not_matchmade" };
+    if (lobby.game.contest) return { reject: "already_contested" };
+    const input = isPlainObject3(params) ? params : {};
+    const others = started.players.filter((p) => p.id !== ctx.from);
+    let against;
+    if (input.opponentId === void 0 || input.opponentId === null) {
+      if (others.length !== 1) return { reject: "bad_params" };
+      against = others[0].id;
+    } else {
+      const named = input.opponentId;
+      if (typeof named !== "string" || !others.some((p) => p.id === named))
+        return { reject: "bad_params" };
+      against = named;
+    }
+    const contested = { by: ctx.from, against, at: ctx.now };
+    return {
+      game: __spreadProps(__spreadValues({}, lobby.game), { contest: contested }),
+      params: { playerId: ctx.from, against }
+    };
+  }
+};
 var MAX_LOG_EVENTS = 2e4;
 var MAX_LOG_BYTES = 1024 * 1024;
 var MAX_OPCODE_LENGTH = 64;
@@ -7980,6 +8008,7 @@ var REGISTRY = {
   [abandonGame.key]: abandonGame,
   [reportResult.key]: reportResult,
   [setResultPending.key]: setResultPending,
+  [contest.key]: contest,
   [logEvent.key]: logEvent,
   [logEvents.key]: logEvents
 };

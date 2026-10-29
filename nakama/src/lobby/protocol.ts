@@ -225,6 +225,16 @@ export interface GameState {
 	// settle neither starts nor honours the result clock, and the run closes on
 	// clear or when its last participant is gone. Absent means not pending.
 	resultPending?: boolean
+	// A player contested the started game (mpapi_contest). The run is stored as
+	// 'contested' and rated by nobody until a moderator decides.
+	contest?: Contest
+}
+
+export interface Contest {
+	// The contester, the player they contest, and when.
+	by: string
+	against: string
+	at: number
 }
 
 // What clients see of GameState (logs stay on the server).
@@ -238,13 +248,16 @@ export interface GameView {
 // agreed: every participant reported the same places. partial: whoever
 // reported agreed, but not everyone reported. disputed: reports differ (the
 // majority's -- or the host's -- is recorded). abandoned: no result.
-// restarted: the host restarted the game.
+// restarted: the host restarted the game. contested: a player contested the
+// game; placements are what was reported before, and nobody is rated until a
+// moderator decides.
 export type RunStatus =
 	| 'agreed'
 	| 'partial'
 	| 'disputed'
 	| 'abandoned'
 	| 'restarted'
+	| 'contested'
 
 // What a rated game did to one player: rating change and new rating are null
 // while they are still in their placement games.
@@ -288,6 +301,8 @@ export interface RunRecord {
 	// Set when a moderator replaced the recorded result (review/result.ts):
 	// the placements it had before, and when.
 	overturned?: { at: number; previous: Placement[] }
+	// Set for a contested run: who contested whom, and when.
+	contest?: Contest
 }
 
 export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'

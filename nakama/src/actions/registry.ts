@@ -243,6 +243,38 @@ const setResultPending: AuthoritativeAction = {
 	},
 }
 
+// {opponentId?} -- any participant of a started matchmade game contests it:
+// the opponent breaks the rules on purpose or stalls. The run is then stored as
+// 'contested' (results.ts) and a moderator decides it. The opponent may be
+// left out in a game of 2; in a larger one the contester names them.
+const contest: AuthoritativeAction = {
+	key: 'mpapi_contest',
+	reduce(lobby, ctx, params) {
+		const started = lobby.game.started
+		if (!started) return { reject: 'not_in_game' }
+		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
+		if (!lobby.rankedMode && !lobby.gameMode) return { reject: 'not_matchmade' }
+		if (lobby.game.contest) return { reject: 'already_contested' }
+		const input = isPlainObject(params) ? params : {}
+		const others = started.players.filter((p) => p.id !== ctx.from)
+		let against: string
+		if (input.opponentId === undefined || input.opponentId === null) {
+			if (others.length !== 1) return { reject: 'bad_params' }
+			against = others[0].id
+		} else {
+			const named = input.opponentId
+			if (typeof named !== 'string' || !others.some((p) => p.id === named))
+				return { reject: 'bad_params' }
+			against = named
+		}
+		const contested = { by: ctx.from, against, at: ctx.now }
+		return {
+			game: { ...lobby.game, contest: contested },
+			params: { playerId: ctx.from, against },
+		}
+	},
+}
+
 // A player's replay log is capped; past it, further events are dropped (not
 // refused, so the client isn't warned on every event).
 export const MAX_LOG_EVENTS = 20_000
@@ -367,6 +399,7 @@ const REGISTRY: { [key: string]: AuthoritativeAction } = {
 	[abandonGame.key]: abandonGame,
 	[reportResult.key]: reportResult,
 	[setResultPending.key]: setResultPending,
+	[contest.key]: contest,
 	[logEvent.key]: logEvent,
 	[logEvents.key]: logEvents,
 }
