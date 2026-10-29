@@ -69,6 +69,8 @@ import { eventsByPlayer, type LogEvent } from '../shared/replay/events'
 import { recordForfeit } from './forfeits'
 import { logChecksOf, saveRun } from './storage'
 import { standingFor } from '../standing/current'
+import { pvpVersionOf } from '../standing/pvp_version'
+import { readModReport } from '../standing/storage'
 import { rejoinRefusal, rejoinRejectMessage } from '../standing/rejoin'
 import type { RequiredStanding } from '../standing/standing'
 import { settingsOf, type ServerSettings } from '../server_kind'
@@ -438,6 +440,8 @@ export function joinInfoOf(
 	const sentMods = parseMods(meta.mods)
 	// Never the client's word for it (a standing in meta is ignored).
 	const standing = standingFor(nk, settings, presence.userId, Date.now()).standing
+	const report = readModReport(nk, presence.userId)
+	const pvpVersion = pvpVersionOf(report ? report.mods : [])
 	const stored = readProfile(nk, presence.userId, presence.username)
 	// The joker is never taken from the join metadata: only the stored pick,
 	// if the player may still show it.
@@ -450,6 +454,7 @@ export function joinInfoOf(
 			preferredJoker: joker,
 			mods: sentMods !== null ? sentMods : stored.profile.mods,
 			standing,
+			pvpVersion,
 		}
 	}
 	return {
@@ -457,6 +462,7 @@ export function joinInfoOf(
 		preferredJoker: joker,
 		mods: sentMods,
 		standing,
+		pvpVersion,
 	}
 }
 

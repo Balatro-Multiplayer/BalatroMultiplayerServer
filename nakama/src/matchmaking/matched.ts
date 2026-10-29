@@ -19,6 +19,7 @@ import { clearMatched } from './queue'
 import { readConfig } from '../config'
 import { requiredStandingFor, type RequiredStanding } from '../standing/standing'
 import { settingsOf } from '../server_kind'
+import { VERSION_MISMATCH } from '../standing/pvp_version'
 
 // A matched ticket's player. Numeric ticket properties arrive merged into
 // properties; partyId is set for a party ticket's members.
@@ -210,8 +211,10 @@ function refuseMatch(nk: nkruntime.Nakama, plan: MatchPlan, refused: RefusedPlay
 	requeueSolos(nk, plan, refused)
 	for (const home of groups.homes) {
 		const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0]
-		if (member) cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused', refusedMemberOf(member))
-		else requeueGroup(nk, home)
+		if (!member) requeueGroup(nk, home)
+		// A version mismatch is not a refusal the group's panels can name.
+		else if (member.refusal.code === VERSION_MISMATCH) cancelGroupFor(nk, home.homeCode, home.partyId, 'match_refused')
+		else cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused', refusedMemberOf(member))
 	}
 	for (const fault of groups.faulty) {
 		if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, 'match_refused')

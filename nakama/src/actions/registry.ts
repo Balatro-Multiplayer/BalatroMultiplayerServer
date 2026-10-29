@@ -14,6 +14,7 @@ import {
 } from '../lobby/state'
 import { finishGame, parsePlacements } from './results'
 import { SETUP_ACTIONS, setupForRestart } from './setup'
+import { PVP_MOD_ID, VERSION_MISMATCH, versionOutliers } from '../standing/pvp_version'
 
 export interface ActionContext {
 	from: string
@@ -136,6 +137,13 @@ const startGame: AuthoritativeAction = {
 		for (const pl of present) {
 			if (pl.id !== lobby.hostId && !lobby.game.ready[pl.id])
 				return { reject: 'not_all_ready' }
+		}
+		// PvP versions read scores differently, so one game takes one version.
+		// The version is the server's own record of the player's mod report.
+		if (lobby.modId === PVP_MOD_ID) {
+			const versions: { [id: string]: string } = {}
+			for (const pl of present) versions[pl.id] = pl.info.pvpVersion || ''
+			if (versionOutliers(versions).length > 0) return { reject: VERSION_MISMATCH }
 		}
 		const started = newGame(
 			lobby,

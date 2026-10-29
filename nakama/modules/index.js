@@ -1661,6 +1661,67 @@ function writeConfig(nk, config) {
   ]);
 }
 
+// src/standing/mod_report.ts
+var VERSION_START = /-(?=[0-9~]|v[0-9]|UNK$)/;
+function parseReportedMod(entry) {
+  const match = VERSION_START.exec(entry);
+  const at = match ? match.index : entry.lastIndexOf("-");
+  if (at <= 0) return { key: entry, version: "" };
+  return { key: entry.slice(0, at), version: entry.slice(at + 1) };
+}
+function isAllowedEntry(entry, allowedIds) {
+  return allowedIds.some((id) => entry === id || entry.indexOf(id + "-") === 0);
+}
+function disallowedMods(reported, allowedIds) {
+  const out = [];
+  for (const entry of reported) {
+    if (isAllowedEntry(entry, allowedIds)) continue;
+    const key = parseReportedMod(entry).key;
+    if (out.indexOf(key) === -1) out.push(key);
+  }
+  return out;
+}
+
+// src/standing/pvp_version.ts
+var PVP_MOD_ID = "MultiplayerPvP";
+var VERSION_MISMATCH = "version_mismatch";
+var VERSION_MISMATCH_MESSAGE = "Everyone in a PvP game needs the same MultiplayerPvP version. Update the mod and try again.";
+var X_Y_Z = /^v?(\d+\.\d+\.\d+)/;
+function pvpVersionOf(reported) {
+  for (const entry of reported) {
+    const mod2 = parseReportedMod(entry);
+    if (mod2.key !== PVP_MOD_ID) continue;
+    const match = X_Y_Z.exec(mod2.version);
+    return match ? match[1] : mod2.version;
+  }
+  return "";
+}
+function compareVersions(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] > 0 ? pa[i] : 0;
+    const y = pb[i] > 0 ? pb[i] : 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+function versionOutliers(versionByPlayer) {
+  const ids = Object.keys(versionByPlayer);
+  const counts = {};
+  for (const id of ids) counts[versionByPlayer[id]] = (counts[versionByPlayer[id]] || 0) + 1;
+  let kept = "";
+  let keptCount = 0;
+  for (const version of Object.keys(counts)) {
+    const better = counts[version] > keptCount || counts[version] === keptCount && compareVersions(version, kept) > 0;
+    if (better) {
+      kept = version;
+      keptCount = counts[version];
+    }
+  }
+  return ids.filter((id) => versionByPlayer[id] !== kept);
+}
+
 // src/standing/storage.ts
 var MOD_REPORT_COLLECTION = "mod_report";
 var MOD_REPORT_KEY = "current";
@@ -2910,6 +2971,8 @@ function queueRefusalMessage(refusal) {
       return INTEGRITY_REQUIRED;
     case "mods_not_allowed":
       return "These mods aren't allowed in matchmaking: " + refusal.mods.join(", ") + ". " + PRIVATE_LOBBIES_ALLOW_ANY_MODS;
+    case "version_mismatch":
+      return VERSION_MISMATCH_MESSAGE;
     case "mods_unreported":
       return "Your game hasn't reported its mods yet. Reconnect and try again.";
   }
@@ -5391,7 +5454,7 @@ function rpcProfileSetMods(ctx, logger, nk, payload) {
   const now = Date.now();
   writeModReport(nk, userId, { mods: list, reportedAt: now });
   const standing = standingFor(nk, settingsOf(ctx), userId, now);
-  pushToLobby(nk, userId, { mods: list, standing: standing.standing });
+  pushToLobby(nk, userId, { mods: list, standing: standing.standing, pvpVersion: pvpVersionOf(list) });
   return JSON.stringify({ mods: list, standing });
 }
 function rpcMuteSet(ctx, logger, nk, payload) {
@@ -5547,27 +5610,6 @@ function parseExtraSeed(value) {
 function seededExtra(current, seed) {
   const missing = seed.filter((id, i) => current.indexOf(id) === -1 && seed.indexOf(id) === i);
   return missing.length > 0 ? current.concat(missing) : null;
-}
-
-// src/standing/mod_report.ts
-var VERSION_START = /-(?=[0-9~]|v[0-9]|UNK$)/;
-function parseReportedMod(entry) {
-  const match = VERSION_START.exec(entry);
-  const at = match ? match.index : entry.lastIndexOf("-");
-  if (at <= 0) return { key: entry, version: "" };
-  return { key: entry.slice(0, at), version: entry.slice(at + 1) };
-}
-function isAllowedEntry(entry, allowedIds) {
-  return allowedIds.some((id) => entry === id || entry.indexOf(id + "-") === 0);
-}
-function disallowedMods(reported, allowedIds) {
-  const out = [];
-  for (const entry of reported) {
-    if (isAllowedEntry(entry, allowedIds)) continue;
-    const key = parseReportedMod(entry).key;
-    if (out.indexOf(key) === -1) out.push(key);
-  }
-  return out;
 }
 
 // src/standing/standing.ts
@@ -6275,6 +6317,16 @@ function refusedPlayers(nk, settings, plan) {
     const refusal = queueRefusalFor(nk, settings, userId, ranked, now);
     if (refusal) out.push({ userId, refusal });
   }
+  if (plan.modId === PVP_MOD_ID) {
+    const versions = {};
+    for (const userId of plan.playerIds) {
+      const report = readModReport(nk, userId);
+      versions[userId] = pvpVersionOf(report ? report.mods : []);
+    }
+    for (const userId of versionOutliers(versions)) {
+      if (out.every((r) => r.userId !== userId)) out.push({ userId, refusal: { code: VERSION_MISMATCH } });
+    }
+  }
   return out;
 }
 function cancelSoloQueue(nk, userId, modId, mode, refusal) {
@@ -6294,7 +6346,7 @@ function requeueSolos(nk, plan, refused) {
     if (grouped.indexOf(id) !== -1) continue;
     const own = refused.filter((r) => r.userId === id)[0];
     if (own) {
-      if (isStandingRefusal(own.refusal)) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal);
+      if (isStandingRefusal(own.refusal) || own.refusal.code === VERSION_MISMATCH) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal);
       continue;
     }
     notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
@@ -6640,8 +6692,9 @@ function refuseMatch(nk, plan, refused, groups) {
   requeueSolos(nk, plan, refused);
   for (const home of groups.homes) {
     const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0];
-    if (member) cancelGroupFor(nk, home.homeCode, home.partyId, "member_refused", refusedMemberOf(member));
-    else requeueGroup(nk, home);
+    if (!member) requeueGroup(nk, home);
+    else if (member.refusal.code === VERSION_MISMATCH) cancelGroupFor(nk, home.homeCode, home.partyId, "match_refused");
+    else cancelGroupFor(nk, home.homeCode, home.partyId, "member_refused", refusedMemberOf(member));
   }
   for (const fault of groups.faulty) {
     if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, "match_refused");
@@ -7835,6 +7888,11 @@ var startGame = {
       if (pl.id !== lobby.hostId && !lobby.game.ready[pl.id])
         return { reject: "not_all_ready" };
     }
+    if (lobby.modId === PVP_MOD_ID) {
+      const versions = {};
+      for (const pl of present) versions[pl.id] = pl.info.pvpVersion || "";
+      if (versionOutliers(versions).length > 0) return { reject: VERSION_MISMATCH };
+    }
     const started = newGame(
       lobby,
       ctx,
@@ -8683,6 +8741,8 @@ function parseMods(raw) {
 function joinInfoOf(nk, settings, presence, meta) {
   const sentMods = parseMods(meta.mods);
   const standing = standingFor(nk, settings, presence.userId, Date.now()).standing;
+  const report = readModReport(nk, presence.userId);
+  const pvpVersion = pvpVersionOf(report ? report.mods : []);
   const stored = readProfile(nk, presence.userId, presence.username);
   const joker = stored ? selectableOrDefault(stored.profile.preferredJoker, holdingsOf(nk, presence.userId, stored.profile.privileges)) : DEFAULT_AVATAR;
   if (stored && stored.profile.nakamaLogin) {
@@ -8690,14 +8750,16 @@ function joinInfoOf(nk, settings, presence, meta) {
       displayName: displayNameOf(stored.profile),
       preferredJoker: joker,
       mods: sentMods !== null ? sentMods : stored.profile.mods,
-      standing
+      standing,
+      pvpVersion
     };
   }
   return {
     displayName: meta.displayName || presence.username,
     preferredJoker: joker,
     mods: sentMods,
-    standing
+    standing,
+    pvpVersion
   };
 }
 function accountExists2(nk, userId) {

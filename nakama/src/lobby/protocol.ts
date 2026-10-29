@@ -409,9 +409,12 @@ export interface PlayerInfo {
 	// as the player reports mods or gets a launcher verdict; never taken from
 	// the client. Absent on a player seated before standings existed.
 	standing?: AccountStanding
+	// The X.Y.Z of the PvP mod in the player's stored mod report, worked out
+	// by the server like the standing; '' or absent when none is reported.
+	pvpVersion?: string
 }
 
-export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing'> {
+export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing' | 'pvpVersion'> {
 	id: string
 	isAway: boolean
 	// Replaying its own run after a crash (ClientOp.CATCHING_UP).
