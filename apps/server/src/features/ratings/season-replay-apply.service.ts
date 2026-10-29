@@ -39,6 +39,8 @@ export interface MatchResult {
 }
 
 export interface SeasonBackup {
+	// The dry run token this apply used; a token works for one apply.
+	token: string
 	season: { id: number; name: string }
 	nakama: NakamaBackup
 	// matchmaking_ratings rows of the Season, as JSON (dates are ISO text).
@@ -77,6 +79,8 @@ export interface ApplyDeps {
 	backupPostgresRatings(season: number): Promise<Record<string, unknown>[]>
 	// The matches among these runs that have a player left unrated.
 	unratedMatches(runIds: string[]): Promise<MatchResult[]>
+	// Whether an apply already used this token.
+	backupWithToken(token: string): Promise<boolean>
 	saveBackup(season: number, by: string, data: SeasonBackup): Promise<string>
 	loadBackup(id: string): Promise<{ season: number; data: SeasonBackup } | null>
 	// Empties the Season board in Nakama: ratings and leaderboard records.
@@ -249,6 +253,7 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 		// Compared with the report the owner saw; same digest as the dry run.
 		if (reportOf(games, state).token !== token)
 			return err({ code: 'stale_token' })
+		if (await deps.backupWithToken(token)) return err({ code: 'stale_token' })
 		// A game that ended while the replay ran is not in it.
 		const after = await deps.activeRankedGames()
 		if (!after.ok) return err({ code: 'nakama', reason: after.error })
@@ -261,6 +266,7 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 		const nakama = await deps.backupNakama(season.id)
 		if (!nakama.ok) return err({ code: 'nakama', reason: nakama.error })
 		const backupId = await deps.saveBackup(season.id, by, {
+			token,
 			season: { id: season.id, name: season.name },
 			nakama: nakama.value,
 			ratings: await deps.backupPostgresRatings(season.id),

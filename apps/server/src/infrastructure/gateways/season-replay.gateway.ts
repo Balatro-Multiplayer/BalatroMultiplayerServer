@@ -1,4 +1,4 @@
-import { and, eq, inArray, like } from 'drizzle-orm'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
 import type {
 	MatchResult,
 	PostgresRatingRow,
@@ -32,6 +32,16 @@ export async function saveBackup(
 		.values({ season, createdBy, data })
 		.returning({ id: seasonReplayBackups.id })
 	return row.id
+}
+
+// Whether a backup holds this dry run token (the apply saves it with the backup).
+export async function backupWithToken(token: string): Promise<boolean> {
+	const [row] = await db
+		.select({ id: seasonReplayBackups.id })
+		.from(seasonReplayBackups)
+		.where(sql`${seasonReplayBackups.data}->>'token' = ${token}`)
+		.limit(1)
+	return row !== undefined
 }
 
 export async function loadBackup(

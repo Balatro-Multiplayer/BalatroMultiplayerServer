@@ -6,17 +6,27 @@ import {
 import { err, ok } from '../../shared/utils/result.js'
 
 describe('activeRankedGames', () => {
-	it('counts started ranked lobbies only', async () => {
+	it('counts started lobbies of a ranked game mode, whatever their type', async () => {
 		const call = (async () =>
 			ok({
 				lobbies: [
-					{ type: 'ranked', started: true },
-					{ type: 'ranked', started: false },
-					{ type: 'private', started: true },
-					{ type: 'public', started: true },
+					{ type: 'public', mode: 'ranked:solo', started: true },
+					{ type: 'public', mode: 'ranked:solo', started: false },
+					{ type: 'public', mode: 'casual', started: true },
+					{ type: 'private', mode: 'standard', started: true },
 				],
 			})) as any
 		expect(await activeRankedGames(call)).toEqual(ok(1))
+	})
+
+	it('refuses when the list is full, as a game may be cut off', async () => {
+		const lobbies = Array.from({ length: 100 }, () => ({
+			type: 'public',
+			mode: 'casual',
+			started: false,
+		}))
+		const result = await activeRankedGames((async () => ok({ lobbies })) as any)
+		expect(result.ok && result.value).toBeGreaterThan(0)
 	})
 
 	it('fails closed when Nakama cannot answer', async () => {

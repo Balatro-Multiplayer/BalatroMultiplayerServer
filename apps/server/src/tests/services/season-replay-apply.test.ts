@@ -52,6 +52,7 @@ function fakeDeps(over: Partial<ApplyDeps> = {}) {
 			}),
 		backupPostgresRatings: async () => [{ playerId: 'old' }],
 		unratedMatches: async () => [unrated],
+		backupWithToken: async () => false,
 		saveBackup: async (_s, _by, data) => {
 			log.push('backup')
 			calls.backup = data
@@ -192,6 +193,24 @@ describe('apply', () => {
 		)
 		expect(result).toEqual(err({ code: 'stale_token' }))
 		expect(log).toEqual([])
+	})
+
+	it('refuses a token a backup already holds, and saves the token with the backup', async () => {
+		const used = new Set<string>()
+		const { deps, calls } = fakeDeps({
+			backupWithToken: async (t) => used.has(t),
+			saveBackup: async (_s, _by, data) => {
+				used.add(data.token)
+				calls.backup = data
+				return 'backup-1'
+			},
+		})
+		const service = createSeasonReplayApply(deps)
+		expect((await service.apply(season, token(), 'owner-1')).ok).toBe(true)
+		expect(calls.backup.token).toBe(token())
+		expect(await service.apply(season, token(), 'owner-1')).toEqual(
+			err({ code: 'stale_token' }),
+		)
 	})
 
 	it('refuses the same token once the board holds the replay', async () => {

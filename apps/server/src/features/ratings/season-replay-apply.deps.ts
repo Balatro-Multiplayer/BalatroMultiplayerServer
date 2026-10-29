@@ -116,18 +116,24 @@ async function dismissAntiCheat(runIds: string[], note: string, owner: string) {
 	return { dismissed, failed }
 }
 
-// Ranked games that have started and not ended, from Nakama's lobby list.
+// admin_lobby_list's cap (LOBBY_LIST_LIMIT in nakama/src/admin.ts).
+const LOBBY_LIST_LIMIT = 100
+
+// Ranked games that have started and not ended, from Nakama's lobby list. A
+// lobby label's `type` is public or private; a ranked lobby has a ranked game
+// mode (isRankedGameMode in nakama/src/review/ranked.ts). A list at the cap may
+// be cut off, so it counts as a running game: the apply refuses.
 export async function activeRankedGames(
 	call: Call,
 ): Promise<Result<number, NakamaRpcError>> {
-	const lobbies = await call<{ lobbies: { type: string; started: boolean }[] }>(
-		'admin_lobby_list',
-		{},
-	)
+	const lobbies = await call<{
+		lobbies: { mode?: string; started: boolean }[]
+	}>('admin_lobby_list', {})
 	if (!lobbies.ok) return lobbies
+	const list = lobbies.value.lobbies
+	if (list.length >= LOBBY_LIST_LIMIT) return ok(list.length)
 	return ok(
-		lobbies.value.lobbies.filter((l) => l.type === 'ranked' && l.started)
-			.length,
+		list.filter((l) => l.started && l.mode?.startsWith('ranked:')).length,
 	)
 }
 
@@ -138,6 +144,7 @@ export function seasonReplayApplyFor(owner: string, call: Call = callNakama) {
 		backupNakama: (season) => backupNakama(season, call),
 		backupPostgresRatings: seasonReplayGateway.listSeasonRatingRows,
 		unratedMatches: seasonReplayGateway.listUnratedMatches,
+		backupWithToken: seasonReplayGateway.backupWithToken,
 		saveBackup: seasonReplayGateway.saveBackup,
 		async loadBackup(id) {
 			const row = await seasonReplayGateway.loadBackup(id)
