@@ -7255,10 +7255,10 @@ function newRating() {
     lastMatchAt: 0
   };
 }
-function planRatings(run, flags, current) {
+function planRatings(run, current) {
   const plan = { updates: {}, results: {} };
   if (run.status !== "agreed" && run.status !== "partial") return plan;
-  const placements = run.placements.filter((p) => !flags[p.playerId]);
+  const placements = run.placements;
   if (placements.length < 2) return plan;
   const ratings = /* @__PURE__ */ new Map();
   for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
@@ -7322,7 +7322,7 @@ function loadRatings(nk, modId, mode, playerIds, now, season) {
   }
   return { current, versions };
 }
-function applyRatings(nk, logger, run, mode, flags) {
+function applyRatings(nk, logger, run, mode) {
   const season = currentSeason(nk);
   const key = boardId(run.modId, mode, season);
   for (let attempt = 0; attempt < WRITE_ATTEMPTS3; attempt++) {
@@ -7334,7 +7334,7 @@ function applyRatings(nk, logger, run, mode, flags) {
       run.endedAt,
       season
     );
-    const plan = planRatings(run, flags, current);
+    const plan = planRatings(run, current);
     const ids = Object.keys(plan.updates);
     if (ids.length === 0) return {};
     try {
@@ -8482,7 +8482,7 @@ function judged(nk, logger, run, logs, events) {
   const flagged = __spreadProps(__spreadValues({}, run), { flags });
   if (!run.rankedMode) return flagged;
   try {
-    return __spreadProps(__spreadValues({}, flagged), { ratings: applyRatings(nk, logger, run, run.rankedMode, flags) });
+    return __spreadProps(__spreadValues({}, flagged), { ratings: applyRatings(nk, logger, run, run.rankedMode) });
   } catch (e) {
     logger.error("Could not rate run %s: %v", run.runId, e);
     return flagged;

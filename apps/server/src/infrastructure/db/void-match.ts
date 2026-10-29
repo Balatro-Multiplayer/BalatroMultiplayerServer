@@ -88,8 +88,7 @@ export function nakamaRatingEntries(
 }
 
 // The placements a replay rates: the players Nakama itself rated for that
-// game (the mirror marks the rest rated:false -- a disputed result, a flagged
-// player), or nothing when fewer than two are left, as Nakama's planRatings.
+// game (the mirror marks the rest rated:false -- a disputed result), or nothing when fewer than two are left, as Nakama's planRatings.
 export function replayPlacements(
 	resultPlacements: unknown,
 ): PlacementEntry[] | null {

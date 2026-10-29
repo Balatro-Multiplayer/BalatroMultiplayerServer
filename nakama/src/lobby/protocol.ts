@@ -301,7 +301,7 @@ export interface RunRecord {
 	lobbyType?: 'public' | 'private'
 	// Each rated player's result, once the game was rated.
 	ratings?: { [userId: string]: RatingResult }
-	// Players whose result is suspect (lobby/anticheat.ts); never rated.
+	// Players whose result is suspect (lobby/anticheat.ts); still rated.
 	flags?: { [userId: string]: FlagReason }
 	// Set when a moderator replaced the recorded result (review/result.ts):
 	// the placements it had before, and when.

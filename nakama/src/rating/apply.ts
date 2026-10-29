@@ -9,7 +9,7 @@ import {
 } from './elo'
 import { nextSeasonBest } from './metrics'
 import { carriedOver, currentSeason, decayedRating } from './season'
-import type { FlagReason, RunRecord } from '../lobby/protocol'
+import type { RunRecord } from '../lobby/protocol'
 import { RATINGS_COLLECTION, type RatingResult } from '../lobby/protocol'
 
 // A player's rating on one (mod, mode, season) board: the stored object.
@@ -42,17 +42,15 @@ export interface RatingPlan {
 	results: { [userId: string]: RatingResult }
 }
 
-// Who is rated: an agreed or partial result (a disputed one isn't trusted),
-// leaving out flagged players (lobby/anticheat.ts). Fewer than two
-// players left rates nobody.
+// Who is rated: everyone in an agreed or partial result (a disputed one isn't
+// trusted). An anti-cheat flag (lobby/anticheat.ts) doesn't withhold a rating.
 export function planRatings(
 	run: RunRecord,
-	flags: { [userId: string]: FlagReason },
 	current: { [userId: string]: RatingRecord | undefined },
 ): RatingPlan {
 	const plan: RatingPlan = { updates: {}, results: {} }
 	if (run.status !== 'agreed' && run.status !== 'partial') return plan
-	const placements = run.placements.filter((p) => !flags[p.playerId])
+	const placements = run.placements
 	if (placements.length < 2) return plan
 
 	const ratings = new Map<string, RatingRecord>()
@@ -141,7 +139,6 @@ export function applyRatings(
 	logger: nkruntime.Logger,
 	run: RunRecord,
 	mode: string,
-	flags: { [userId: string]: FlagReason },
 ): { [userId: string]: RatingResult } {
 	const season = currentSeason(nk)
 	const key = boardId(run.modId, mode, season)
@@ -154,7 +151,7 @@ export function applyRatings(
 			run.endedAt,
 			season,
 		)
-		const plan = planRatings(run, flags, current)
+		const plan = planRatings(run, current)
 		const ids = Object.keys(plan.updates)
 		if (ids.length === 0) return {}
 		try {

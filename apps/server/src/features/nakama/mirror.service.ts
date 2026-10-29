@@ -41,7 +41,7 @@ export interface NakamaRun {
 	logChecks?: { [userId: string]: LogCheck }
 	flags?: { [userId: string]: FlagReason }
 	// A ranked run's rating result per player Nakama rated ({} when it rated
-	// nobody: a disputed result, or flags leaving fewer than two players).
+	// nobody: a disputed result).
 	ratings?: { [userId: string]: unknown }
 	// A contested run: who contested whom (Nakama user ids), and when.
 	contest?: { by: string; against: string; at: number }
