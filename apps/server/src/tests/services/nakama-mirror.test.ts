@@ -141,7 +141,11 @@ describe('runRowsOf: flags and disputes', () => {
 		])
 		// Disputed (nobody rated) and a flagged player (left out).
 		expect(runRowsOf(run({ status: 'disputed', ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([false, false])
-		expect(runRowsOf(run({ flags: { na: 'hash_mismatch' }, ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([false, false])
+		// A flagged agreed run is rated by the live code and by the Season replay,
+		// so a late pull of one stored before that keeps it rated.
+		expect(runRowsOf(run({ flags: { na: 'hash_mismatch' }, ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([true, true])
+		expect(runRowsOf(run({ status: 'disputed', flags: { na: 'hash_mismatch' }, ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([false, false])
+		expect(runRowsOf(run({ placements: [{ playerId: 'na', place: 1 }], flags: { na: 'hash_mismatch' }, ratings: {} }), ids).match?.resultPlacements.map((p) => p.rated)).toEqual([false])
 		// A casual run, or a record from before ratings were stored: no marker.
 		expect(runRowsOf(run({ rankedMode: undefined, gameMode: 'duel', ratings: {} }), ids).match?.resultPlacements[0]).not.toHaveProperty('rated')
 		expect(runRowsOf(run(), ids).match?.resultPlacements[0]).not.toHaveProperty('rated')

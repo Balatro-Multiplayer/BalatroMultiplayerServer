@@ -292,6 +292,17 @@ function runStatusOf(
 	return 'completed'
 }
 
+// A flagged agreed or partial game with two or more players is rated by the
+// live code and by the Season replay. A run stored before that has no rating
+// for it, so a late pull must not mark its players unrated again.
+function ratedDespiteFlag(run: PulledRun['run'], hasFlag: boolean): boolean {
+	return (
+		hasFlag &&
+		(run.status === 'agreed' || run.status === 'partial') &&
+		run.placements.length >= 2
+	)
+}
+
 // ids maps every Nakama user in the run to their player id.
 export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	const { run } = entry
@@ -348,7 +359,9 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 							? {
 									playerId: pg(p.playerId),
 									place: p.place,
-									rated: p.playerId in run.ratings,
+									rated:
+										p.playerId in run.ratings ||
+										ratedDespiteFlag(run, flagged.length > 0),
 								}
 							: { playerId: pg(p.playerId), place: p.place },
 					),
