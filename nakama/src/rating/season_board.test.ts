@@ -26,7 +26,10 @@ function nkWithBoards() {
 			const records = board.get(id)
 			if (!records) throw new Error('leaderboard not found')
 			return {
-				records: [...records.entries()].map(([ownerId, r]) => ({ ownerId, ...r })),
+				records: [...records.entries()].map(([ownerId, r]) => ({
+					ownerId,
+					...r,
+				})),
 				nextCursor: '',
 			}
 		},
@@ -35,9 +38,19 @@ function nkWithBoards() {
 		},
 	})
 	const put = (key: string, userId: string, rating: number) => {
-		nk.objects.set(`${RATINGS_COLLECTION}/${userId}/${key}`, { value: record(rating), version: 1 })
+		nk.objects.set(`${RATINGS_COLLECTION}/${userId}/${key}`, {
+			value: record(rating),
+			version: 1,
+		})
 		if (!board.has(key)) board.set(key, new Map())
-		board.get(key)?.set(userId, { username: userId, score: rating, subscore: 1, metadata: {} })
+		board
+			.get(key)
+			?.set(userId, {
+				username: userId,
+				score: rating,
+				subscore: 1,
+				metadata: {},
+			})
 	}
 	put('Mod:solo:2', A, 700)
 	put('Mod:solo:2', B, 800)
@@ -51,7 +64,9 @@ const call = (rpc: any, nk: any, body: unknown, ctx = serverCtx()) =>
 
 describe('season board export', () => {
 	it('lists only the named season, whatever the mode looks like', () => {
-		const page = call(rpcAdminRatingsSeasonExport, nkWithBoards(), { season: 2 })
+		const page = call(rpcAdminRatingsSeasonExport, nkWithBoards(), {
+			season: 2,
+		})
 		expect(page.ratings.map((r: any) => [r.key, r.userId]).sort()).toEqual([
 			['Mod:ranked:solo:2', A],
 			['Mod:solo:2', A],
@@ -65,7 +80,9 @@ describe('season board export', () => {
 		const nk = nkWithBoards()
 		const page = call(rpcAdminRatingsBoardExport, nk, { board: 'Mod:solo:2' })
 		expect(page.records.map((r: any) => r.ownerId).sort()).toEqual([A, B])
-		expect(call(rpcAdminRatingsBoardExport, nk, { board: 'Mod:none:2' }).records).toEqual([])
+		expect(
+			call(rpcAdminRatingsBoardExport, nk, { board: 'Mod:none:2' }).records,
+		).toEqual([])
 	})
 })
 
@@ -74,7 +91,9 @@ describe('rpcAdminRatingsSeasonClear', () => {
 		const nk = nkWithBoards()
 		const result = call(rpcAdminRatingsSeasonClear, nk, { season: 2 })
 		expect(result).toEqual({ cleared: 3, cursor: '' })
-		expect([...nk.objects.keys()]).toEqual([`${RATINGS_COLLECTION}/${A}/Mod:solo:1`])
+		expect([...nk.objects.keys()]).toEqual([
+			`${RATINGS_COLLECTION}/${A}/Mod:solo:1`,
+		])
 		expect([...nk.board.get('Mod:solo:2').keys()]).toEqual([])
 		expect([...nk.board.get('Mod:ranked:solo:2').keys()]).toEqual([])
 		expect([...nk.board.get('Mod:solo:1').keys()]).toEqual([A])
@@ -82,8 +101,22 @@ describe('rpcAdminRatingsSeasonClear', () => {
 
 	it('is server only and needs a season', () => {
 		const nk = nkWithBoards()
-		expect(() => rpcAdminRatingsSeasonClear(playerCtx(A), fakeLogger as any, nk as any, '{"season":2}')).toThrow()
-		expect(() => rpcAdminRatingsSeasonClear(serverCtx(), fakeLogger as any, nk as any, '{}')).toThrow()
+		expect(() =>
+			rpcAdminRatingsSeasonClear(
+				playerCtx(A),
+				fakeLogger as any,
+				nk as any,
+				'{"season":2}',
+			),
+		).toThrow()
+		expect(() =>
+			rpcAdminRatingsSeasonClear(
+				serverCtx(),
+				fakeLogger as any,
+				nk as any,
+				'{}',
+			),
+		).toThrow()
 		expect(nk.objects.size).toBe(4)
 	})
 })

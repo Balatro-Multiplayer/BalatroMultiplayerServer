@@ -110,7 +110,11 @@ export function rpcAdminRatingsSeasonClear(
 	const cursor = scanSeason(nk, season, cursorOf(input), (o) => found.push(o))
 	if (found.length > 0) {
 		nk.storageDelete(
-			found.map((o) => ({ collection: RATINGS_COLLECTION, key: o.key, userId: o.userId })),
+			found.map((o) => ({
+				collection: RATINGS_COLLECTION,
+				key: o.key,
+				userId: o.userId,
+			})),
 		)
 		for (const o of found) {
 			try {
