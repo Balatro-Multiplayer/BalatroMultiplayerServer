@@ -1,7 +1,7 @@
 // Who a finished run's result is suspect for: a replay log that fails its
 // hash check, or more scored hands than the game's real length allows (the
 // API's evaluateAntiCheat, with MIN_MS_PER_HAND from anti-cheat.config.ts).
-// A flagged player isn't rated, and the run goes to the moderators' service
+// A flagged player is still rated, and the run goes to the moderators' service
 // queue through the mirror. Pure.
 import type { LogEvent } from '../shared/replay/events'
 import type { FlagReason, LogCheck, RunRecord } from './protocol'

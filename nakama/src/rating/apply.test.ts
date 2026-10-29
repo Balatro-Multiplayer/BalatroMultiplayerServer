@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { FlagReason, RunRecord } from '../lobby/protocol'
+import type { RunRecord } from '../lobby/protocol'
 import { type RatingRecord, applyRatings, newRating, planRatings } from './apply'
 import { PLACEMENT_GAMES } from './elo'
 import { nextSeasonBest } from './metrics'
@@ -30,15 +30,13 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
 	}
 }
 
-const clean: { [id: string]: FlagReason } = {}
-
 function seasoned(rating: number): RatingRecord {
 	return { ...newRating(), rating, gamesPlayed: 10 }
 }
 
 describe('planRatings', () => {
 	it('moves an even 1v1 by K/2 and records the win and loss', () => {
-		const plan = planRatings(run(), clean, { a: seasoned(600), b: seasoned(600) })
+		const plan = planRatings(run(), { a: seasoned(600), b: seasoned(600) })
 		expect(plan.updates.a).toMatchObject({ rating: 620, wins: 1, losses: 0, gamesPlayed: 11, lastMatchAt: 61_000 })
 		expect(plan.updates.b).toMatchObject({ rating: 580, wins: 0, losses: 1, gamesPlayed: 11 })
 		expect(plan.results.a).toEqual({ delta: 20, newRating: 620, isPlacement: false, justPlaced: false, gamesPlayed: 11 })
@@ -46,7 +44,7 @@ describe('planRatings', () => {
 
 	it('marks the game that ends the placement games, and shows the rating then', () => {
 		const last = { ...newRating(), rating: 640, gamesPlayed: PLACEMENT_GAMES - 1 }
-		const plan = planRatings(run(), clean, { a: last, b: seasoned(600) })
+		const plan = planRatings(run(), { a: last, b: seasoned(600) })
 		expect(plan.results.a.justPlaced).toBe(true)
 		expect(plan.results.a.isPlacement).toBe(false)
 		expect(plan.results.a.newRating).toBe(plan.updates.a.rating)
@@ -54,28 +52,37 @@ describe('planRatings', () => {
 	})
 
 	it('hides the rating change while a player is still in placement games', () => {
-		const plan = planRatings(run(), clean, {})
+		const plan = planRatings(run(), {})
 		expect(plan.results.a).toEqual({ delta: null, newRating: null, isPlacement: true, justPlaced: false, gamesPlayed: 1 })
 		// ...but still stores it.
 		expect(plan.updates.a.rating).toBeGreaterThan(600)
 	})
 
 	it('rates a partial result (the leaver was placed last by whoever stayed)', () => {
-		const plan = planRatings(run({ status: 'partial' }), clean, { a: seasoned(600), b: seasoned(600) })
+		const plan = planRatings(run({ status: 'partial' }), { a: seasoned(600), b: seasoned(600) })
 		expect(plan.updates.a.rating).toBe(620)
 	})
 
 	it.each(['disputed', 'abandoned', 'restarted', 'contested'] as const)('does not rate a %s game', (status) => {
-		const plan = planRatings(run({ status }), clean, { a: seasoned(600), b: seasoned(600) })
+		const plan = planRatings(run({ status }), { a: seasoned(600), b: seasoned(600) })
 		expect(plan).toEqual({ updates: {}, results: {} })
 	})
 
-	it('leaves out a player whose log does not match its hash, and everyone if that leaves one', () => {
-		const plan = planRatings(run(), { b: 'hash_mismatch' }, { a: seasoned(600), b: seasoned(600) })
-		expect(plan).toEqual({ updates: {}, results: {} })
+	it.each(['hash_mismatch', 'elapsed_time_gate'] as const)('rates a game where one player carries a %s flag', (reason) => {
+		const plan = planRatings(run({ flags: { b: reason } }), { a: seasoned(600), b: seasoned(600) })
+		expect(plan.updates.a.rating).toBe(620)
+		expect(plan.updates.b.rating).toBe(580)
+		expect(Object.keys(plan.results).sort()).toEqual(['a', 'b'])
 	})
 
-	it('still rates the honest players of a three-player game', () => {
+	it('rates a game where both players are flagged, one of each kind', () => {
+		const flags = { a: 'hash_mismatch', b: 'elapsed_time_gate' } as const
+		const plan = planRatings(run({ flags }), { a: seasoned(600), b: seasoned(600) })
+		expect(plan.updates.a.rating).toBe(620)
+		expect(plan.updates.b.rating).toBe(580)
+	})
+
+	it('rates every player of a three-player game, flagged or not', () => {
 		const three = run({
 			placements: [
 				{ playerId: 'a', place: 1 },
@@ -87,23 +94,23 @@ describe('planRatings', () => {
 				{ id: 'b', displayName: 'B' },
 				{ id: 'c', displayName: 'C' },
 			],
+			flags: { c: 'elapsed_time_gate' },
 		})
 		const current = { a: seasoned(600), b: seasoned(600), c: seasoned(600) }
-		const plan = planRatings(three, { c: 'elapsed_time_gate' }, current)
-		expect(Object.keys(plan.updates).sort()).toEqual(['a', 'b'])
-		expect(plan.updates.a.rating).toBe(620)
+		const plan = planRatings(three, current)
+		expect(Object.keys(plan.updates).sort()).toEqual(['a', 'b', 'c'])
 	})
 
 	it('never drops a rating below the floor', () => {
-		const plan = planRatings(run(), clean, { a: seasoned(100), b: seasoned(100) })
+		const plan = planRatings(run(), { a: seasoned(100), b: seasoned(100) })
 		expect(plan.updates.b.rating).toBe(100)
 	})
 
 	it('keeps a season-best time only when the new one is faster and plausible', () => {
 		const current = { a: { ...seasoned(600), seasonBest: 100_000 }, b: seasoned(600) }
-		expect(planRatings(run(), clean, current).updates.a.seasonBest).toBe(100_000)
+		expect(planRatings(run(), current).updates.a.seasonBest).toBe(100_000)
 		const faster = run({ placements: [{ playerId: 'a', place: 1, metric: 90_000 }, { playerId: 'b', place: 2 }] })
-		expect(planRatings(faster, clean, current).updates.a.seasonBest).toBe(90_000)
+		expect(planRatings(faster, current).updates.a.seasonBest).toBe(90_000)
 	})
 })
 
@@ -161,7 +168,7 @@ const logger = { warn: () => undefined, error: () => undefined } as unknown as n
 describe('applyRatings', () => {
 	it('stores ratings for both players and reports their results', () => {
 		const nk = fakeNk()
-		const results = applyRatings(nk as never, logger, run(), 'solo', clean)
+		const results = applyRatings(nk as never, logger, run(), 'solo')
 		expect(results.a.gamesPlayed).toBe(1)
 		expect(nk.objects.get('a/MultiplayerSPDRN:solo:1')?.value.wins).toBe(1)
 		expect(nk.objects.get('b/MultiplayerSPDRN:solo:1')?.value.losses).toBe(1)
@@ -175,7 +182,7 @@ describe('applyRatings', () => {
 			// Another game finished for b first.
 			self.objects.set('b/MultiplayerSPDRN:solo:1', { value: seasoned(900), version: 1 })
 		})
-		const results = applyRatings(nk as never, logger, run(), 'solo', clean)
+		const results = applyRatings(nk as never, logger, run(), 'solo')
 		expect(nk.writes).toBe(2)
 		// Rated against b's fresh 900, not a fresh 600.
 		expect(nk.objects.get('b/MultiplayerSPDRN:solo:1')?.value.gamesPlayed).toBe(11)
@@ -185,19 +192,19 @@ describe('applyRatings', () => {
 	it('puts only players past their placement games on the leaderboard', () => {
 		const nk = fakeNk()
 		nk.objects.set('a/MultiplayerSPDRN:solo:1', { value: seasoned(600), version: 1 })
-		applyRatings(nk as never, logger, run(), 'solo', clean)
+		applyRatings(nk as never, logger, run(), 'solo')
 		expect(Object.keys(nk.boards['MultiplayerSPDRN:solo:1'])).toEqual(['a'])
 	})
 
 	it('rates nobody, and writes nothing, for a disputed game', () => {
 		const nk = fakeNk()
-		expect(applyRatings(nk as never, logger, run({ status: 'disputed' }), 'solo', clean)).toEqual({})
+		expect(applyRatings(nk as never, logger, run({ status: 'disputed' }), 'solo')).toEqual({})
 		expect(nk.writes).toBe(0)
 	})
 
 	it('rates nobody, and writes nothing, for a contested game', () => {
 		const nk = fakeNk()
-		expect(applyRatings(nk as never, logger, run({ status: 'contested' }), 'solo', clean)).toEqual({})
+		expect(applyRatings(nk as never, logger, run({ status: 'contested' }), 'solo')).toEqual({})
 		expect(nk.writes).toBe(0)
 	})
 
@@ -211,7 +218,7 @@ describe('applyRatings', () => {
 		})
 		configureSeason('2')
 		try {
-			const results = applyRatings(nk as never, logger, run(), 'solo', clean)
+			const results = applyRatings(nk as never, logger, run(), 'solo')
 			// 1100 and 1075 (1600 - 10 days' decay, then halved toward 600), both placing again.
 			expect(nk.objects.get('a/MultiplayerSPDRN:solo:2')?.value.gamesPlayed).toBe(1)
 			expect(results.a.isPlacement).toBe(true)

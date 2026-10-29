@@ -193,7 +193,7 @@ function judged(
 	const flagged = { ...run, flags }
 	if (!run.rankedMode) return flagged
 	try {
-		return { ...flagged, ratings: applyRatings(nk, logger, run, run.rankedMode, flags) }
+		return { ...flagged, ratings: applyRatings(nk, logger, run, run.rankedMode) }
 	} catch (e) {
 		logger.error('Could not rate run %s: %v', run.runId, e)
 		return flagged
