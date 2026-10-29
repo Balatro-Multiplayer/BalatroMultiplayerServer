@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import {
 	type NakamaRpcError,
 	callNakamaRpc,
@@ -19,15 +20,15 @@ export interface RatingRecord {
 	lastMatchAt: number
 }
 
-interface ReplayEntry {
+export interface ReplayEntry {
 	name: string
 	before: RatingRecord | null
 	after: RatingRecord
 }
 
-type ReplayState = Record<string, Record<string, ReplayEntry>>
+export type ReplayState = Record<string, Record<string, ReplayEntry>>
 
-interface RunRef {
+export interface RunRef {
 	runId: string
 	endedAt: number
 }
@@ -45,6 +46,11 @@ export interface SeasonReplayReport {
 	games: number
 	changedPlayers: number
 	players: ReplayPlayer[]
+	// A digest of the games and of each player's rating before and after. The
+	// owner sends it back to apply: it only matches while a fresh replay gives
+	// the same numbers, so a board that changed since (an apply included) no
+	// longer matches.
+	token: string
 }
 
 export type SeasonReplayError = NakamaRpcError | 'no_season'
@@ -59,7 +65,7 @@ const FOLD_BATCH = 100
 // A list call scans up to 1000 stored runs; a fold call reads a batch.
 const CALL_TIMEOUT_MS = 60_000
 
-const callNakama: ReplayCall = (id, body) =>
+export const callNakama: ReplayCall = (id, body) =>
 	callNakamaRpc(id, body, { timeoutMs: CALL_TIMEOUT_MS })
 
 const byEndThenId = (a: RunRef, b: RunRef) =>
@@ -86,13 +92,31 @@ export function reportOf(games: number, state: ReplayState): SeasonReplayReport 
 	const changedPlayers = players.filter(
 		(p) => p.before === null || p.before.rating !== p.after.rating,
 	).length
-	return { games, changedPlayers, players }
+	return { games, changedPlayers, players, token: tokenOf(games, players) }
 }
 
-export async function replaySeason(
+function tokenOf(games: number, players: ReplayPlayer[]): string {
+	return createHash('sha256')
+		.update(
+			JSON.stringify([
+				games,
+				players.map((p) => [p.userId, p.modId, p.mode, p.before, p.after]),
+			]),
+		)
+		.digest('hex')
+}
+
+// The replay's runs in order, the state it ended on and how many games it rated.
+export interface SeasonReplayRun {
+	refs: RunRef[]
+	state: ReplayState
+	games: number
+}
+
+export async function replayRuns(
 	startedAt: Date,
 	call: ReplayCall = callNakama,
-): Promise<Result<SeasonReplayReport, NakamaRpcError>> {
+): Promise<Result<SeasonReplayRun, NakamaRpcError>> {
 	const refs: RunRef[] = []
 	let cursor = ''
 	do {
@@ -117,6 +141,14 @@ export async function replaySeason(
 		state = batch.value.state
 		games += batch.value.rated
 	}
-	return ok(reportOf(games, state))
+	return ok({ refs, state, games })
 }
 
+export async function replaySeason(
+	startedAt: Date,
+	call: ReplayCall = callNakama,
+): Promise<Result<SeasonReplayReport, NakamaRpcError>> {
+	const run = await replayRuns(startedAt, call)
+	if (!run.ok) return run
+	return ok(reportOf(run.value.games, run.value.state))
+}
