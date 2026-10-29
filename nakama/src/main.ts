@@ -67,6 +67,11 @@ import { rpcAdminCheckpointsSweep } from './lobby/checkpoint_sweep'
 import { rpcAdminRunsExpired, rpcAdminRunsPurgeNamed } from './lobby/retention'
 import { rpcAdminRatingsSet } from './rating/admin'
 import { rpcAdminRatingsReplayFold, rpcAdminRatingsReplayList } from './rating/replay'
+import {
+	rpcAdminRatingsBoardExport,
+	rpcAdminRatingsSeasonClear,
+	rpcAdminRatingsSeasonExport,
+} from './rating/season_board'
 import { rpcAdminRunGet, rpcAdminRunSetResult } from './review/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
@@ -191,6 +196,9 @@ function InitModule(
 	initializer.registerRpc('admin_ratings_set', rpcAdminRatingsSet)
 	initializer.registerRpc('admin_ratings_replay_list', rpcAdminRatingsReplayList)
 	initializer.registerRpc('admin_ratings_replay_fold', rpcAdminRatingsReplayFold)
+	initializer.registerRpc('admin_ratings_season_export', rpcAdminRatingsSeasonExport)
+	initializer.registerRpc('admin_ratings_board_export', rpcAdminRatingsBoardExport)
+	initializer.registerRpc('admin_ratings_season_clear', rpcAdminRatingsSeasonClear)
 	initializer.registerRpc('admin_run_get', rpcAdminRunGet)
 	initializer.registerRpc('admin_run_set_result', rpcAdminRunSetResult)
 	logger.info('BMP lobby module loaded')

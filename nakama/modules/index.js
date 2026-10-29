@@ -9833,6 +9833,88 @@ function rpcAdminRatingsReplayFold(ctx, _logger, nk, payload) {
   return JSON.stringify({ state: folded, rated });
 }
 
+// src/rating/season_board.ts
+var LIST_PAGE8 = 100;
+var PAGES_PER_CALL = 10;
+function seasonOf(input) {
+  const { season } = input;
+  if (typeof season !== "number" || !Number.isInteger(season) || season < 1)
+    throw runtimeError(INVALID_ARGUMENT, "season must be a positive integer");
+  return season;
+}
+function cursorOf(input) {
+  if (input.cursor !== void 0 && typeof input.cursor !== "string")
+    throw runtimeError(INVALID_ARGUMENT, "cursor must be a string");
+  return input.cursor || "";
+}
+function inSeason(key, season) {
+  return key.endsWith(`:${season}`);
+}
+function scanSeason(nk, season, cursor, visit) {
+  let next = cursor;
+  for (let pages = 0; pages < PAGES_PER_CALL; pages++) {
+    const page = listCollectionPage(nk, RATINGS_COLLECTION, LIST_PAGE8, next);
+    for (const o of page.objects || []) if (inSeason(o.key, season)) visit(o);
+    next = page.cursor || "";
+    if (next === "") break;
+  }
+  return next;
+}
+function rpcAdminRatingsSeasonExport(ctx, _logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const ratings = [];
+  const cursor = scanSeason(
+    nk,
+    seasonOf(input),
+    cursorOf(input),
+    (o) => ratings.push({ userId: o.userId, key: o.key, value: o.value })
+  );
+  return JSON.stringify({ ratings, cursor });
+}
+function rpcAdminRatingsBoardExport(ctx, _logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  if (typeof input.board !== "string" || input.board === "")
+    throw runtimeError(INVALID_ARGUMENT, "board is required");
+  const cursor = cursorOf(input);
+  let page;
+  try {
+    page = nk.leaderboardRecordsList(input.board, null, LIST_PAGE8, cursor, 0);
+  } catch (e) {
+    if (cursor) throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    return JSON.stringify({ records: [], cursor: "" });
+  }
+  const records = (page.records || []).map((r) => ({
+    ownerId: r.ownerId,
+    username: r.username,
+    score: r.score,
+    subscore: r.subscore,
+    metadata: r.metadata
+  }));
+  return JSON.stringify({ records, cursor: page.nextCursor || "" });
+}
+function rpcAdminRatingsSeasonClear(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const season = seasonOf(input);
+  const found = [];
+  const cursor = scanSeason(nk, season, cursorOf(input), (o) => found.push(o));
+  if (found.length > 0) {
+    nk.storageDelete(
+      found.map((o) => ({ collection: RATINGS_COLLECTION, key: o.key, userId: o.userId }))
+    );
+    for (const o of found) {
+      try {
+        nk.leaderboardRecordDelete(o.key, o.userId);
+      } catch (e) {
+      }
+    }
+  }
+  logger.info("Season %d ratings cleared: %d records", season, found.length);
+  return JSON.stringify({ cleared: found.length, cursor });
+}
+
 // src/standing/seed.ts
 var EXTRA_SEED_ENV = "QUEUE_ALLOWED_MOD_IDS_EXTRA";
 function seedAllowedModIdsExtra(nk, logger, env) {
@@ -10436,6 +10518,9 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
   initializer.registerRpc("admin_ratings_replay_list", rpcAdminRatingsReplayList);
   initializer.registerRpc("admin_ratings_replay_fold", rpcAdminRatingsReplayFold);
+  initializer.registerRpc("admin_ratings_season_export", rpcAdminRatingsSeasonExport);
+  initializer.registerRpc("admin_ratings_board_export", rpcAdminRatingsBoardExport);
+  initializer.registerRpc("admin_ratings_season_clear", rpcAdminRatingsSeasonClear);
   initializer.registerRpc("admin_run_get", rpcAdminRunGet);
   initializer.registerRpc("admin_run_set_result", rpcAdminRunSetResult);
   logger.info("BMP lobby module loaded");
