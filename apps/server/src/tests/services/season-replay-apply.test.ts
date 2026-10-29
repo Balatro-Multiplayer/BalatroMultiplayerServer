@@ -20,6 +20,7 @@ const record = (rating: number, gamesPlayed = 6) => ({
 	lastMatchAt: 1_700_000_000_000,
 })
 
+const DAY = 24 * 60 * 60 * 1000
 const season = { id: 1, name: 'Season 1', startedAt: new Date(5) }
 const state = {
 	'MultiplayerPvP:solo': {
@@ -79,6 +80,11 @@ function fakeDeps(over: Partial<ApplyDeps> = {}) {
 			calls.postgres = { s, ratings, matches }
 		},
 		restorePostgres: async () => {},
+		releaseToken: async (id) => {
+			log.push('release')
+			calls.released = id
+		},
+		now: () => new Date(10 * DAY),
 		dismissAntiCheat: async (runIds, note) => {
 			log.push('dismiss')
 			calls.dismiss = { runIds, note }
@@ -157,6 +163,78 @@ describe('apply', () => {
 			['p1', 'ranked:solo', 640, '1234'],
 			['p2', 'ranked:solo', 580, '1234'],
 		])
+	})
+
+	it('marks only the players the replay rated, and skips a game it rated nobody of', async () => {
+		const other: MatchResult = {
+			matchId: 'run-2',
+			resultPlacements: [
+				{ playerId: 'p8', place: 1, rated: false },
+				{ playerId: 'p9', place: 2, rated: false },
+			],
+		}
+		const { deps, calls } = fakeDeps({
+			unratedMatches: async () => [
+				{
+					matchId: 'run-1',
+					resultPlacements: [
+						{ playerId: 'p1', place: 1, rated: false },
+						{ playerId: 'p3', place: 2, rated: false },
+					],
+				},
+				other,
+			],
+		})
+		await createSeasonReplayApply(deps).apply(season, token(), 'owner-1')
+		expect(calls.postgres.matches).toEqual([
+			{
+				matchId: 'run-1',
+				resultPlacements: [
+					{ playerId: 'p1', place: 1, rated: true },
+					{ playerId: 'p3', place: 2, rated: false },
+				],
+			},
+		])
+		expect(calls.dismiss.runIds).toEqual(['run-1'])
+	})
+
+	it('keeps the columns the replay does not compute from the rows already there', async () => {
+		const bestAt = new Date(7)
+		const { deps, calls } = fakeDeps({
+			backupPostgresRatings: async () => [
+				{
+					playerId: 'p1',
+					modId: 'MultiplayerPvP',
+					gameMode: 'ranked:solo',
+					season: 1,
+					bestMatchId: 'run-0',
+					bestAt,
+					decayAppliedAt: new Date(9),
+					rating: 1,
+				},
+			],
+		})
+		await createSeasonReplayApply(deps).apply(season, token(), 'owner-1')
+		const [first, second] = calls.postgres.ratings
+		expect(first).toMatchObject({
+			playerId: 'p1',
+			rating: 640,
+			bestMatchId: 'run-0',
+			bestAt,
+			decayAppliedAt: new Date(9),
+		})
+		expect(second).not.toHaveProperty('bestAt')
+	})
+
+	it('refuses when the Season started before the run retention window', async () => {
+		const { deps, log } = fakeDeps({ now: () => new Date(200 * DAY) })
+		const result = await createSeasonReplayApply(deps).apply(
+			season,
+			token(),
+			'owner-1',
+		)
+		expect(result).toEqual(err({ code: 'retention_risk' }))
+		expect(log).toEqual([])
 	})
 
 	it('refuses while a ranked game runs, and writes nothing', async () => {
@@ -245,7 +323,7 @@ describe('apply', () => {
 	})
 
 	it('drops a player without a Postgres account from the rating rows', () => {
-		const rows = ratingRowsOf(state, new Map([['u1', 'p1']]), 1)
+		const rows = ratingRowsOf(state, new Map([['u1', 'p1']]), 1, [])
 		expect(rows.map((r) => r.playerId)).toEqual(['p1'])
 	})
 })
@@ -295,7 +373,8 @@ describe('restore', () => {
 		})
 		const result = await createSeasonReplayApply(deps).restore('backup-1')
 		expect(result).toEqual(ok({ season: 1 }))
-		expect(log).toEqual(['clear', 'write', 'postgres'])
+		expect(log).toEqual(['clear', 'write', 'postgres', 'release'])
+		expect(calls.released).toBe('backup-1')
 		expect(calls.write[0].entries.map((e: any) => e.userId)).toEqual([
 			'old',
 			'quiet',
@@ -305,6 +384,27 @@ describe('restore', () => {
 			ratings: [{ playerId: 'p9' }],
 			matches: [unrated],
 		})
+	})
+
+	it('lets a fresh dry run apply again after a restore, but not before', async () => {
+		const used = new Set<string>()
+		const { deps } = fakeDeps({
+			backupWithToken: async (t) => used.has(t),
+			saveBackup: async (_s, _by, data) => {
+				used.add(data.token)
+				return 'backup-1'
+			},
+			loadBackup: async () => ({ season: 1, data: backup }),
+			releaseToken: async () => {
+				used.clear()
+			},
+		})
+		const service = createSeasonReplayApply(deps)
+		expect((await service.apply(season, token(), 'owner-1')).ok).toBe(true)
+		expect((await service.apply(season, token(), 'owner-1')).ok).toBe(false)
+		await service.restore('backup-1')
+		expect((await service.apply(season, token(), 'owner-1')).ok).toBe(true)
+		expect((await service.apply(season, token(), 'owner-1')).ok).toBe(false)
 	})
 
 	it('refuses an unknown backup', async () => {

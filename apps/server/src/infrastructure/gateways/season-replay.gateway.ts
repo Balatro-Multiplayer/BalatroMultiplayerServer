@@ -44,6 +44,14 @@ export async function backupWithToken(token: string): Promise<boolean> {
 	return row !== undefined
 }
 
+// Takes the token off a backup, so a fresh dry run's token can apply again.
+export async function releaseBackupToken(id: string): Promise<void> {
+	await db
+		.update(seasonReplayBackups)
+		.set({ data: sql`${seasonReplayBackups.data} - 'token'` })
+		.where(eq(seasonReplayBackups.id, id))
+}
+
 export async function loadBackup(
 	id: string,
 ): Promise<{ season: number; data: unknown } | null> {

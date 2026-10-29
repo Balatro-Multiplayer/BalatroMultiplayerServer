@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import {
-	activeRankedGames,
-	clearNakama,
-} from '../../features/ratings/season-replay-apply.deps.js'
+import { activeRankedGames } from '../../features/ratings/active-ranked-games.js'
+import { clearNakama } from '../../features/ratings/season-replay-apply.deps.js'
 import { err, ok } from '../../shared/utils/result.js'
 
 describe('activeRankedGames', () => {

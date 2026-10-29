@@ -1,4 +1,4 @@
-import { type NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
+import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
 import { type Result, err, ok } from '../../shared/utils/result.js'
 import { rankedGameModeOf } from '../nakama/mirror.service.js'
 import { seasonBestColumns } from './season-best.js'
@@ -7,6 +7,7 @@ import {
 	type ReplayState,
 	type SeasonReplayRun,
 	reportOf,
+	runsMayBePurged,
 } from './season-replay.service.js'
 
 // The owner's apply of a Season replay (the dry run is season-replay.service.ts).
@@ -69,7 +70,14 @@ export type PostgresRatingRow = {
 	seasonBestRev: number[] | null
 	seasonBestText: string | null
 	lastMatchAt: Date | null
+	// Kept from the row already there; the replay does not compute them.
+	bestMatchId?: string | null
+	bestAt?: Date | null
+	decayAppliedAt?: Date | null
 }
+
+// The columns of an existing rating row that the replay leaves as they were.
+const KEPT_COLUMNS = ['bestMatchId', 'bestAt', 'decayAppliedAt'] as const
 
 export interface ApplyDeps {
 	// Started ranked games, from Nakama.
@@ -100,6 +108,9 @@ export interface ApplyDeps {
 		ratings: Record<string, unknown>[],
 		matches: MatchResult[],
 	): Promise<void>
+	// Frees the dry run token the backup holds, so a fresh dry run can apply.
+	releaseToken(backupId: string): Promise<void>
+	now(): Date
 	dismissAntiCheat(
 		runIds: string[],
 		note: string,
@@ -109,6 +120,7 @@ export interface ApplyDeps {
 export type ApplyRefusal =
 	| { code: 'active_games'; count: number }
 	| { code: 'stale_token' }
+	| { code: 'retention_risk' }
 	| { code: 'nakama'; reason: NakamaRpcError; backupId?: string }
 	| { code: 'failed'; reason: string; backupId: string }
 	| { code: 'no_backup' }
@@ -197,22 +209,36 @@ export function restoreBatchesOf(
 
 // The matchmaking_ratings rows the replay leaves. A player without a Postgres
 // account has no row.
+// A player who already has a row keeps its columns the replay does not compute.
 export function ratingRowsOf(
 	state: ReplayState,
 	playerIds: Map<string, string>,
 	season: number,
+	existing: Record<string, unknown>[],
 ): PostgresRatingRow[] {
 	const rows: PostgresRatingRow[] = []
+	const rowKey = (playerId: unknown, modId: unknown, gameMode: unknown) =>
+		`${playerId}|${modId}|${gameMode}`
+	const before = new Map(
+		existing.map((r) => [rowKey(r.playerId, r.modId, r.gameMode), r]),
+	)
 	for (const board of Object.keys(state)) {
 		const { modId, mode } = splitBoard(board)
 		for (const userId of Object.keys(state[board])) {
 			const playerId = playerIds.get(userId)
 			if (!playerId) continue
 			const after = state[board][userId].after
+			const gameMode = rankedGameModeOf(mode)
+			const old = before.get(rowKey(playerId, modId, gameMode))
+			const kept: Partial<PostgresRatingRow> = {}
+			if (old)
+				for (const column of KEPT_COLUMNS)
+					if (column in old) Object.assign(kept, { [column]: old[column] })
 			rows.push({
+				...kept,
 				playerId,
 				modId,
-				gameMode: rankedGameModeOf(mode),
+				gameMode,
 				season,
 				rating: Math.round(after.rating),
 				wins: after.wins,
@@ -226,15 +252,26 @@ export function ratingRowsOf(
 	return rows
 }
 
-// The result with every player marked rated, as the replay rated them.
-export function ratedResultOf(match: MatchResult): MatchResult {
+// The result with the players the replay rated marked rated. Anyone else keeps
+// the mark they had.
+export function ratedResultOf(
+	match: MatchResult,
+	ratedPlayerIds: ReadonlySet<string>,
+): MatchResult {
 	return {
 		matchId: match.matchId,
 		resultPlacements: match.resultPlacements.map((p) =>
-			p.rated === false ? { ...p, rated: true } : p,
+			p.rated === false && ratedPlayerIds.has(p.playerId)
+				? { ...p, rated: true }
+				: p,
 		),
 	}
 }
+
+const changes = (before: MatchResult, after: MatchResult) =>
+	after.resultPlacements.some(
+		(p, i) => p.rated !== before.resultPlacements[i].rated,
+	)
 
 export function createSeasonReplayApply(deps: ApplyDeps) {
 	async function apply(
@@ -242,6 +279,9 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 		token: string,
 		by: string,
 	): Promise<Result<ApplyReport, ApplyRefusal>> {
+		// Runs older than the retention window are gone, so a replay would miss them.
+		if (runsMayBePurged(season.startedAt, deps.now()))
+			return err({ code: 'retention_risk' })
 		const active = await deps.activeRankedGames()
 		if (!active.ok) return err({ code: 'nakama', reason: active.error })
 		if (active.value > 0)
@@ -260,16 +300,24 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 		if (after.value > 0)
 			return err({ code: 'active_games', count: after.value })
 
-		const repaired = (
-			await deps.unratedMatches(refs.map((r) => r.runId))
-		).filter((m) => m.resultPlacements.length >= 2)
+		const userIds = [
+			...new Set(Object.values(state).flatMap((b) => Object.keys(b))),
+		]
+		const playerIds = await deps.playerIdsOf(userIds)
+		const ratedPlayerIds = new Set(playerIds.values())
+		const repairs = (await deps.unratedMatches(refs.map((r) => r.runId)))
+			.filter((m) => m.resultPlacements.length >= 2)
+			.map((match) => ({ match, rated: ratedResultOf(match, ratedPlayerIds) }))
+			.filter((r) => changes(r.match, r.rated))
+		const repaired = repairs.map((r) => r.match)
+		const existingRatings = await deps.backupPostgresRatings(season.id)
 		const nakama = await deps.backupNakama(season.id)
 		if (!nakama.ok) return err({ code: 'nakama', reason: nakama.error })
 		const backupId = await deps.saveBackup(season.id, by, {
 			token,
 			season: { id: season.id, name: season.name },
 			nakama: nakama.value,
-			ratings: await deps.backupPostgresRatings(season.id),
+			ratings: existingRatings,
 			matches: repaired,
 		})
 
@@ -289,14 +337,11 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 		if (!written.ok)
 			return err({ code: 'nakama', reason: written.error, backupId })
 
-		const userIds = [
-			...new Set(Object.values(state).flatMap((b) => Object.keys(b))),
-		]
 		try {
 			await deps.replacePostgres(
 				season.id,
-				ratingRowsOf(state, await deps.playerIdsOf(userIds), season.id),
-				repaired.map(ratedResultOf),
+				ratingRowsOf(state, playerIds, season.id, existingRatings),
+				repairs.map((r) => r.rated),
 			)
 		} catch (e) {
 			return err({ code: 'failed', reason: `Postgres: ${String(e)}`, backupId })
@@ -347,6 +392,8 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 		} catch (e) {
 			return err({ code: 'failed', reason: `Postgres: ${String(e)}`, backupId })
 		}
+		// The board is the old one again, so a fresh dry run may apply.
+		await deps.releaseToken(backupId)
 		return ok({ season })
 	}
 

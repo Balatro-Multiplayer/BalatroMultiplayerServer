@@ -60,6 +60,14 @@ export type ReplayCall = <T>(
 	body: Record<string, unknown>,
 ) => Promise<Result<T, NakamaRpcError>>
 
+// Nakama keeps a run this long (RUN_RETENTION_DAYS in nakama/src/lobby/retention.ts).
+export const RUN_KEEP_MS = 180 * 24 * 60 * 60 * 1000
+
+// Whether a Season that began this long ago may have lost runs to retention.
+export function runsMayBePurged(startedAt: Date, now: Date): boolean {
+	return startedAt.getTime() < now.getTime() - RUN_KEEP_MS
+}
+
 // Runs per fold call: each one reads its runs and the players' stored ratings.
 const FOLD_BATCH = 100
 // A list call scans up to 1000 stored runs; a fold call reads a batch.
@@ -73,7 +81,10 @@ const byEndThenId = (a: RunRef, b: RunRef) =>
 
 // Pure: a player counts as changed when the replay ends on another rating
 // than the one stored now (or nothing is stored).
-export function reportOf(games: number, state: ReplayState): SeasonReplayReport {
+export function reportOf(
+	games: number,
+	state: ReplayState,
+): SeasonReplayReport {
 	const players: ReplayPlayer[] = []
 	for (const board of Object.keys(state).sort()) {
 		const split = board.indexOf(':')
@@ -113,7 +124,9 @@ function tokenOf(games: number, players: ReplayPlayer[]): string {
 		.update(
 			JSON.stringify([
 				games,
-				players.map((p) => canonical([p.userId, p.modId, p.mode, p.before, p.after])),
+				players.map((p) =>
+					canonical([p.userId, p.modId, p.mode, p.before, p.after]),
+				),
 			]),
 		)
 		.digest('hex')

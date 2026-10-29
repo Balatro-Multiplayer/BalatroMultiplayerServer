@@ -1,8 +1,9 @@
-import * as seasonReplayGateway from '../../infrastructure/gateways/season-replay.gateway.js'
 import { findPlayerIdsByNakamaUserIds } from '../../infrastructure/gateways/player.gateway.js'
-import { type NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
+import * as seasonReplayGateway from '../../infrastructure/gateways/season-replay.gateway.js'
+import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js'
 import { type Result, ok } from '../../shared/utils/result.js'
 import { serviceQueueDispatcher } from '../service-queue/queue.service.js'
+import { activeRankedGames } from './active-ranked-games.js'
 import {
 	type ApplyDeps,
 	type NakamaBackup,
@@ -11,6 +12,7 @@ import {
 	boardsOfKeys,
 	createSeasonReplayApply,
 } from './season-replay-apply.service.js'
+import { dismissAntiCheatItems } from './season-replay-dismiss.js'
 import { callNakama, replayRuns } from './season-replay.service.js'
 
 // The apply wired to Nakama and Postgres.
@@ -18,7 +20,7 @@ import { callNakama, replayRuns } from './season-replay.service.js'
 type Call = typeof callNakama
 
 // Every page of an RPC that returns a cursor ('' = done).
-async function pages<T extends { cursor: string }>(
+async function collectPages<T extends { cursor: string }>(
 	id: string,
 	body: Record<string, unknown>,
 	call: Call,
@@ -34,11 +36,24 @@ async function pages<T extends { cursor: string }>(
 	return ok(out)
 }
 
+// Every leaderboard record of a board (`<modId>:<mode>:<season>`).
+async function exportBoard(
+	board: string,
+	call: Call,
+): Promise<Result<NakamaLeaderboardRecord[], NakamaRpcError>> {
+	const pages = await collectPages<{
+		records: NakamaLeaderboardRecord[]
+		cursor: string
+	}>('admin_ratings_board_export', { board }, call)
+	if (!pages.ok) return pages
+	return ok(pages.value.flatMap((p) => p.records))
+}
+
 async function backupNakama(
 	season: number,
 	call: Call,
 ): Promise<Result<NakamaBackup, NakamaRpcError>> {
-	const ratings = await pages<{
+	const ratings = await collectPages<{
 		ratings: NakamaBackup['ratings']
 		cursor: string
 	}>('admin_ratings_season_export', { season }, call)
@@ -52,12 +67,9 @@ async function backupNakama(
 		season,
 	)) {
 		const key = `${board}:${season}`
-		const records = await pages<{
-			records: NakamaLeaderboardRecord[]
-			cursor: string
-		}>('admin_ratings_board_export', { board: key }, call)
+		const records = await exportBoard(key, call)
 		if (!records.ok) return records
-		backup.leaderboard[key] = records.value.flatMap((p) => p.records)
+		backup.leaderboard[key] = records.value
 	}
 	return ok(backup)
 }
@@ -67,24 +79,21 @@ export async function clearNakama(
 	boards: string[],
 	call: Call,
 ): Promise<Result<null, NakamaRpcError>> {
-	const cleared = await pages<{ cleared: number; cursor: string }>(
+	const clearedPages = await collectPages<{ cleared: number; cursor: string }>(
 		'admin_ratings_season_clear',
 		{ season },
 		call,
 	)
-	if (!cleared.ok) return cleared
+	if (!clearedPages.ok) return clearedPages
 	// A leaderboard record with no rating record behind it is not found above.
 	for (const board of boards) {
-		const left = await pages<{
-			records: NakamaLeaderboardRecord[]
-			cursor: string
-		}>('admin_ratings_board_export', { board }, call)
+		const left = await exportBoard(board, call)
 		if (!left.ok) return left
-		const owners = left.value.flatMap((p) => p.records.map((r) => r.ownerId))
+		const owners = left.value.map((r) => r.ownerId)
 		const name = board.slice(0, board.lastIndexOf(':'))
 		const at = name.indexOf(':')
 		for (let i = 0; i < owners.length; i += 1000) {
-			const gone = await call('admin_ratings_set', {
+			const cleared = await call('admin_ratings_set', {
 				modId: name.slice(0, at),
 				mode: name.slice(at + 1),
 				season,
@@ -92,49 +101,10 @@ export async function clearNakama(
 					.slice(i, i + 1000)
 					.map((userId) => ({ userId, name: '', record: null })),
 			})
-			if (!gone.ok) return gone
+			if (!cleared.ok) return cleared
 		}
 	}
 	return ok(null)
-}
-
-// Closes each open anti-cheat item of these runs as the owner: a dismiss, so
-// the queue writes its usual audit event.
-async function dismissAntiCheat(runIds: string[], note: string, owner: string) {
-	let dismissed = 0
-	let failed = 0
-	for (const id of await seasonReplayGateway.listOpenAntiCheatItems(runIds)) {
-		const result = await serviceQueueDispatcher.run(
-			id,
-			'dismiss',
-			{ playerId: owner, role: 'admin' },
-			{ note },
-		)
-		if (result.ok) dismissed++
-		else failed++
-	}
-	return { dismissed, failed }
-}
-
-// admin_lobby_list's cap (LOBBY_LIST_LIMIT in nakama/src/admin.ts).
-const LOBBY_LIST_LIMIT = 100
-
-// Ranked games that have started and not ended, from Nakama's lobby list. A
-// lobby label's `type` is public or private; a ranked lobby has a ranked game
-// mode (isRankedGameMode in nakama/src/review/ranked.ts). A list at the cap may
-// be cut off, so it counts as a running game: the apply refuses.
-export async function activeRankedGames(
-	call: Call,
-): Promise<Result<number, NakamaRpcError>> {
-	const lobbies = await call<{
-		lobbies: { mode?: string; started: boolean }[]
-	}>('admin_lobby_list', {})
-	if (!lobbies.ok) return lobbies
-	const list = lobbies.value.lobbies
-	if (list.length >= LOBBY_LIST_LIMIT) return ok(list.length)
-	return ok(
-		list.filter((l) => l.started && l.mode?.startsWith('ranked:')).length,
-	)
 }
 
 export function seasonReplayApplyFor(owner: string, call: Call = callNakama) {
@@ -161,7 +131,16 @@ export function seasonReplayApplyFor(owner: string, call: Call = callNakama) {
 		playerIdsOf: findPlayerIdsByNakamaUserIds,
 		replacePostgres: seasonReplayGateway.replaceSeasonRatings,
 		restorePostgres: seasonReplayGateway.restoreSeasonRatings,
-		dismissAntiCheat: (runIds, note) => dismissAntiCheat(runIds, note, owner),
+		releaseToken: seasonReplayGateway.releaseBackupToken,
+		now: () => new Date(),
+		dismissAntiCheat: (runIds, note) =>
+			dismissAntiCheatItems(runIds, note, owner, {
+				listOpenItems: seasonReplayGateway.listOpenAntiCheatItems,
+				dismiss: (id, actor, dismissNote) =>
+					serviceQueueDispatcher.run(id, 'dismiss', actor, {
+						note: dismissNote,
+					}),
+			}),
 	}
 	return createSeasonReplayApply(deps)
 }

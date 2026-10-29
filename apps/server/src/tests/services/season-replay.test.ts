@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { replaySeason, reportOf } from '../../features/ratings/season-replay.service.js'
+import { replaySeason, reportOf, runsMayBePurged } from '../../features/ratings/season-replay.service.js'
 import { err, ok } from '../../shared/utils/result.js'
 
 const record = (rating: number) => ({
@@ -104,5 +104,14 @@ describe('replaySeason', () => {
 	it('stops on a Nakama error', async () => {
 		const result = await replaySeason(new Date(0), (async () => err('rejected')) as any)
 		expect(result).toEqual(err('rejected'))
+	})
+})
+
+describe('runsMayBePurged', () => {
+	const DAY = 24 * 60 * 60 * 1000
+	const now = new Date(1000 * DAY)
+	it('is true only for a Season that began before the 180 day window', () => {
+		expect(runsMayBePurged(new Date(now.getTime() - 181 * DAY), now)).toBe(true)
+		expect(runsMayBePurged(new Date(now.getTime() - 179 * DAY), now)).toBe(false)
 	})
 })
