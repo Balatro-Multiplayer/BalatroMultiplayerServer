@@ -1,3 +1,4 @@
+import { seasonBestOut } from '../ratings/season-best.js'
 import { and, asc, eq, sql } from 'drizzle-orm'
 import { Router } from 'express'
 import type {
@@ -128,14 +129,14 @@ export function createStatsRouter({
 			)
 
 			const rowsRes = await db.execute(sql`
-			SELECT rank, player_id, display_name, rating, wins, losses, games_played, season_best
+			SELECT rank, player_id, display_name, rating, wins, losses, games_played, season_best, season_best_text
 			FROM (
 				SELECT
 					r.player_id,
 					CASE WHEN p.use_discord_name AND p.discord_username IS NOT NULL
 					     THEN p.discord_username ELSE p.steam_name END AS display_name,
 					p.steam_name, p.discord_username,
-					${effectiveRating} AS rating, r.wins, r.losses, r.games_played, r.season_best,
+					${effectiveRating} AS rating, r.wins, r.losses, r.games_played, r.season_best, r.season_best_text,
 					ROW_NUMBER() OVER (ORDER BY ${effectiveRating} DESC, r.wins DESC, r.player_id ASC) AS rank
 				FROM matchmaking_ratings r
 				JOIN players p ON p.id = r.player_id
@@ -157,7 +158,7 @@ export function createStatsRouter({
 					wins: Number(r.wins),
 					losses: Number(r.losses),
 					gamesPlayed: Number(r.games_played),
-					seasonBest: r.season_best == null ? null : Number(r.season_best),
+					seasonBest: seasonBestOut({ seasonBest: r.season_best, seasonBestText: (r.season_best_text as string | null) ?? null }),
 				}
 			})
 
@@ -243,6 +244,7 @@ export function createStatsRouter({
 					losses: matchmakingRatings.losses,
 					gamesPlayed: matchmakingRatings.gamesPlayed,
 					seasonBest: matchmakingRatings.seasonBest,
+					seasonBestText: matchmakingRatings.seasonBestText,
 				})
 				.from(matchmakingRatings)
 				.where(and(board, eq(matchmakingRatings.playerId, id)))
@@ -284,7 +286,7 @@ export function createStatsRouter({
 				wins: r?.wins ?? null,
 				losses: r?.losses ?? null,
 				gamesPlayed: r?.gamesPlayed ?? null,
-				seasonBest: r?.seasonBest ?? null,
+				seasonBest: r ? seasonBestOut(r) : null,
 			})
 		} catch (err) {
 			next(err)

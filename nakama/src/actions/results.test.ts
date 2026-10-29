@@ -151,6 +151,29 @@ describe('reporting results', () => {
 		expect(run.placements.map((p) => p.metric)).toEqual([95282, 0])
 	})
 
+	it('keeps score text on a placement and drops bad text without refusing the report', () => {
+		const lobby = started('a', 'b')
+		const good = '20.17609125905568,3'
+		const sent = [
+			{ playerId: 'a', place: 1, metricText: good },
+			{ playerId: 'b', place: 2, metricText: 'nope' },
+		]
+		const run = saved(report(report(lobby, 'a', sent).lobby, 'b', sent, 2500))?.run as RunRecord
+		expect(run.placements.map((p) => p.metricText)).toEqual([good, undefined])
+		expect(run.placements.map((p) => p.place)).toEqual([1, 2])
+	})
+
+	it('writes score text in its canonical form and drops text over the array limit', () => {
+		const lobby = started('a', 'b')
+		const tooLong = Array(101).fill('1').join(',')
+		const sent = [
+			{ playerId: 'a', place: 1, metricText: '20,2' },
+			{ playerId: 'b', place: 2, metricText: tooLong },
+		]
+		const run = saved(report(report(lobby, 'a', sent).lobby, 'b', sent, 2500))?.run as RunRecord
+		expect(run.placements.map((p) => p.metricText)).toEqual(['20,2', undefined])
+	})
+
 	it('refuses a report from a player who sat the game out', () => {
 		// c was away when the game started, so isn't a participant.
 		let lobby = newLobby({

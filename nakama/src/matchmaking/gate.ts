@@ -11,6 +11,8 @@ import { readBans } from '../moderation/bans'
 import { notify, NotifyCode } from '../notify'
 import { profileFor } from '../player/profile'
 import { standingFor } from '../standing/current'
+import { PVP_MOD_ID, VERSION_MISMATCH, pvpVersionOf, versionOutliers } from '../standing/pvp_version'
+import { readModReport } from '../standing/storage'
 import { groupOf } from './group/binding'
 import { blocksSoloQueue } from './group/refusal'
 import type { RefusedMember } from '../lobby/protocol'
@@ -80,7 +82,20 @@ export function refusedMemberOf(player: RefusedPlayer): RefusedMember {
 	return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) }
 }
 
-// The matched players who may no longer queue, and why.
+// The players off the PvP version most of them run, by the stored mod reports.
+export function pvpVersionOutliers(nk: nkruntime.Nakama, userIds: string[]): string[] {
+	const versions: { [userId: string]: string } = {}
+	for (const userId of userIds) {
+		const report = readModReport(nk, userId)
+		versions[userId] = pvpVersionOf(report ? report.mods : [])
+	}
+	return versionOutliers(versions)
+}
+
+// The matched players who may no longer queue, and why. In a PvP match, the
+// players who are not on the PvP version most of them run are refused too:
+// they are told, the others queue again. The versions come from the stored
+// mod reports, so a modified client cannot change them in its ticket.
 export function refusedPlayers(nk: nkruntime.Nakama, settings: ServerSettings, plan: MatchPlan): RefusedPlayer[] {
 	const now = Date.now()
 	const ranked = plan.rankedMode !== ''
@@ -88,6 +103,11 @@ export function refusedPlayers(nk: nkruntime.Nakama, settings: ServerSettings, p
 	for (const userId of plan.playerIds) {
 		const refusal = queueRefusalFor(nk, settings, userId, ranked, now)
 		if (refusal) out.push({ userId, refusal })
+	}
+	if (plan.modId === PVP_MOD_ID) {
+		for (const userId of pvpVersionOutliers(nk, plan.playerIds)) {
+			if (out.every((r) => r.userId !== userId)) out.push({ userId, refusal: { code: VERSION_MISMATCH } })
+		}
 	}
 	return out
 }
@@ -117,7 +137,7 @@ export function requeueSolos(nk: nkruntime.Nakama, plan: MatchPlan, refused: Ref
 		if (grouped.indexOf(id) !== -1) continue
 		const own = refused.filter((r) => r.userId === id)[0]
 		if (own) {
-			if (isStandingRefusal(own.refusal)) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal)
+			if (isStandingRefusal(own.refusal) || own.refusal.code === VERSION_MISMATCH) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal)
 			continue
 		}
 		notify(nk, id, NotifyCode.QUEUE_CANCELLED, 'queue_cancelled', {

@@ -18,7 +18,8 @@ export interface RatingRecord {
 	wins: number
 	losses: number
 	gamesPlayed: number
-	seasonBest: number | null
+	// Score text on a score board, milliseconds on a time board.
+	seasonBest: number | string | null
 	lastMatchAt: number
 }
 
@@ -71,7 +72,7 @@ export function planRatings(
 			wins: before.wins + (won ? 1 : 0),
 			losses: before.losses + (won ? 0 : 1),
 			gamesPlayed: before.gamesPlayed + 1,
-			seasonBest: nextSeasonBest(run.modId, p.metric, before.seasonBest),
+			seasonBest: nextSeasonBest(run.modId, p, before.seasonBest),
 			lastMatchAt: run.endedAt,
 		}
 		plan.updates[p.playerId] = after

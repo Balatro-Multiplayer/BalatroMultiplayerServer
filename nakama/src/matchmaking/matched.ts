@@ -210,8 +210,8 @@ function refuseMatch(nk: nkruntime.Nakama, plan: MatchPlan, refused: RefusedPlay
 	requeueSolos(nk, plan, refused)
 	for (const home of groups.homes) {
 		const member = refused.filter((r) => home.memberIds.indexOf(r.userId) !== -1)[0]
-		if (member) cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused', refusedMemberOf(member))
-		else requeueGroup(nk, home)
+		if (!member) requeueGroup(nk, home)
+		else cancelGroupFor(nk, home.homeCode, home.partyId, 'member_refused', refusedMemberOf(member))
 	}
 	for (const fault of groups.faulty) {
 		if (fault.binding) cancelGroupFor(nk, fault.binding.homeCode, fault.partyId, 'match_refused')

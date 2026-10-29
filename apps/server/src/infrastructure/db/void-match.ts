@@ -28,6 +28,7 @@
  */
 
 import { and, asc, eq, gt, gte, isNull, lte, or } from 'drizzle-orm'
+import { seasonBestOut } from '../../features/ratings/season-best.js'
 import type { PlacementEntry } from '../../shared/types/index.js'
 import {
 	applyRatingTransaction,
@@ -75,7 +76,7 @@ export function nakamaRatingEntries(
 				wins: r.wins,
 				losses: r.losses,
 				gamesPlayed: r.gamesPlayed,
-				seasonBest: r.seasonBest,
+				seasonBest: seasonBestOut(r),
 				lastMatchAt: r.lastMatchAt ? r.lastMatchAt.getTime() : 0,
 			},
 		})

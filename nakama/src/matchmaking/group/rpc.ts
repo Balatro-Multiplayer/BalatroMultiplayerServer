@@ -65,8 +65,15 @@ export function rpcGroupQueueOpen(
 		homeRefusal(home, userId, readConfig(nk)) ||
 		(readBinding(nk, request.partyId) ? { code: 'party_in_use' as const } : null) ||
 		partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) ||
-		memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), memberIds, null, Date.now()))
-	if (refused) return refusedReply(refused)
+		memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), home.modId, memberIds, null, Date.now()))
+	if (refused) {
+		// The other players get no RPC reply: tell them who is in the way.
+		if (refused.code === 'member_refused' && refused.userId && refused.reason) {
+			const member = { userId: refused.userId, reason: refused.reason, mods: refused.mods || [] }
+			signal(nk, seat.matchId, { type: 'group_open_refused', userId, partyId: request.partyId, refused: member })
+		}
+		return refusedReply(refused)
+	}
 	const reply = signal(nk, seat.matchId, {
 		type: 'group_open',
 		userId,

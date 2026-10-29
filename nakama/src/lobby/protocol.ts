@@ -92,6 +92,8 @@ export interface Placement {
 	place: number
 	performance?: number
 	metric?: number
+	// The season best as score text, in canonical form.
+	metricText?: string
 }
 
 // A participant of a started game, captured at the start (they may leave).
@@ -409,9 +411,12 @@ export interface PlayerInfo {
 	// as the player reports mods or gets a launcher verdict; never taken from
 	// the client. Absent on a player seated before standings existed.
 	standing?: AccountStanding
+	// The X.Y.Z of the PvP mod in the player's stored mod report, worked out
+	// by the server like the standing; '' or absent when none is reported.
+	pvpVersion?: string
 }
 
-export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing'> {
+export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing' | 'pvpVersion'> {
 	id: string
 	isAway: boolean
 	// Replaying its own run after a crash (ClientOp.CATCHING_UP).
@@ -537,6 +542,7 @@ export type LobbySignal =
 	| { type: 'group_members' }
 	| { type: 'group_status'; partyId: string }
 	| { type: 'group_open'; userId: string; partyId: string; mode: string; teams: boolean }
+	| { type: 'group_open_refused'; userId: string; partyId: string; refused: RefusedMember }
 	| { type: 'group_queued'; partyId: string; ticket: string }
 	| { type: 'group_unqueued'; partyId: string }
 	| { type: 'group_requeue'; partyId: string }

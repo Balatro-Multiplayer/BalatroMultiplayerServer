@@ -414,6 +414,13 @@
       "when": 1793400000000,
       "tag": "0058_achievements_enabled_default_on",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793500000000,
+      "tag": "0059_season_best_score_text",
+      "breakpoints": true
     }
   ]
 }

@@ -11,6 +11,7 @@ import {
 	groupUnqueued,
 	homeFactsOf,
 	openGroupQueue,
+	refuseOpen,
 	viewOf,
 } from './group_queue'
 import type { GroupQueueView, LobbySignal } from './protocol'
@@ -23,6 +24,7 @@ export type GroupSignal = Extract<
 			| 'group_members'
 			| 'group_status'
 			| 'group_open'
+			| 'group_open_refused'
 			| 'group_queued'
 			| 'group_unqueued'
 			| 'group_requeue'
@@ -36,6 +38,7 @@ const GROUP_SIGNALS: GroupSignal['type'][] = [
 	'group_members',
 	'group_status',
 	'group_open',
+	'group_open_refused',
 	'group_queued',
 	'group_unqueued',
 	'group_requeue',
@@ -82,6 +85,8 @@ export function answerGroupSignal(lobby: Lobby, signal: GroupSignal, switches: G
 				lobby,
 				openGroupQueue(lobby, signal.userId, { partyId: signal.partyId, mode: signal.mode, teams: signal.teams }, switches, now),
 			)
+		case 'group_open_refused':
+			return stepped(refuseOpen(lobby, signal.userId, signal.partyId, signal.refused))
 		case 'group_queued':
 			return answered(lobby, groupQueued(lobby, signal.partyId, signal.ticket))
 		case 'group_unqueued':

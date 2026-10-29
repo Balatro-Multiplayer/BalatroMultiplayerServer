@@ -32,15 +32,8 @@ describe('metrics.config', () => {
 	})
 
 	describe('withinMetricBounds', () => {
-		it('rejects negative and non-finite scores', () => {
-			expect(withinMetricBounds('score', -1)).toBe(false)
-			expect(withinMetricBounds('score', Number.POSITIVE_INFINITY)).toBe(false)
-			expect(withinMetricBounds('score', Number.NaN)).toBe(false)
-		})
-
-		it('accepts a plausible score and rejects an absurd one', () => {
-			expect(withinMetricBounds('score', 1_000_000)).toBe(true)
-			expect(withinMetricBounds('score', 1e18)).toBe(false)
+		it('accepts no number as a score, which is score text', () => {
+			expect(withinMetricBounds('score', 1_000_000)).toBe(false)
 		})
 
 		it('rejects times below the floor and above the ceiling', () => {

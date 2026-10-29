@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_CONFIG, writeConfig } from '../config'
+import { writeModReport } from '../standing/storage'
 import { fakeLogger, fakeNk, playerCtx } from '../testing/fake_nk'
 import { matchmakerMatched, planMatch, type MatchedEntry } from './matched'
 import { afterMatchmakerAdd, QUEUE_COLLECTION, recordKey } from './queue'
@@ -93,5 +94,47 @@ describe('matchmakerMatched', () => {
 			matchmakerMatched(playerCtx('a'), fakeLogger, nk as any, [entry('a', RANKED), entry('b', RANKED)]),
 		).toThrow(/may not queue/)
 		expect(records()).toHaveLength(0)
+	})
+
+	describe('PvP versions', () => {
+		const CASUAL_PVP = { modId: 'MultiplayerPvP', mode: 'pvp_standard', kind: 'casual' }
+		function report(nk: ReturnType<typeof fakeNk>, userId: string, pvp: string | null, spdrn?: string) {
+			const mods = ['Steamodded-1.0.0~BETA-1814a']
+			if (pvp) mods.push('MultiplayerPvP-' + pvp)
+			if (spdrn) mods.push('MultiplayerSPDRN-' + spdrn)
+			writeModReport(nk as any, userId, { mods, reportedAt: 0 })
+		}
+		const match = (nk: ReturnType<typeof fakeNk>, props: { [k: string]: string | number }, ...ids: string[]) =>
+			matchmakerMatched(playerCtx(ids[0]), fakeLogger, nk as any, ids.map((id) => entry(id, props)))
+
+		it('refuses the player off the common PvP version and tells everyone', () => {
+			const nk = fakeNk()
+			report(nk, 'a', '1.0.3')
+			report(nk, 'b', '1.0.3')
+			report(nk, 'c', '1.0.2')
+			expect(() => match(nk, CASUAL_PVP, 'a', 'b', 'c')).toThrow(/may not queue/)
+			const sent = (id: string) => nk.notifications.filter((n) => n.userId === id)
+			expect(sent('c')[0].content).toMatchObject({ code: 'version_mismatch', requeue: false })
+			expect(sent('c')[0].content.reason).toMatch(/same MultiplayerPvP version/)
+			expect(sent('a')[0].content).toMatchObject({ requeue: true })
+			expect(sent('b')[0].content).toMatchObject({ requeue: true })
+		})
+
+		it('compares the X.Y.Z prefix only', () => {
+			const nk = fakeNk()
+			;(nk as any).matchCreate = () => 'match-id'
+			report(nk, 'a', '1.0.3')
+			report(nk, 'b', '1.0.3-beta.1')
+			expect(typeof match(nk, CASUAL_PVP, 'a', 'b')).toBe('string')
+		})
+
+		it('does not compare versions of another mod', () => {
+			const nk = fakeNk()
+			;(nk as any).matchCreate = () => 'match-id'
+			const props = { modId: 'MultiplayerSPDRN', mode: 'standard', kind: 'casual' }
+			report(nk, 'a', '1.0.3', '2.0.0')
+			report(nk, 'b', '1.0.4', '2.0.0')
+			expect(typeof match(nk, props, 'a', 'b')).toBe('string')
+		})
 	})
 })
