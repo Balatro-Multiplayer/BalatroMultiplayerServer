@@ -542,6 +542,7 @@ export type LobbySignal =
 	| { type: 'group_members' }
 	| { type: 'group_status'; partyId: string }
 	| { type: 'group_open'; userId: string; partyId: string; mode: string; teams: boolean }
+	| { type: 'group_open_refused'; userId: string; partyId: string; refused: RefusedMember }
 	| { type: 'group_queued'; partyId: string; ticket: string }
 	| { type: 'group_unqueued'; partyId: string }
 	| { type: 'group_requeue'; partyId: string }

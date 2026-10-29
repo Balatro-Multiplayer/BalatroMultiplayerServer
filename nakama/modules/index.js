@@ -3212,6 +3212,19 @@ function openGroupQueue(lobby, byId, request, switches, now) {
     out: [{ kind: "groupBind", partyId: request.partyId, memberIds }, announce(next, null)]
   });
 }
+function refuseOpen(lobby, hostId, partyId, refused) {
+  if (lobby.groupQueue) return { lobby, out: [] };
+  const idle = {
+    phase: "idle",
+    partyId,
+    homeCode: lobby.code,
+    reason: "member_refused",
+    requeue: false,
+    refused
+  };
+  const to = everyone(lobby).filter((id) => id !== hostId);
+  return { lobby, out: [{ kind: "send", op: ServerOp.GROUP_QUEUE, payload: idle, to }] };
+}
 function groupQueued(lobby, partyId, ticket) {
   const gq = ownGroup(lobby, partyId);
   if (!gq) return err({ code: "not_bound" });
@@ -8281,6 +8294,7 @@ var GROUP_SIGNALS = [
   "group_members",
   "group_status",
   "group_open",
+  "group_open_refused",
   "group_queued",
   "group_unqueued",
   "group_requeue",
@@ -8314,6 +8328,8 @@ function answerGroupSignal(lobby, signal2, switches, now) {
         lobby,
         openGroupQueue(lobby, signal2.userId, { partyId: signal2.partyId, mode: signal2.mode, teams: signal2.teams }, switches, now)
       );
+    case "group_open_refused":
+      return stepped(refuseOpen(lobby, signal2.userId, signal2.partyId, signal2.refused));
     case "group_queued":
       return answered(lobby, groupQueued(lobby, signal2.partyId, signal2.ticket));
     case "group_unqueued":
@@ -9638,7 +9654,13 @@ function rpcGroupQueueOpen(ctx, logger, nk, payload) {
   const home = JSON.parse(signal(nk, seat.matchId, { type: "group_members" }));
   const memberIds = home.members.map((m) => m.id);
   const refused = homeRefusal(home, userId, readConfig(nk)) || (readBinding(nk, request.partyId) ? { code: "party_in_use" } : null) || partyRefusal(partyPresences(nk, request.partyId).map((p) => p.userId), memberIds, userId) || memberRefusal(memberIds, memberFactsOf(nk, settingsOf(ctx), home.modId, memberIds, null, Date.now()));
-  if (refused) return refusedReply(refused);
+  if (refused) {
+    if (refused.code === "member_refused" && refused.userId && refused.reason) {
+      const member = { userId: refused.userId, reason: refused.reason, mods: refused.mods || [] };
+      signal(nk, seat.matchId, { type: "group_open_refused", userId, partyId: request.partyId, refused: member });
+    }
+    return refusedReply(refused);
+  }
   const reply = signal(nk, seat.matchId, {
     type: "group_open",
     userId,
