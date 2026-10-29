@@ -546,6 +546,18 @@ export const seasons = pgTable('seasons', {
 	endedAt: timestamp('ended_at', { withTimezone: true }),
 })
 
+// What the owner's season replay overwrote, kept so the old board can come back
+// (features/ratings/season-replay-apply.service.ts).
+export const seasonReplayBackups = pgTable('season_replay_backups', {
+	id: uuid('id').primaryKey().defaultRandom(),
+	season: integer('season').notNull(),
+	createdBy: text('created_by').notNull(),
+	createdAt: timestamp('created_at', { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+	data: jsonb('data').notNull(),
+})
+
 // Launcher release hosting -- the new-launcher repo (github.com/Balatro-Multiplayer/new-launcher)
 // is private for anti-cheat reasons, so end users can't be pointed at its
 // GitHub Releases page directly (no auth, and the repo itself must stay
