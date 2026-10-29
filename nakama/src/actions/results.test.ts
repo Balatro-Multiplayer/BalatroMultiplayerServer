@@ -469,6 +469,32 @@ describe('contest', () => {
 		expect(gameEnded(closed)).toMatchObject({ status: 'contested' })
 	})
 
+	it('lets the others of a match of 3 play on, then stores the run as contested', () => {
+		let lobby = startedMatchmade('a', 'b', 'c')
+		lobby = send(lobby, 'a', 'mpapi_contest', { opponentId: 'b' }, 2000).lobby
+		lobby = leave(lobby, 'a').lobby
+		// The game stays open for b and c: no save, no GAME_ENDED yet.
+		expect(lobby.game.started).not.toBeNull()
+		expect(settle(lobby, 3000).out.filter((o) => o.kind === 'saveRun')).toEqual([])
+		// b and c can still act and report as usual.
+		const first = report(lobby, 'b', places('c', 'b', 'a'), 4000)
+		expect(rejection(first)).toBeUndefined()
+		expect(saved(first)).toBeUndefined()
+		const last = report(first.lobby, 'c', places('c', 'b', 'a'), 4500)
+		const run = saved(last)?.run as RunRecord
+		expect(run.status).toBe('contested')
+		expect(run.contest).toEqual({ by: 'a', against: 'b', at: 2000 })
+		expect(run.placements).toHaveLength(3)
+		expect(run.placements).toEqual(
+			expect.arrayContaining([
+				{ playerId: 'c', place: 1 },
+				{ playerId: 'b', place: 2 },
+				{ playerId: 'a', place: 3 },
+			]),
+		)
+		expect(gameEnded(last)).toMatchObject({ status: 'contested' })
+	})
+
 	it('still stores a contested run when nobody reported', () => {
 		let lobby = startedMatchmade('a', 'b')
 		lobby = send(lobby, 'a', 'mpapi_contest', {}, 2000).lobby
