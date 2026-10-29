@@ -2,9 +2,14 @@ import { Router } from 'express'
 import { getSeasonForReplay } from '../../infrastructure/gateways/rating.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { requireOwner } from '../../shared/utils/require-owner.js'
+import { activeRankedGames } from '../ratings/active-ranked-games.js'
 import { seasonReplayApplyFor } from '../ratings/season-replay-apply.deps.js'
 import type { ApplyRefusal } from '../ratings/season-replay-apply.service.js'
-import { replaySeason } from '../ratings/season-replay.service.js'
+import {
+	callNakama,
+	replaySeason,
+	runsMayBePurged,
+} from '../ratings/season-replay.service.js'
 
 // Owner-only. The dry run replays the current Season's ranked games under the
 // current rating rules and returns each player's rating before and after; it
@@ -15,6 +20,7 @@ const router = Router()
 const REFUSAL_STATUS: Record<ApplyRefusal['code'], number> = {
 	active_games: 409,
 	stale_token: 409,
+	retention_risk: 409,
 	nakama: 503,
 	failed: 500,
 	no_backup: 404,
@@ -26,6 +32,8 @@ function messageOf(refusal: ApplyRefusal): string {
 			return `${refusal.count} ranked game(s) are running. Apply when none is.`
 		case 'stale_token':
 			return 'The replay changed since the dry run you saw. Run the dry run again.'
+		case 'retention_risk':
+			return 'This Season started before the run retention window, so some of its runs may be purged. The replay would miss them.'
 		case 'nakama':
 			return `Nakama did not take the step: ${refusal.reason}${refusal.backupId ? ` (backup ${refusal.backupId})` : ''}`
 		case 'failed':
@@ -44,9 +52,18 @@ router.post('/ratings/season-replay', async (req, res, next) => {
 		if (!result.ok) {
 			throw new AppError(`Nakama did not run the replay: ${result.error}`, 503)
 		}
+		const active = await activeRankedGames(callNakama)
+		if (!active.ok) {
+			throw new AppError(
+				`Nakama did not count the running games: ${active.error}`,
+				503,
+			)
+		}
 		res.json({
 			season: { id: season.id, name: season.name, startedAt: season.startedAt },
 			...result.value,
+			activeRankedGames: active.value,
+			retentionRisk: runsMayBePurged(season.startedAt, new Date()),
 		})
 	} catch (err) {
 		next(err)
@@ -70,7 +87,9 @@ router.post('/ratings/season-replay/apply', async (req, res, next) => {
 			res.status(REFUSAL_STATUS[result.error.code]).json({
 				error: messageOf(result.error),
 				code: result.error.code,
-				...(result.error.code === 'active_games' ? { activeGames: result.error.count } : {}),
+				...(result.error.code === 'active_games'
+					? { activeGames: result.error.count }
+					: {}),
 			})
 			return
 		}
@@ -87,7 +106,9 @@ router.post('/ratings/season-replay/restore', async (req, res, next) => {
 		const { backupId } = req.body ?? {}
 		if (typeof backupId !== 'string' || backupId === '')
 			throw new AppError('backupId is required', 400)
-		const result = await seasonReplayApplyFor(req.player!.playerId).restore(backupId)
+		const result = await seasonReplayApplyFor(req.player!.playerId).restore(
+			backupId,
+		)
 		if (!result.ok) {
 			res.status(REFUSAL_STATUS[result.error.code]).json({
 				error: messageOf(result.error),

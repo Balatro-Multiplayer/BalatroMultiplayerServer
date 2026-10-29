@@ -8,13 +8,19 @@ import { err, ok } from '../../shared/utils/result.js'
 import { createSession } from '../../state/index.js'
 import { createTestApp } from './app.js'
 
-vi.mock('../../features/ratings/season-replay.service.js', () => ({
+vi.mock('../../features/ratings/season-replay.service.js', async (original) => ({
+	...(await original<object>()),
 	replaySeason: vi.fn(),
 }))
 vi.mock('../../infrastructure/gateways/rating.gateway.js', () => ({
 	getSeasonForReplay: vi.fn(),
 }))
 
+vi.mock('../../features/ratings/active-ranked-games.js', () => ({
+	activeRankedGames: vi.fn(),
+}))
+
+import { activeRankedGames } from '../../features/ratings/active-ranked-games.js'
 import { replaySeason } from '../../features/ratings/season-replay.service.js'
 
 const app = createTestApp()
@@ -35,6 +41,8 @@ const post = (auth: string) =>
 beforeEach(() => {
 	env.OWNER_PLAYER_ID = 'owner-1'
 	vi.mocked(replaySeason).mockReset()
+	vi.mocked(activeRankedGames).mockReset()
+	vi.mocked(activeRankedGames).mockResolvedValue(ok(0))
 	vi.mocked(ratingGateway.getSeasonForReplay).mockResolvedValue({
 		id: 1,
 		name: 'Season 1',
@@ -49,6 +57,31 @@ describe('POST /api/webadmin/ratings/season-replay', () => {
 		expect(res.status).toBe(200)
 		expect(res.body).toMatchObject({ ...report, season: { id: 1, name: 'Season 1' } })
 		expect(replaySeason).toHaveBeenCalledWith(startedAt)
+	})
+
+	it('shows the running ranked game count and warns about purged runs', async () => {
+		vi.mocked(replaySeason).mockResolvedValue(ok(report))
+		vi.mocked(activeRankedGames).mockResolvedValue(ok(2))
+		vi.mocked(ratingGateway.getSeasonForReplay).mockResolvedValue({
+			id: 1,
+			name: 'Season 1',
+			startedAt: new Date('2020-01-01T00:00:00Z'),
+		})
+		const res = await post(authAs('owner-1', ['admin']))
+		expect(res.body).toMatchObject({ activeRankedGames: 2, retentionRisk: true })
+		vi.mocked(ratingGateway.getSeasonForReplay).mockResolvedValue({
+			id: 2,
+			name: 'Season 2',
+			startedAt: new Date(),
+		})
+		const fresh = await post(authAs('owner-1', ['admin']))
+		expect(fresh.body.retentionRisk).toBe(false)
+	})
+
+	it('says when Nakama could not count the running games', async () => {
+		vi.mocked(replaySeason).mockResolvedValue(ok(report))
+		vi.mocked(activeRankedGames).mockResolvedValue(err('unreachable'))
+		expect((await post(authAs('owner-1', ['admin']))).status).toBe(503)
 	})
 
 	it('refuses another admin', async () => {
