@@ -16,6 +16,7 @@ export const TYPE_LABELS: Record<ItemType, string> = {
   flagged_chat: 'Flagged chat',
   match_conflict: 'Match result',
   forfeit_reconciliation: 'Forfeit',
+  contest: 'Contest',
   anti_cheat: 'Anti-cheat',
   integrity: 'Integrity',
 }
@@ -27,6 +28,7 @@ export const TYPE_TABS: { type: ItemType | null; label: string }[] = [
   { type: 'flagged_chat', label: 'Chat' },
   { type: 'match_conflict', label: 'Match results' },
   { type: 'forfeit_reconciliation', label: 'Forfeits' },
+  { type: 'contest', label: 'Contests' },
   { type: 'anti_cheat', label: 'Anti-cheat' },
   { type: 'integrity', label: 'Integrity' },
 ]
@@ -63,6 +65,10 @@ export const ACTION_CONSEQUENCES: Record<ActionKey, string> = {
   note: 'Adds a note to the history. The status does not change.',
 }
 
+// What a dismiss does to a contested run instead of the generic wording.
+export const CONTEST_DISMISS_CONSEQUENCE =
+  'Closes the contest as unfounded: the result reported before it is rated.'
+
 export const DURATION_LABELS: Record<Duration, string> = {
   '24h': '24 hours',
   '7d': '7 days',
@@ -75,6 +81,7 @@ export const TARGET_ROLE_LABELS: Record<TargetRole, string> = {
   reporter: 'Reporter',
   first_reporter: 'First reporter',
   conflicting_reporter: 'Conflicting reporter',
+  contester: 'Contester',
 }
 
 export const LOBBY_KIND_LABELS: Record<LobbyKind, string> = {

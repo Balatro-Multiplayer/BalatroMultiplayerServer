@@ -7,6 +7,7 @@ export const ITEM_TYPES = [
 	'flagged_chat',
 	'match_conflict',
 	'forfeit_reconciliation',
+	'contest',
 	'anti_cheat',
 	'integrity',
 ] as const

@@ -43,12 +43,19 @@ export type IntegrityTrigger = 'ranked' | 'repeated'
 export interface ItemContext {
 	lobbyKind?: LobbyKind
 	integrityTrigger?: IntegrityTrigger
+	// A contest item: who contested, and whom (null when no one was named).
+	contest?: ContestParties
+}
+
+export interface ContestParties {
+	contesterId: string
+	againstId: string | null
 }
 
 export type ItemEventKind = 'viewed' | 'claimed' | 'released' | 'acted' | 'noted' | 'reopened'
 
 // Who a target-taking action (warn, mute, ban) can be aimed at, per type.
-export type TargetRole = 'subject' | 'reporter' | 'first_reporter' | 'conflicting_reporter'
+export type TargetRole = 'subject' | 'reporter' | 'first_reporter' | 'conflicting_reporter' | 'contester'
 
 const includes = <T extends string>(list: readonly T[], value: unknown): value is T =>
 	typeof value === 'string' && (list as readonly string[]).includes(value)
@@ -81,11 +88,20 @@ export function playerIdOfActor(actor: string | null): string | null {
 
 export function contextOf(value: unknown): ItemContext {
 	if (typeof value !== 'object' || value === null) return {}
-	const record = value as { lobbyKind?: unknown; integrityTrigger?: unknown }
+	const record = value as { lobbyKind?: unknown; integrityTrigger?: unknown; contest?: unknown }
 	return {
 		...(isLobbyKind(record.lobbyKind) ? { lobbyKind: record.lobbyKind } : {}),
 		...(record.integrityTrigger === 'ranked' || record.integrityTrigger === 'repeated'
 			? { integrityTrigger: record.integrityTrigger }
 			: {}),
+		...contestOf(record.contest),
 	}
+}
+
+function contestOf(value: unknown): { contest?: ContestParties } {
+	if (typeof value !== 'object' || value === null) return {}
+	const { contesterId, againstId } = value as { contesterId?: unknown; againstId?: unknown }
+	if (typeof contesterId !== 'string') return {}
+	if (typeof againstId !== 'string' && againstId !== null) return {}
+	return { contest: { contesterId, againstId } }
 }

@@ -7,6 +7,7 @@ import {
   MessageSquareWarningIcon,
   ScaleIcon,
   ShieldAlertIcon,
+  SwordsIcon,
   TimerOffIcon,
 } from 'lucide-react'
 import { useEffect, useRef } from 'react'
@@ -45,6 +46,7 @@ const TYPE_ICONS: Record<ItemType, LucideIcon> = {
   flagged_chat: MessageSquareWarningIcon,
   match_conflict: ScaleIcon,
   forfeit_reconciliation: TimerOffIcon,
+  contest: SwordsIcon,
   anti_cheat: ShieldAlertIcon,
   integrity: AlertTriangleIcon,
 }

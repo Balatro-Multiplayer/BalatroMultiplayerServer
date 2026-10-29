@@ -60,6 +60,8 @@ function setup(seed: QueueItem, over: Partial<DispatcherDeps<World>> = {}) {
 				? { subjectPlayerId: it.subjectPlayerId, report: { reporterId: 'rep', reportedId: 'bad' } }
 				: it.itemType === 'match_conflict'
 					? { subjectPlayerId: it.subjectPlayerId, conflict: { firstReporterId: 'a', conflictingReporterId: 'b' } }
+					: it.itemType === 'contest'
+						? { subjectPlayerId: it.subjectPlayerId, contest: { contesterId: 'a', againstId: 'b' } }
 					: { subjectPlayerId: it.subjectPlayerId },
 		playerExists: async (id) => id !== 'ghost',
 		getBan: async (id) => world.bans.find((b) => b.id === id) ?? null,
@@ -77,6 +79,11 @@ function setup(seed: QueueItem, over: Partial<DispatcherDeps<World>> = {}) {
 			],
 		}),
 		flaggedPlayersOf: async () => new Set(['a']),
+		participantsOf: async () => ['a', 'b'],
+		originalResultOf: async () => [
+			{ playerId: 'a', place: 1 },
+			{ playerId: 'b', place: 2 },
+		],
 		...external,
 		async transaction(fn) {
 			const before = snapshot()
@@ -307,5 +314,101 @@ describe('the dispatcher', () => {
 			refusal: { code: 'nakama_failed', reason: 'admin_run_set_result rejected' },
 		})
 		expect(world.items.get(1)?.status).toBe('open')
+	})
+})
+
+describe('a contest item', () => {
+	// a contested b; the run sits unrated until a moderator decides.
+	const contest = () => item({ itemType: 'contest', sourceId: 'run-1', subjectPlayerId: 'b' })
+	const original = [
+		{ playerId: 'a', place: 1, rated: false },
+		{ playerId: 'b', place: 2, rated: true },
+	]
+
+	it('rates the original result when dismissed, leaving a flagged player out', async () => {
+		const { dispatcher, external, world } = setup(contest())
+		const result = await dispatcher.run(1, 'dismiss', MOD, { note: 'fair match' })
+		expect(result).toMatchObject({ ok: true, value: { item: { status: 'resolved' } } })
+		expect(external.overturnGame).toHaveBeenCalledWith({ runId: 'run-1', matchmade: true, ranked: true }, original)
+		expect(world.events.at(-1)).toMatchObject({ action: 'dismiss', detail: { settled: 'rate_original', runId: 'run-1' } })
+	})
+
+	it('dismisses a contest nobody reported a result for without rating anything', async () => {
+		const { dispatcher, external, world } = setup(contest(), { originalResultOf: async () => [] })
+		expect(await dispatcher.run(1, 'dismiss', MOD, {})).toMatchObject({ ok: true })
+		expect(external.overturnGame).not.toHaveBeenCalled()
+		expect(world.items.get(1)?.status).toBe('resolved')
+	})
+
+	it('keeps the item open when the original result cannot be rated', async () => {
+		const { dispatcher, external, world } = setup(contest())
+		external.overturnGame.mockResolvedValueOnce({ kind: 'failed', reason: 'down' } as never)
+		expect(await dispatcher.run(1, 'dismiss', MOD, {})).toEqual({
+			ok: false,
+			refusal: { code: 'nakama_failed', reason: 'down' },
+		})
+		expect(world.items.get(1)?.status).toBe('open')
+	})
+
+	it('voids the run', async () => {
+		const { dispatcher, external } = setup(contest())
+		expect(await dispatcher.run(1, 'void', ADMIN, {})).toMatchObject({
+			ok: true,
+			value: { effects: { voided: { runId: 'run-1' } } },
+		})
+		expect(external.voidGame).toHaveBeenCalledOnce()
+		expect(external.overturnGame).not.toHaveBeenCalled()
+	})
+
+	it('names a winner: first place for them, the other player behind', async () => {
+		const { dispatcher, external, world } = setup(contest())
+		const result = await dispatcher.run(1, 'overturn', ADMIN, { toReportOf: 'b' })
+		expect(result).toMatchObject({ ok: true, value: { effects: { overturned: { runId: 'run-1', rerated: true } } } })
+		expect(external.overturnGame).toHaveBeenCalledWith({ runId: 'run-1', matchmade: true, ranked: true }, [
+			{ playerId: 'b', place: 1, rated: true },
+			{ playerId: 'a', place: 2, rated: false },
+		])
+		expect(world.items.get(1)?.status).toBe('resolved')
+	})
+
+	it('refuses a winner who did not play', async () => {
+		const { dispatcher } = setup(contest())
+		expect(await dispatcher.run(1, 'overturn', ADMIN, { toReportOf: 'z' })).toEqual({
+			ok: false,
+			refusal: { code: 'invalid_target' },
+		})
+	})
+
+	it('rates the original result when the contester is punished for a false contest', async () => {
+		const { dispatcher, external, world } = setup(contest())
+		const result = await dispatcher.run(1, 'chat_mute', MOD, { targetPlayerId: 'a', duration: '24h' })
+		expect(result).toMatchObject({ ok: true, value: { effects: { ban: { playerId: 'a', banType: 'chat' } } } })
+		expect(external.overturnGame).toHaveBeenCalledOnce()
+		expect(external.voidGame).not.toHaveBeenCalled()
+		expect(world.items.get(1)?.status).toBe('resolved')
+	})
+
+	it('voids the run when the contested player is punished, the contest being upheld', async () => {
+		const { dispatcher, external } = setup(contest())
+		const result = await dispatcher.run(1, 'queue_ban', MOD, { duration: '7d' })
+		expect(result).toMatchObject({ ok: true, value: { effects: { ban: { playerId: 'b', banType: 'queue' } } } })
+		expect(external.voidGame).toHaveBeenCalledOnce()
+		expect(external.overturnGame).not.toHaveBeenCalled()
+	})
+
+	it('settles a warning the same way, by who is warned', async () => {
+		const { dispatcher, external } = setup(contest())
+		await dispatcher.run(1, 'warn', MOD, { targetPlayerId: 'a', message: 'do not contest fair games' })
+		expect(external.overturnGame).toHaveBeenCalledOnce()
+	})
+
+	it('does not touch the run for a note, a claim or a reopen', async () => {
+		const { dispatcher, external } = setup(contest())
+		await dispatcher.run(1, 'note', MOD, { note: 'looking' })
+		await dispatcher.run(1, 'dismiss', MOD, {})
+		external.overturnGame.mockClear()
+		await dispatcher.run(1, 'reopen', MOD, {})
+		expect(external.overturnGame).not.toHaveBeenCalled()
+		expect(external.voidGame).not.toHaveBeenCalled()
 	})
 })

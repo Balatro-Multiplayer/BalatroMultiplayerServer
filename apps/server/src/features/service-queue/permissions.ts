@@ -32,21 +32,24 @@ const ALL: readonly ItemType[] = [
 	'flagged_chat',
 	'match_conflict',
 	'forfeit_reconciliation',
+	'contest',
 	'anti_cheat',
 	'integrity',
 ]
 
 export const ACTION_RULES: Readonly<Record<ActionKey, ActionRule>> = {
 	dismiss: { itemTypes: ALL, status: 'open', minRole: 'moderator' },
-	resolve: { itemTypes: ALL, status: 'open', minRole: 'moderator' },
+	// A contest is settled by its outcome (dismiss, void, overturn, a punishment),
+	// never by a bare resolve.
+	resolve: { itemTypes: ALL.filter((t) => t !== 'contest'), status: 'open', minRole: 'moderator' },
 	warn: {
-		itemTypes: ['report', 'flagged_chat', 'match_conflict', 'anti_cheat', 'integrity'],
+		itemTypes: ['report', 'flagged_chat', 'match_conflict', 'contest', 'anti_cheat', 'integrity'],
 		status: 'open',
 		minRole: 'moderator',
 		targeted: true,
 	},
 	chat_mute: {
-		itemTypes: ['report', 'flagged_chat'],
+		itemTypes: ['report', 'flagged_chat', 'contest'],
 		status: 'open',
 		minRole: 'moderator',
 		presets: { '24h': 'moderator', '7d': 'moderator', '30d': 'moderator', permanent: 'admin' },
@@ -54,7 +57,7 @@ export const ACTION_RULES: Readonly<Record<ActionKey, ActionRule>> = {
 		destructive: true,
 	},
 	queue_ban: {
-		itemTypes: ['report', 'match_conflict', 'anti_cheat', 'integrity'],
+		itemTypes: ['report', 'match_conflict', 'contest', 'anti_cheat', 'integrity'],
 		status: 'open',
 		minRole: 'moderator',
 		presets: { '7d': 'moderator', '30d': 'admin', permanent: 'admin' },
@@ -62,7 +65,7 @@ export const ACTION_RULES: Readonly<Record<ActionKey, ActionRule>> = {
 		destructive: true,
 	},
 	account_ban: {
-		itemTypes: ['report', 'anti_cheat', 'integrity'],
+		itemTypes: ['report', 'contest', 'anti_cheat', 'integrity'],
 		status: 'open',
 		minRole: 'admin',
 		presets: { '7d': 'admin', '30d': 'admin', permanent: 'admin' },
@@ -70,12 +73,12 @@ export const ACTION_RULES: Readonly<Record<ActionKey, ActionRule>> = {
 		destructive: true,
 	},
 	void: {
-		itemTypes: ['match_conflict', 'forfeit_reconciliation', 'anti_cheat'],
+		itemTypes: ['match_conflict', 'forfeit_reconciliation', 'contest', 'anti_cheat'],
 		status: 'open',
 		minRole: 'admin',
 		destructive: true,
 	},
-	overturn: { itemTypes: ['match_conflict'], status: 'open', minRole: 'admin', destructive: true },
+	overturn: { itemTypes: ['match_conflict', 'contest'], status: 'open', minRole: 'admin', destructive: true },
 	reopen: { itemTypes: ALL, status: 'resolved', minRole: 'moderator' },
 	unban: { itemTypes: ALL, status: 'any', minRole: 'moderator', destructive: true },
 	note: { itemTypes: ALL, status: 'any', minRole: 'moderator' },

@@ -11,7 +11,7 @@ import {
 	decideIntegrityFlag,
 	utcDayStart,
 } from '../../features/service-queue/integrity-flag.js'
-import { planOverturn, ratedPlacements, samePlaces } from '../../features/service-queue/overturn.js'
+import { planContestOverturn, planOverturn, ratedPlacements, samePlaces } from '../../features/service-queue/overturn.js'
 import { allowedActionsFor, mayIssueBan, mayLiftBan, permissionFor } from '../../features/service-queue/permissions.js'
 import { BASE_PRIORITY, priorityOf } from '../../features/service-queue/priority.js'
 import {
@@ -392,6 +392,61 @@ describe('overturn plans', () => {
 		expect(ratedPlacements(places, new Set(), false)).toEqual(places)
 		expect(samePlaces(places, [...places].reverse())).toBe(true)
 		expect(samePlaces(places, [{ playerId: 'a', place: 2 }, { playerId: 'b', place: 1 }])).toBe(false)
+	})
+})
+
+describe('contest items', () => {
+	const open = { itemType: 'contest' as const, status: 'open' as const }
+
+	it('takes dismiss, void, overturn, warn and the three punishments, but not resolve', () => {
+		for (const action of ['dismiss', 'warn', 'chat_mute', 'queue_ban'] as const)
+			expect(permissionFor(action, open, 'moderator').ok).toBe(true)
+		expect(permissionFor('account_ban', open, 'admin', '7d').ok).toBe(true)
+		for (const action of ['void', 'overturn'] as const) {
+			expect(permissionFor(action, open, 'moderator')).toEqual({ ok: false, refusal: 'forbidden' })
+			expect(permissionFor(action, open, 'admin').ok).toBe(true)
+		}
+		expect(permissionFor('resolve', open, 'admin')).toEqual({ ok: false, refusal: 'not_for_type' })
+	})
+
+	it('has no source row to move', () => {
+		for (const action of ['dismiss', 'void', 'overturn', 'queue_ban', 'reopen'] as const)
+			expect(sourceStatusFor('contest', action)).toBeNull()
+	})
+
+	it('ranks beside a result conflict', () => {
+		expect(BASE_PRIORITY.contest).toBeGreaterThanOrEqual(BASE_PRIORITY.match_conflict)
+		expect(BASE_PRIORITY.contest).toBeLessThan(BASE_PRIORITY.anti_cheat)
+	})
+
+	it('aims at the contested player by default, or the contester for a false contest', () => {
+		const targets = targetsOf({
+			itemType: 'contest',
+			subjectPlayerId: 'b',
+			contest: { contesterId: 'a', againstId: 'b' },
+		})
+		expect(pickTarget(targets, null)).toEqual({ ok: true, target: { role: 'subject', playerId: 'b' } })
+		expect(pickTarget(targets, 'a')).toEqual({ ok: true, target: { role: 'contester', playerId: 'a' } })
+		expect(pickTarget(targets, 'c')).toEqual({ ok: false, refusal: 'invalid_target' })
+	})
+
+	it('keeps the contest in the item context', () => {
+		const context = { lobbyKind: 'ranked', contest: { contesterId: 'a', againstId: 'b' } }
+		expect(contextOf(context)).toEqual(context)
+		expect(contextOf({ contest: { contesterId: 'a' } })).toEqual({})
+	})
+
+	it('names a winner: first place for them, the rest tied behind', () => {
+		expect(planContestOverturn(['a', 'b', 'c'], 'b')).toEqual({
+			ok: true,
+			placements: [
+				{ playerId: 'b', place: 1 },
+				{ playerId: 'a', place: 2 },
+				{ playerId: 'c', place: 2 },
+			],
+		})
+		expect(planContestOverturn(['a', 'b'], 'z')).toEqual({ ok: false, refusal: 'invalid_target' })
+		expect(planContestOverturn([], 'a')).toEqual({ ok: false, refusal: 'source_missing' })
 	})
 })
 

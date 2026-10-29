@@ -31,6 +31,7 @@ import {
 import { queueKeys, refusalCodeOf, runAction } from '../lib/api'
 import {
   ACTION_CONSEQUENCES,
+  CONTEST_DISMISS_CONSEQUENCE,
   ACTION_LABELS,
   DURATION_LABELS,
   effectsText,
@@ -44,12 +45,18 @@ import {
 import type {
   AllowedAction,
   BanRow,
+  ContestEvidence,
   ItemDetail,
   MatchConflictEvidence,
 } from '../lib/types'
 
-// Whose report an overturn can make the result (a conflict's two sides).
+// Whose report an overturn can make the result (a conflict's two sides), or
+// who can be named the winner of a contest (its players).
 function overturnSides(detail: ItemDetail): { playerId: string }[] {
+  if (detail.item.itemType === 'contest')
+    return ((detail.evidence as ContestEvidence | null)?.players ?? []).map(
+      (p) => ({ playerId: p.id })
+    )
   if (detail.item.itemType !== 'match_conflict') return []
   return (detail.evidence as MatchConflictEvidence | null)?.sides ?? []
 }
@@ -135,7 +142,9 @@ function ActionDialog({
             {allowed.destructive ? `${label}: are you sure?` : label}
           </DialogTitle>
           <DialogDescription>
-            {ACTION_CONSEQUENCES[allowed.action]}
+            {detail.item.itemType === 'contest' && allowed.action === 'dismiss'
+              ? CONTEST_DISMISS_CONSEQUENCE
+              : ACTION_CONSEQUENCES[allowed.action]}
           </DialogDescription>
         </DialogHeader>
 
@@ -214,7 +223,11 @@ function ActionDialog({
 
           {allowed.action === 'overturn' && (
             <div className='space-y-1'>
-              <Label>Result stands as reported by</Label>
+              <Label>
+                {detail.item.itemType === 'contest'
+                  ? 'Winner'
+                  : 'Result stands as reported by'}
+              </Label>
               <Select
                 value={form.toReportOf ?? undefined}
                 onValueChange={(v) => set({ toReportOf: v })}

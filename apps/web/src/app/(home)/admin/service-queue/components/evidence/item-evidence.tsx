@@ -1,6 +1,7 @@
 'use client'
 
 import type { ItemDetail, TypedEvidence } from '../../lib/types'
+import { ContestEvidence } from './contest-evidence'
 import { AntiCheatEvidence } from './anti-cheat-evidence'
 import { FlaggedChatEvidence } from './flagged-chat-evidence'
 import { ForfeitEvidence } from './forfeit-evidence'
@@ -33,6 +34,8 @@ export function ItemEvidence({
       return <FlaggedChatEvidence evidence={t.evidence} />
     case 'match_conflict':
       return <MatchConflictEvidence evidence={t.evidence} names={names} />
+    case 'contest':
+      return <ContestEvidence evidence={t.evidence} names={names} />
     case 'forfeit_reconciliation':
       return <ForfeitEvidence evidence={t.evidence} names={names} />
     case 'anti_cheat':

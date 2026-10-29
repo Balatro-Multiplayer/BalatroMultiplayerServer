@@ -25,7 +25,7 @@ export interface NakamaRun {
 	modId: string
 	startedAt: number
 	endedAt: number
-	status: 'agreed' | 'partial' | 'disputed' | 'abandoned' | 'restarted'
+	status: 'agreed' | 'partial' | 'disputed' | 'abandoned' | 'restarted' | 'contested'
 	placements: {
 		playerId: string
 		place: number
@@ -43,6 +43,8 @@ export interface NakamaRun {
 	// A ranked run's rating result per player Nakama rated ({} when it rated
 	// nobody: a disputed result, or flags leaving fewer than two players).
 	ratings?: { [userId: string]: unknown }
+	// A contested run: who contested whom (Nakama user ids), and when.
+	contest?: { by: string; against: string; at: number }
 }
 
 export interface NakamaLog {
@@ -197,6 +199,8 @@ export interface RunRows {
 		conflictingReporterId: string
 		conflictingPlacements: { playerId: string; place: number }[]
 	}[]
+	// A contested run: a contest service-queue item (Nakama review's hold).
+	contest: { contesterId: string; againstId: string } | null
 }
 
 export function rankedGameModeOf(mode: string): string {
@@ -365,6 +369,10 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	return {
 		lobbyKind: gameKindOfRun(run),
 		conflicts: conflictsOf(run, ids),
+		contest:
+			run.contest && ids.has(run.contest.by) && ids.has(run.contest.against)
+				? { contesterId: pg(run.contest.by), againstId: pg(run.contest.against) }
+				: null,
 		lobbyRun: {
 			id: run.runId,
 			lobbyCode: run.code,

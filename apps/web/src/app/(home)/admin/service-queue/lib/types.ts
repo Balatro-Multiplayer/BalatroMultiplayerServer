@@ -7,6 +7,7 @@ export const ITEM_TYPES = [
   'flagged_chat',
   'match_conflict',
   'forfeit_reconciliation',
+  'contest',
   'anti_cheat',
   'integrity',
 ] as const
@@ -40,6 +41,7 @@ export type TargetRole =
   | 'reporter'
   | 'first_reporter'
   | 'conflicting_reporter'
+  | 'contester'
 
 export type ItemEventKind =
   | 'viewed'
@@ -65,7 +67,11 @@ export interface QueueItem {
   resolutionNotes: string | null
   claimedBy: string | null
   claimedUntil: string | null
-  context: { lobbyKind?: LobbyKind; integrityTrigger?: 'ranked' | 'repeated' }
+  context: {
+    lobbyKind?: LobbyKind
+    integrityTrigger?: 'ranked' | 'repeated'
+    contest?: { contesterId: string; againstId: string | null }
+  }
 }
 
 export interface Claim {
@@ -369,6 +375,36 @@ export interface MatchConflictEvidence {
   otherConflicts: MatchConflictEvidence['conflict'][]
 }
 
+export interface ContestPlayer {
+  id: string
+  name: string | null
+  nakamaUserId: string | null
+  role: 'contester' | 'subject' | null
+  logCheck: LogCheck | null
+  flag: string | null
+  ratings: { season: number; rating: number; gamesPlayed: number }[]
+  contestsStarted: number
+}
+
+// A contested run, held unrated until a moderator decides.
+export interface ContestEvidence {
+  contest: { contesterId: string; againstId: string | null }
+  runId: string
+  lobbyKind: LobbyKind
+  match: {
+    matchId: string
+    gameMode: string
+    modId: string
+    status: string
+    resultReportedAt: string | null
+  } | null
+  // The result reported before the contest, which a dismiss rates.
+  recorded: (Placement & { rated?: boolean })[] | null
+  players: ContestPlayer[]
+  run: NakamaRunView | null
+  replay: ReplayView | null
+}
+
 export type TimelineEvent = 'started' | 'forfeited' | 'reconnected' | 'ended'
 
 export interface ForfeitEvidence {
@@ -450,6 +486,7 @@ export type TypedEvidence =
   | { itemType: 'flagged_chat'; evidence: FlaggedChatEvidence | null }
   | { itemType: 'match_conflict'; evidence: MatchConflictEvidence | null }
   | { itemType: 'forfeit_reconciliation'; evidence: ForfeitEvidence | null }
+  | { itemType: 'contest'; evidence: ContestEvidence | null }
   | { itemType: 'anti_cheat'; evidence: AntiCheatEvidence | null }
   | { itemType: 'integrity'; evidence: IntegrityEvidence | null }
 

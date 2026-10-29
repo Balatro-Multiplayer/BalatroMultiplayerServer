@@ -58,13 +58,20 @@ async function sendNamedRefusal(res: Response, refusal: QueueRefusal) {
 }
 
 // Who a target-taking action may be aimed at, from the item's evidence (a
-// report's two players, a conflict's two reporters, otherwise the subject).
+// report's two players, a conflict's two reporters, a contest's two players, otherwise the subject).
 function targetsFor(item: { itemType: string; subjectPlayerId: string | null }, evidence: unknown) {
 	const ev = (evidence ?? {}) as {
 		report?: { reporterId: string; reportedId: string }
 		conflict?: { firstReporterId: string; conflictingReporterId: string }
+		contest?: { contesterId: string; againstId: string | null }
 	}
-	return targetsOf({ itemType: item.itemType, subjectPlayerId: item.subjectPlayerId, report: ev.report ?? null, conflict: ev.conflict ?? null })
+	return targetsOf({
+		itemType: item.itemType,
+		subjectPlayerId: item.subjectPlayerId,
+		report: ev.report ?? null,
+		conflict: ev.conflict ?? null,
+		contest: ev.contest ?? null,
+	})
 }
 
 const STATUS_FILTERS: readonly QueueStatusFilter[] = ['open', 'resolved', 'all']

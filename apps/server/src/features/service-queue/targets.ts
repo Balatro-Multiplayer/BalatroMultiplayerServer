@@ -1,6 +1,7 @@
 // Who a warn, mute or ban can be aimed at: a report's reported player (the
 // subject) or its reporter (a false report); either reporter of a conflict;
-// otherwise the item's subject.
+// a contest's contested player (the subject) or its contester (a false
+// contest); otherwise the item's subject.
 import type { TargetRole } from './types.js'
 
 export interface Target {
@@ -12,6 +13,7 @@ export interface TargetSources {
 	subjectPlayerId: string | null
 	report?: { reporterId: string; reportedId: string } | null
 	conflict?: { firstReporterId: string; conflictingReporterId: string } | null
+	contest?: { contesterId: string; againstId: string | null } | null
 }
 
 export function targetsOf(item: { itemType: string } & TargetSources): Target[] {
@@ -25,6 +27,12 @@ export function targetsOf(item: { itemType: string } & TargetSources): Target[] 
 			{ role: 'first_reporter', playerId: item.conflict.firstReporterId },
 			{ role: 'conflicting_reporter', playerId: item.conflict.conflictingReporterId },
 		]
+	if (item.itemType === 'contest' && item.contest) {
+		const targets: Target[] = []
+		if (item.contest.againstId) targets.push({ role: 'subject', playerId: item.contest.againstId })
+		targets.push({ role: 'contester', playerId: item.contest.contesterId })
+		return targets
+	}
 	return item.subjectPlayerId ? [{ role: 'subject', playerId: item.subjectPlayerId }] : []
 }
 

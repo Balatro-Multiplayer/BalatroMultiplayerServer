@@ -8,7 +8,7 @@
 import { heldByOther } from './claim.js'
 import { type QueueCommand, type SanctionCommand, banTypeOf, parseCommand, presetOf } from './command.js'
 import { expiresAtOf } from './durations.js'
-import { type OverturnPlan, type Placement, planOverturn, ratedPlacements } from './overturn.js'
+import { type OverturnPlan, type Placement, planContestOverturn, planOverturn, ratedPlacements } from './overturn.js'
 import { mayLiftBan, permissionFor } from './permissions.js'
 import { type QueueRefusal, type QueueResult, refuse } from './refusals.js'
 import { type Target, type TargetSources, pickTarget, targetsOf } from './targets.js'
@@ -32,6 +32,8 @@ export interface QueueItem {
 	status: string
 	claimedBy: string | null
 	claimedUntil: Date | null
+	// What the item was raised with (types.ts ItemContext); the queue rows carry it.
+	context?: unknown
 }
 
 export interface Staff {
@@ -75,6 +77,10 @@ export interface DispatcherDeps<Tx> {
 	getBan(banId: string): Promise<BanRow | null>
 	gameOf(item: QueueItem): Promise<GameRef | null>
 	conflictOf(item: QueueItem): Promise<Parameters<typeof planOverturn>[0] | null>
+	// A contest's run: the players in it, and the result reported before the
+	// contest (empty when nobody reported one).
+	participantsOf(game: GameRef): Promise<string[]>
+	originalResultOf(game: GameRef): Promise<Placement[]>
 	flaggedPlayersOf(runId: string): Promise<Set<string>>
 	voidGame(game: GameRef): Promise<VoidResult>
 	overturnGame(game: GameRef, placements: (Placement & { rated?: boolean })[]): Promise<OverturnResult>
@@ -111,6 +117,11 @@ export interface ActionEffects {
 	voided?: { runId: string; rerated: boolean }
 	overturned?: { runId: string; placements: Placement[]; rerated: boolean }
 }
+
+// How a moderator's action settles a contested run. rate_original: the
+// contest was unfounded, so the result reported before it is rated. void: the
+// contest stands and no result does.
+type ContestSettlement = 'rate_original' | 'void'
 
 export interface ActionOutcome {
 	item: QueueItem
@@ -213,7 +224,11 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 		actor: string,
 		now: Date,
 	): Promise<QueueResult<ActionOutcome>> {
-		await deps.transaction((tx) => closeIn(tx, item, itemType, command.action, command.note, actor, now, null))
+		const settled = itemType === 'contest' ? await settleContest(item, 'rate_original') : null
+		if (settled && !settled.ok) return refuse(settled.refusal)
+		await deps.transaction((tx) =>
+			closeIn(tx, item, itemType, command.action, command.note, actor, now, settled ? settled.detail : null),
+		)
 		await deps.rescore(item, subjectsOf(item))
 		return done(item, command.action, {})
 	}
@@ -261,6 +276,8 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 		now: Date,
 	): Promise<QueueResult<ActionOutcome>> {
 		const target = await targetFor(item, command.targetPlayerId)
+		const settled = await settleForTarget(item, itemType, target)
+		if (settled && !settled.ok) return refuse(settled.refusal)
 		const warning = await deps.transaction(async (tx) => {
 			const row = await deps.insertWarning(tx, {
 				playerId: target.playerId,
@@ -272,6 +289,7 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 				target,
 				warningId: row.id,
 				message: command.message,
+				...(settled ? settled.detail : {}),
 			})
 			return row
 		})
@@ -292,6 +310,8 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 		const target = await targetFor(item, command.targetPlayerId)
 		const banType = banTypeOf(command)
 		const expiresAt = expiresAtOf(command.duration, now)
+		const settled = await settleForTarget(item, itemType, target)
+		if (settled && !settled.ok) return refuse(settled.refusal)
 		const ban = await deps.transaction(async (tx) => {
 			const row = await deps.insertBan(tx, {
 				playerId: target.playerId,
@@ -306,6 +326,7 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 				banType,
 				duration: command.duration,
 				expiresAt,
+				...(settled ? settled.detail : {}),
 			})
 			return row
 		})
@@ -381,9 +402,15 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 		actor: string,
 		now: Date,
 	): Promise<QueueResult<ActionOutcome>> {
-		const [conflict, game] = await Promise.all([deps.conflictOf(item), deps.gameOf(item)])
-		if (!conflict || !game) return refuse({ code: 'source_missing' })
-		const plan: OverturnPlan = planOverturn(conflict, toReportOf)
+		const [conflict, game] = await Promise.all([
+			itemType === 'contest' ? null : deps.conflictOf(item),
+			deps.gameOf(item),
+		])
+		if (!game || (itemType !== 'contest' && !conflict)) return refuse({ code: 'source_missing' })
+		// A contest names the winner; a conflict names the report that stands.
+		const plan: OverturnPlan = conflict
+			? planOverturn(conflict, toReportOf)
+			: planContestOverturn(await deps.participantsOf(game), toReportOf)
 		if (!plan.ok) return refuse({ code: plan.refusal })
 		const flagged = game.ranked ? await deps.flaggedPlayersOf(game.runId) : new Set<string>()
 		const result = await deps.overturnGame(game, ratedPlacements(plan.placements, flagged, game.ranked))
@@ -392,6 +419,41 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 		await deps.transaction((tx) => closeIn(tx, item, itemType, 'overturn', text, actor, now, overturned))
 		await deps.rescore(item, subjectsOf(item))
 		return done(item, 'overturn', { overturned })
+	}
+
+	// Settles a contested run's ratings before the item closes. Both settlements
+	// are idempotent (a void rebuilds again, a re-set result is a no-op), so a
+	// retry after a failed commit is safe.
+	async function settleContest(
+		item: QueueItem,
+		how: ContestSettlement,
+	): Promise<{ ok: true; detail: { settled: ContestSettlement; runId: string } } | { ok: false; refusal: QueueRefusal }> {
+		const game = await deps.gameOf(item)
+		if (!game) return { ok: false, refusal: { code: 'source_missing' } }
+		const detail = { settled: how, runId: game.runId }
+		// Only a matchmade game has ratings to settle.
+		if (!game.matchmade) return { ok: true, detail }
+		if (how === 'void') {
+			const result = await deps.voidGame(game)
+			if (result.kind === 'not_resolved')
+				return { ok: false, refusal: { code: 'not_voidable', reason: `The match is ${result.status}, not resolved` } }
+			if (result.kind === 'failed') return { ok: false, refusal: { code: 'nakama_failed', reason: result.reason } }
+			return { ok: true, detail }
+		}
+		const original = await deps.originalResultOf(game)
+		// Nobody reported before the contest: there is no result to rate.
+		if (original.length < 2) return { ok: true, detail }
+		const flagged = game.ranked ? await deps.flaggedPlayersOf(game.runId) : new Set<string>()
+		const result = await deps.overturnGame(game, ratedPlacements(original, flagged, game.ranked))
+		if (result.kind === 'failed') return { ok: false, refusal: { code: 'nakama_failed', reason: result.reason } }
+		return { ok: true, detail }
+	}
+
+	// A punishment on a contest: the contester's means the contest was unfounded;
+	// anyone else's means it stands.
+	async function settleForTarget(item: QueueItem, itemType: ItemType, target: Target) {
+		if (itemType !== 'contest') return null
+		return settleContest(item, target.role === 'contester' ? 'rate_original' : 'void')
 	}
 
 	async function done(item: QueueItem, action: ActionKey, effects: ActionEffects): Promise<QueueResult<ActionOutcome>> {

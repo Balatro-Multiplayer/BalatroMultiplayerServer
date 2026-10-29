@@ -244,6 +244,8 @@ async function runLinksOf(
 				itemType: 'anti_cheat',
 				sourceId: antiCheatSourceId(l.runId, l.playerId),
 			})
+		// A contest item is keyed by its run.
+		for (const runId of part) add(runId, { itemType: 'contest', sourceId: runId })
 		const conflicts = await db
 			.select({
 				id: matchResultConflicts.id,

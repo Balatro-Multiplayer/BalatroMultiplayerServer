@@ -53,3 +53,17 @@ export function samePlaces(a: readonly Placement[], b: readonly Placement[]): bo
 	const places = new Map(a.map((p) => [p.playerId, p.place]))
 	return b.every((p) => places.get(p.playerId) === p.place)
 }
+
+// A contest decided for a named winner: first place for them, every other
+// player tied behind (a moderator names one winner, not a full order).
+export function planContestOverturn(participants: readonly string[], winnerId: string): OverturnPlan {
+	if (participants.length < 2) return { ok: false, refusal: 'source_missing' }
+	if (!participants.includes(winnerId)) return { ok: false, refusal: 'invalid_target' }
+	return {
+		ok: true,
+		placements: [
+			{ playerId: winnerId, place: 1 },
+			...participants.filter((id) => id !== winnerId).map((playerId) => ({ playerId, place: 2 })),
+		],
+	}
+}

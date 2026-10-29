@@ -412,6 +412,63 @@ async function matchConflictEvidence(item: ServiceQueueItemRecord) {
 	}
 }
 
+// A contested run: who contested whom, the result reported before it, each
+// player's log (both replays are in `run` and `replay`), and the history of
+// the players with forfeits, disputes and contests.
+async function contestEvidence(item: ServiceQueueItemRecord) {
+	const { contest, lobbyKind: kind } = contextOf(item.context)
+	if (!contest) return null
+	const runId = item.sourceId
+	const [match] = UUID.test(runId)
+		? await db.select().from(matchmakingMatches).where(eq(matchmakingMatches.matchId, runId)).limit(1)
+		: []
+	const [run, replay] = await Promise.all([nakamaRun(runId), replayOf(runId)])
+	const playerIds = [
+		...new Set([contest.contesterId, ...(contest.againstId ? [contest.againstId] : []), ...(match ? ((match.players as string[]) ?? []) : [])]),
+	]
+	const cards = await miniCards(playerIds)
+	const players = await Promise.all(
+		playerIds.map(async (playerId) => {
+			const card = cards.get(playerId) as MiniCard
+			const nakamaId = card.nakamaUserId
+			const [contests, ratings] = await Promise.all([
+				db
+					.select({ n: count() })
+					.from(serviceQueueItems)
+					.where(and(eq(serviceQueueItems.itemType, 'contest'), sql`${serviceQueueItems.context}->'contest'->>'contesterId' = ${playerId}`)),
+				UUID.test(playerId) && match
+					? db
+							.select()
+							.from(matchmakingRatings)
+							.where(and(eq(matchmakingRatings.playerId, playerId), eq(matchmakingRatings.modId, match.modId), eq(matchmakingRatings.gameMode, match.gameMode)))
+					: [],
+			])
+			const log = replay?.logs.find((l) => l.playerId === playerId) ?? null
+			return {
+				...card,
+				role: playerId === contest.contesterId ? ('contester' as const) : playerId === contest.againstId ? ('subject' as const) : null,
+				logCheck: nakamaId && run ? (run.run.logChecks?.[nakamaId] ?? run.logs[nakamaId]?.check ?? null) : null,
+				flag: log?.flagReason ?? (nakamaId && run ? (run.run.flags?.[nakamaId] ?? null) : null),
+				ratings: ratings.map((r) => ({ season: r.season, rating: r.rating, gamesPlayed: r.gamesPlayed })),
+				contestsStarted: Number(contests[0]?.n ?? 0),
+			}
+		}),
+	)
+	return {
+		contest,
+		runId,
+		lobbyKind: kind ?? (match ? (match.gameMode.startsWith('ranked:') ? 'ranked' : 'casual') : 'private'),
+		match: match
+			? { matchId: match.matchId, gameMode: match.gameMode, modId: match.modId, status: match.status, resultReportedAt: match.resultReportedAt }
+			: null,
+		// What was reported before the contest: what a dismiss rates.
+		recorded: match?.resultPlacements ?? null,
+		players,
+		run,
+		replay,
+	}
+}
+
 async function forfeitEvidence(item: ServiceQueueItemRecord) {
 	const id = numericSourceId(item.sourceId)
 	const [flag] = id === null ? [] : await db.select().from(forfeitReconciliationFlags).where(eq(forfeitReconciliationFlags.id, id)).limit(1)
@@ -553,6 +610,8 @@ export async function evidenceOf(item: ServiceQueueItemRecord, now: Date): Promi
 			return matchConflictEvidence(item)
 		case 'forfeit_reconciliation':
 			return forfeitEvidence(item)
+		case 'contest':
+			return contestEvidence(item)
 		case 'anti_cheat':
 			return antiCheatEvidence(item)
 		case 'integrity':

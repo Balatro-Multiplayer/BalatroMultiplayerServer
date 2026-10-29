@@ -177,6 +177,30 @@ describe('runRowsOf: flags and disputes', () => {
 	})
 })
 
+describe('runRowsOf: contests', () => {
+	const contested = (over: Partial<PulledRun['run']> = {}) =>
+		run({ status: 'contested', ratings: {}, contest: { by: 'nb', against: 'na', at: T0 + 30_000 }, ...over })
+
+	it('files the contester and the contested player, as player ids', () => {
+		const rows = runRowsOf(contested(), ids)
+		expect(rows.contest).toEqual({ contesterId: 'pg-b', againstId: 'pg-a' })
+		expect(rows.lobbyRun.status).toBe('completed')
+		expect(runRowsOf(run(), ids).contest).toBeNull()
+	})
+
+	it('leaves every player unrated, so a rebuild skips the run until a moderator decides', () => {
+		// Nothing was rated, so the board read at pull time holds no rating for this run.
+		const rows = runRowsOf({ ...contested(), ratings: {} }, ids)
+		expect(rows.match?.resultPlacements.map((p) => p.rated)).toEqual([false, false])
+		expect(rows.ratings).toEqual([])
+	})
+
+	it('gives the logs the evidence limit', () => {
+		const limit = new Date(T0 + 60_000 + 180 * DAY)
+		expect(runRowsOf(contested(), ids).logs.map((l) => l.expiresAt)).toEqual([limit, limit])
+	})
+})
+
 describe('chatRowsOf', () => {
 	const line = (flagged: boolean): PulledChat => ({
 		key: 'k-chat',

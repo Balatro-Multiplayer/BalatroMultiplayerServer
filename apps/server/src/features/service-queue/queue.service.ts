@@ -33,7 +33,7 @@ import { type DispatcherDeps, type GameRef, type QueueItem, createDispatcher } f
 import { type Placement, samePlaces } from './overturn.js'
 import { type QueueResult, refuse } from './refusals.js'
 import { numericSourceId, parseAntiCheatSourceId } from '../../shared/service-queue/source-ids.js'
-import { type StaffRole, actorOf } from './types.js'
+import { type StaffRole, actorOf, contextOf } from './types.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -41,7 +41,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const NOTIFY_WARNED = 109
 
 // The run an item is about: a conflict's or forfeit flag's match id (the run
-// id), or an anti-cheat item's run.
+// id), a contest's source id (the run id), or an anti-cheat item's run.
 async function runIdOf(item: QueueItem): Promise<string | null> {
 	const id = numericSourceId(item.sourceId)
 	switch (item.itemType) {
@@ -49,6 +49,8 @@ async function runIdOf(item: QueueItem): Promise<string | null> {
 			return id === null ? null : ((await getMatchConflict(id))?.matchId ?? null)
 		case 'forfeit_reconciliation':
 			return id === null ? null : ((await getForfeitReconciliationFlag(id))?.matchId ?? null)
+		case 'contest':
+			return item.sourceId
 		case 'anti_cheat':
 			// Rows from before migration 0054 held the bare run id.
 			return parseAntiCheatSourceId(item.sourceId)?.runId ?? item.sourceId
@@ -105,6 +107,10 @@ const deps: DispatcherDeps<DbTransaction> = {
 			const conflict = id === null ? null : await getMatchConflict(id)
 			return conflict ? { subjectPlayerId: item.subjectPlayerId, conflict } : null
 		}
+		if (item.itemType === 'contest') {
+			const { contest } = contextOf(item.context)
+			return contest ? { subjectPlayerId: item.subjectPlayerId, contest } : null
+		}
 		return { subjectPlayerId: item.subjectPlayerId }
 	},
 	async playerExists(playerId) {
@@ -115,6 +121,24 @@ const deps: DispatcherDeps<DbTransaction> = {
 	async conflictOf(item) {
 		const id = numericSourceId(item.sourceId)
 		return item.itemType === 'match_conflict' && id !== null ? getMatchConflict(id) : null
+	},
+	async participantsOf(game) {
+		const [match] = await db
+			.select({ players: matchmakingMatches.players })
+			.from(matchmakingMatches)
+			.where(eq(matchmakingMatches.matchId, game.runId))
+			.limit(1)
+		return Array.isArray(match?.players) ? (match.players as string[]) : []
+	},
+	async originalResultOf(game) {
+		const [match] = await db
+			.select({ resultPlacements: matchmakingMatches.resultPlacements })
+			.from(matchmakingMatches)
+			.where(eq(matchmakingMatches.matchId, game.runId))
+			.limit(1)
+		const placements = match?.resultPlacements
+		if (!Array.isArray(placements)) return []
+		return (placements as Placement[]).map(({ playerId, place }) => ({ playerId, place }))
 	},
 	async flaggedPlayersOf(runId) {
 		if (!UUID.test(runId)) return new Set()

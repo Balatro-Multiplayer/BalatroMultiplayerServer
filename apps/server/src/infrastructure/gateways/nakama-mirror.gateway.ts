@@ -92,6 +92,17 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 			context: { lobbyKind: rows.lobbyKind },
 		})
 	}
+	// One item per contested run (sourceId = the run id), however often the
+	// entry is stored. The held run waits on it.
+	if (rows.contest) {
+		await enqueueServiceQueueItem({
+			itemType: 'contest',
+			sourceId: rows.lobbyRun.id,
+			subjectPlayerId: rows.contest.againstId,
+			summary: `Contested ${rows.lobbyKind === 'ranked' ? 'ranked' : 'casual'} match, lobby ${rows.lobbyRun.lobbyCode}`,
+			context: { lobbyKind: rows.lobbyKind, contest: rows.contest },
+		})
+	}
 	if (rows.conflicts.length > 0) {
 		const conflicts = await db
 			.select({ id: matchResultConflicts.id })
