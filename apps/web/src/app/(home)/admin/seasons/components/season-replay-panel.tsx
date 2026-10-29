@@ -33,6 +33,8 @@ interface ReplayResponse {
   season: { id: number; name: string }
   games: number
   changedPlayers: number
+  activeRankedGames: number
+  retentionRisk: boolean
   token: string
   players: {
     userId: string
@@ -53,15 +55,21 @@ interface ApplyResponse {
   itemsLeftOpen: number
 }
 
-function show(record: RatingRecord | null): string {
-  return record ? `${Math.round(record.rating)} (${record.gamesPlayed} games)` : '-'
+function formatRecord(record: RatingRecord | null): string {
+  return record
+    ? `${Math.round(record.rating)} (${record.gamesPlayed} games)`
+    : '-'
+}
+
+function toastError(e: Error) {
+  toast.error(e instanceof ApiError ? e.message : e.message || 'Request failed')
 }
 
 export function SeasonReplayPanel() {
-  const replayMut = useMutation<ReplayResponse>({
-    mutationFn: () => apiFetch('/webadmin/ratings/season-replay', { method: 'POST' }),
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Request failed'),
+  const replayMut = useMutation<ReplayResponse, Error>({
+    mutationFn: () =>
+      apiFetch('/webadmin/ratings/season-replay', { method: 'POST' }),
+    onError: toastError,
   })
   const result = replayMut.data
   const [confirming, setConfirming] = useState(false)
@@ -72,8 +80,7 @@ export function SeasonReplayPanel() {
         body: JSON.stringify({ token }),
       }),
     onSettled: () => setConfirming(false),
-    onError: (e) =>
-      toast.error(e instanceof ApiError ? e.message : e.message || 'Request failed'),
+    onError: toastError,
   })
   const applied = applyMut.data
 
@@ -81,16 +88,21 @@ export function SeasonReplayPanel() {
     <div className='space-y-3 rounded-lg border border-border p-4'>
       <div className='flex items-center justify-between gap-4'>
         <div>
-          <h2 className='text-lg font-semibold'>Season replay (dry run)</h2>
+          <h2 className='text-lg font-semibold'>Season replay</h2>
           <p className='text-sm text-muted-foreground'>
-            Replays every ranked game of the current season under the current rules and shows each
-            player&apos;s rating before and after. The dry run writes nothing.
+            Replays every ranked game of the current Season under the current
+            rules and shows each player&apos;s rating before and after. Games
+            with an anti-cheat flag are rated too, and the Season best is
+            rebuilt from the same games. The dry run writes nothing.
           </p>
         </div>
-        <Button onClick={() => {
+        <Button
+          onClick={() => {
             applyMut.reset()
             replayMut.mutate()
-          }} disabled={replayMut.isPending}>
+          }}
+          disabled={replayMut.isPending}
+        >
           {replayMut.isPending ? 'Replaying…' : 'Run dry run'}
         </Button>
       </div>
@@ -98,15 +110,30 @@ export function SeasonReplayPanel() {
       {result && (
         <>
           <p className='text-sm'>
-            {result.season.name}: {result.games} games replayed, {result.changedPlayers} players
-            change.
+            {result.season.name}: {result.games} games replayed,{' '}
+            {result.changedPlayers} players change. {result.activeRankedGames}{' '}
+            ranked games are running now.
           </p>
+          {result.activeRankedGames > 0 && (
+            <p className='text-sm font-medium text-destructive'>
+              Apply is refused while a ranked game is running.
+            </p>
+          )}
+          {result.retentionRisk && (
+            <p className='text-sm font-medium text-destructive'>
+              This Season started before the run retention window (180 days).
+              Some of its runs may be purged, so the replay would miss them.
+              Apply is refused.
+            </p>
+          )}
           {applied ? (
             <p className='text-sm font-medium'>
-              Applied: {applied.games} games, {applied.players} players, {applied.repairedGames}{' '}
-              games now rated, {applied.dismissedItems} queue items dismissed
-              {applied.itemsLeftOpen > 0 && ` (${applied.itemsLeftOpen} left open)`}. Backup{' '}
-              {applied.backupId}.
+              Applied: {applied.games} games, {applied.players} players,{' '}
+              {applied.repairedGames} games now rated, {applied.dismissedItems}{' '}
+              queue items dismissed
+              {applied.itemsLeftOpen > 0 &&
+                ` (${applied.itemsLeftOpen} left open)`}
+              . Backup {applied.backupId}.
             </p>
           ) : (
             <Button variant='destructive' onClick={() => setConfirming(true)}>
@@ -130,8 +157,8 @@ export function SeasonReplayPanel() {
                     <TableCell>
                       {p.modId} {p.mode}
                     </TableCell>
-                    <TableCell>{show(p.before)}</TableCell>
-                    <TableCell>{show(p.after)}</TableCell>
+                    <TableCell>{formatRecord(p.before)}</TableCell>
+                    <TableCell>{formatRecord(p.after)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -144,14 +171,20 @@ export function SeasonReplayPanel() {
           <AlertDialogHeader>
             <AlertDialogTitle>Apply the season replay?</AlertDialogTitle>
             <AlertDialogDescription>
-              Replaces the whole season board with the numbers above
-              {result ? ` (${result.games} games, ${result.changedPlayers} players change)` : ''}.
-              A backup is saved first. It is refused if a ranked game is running, or if the replay
-              changed since this dry run. No player is messaged.
+              Replaces the whole Season board with the numbers above
+              {result
+                ? ` (${result.games} games, ${result.changedPlayers} players change)`
+                : ''}
+              . A backup is saved first. The anti-cheat flag queue items of the
+              repaired games are dismissed. It is refused if a ranked game is
+              running, or if the replay changed since this dry run. No player is
+              messaged.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={applyMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={applyMut.isPending}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               disabled={applyMut.isPending}
               onClick={(e) => {
