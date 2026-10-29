@@ -60,6 +60,7 @@ export function useAuth() {
     isLoggedIn: player !== null,
     isAdmin: isAdmin(player),
     isModerator: isModerator(player),
+    isOwner: player?.isOwner === true,
     loginWithToken,
     logout,
     fetchMe,

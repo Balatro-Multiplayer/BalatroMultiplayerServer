@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { ApiError, apiFetch } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
+import { SeasonReplayPanel } from './components/season-replay-panel'
 import { NewSeasonDialog } from './components/new-season-dialog'
 import { SeasonsTable } from './components/seasons-table'
 
@@ -24,7 +25,7 @@ interface SeasonsResponse {
 }
 
 export default function AdminSeasonsPage() {
-  const { isAdmin, isModerator, pending } = useAuth()
+  const { isAdmin, isModerator, isOwner, pending } = useAuth()
   const router = useRouter()
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
@@ -106,6 +107,8 @@ export default function AdminSeasonsPage() {
         onActivate={(id) => activateMut.mutate(id)}
         onEnd={(id) => endMut.mutate(id)}
       />
+
+      {isOwner && <SeasonReplayPanel />}
 
       <NewSeasonDialog
         open={open}

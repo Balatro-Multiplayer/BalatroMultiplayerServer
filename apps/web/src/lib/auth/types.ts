@@ -9,6 +9,8 @@ export interface Player {
   discordLinked: boolean
   discordUsername: string | null
   privileges: Privilege[]
+  // Set by the API; the real owner check is on the API route.
+  isOwner?: boolean
   chatEnabled: boolean
   chatBlocked: boolean
 }
