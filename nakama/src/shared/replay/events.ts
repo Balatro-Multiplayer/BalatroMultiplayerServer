@@ -30,10 +30,17 @@ export function eventsOf(log: PlayerLog | undefined): LogEvent[] {
 	return eventsOfTuples(log.lines.map((line) => JSON.parse(line) as unknown))
 }
 
-// A log as stored in match_logs (lobby/storage.ts writes the tuples parsed).
+// A log as stored in match_logs: the exact lines (lobby/storage.ts), parsed on
+// read. A log stored before that kept parsed `events` instead.
+export function tuplesOfStored(value: unknown): unknown[] {
+	if (value === null || typeof value !== 'object') return []
+	const { lines, events } = value as { lines?: unknown; events?: unknown }
+	if (Array.isArray(lines)) return lines.map((line) => JSON.parse(String(line)) as unknown)
+	return Array.isArray(events) ? events : []
+}
+
 export function eventsOfStored(value: unknown): LogEvent[] {
-	const events = value !== null && typeof value === 'object' ? (value as { events?: unknown }).events : undefined
-	return Array.isArray(events) ? eventsOfTuples(events) : []
+	return eventsOfTuples(tuplesOfStored(value))
 }
 
 export function eventsByPlayer(logs: { [userId: string]: PlayerLog }): { [userId: string]: LogEvent[] } {

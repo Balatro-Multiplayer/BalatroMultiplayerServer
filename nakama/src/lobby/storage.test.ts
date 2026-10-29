@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { fakeNk } from '../testing/fake_nk'
-import { RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from './protocol'
+import { LOGS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from './protocol'
 import { MY_RUNS_COLLECTION } from './protocol'
-import { rpcRunGet, rpcRunsMine, runWrites } from './storage'
+import { rpcRunGet, rpcRunLogs, rpcRunsMine, runWrites } from './storage'
 
 const logger = {} as nkruntime.Logger
 const ctx = (userId: string) => ({ userId }) as unknown as nkruntime.Context
@@ -109,5 +109,23 @@ describe('runWrites', () => {
 		const writes = runWrites(run, {}, () => 'h')
 		const mine = writes.filter((w) => w.collection === MY_RUNS_COLLECTION && w.userId === 'a')[0]
 		expect(mine.value).toMatchObject({ status: 'partial', place: 2, rating: { delta: -12 } })
+	})
+})
+
+describe('rpcRunLogs', () => {
+	const logsOf = (value: { [key: string]: unknown }) => {
+		const nk = storedRun()
+		nk.storageWrite([{ collection: LOGS_COLLECTION, key: 'r1:a', userId: SYSTEM_USER_ID, value, permissionRead: 0, permissionWrite: 0 }])
+		return JSON.parse(rpcRunLogs(ctx('a'), logger, nk, JSON.stringify({ runId: 'r1', playerId: 'a' }))).logs.a
+	}
+
+	it('parses the stored lines into events for the client', () => {
+		const log = logsOf({ lines: ['[1,"play",null]'], eventCount: 1, check: 'match' })
+		expect(log).toEqual({ events: [[1, 'play', null]], eventCount: 1, check: 'match' })
+	})
+
+	it('still answers the events of a log stored before lines were kept', () => {
+		const log = logsOf({ events: [[1, 'play', null]], eventCount: 1 })
+		expect(log.events).toEqual([[1, 'play', null]])
 	})
 })

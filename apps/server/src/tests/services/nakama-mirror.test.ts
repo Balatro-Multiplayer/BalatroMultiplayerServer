@@ -59,6 +59,15 @@ const ids = new Map([
 ])
 
 describe('runRowsOf', () => {
+	it('builds the compressed events from the exact lines', () => {
+		const entry = run()
+		// Key order and number text that a parse and stringify would change.
+		const lines = ['[1,"x",{"b":1,"a":1.0}]', '[2,"y",null]']
+		entry.logs.na = { lines, eventCount: 2, truncated: false, carbonHash: 'h', check: 'match' } as never
+		const [a] = runRowsOf(entry, ids).logs
+		expect(decompressFromBase64(a.compressedEvents)).toBe(`[${lines.join(',')}]`)
+	})
+
 	it('maps a ranked run onto its run, logs, match and ratings', () => {
 		const rows = runRowsOf(run(), ids)
 		expect(rows.lobbyRun).toMatchObject({

@@ -93,7 +93,7 @@ export interface PulledRun {
 	kind: 'run'
 	at: number
 	run: RunRecord & { logChecks?: { [userId: string]: string } }
-	// userId -> the stored log ({events, eventCount, truncated, carbonHash, check}).
+	// userId -> the stored log ({lines or legacy events, eventCount, truncated, carbonHash, check}).
 	logs: { [userId: string]: unknown }
 	rating: RatingBoard | null
 	// userId -> their rating on that board as it stands now.
