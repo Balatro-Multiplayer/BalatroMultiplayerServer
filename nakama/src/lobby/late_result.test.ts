@@ -73,6 +73,10 @@ describe('ranked results', () => {
 		expect(sent[1][5]).toBe(false)
 	})
 
+	it('carries the number of players', () => {
+		expect(rankedResultContent(ranked, 'a').players).toBe(2)
+	})
+
 	it('says tied when first place is shared', () => {
 		const drawn = { ...ranked, placements: [{ playerId: 'a', place: 1 }, { playerId: 'b', place: 1 }] } as unknown as RunRecord
 		expect(rankedResultContent(drawn, 'a').tied).toBe(true)

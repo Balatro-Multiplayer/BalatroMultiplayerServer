@@ -16,6 +16,7 @@ export interface LateResult {
 
 export interface RankedResult extends LateResult {
 	tied: boolean
+	players: number
 }
 
 export function lateResultContent(run: RunRecord, playerId: string): LateResult {
@@ -38,10 +39,11 @@ export function sendLateResults(nk: nkruntime.Nakama, run: RunRecord, playerIds:
 }
 
 // A settled ranked run, told to each player who was rated by it. `tied` is a
-// shared first place (a draw).
+// shared first place (a draw); `players` is how many were in the run (a client
+// says the place, not win or loss, past two).
 export function rankedResultContent(run: RunRecord, playerId: string): RankedResult {
 	const first = run.placements.filter((p) => p.place === 1)
-	return { ...lateResultContent(run, playerId), tied: first.length > 1 }
+	return { ...lateResultContent(run, playerId), tied: first.length > 1, players: run.players.length }
 }
 
 // Transient: an offline player sees the same result in their match history.

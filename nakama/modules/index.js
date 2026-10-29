@@ -4135,7 +4135,7 @@ var NotifyCode = {
   // player left before it settled (lobby/late_result.ts). Transient: an
   // offline player reads it in their match history instead.
   RESULT_LATE: 110,
-  // {runId, code, modId, status, place, tied, rating}: a ranked run settled
+  // {runId, code, modId, status, place, tied, players, rating}: a ranked run settled
   // (lobby/late_result.ts). Sent to every player of it, leavers included.
   // Transient: the match history shows the same result.
   RESULT_RANKED: 111
@@ -8381,7 +8381,7 @@ function sendLateResults(nk, run, playerIds) {
 }
 function rankedResultContent(run, playerId) {
   const first = run.placements.filter((p) => p.place === 1);
-  return __spreadProps(__spreadValues({}, lateResultContent(run, playerId)), { tied: first.length > 1 });
+  return __spreadProps(__spreadValues({}, lateResultContent(run, playerId)), { tied: first.length > 1, players: run.players.length });
 }
 function sendRankedResults(nk, run) {
   if (!run.rankedMode) return;
