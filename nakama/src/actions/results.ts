@@ -200,8 +200,9 @@ export function settle(lobby: Lobby, now: number): Step {
 	if (remaining.length === 0) return finishGame(lobby, now)
 
 	// A pending result holds the run open: no clock, and reports alone do not
-	// end it. Clearing the flag settles it as usual.
-	if (lobby.game.resultPending) return { lobby, out: [] }
+	// end it. Clearing the flag settles it as usual. A contest outranks the
+	// hold, or a contested run would never reach a moderator.
+	if (lobby.game.resultPending && !lobby.game.contest) return { lobby, out: [] }
 
 	const reports = lobby.game.reports
 	const anyReport = lobby.game.reportOrder.length > 0

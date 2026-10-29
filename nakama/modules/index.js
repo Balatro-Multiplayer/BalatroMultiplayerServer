@@ -7739,7 +7739,7 @@ function settle(lobby, now) {
   if (!started) return { lobby, out: [] };
   const remaining = remainingParticipants(lobby);
   if (remaining.length === 0) return finishGame(lobby, now);
-  if (lobby.game.resultPending) return { lobby, out: [] };
+  if (lobby.game.resultPending && !lobby.game.contest) return { lobby, out: [] };
   const reports = lobby.game.reports;
   const anyReport = lobby.game.reportOrder.length > 0;
   if (anyReport && remaining.every((id) => reports[id] !== void 0))

@@ -514,6 +514,18 @@ describe('contest', () => {
 		expect(saved(abandoned)?.run.status).toBe('contested')
 	})
 
+	it('settles a contested run although its result is still pending', () => {
+		let lobby = startedMatchmade('a', 'b')
+		lobby = send(lobby, 'a', 'mpapi_set_result_pending', { pending: true }, 1500).lobby
+		lobby = send(lobby, 'a', 'mpapi_contest', {}, 2000).lobby
+		lobby = report(lobby, 'a', places('a', 'b'), 2500).lobby
+		const last = report(lobby, 'b', places('a', 'b'), 3000)
+		const run = saved(last)?.run as RunRecord
+		expect(run.status).toBe('contested')
+		expect(run.contest).toEqual({ by: 'a', against: 'b', at: 2000 })
+		expect(gameEnded(last)).toMatchObject({ status: 'contested' })
+	})
+
 	it('keeps the contest through a checkpoint resume', () => {
 		let lobby = startedMatchmade('a', 'b')
 		lobby = send(lobby, 'a', 'mpapi_contest', {}, 2000).lobby
