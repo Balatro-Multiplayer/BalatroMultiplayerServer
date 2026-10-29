@@ -135,6 +135,21 @@ describe('admin run RPCs', () => {
 		expect(full.logs.a.events).toEqual([{ t: 1 }])
 	})
 
+	it('admin_run_get still reads a log stored before lines were kept', () => {
+		const nk: any = fakeNk()
+		nk.storageWrite(runWrites(run(), { a: { lines: [], truncated: false } as never }, () => 'h'))
+		nk.storageWrite([
+			{
+				collection: LOGS_COLLECTION,
+				key: 'r1:a',
+				userId: SYSTEM_USER_ID,
+				value: { events: [{ t: 2 }], eventCount: 1, truncated: false, carbonHash: null, check: 'unavailable' },
+			},
+		])
+		const full = JSON.parse(rpcAdminRunGet(serverCtx(), fakeLogger, nk, JSON.stringify({ runId: 'r1', events: true })))
+		expect(full.logs.a.events).toEqual([{ t: 2 }])
+	})
+
 	it('admin_run_get refuses a player session and an unknown run', () => {
 		const nk = stored()
 		expect(() => rpcAdminRunGet(playerCtx('a'), fakeLogger, nk, JSON.stringify({ runId: 'r1' }))).toThrow(/server/)

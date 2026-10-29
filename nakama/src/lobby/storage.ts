@@ -4,6 +4,7 @@
 // RPCs below.
 import { INVALID_ARGUMENT, NOT_FOUND, UNAUTHENTICATED, runtimeError } from '../errors'
 import { parsePayload, requireUser } from '../rpc'
+import { tuplesOfStored } from '../shared/replay/events'
 import { checkLog } from './log_check'
 import {
 	type LogCheck,
@@ -69,7 +70,7 @@ export function runWrites(
 			key: logKey(run.runId, player.id),
 			userId: SYSTEM_USER_ID,
 			value: {
-				events: log ? log.lines.map((line) => JSON.parse(line)) : [],
+				lines: log ? log.lines : [],
 				eventCount: log ? log.lines.length : 0,
 				truncated: log ? log.truncated : false,
 				carbonHash: checks[player.id].carbonHash,
@@ -160,7 +161,8 @@ export function rpcRunLogs(
 	)
 	const logs: { [playerId: string]: unknown } = {}
 	for (const object of objects) {
-		logs[object.key.slice(run.runId.length + 1)] = object.value
+		const { lines, ...rest } = object.value as { lines?: unknown; [key: string]: unknown }
+		logs[object.key.slice(run.runId.length + 1)] = { ...rest, events: tuplesOfStored(object.value) }
 	}
 	return JSON.stringify({ logs })
 }

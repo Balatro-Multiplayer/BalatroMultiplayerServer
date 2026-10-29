@@ -48,7 +48,9 @@ export interface NakamaRun {
 }
 
 export interface NakamaLog {
-	events: unknown[]
+	// The exact lines the server hashed; a log stored earlier has parsed events.
+	lines?: string[]
+	events?: unknown[]
 	eventCount: number
 	truncated: boolean
 	carbonHash: string | null
@@ -207,6 +209,13 @@ export function rankedGameModeOf(mode: string): string {
 	return mode.startsWith('ranked:') ? mode : 'ranked:' + mode
 }
 
+// The events JSON, joined from the exact lines so it keeps the client's key
+// order and number text.
+function eventsJsonOf(log: NakamaLog | undefined): string {
+	if (!log) return '[]'
+	return log.lines ? `[${log.lines.join(',')}]` : JSON.stringify(log.events ?? [])
+}
+
 function placesKey(placements: { playerId: string; place: number }[]): string {
 	return JSON.stringify(
 		placements
@@ -303,7 +312,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 		logs.push({
 			runId: run.runId,
 			playerId: pg(player.id),
-			compressedEvents: compressToBase64(JSON.stringify(log ? log.events : [])),
+			compressedEvents: compressToBase64(eventsJsonOf(log)),
 			carbonHash: log ? log.carbonHash : null,
 			eventCount: log ? log.eventCount : 0,
 			status: check === 'unavailable' ? 'partial' : 'complete',

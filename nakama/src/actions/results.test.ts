@@ -831,8 +831,9 @@ describe('storage writes', () => {
 			['match_logs', `${runId}:b`, system, 0],
 			['my_runs', myKey, 'b', 1],
 		])
-		expect(writes[1].value).toMatchObject({ eventCount: 1, truncated: false, events: [[1, 'play', null]] })
-		expect(writes[3].value).toMatchObject({ eventCount: 0, events: [] })
+		expect(writes[1].value).toMatchObject({ eventCount: 1, truncated: false, lines: [save.logs.a.lines[0]] })
+		expect(writes[1].value).not.toHaveProperty('events')
+		expect(writes[3].value).toMatchObject({ eventCount: 0, lines: [] })
 		expect(writes[2].value).toMatchObject({ status: 'agreed', place: 2 })
 		expect(writes[4].value).toMatchObject({ place: 1 })
 		// No 'chk' event in these logs, so nothing to check them against.

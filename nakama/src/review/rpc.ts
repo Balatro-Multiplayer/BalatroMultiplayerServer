@@ -8,6 +8,7 @@ import { liveRecordsOf } from '../matchmaking/queue'
 import { LOGS_COLLECTION, MY_RUNS_COLLECTION, RUNS_COLLECTION, type RunRecord, SYSTEM_USER_ID } from '../lobby/protocol'
 import { currentLobby } from '../lobby/rpc'
 import { logKey, myRunKey, readRun } from '../lobby/storage'
+import { tuplesOfStored } from '../shared/replay/events'
 import { parsePayload, requireServer } from '../rpc'
 import { standingFor } from '../standing/current'
 import { readModReport } from '../standing/storage'
@@ -16,6 +17,7 @@ import { overturnRun, parseResultPlacements } from './result'
 import type { ServerSettings } from '../server_kind'
 
 interface StoredLog {
+	lines?: string[]
 	events?: unknown[]
 	eventCount?: number
 	truncated?: boolean
@@ -37,7 +39,7 @@ function logsOf(nk: nkruntime.Nakama, run: RunRecord, withEvents: boolean) {
 			truncated: log.truncated === true,
 			carbonHash: log.carbonHash ?? null,
 			check: log.check || 'unavailable',
-			...(withEvents ? { events: log.events || [] } : {}),
+			...(withEvents ? { events: tuplesOfStored(log) } : {}),
 		}
 	}
 	return logs
