@@ -268,6 +268,8 @@ export interface RatingResult {
 	delta: number | null
 	newRating: number | null
 	isPlacement: boolean
+	// True on the game that ends the placement games, when newRating is first shown.
+	justPlaced?: boolean
 	gamesPlayed: number
 }
 

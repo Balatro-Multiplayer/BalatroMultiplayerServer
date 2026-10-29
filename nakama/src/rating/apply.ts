@@ -83,6 +83,8 @@ export function planRatings(
 			delta: placing ? null : after.rating - before.rating,
 			newRating: placing ? null : after.rating,
 			isPlacement: placing,
+			// The game that finishes the placement games: the first rating shown.
+			justPlaced: !placing && before.gamesPlayed < PLACEMENT_GAMES,
 			gamesPlayed: after.gamesPlayed,
 		}
 	}

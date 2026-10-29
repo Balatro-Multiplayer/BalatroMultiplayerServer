@@ -60,7 +60,7 @@ import {
 	spectateRejection,
 } from './spectate'
 import { recordRun } from '../achievements/record'
-import { sendLateResults } from './late_result'
+import { sendLateResults, sendRankedResults } from './late_result'
 import { holdingsOf } from '../achievements/storage'
 import { DEFAULT_AVATAR } from '../shared/avatars/ids'
 import { selectableOrDefault } from '../shared/avatars/unlocked'
@@ -267,7 +267,10 @@ function runEffect(
 			}
 			if (stored) {
 				try {
-					sendLateResults(nk, stored, effect.lateResultTo)
+					// A ranked run tells everyone it rated, leavers included; any other
+					// run only tells the leavers of a pending result.
+					if (stored.rankedMode) sendRankedResults(nk, stored)
+					else sendLateResults(nk, stored, effect.lateResultTo)
 				} catch (e) {
 					logger.warn('Lobby %s: could not tell leavers the result of run %s: %v', lobby.code, stored.runId, e)
 				}

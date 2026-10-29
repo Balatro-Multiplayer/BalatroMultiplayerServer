@@ -4134,7 +4134,11 @@ var NotifyCode = {
   // {runId, code, modId, status, place, rating}: the result of a run the
   // player left before it settled (lobby/late_result.ts). Transient: an
   // offline player reads it in their match history instead.
-  RESULT_LATE: 110
+  RESULT_LATE: 110,
+  // {runId, code, modId, status, place, tied, rating}: a ranked run settled
+  // (lobby/late_result.ts). Sent to every player of it, leavers included.
+  // Transient: the match history shows the same result.
+  RESULT_RANKED: 111
 };
 var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
 function isNotifyCode(code) {
@@ -7277,6 +7281,8 @@ function planRatings(run, flags, current) {
       delta: placing ? null : after.rating - before.rating,
       newRating: placing ? null : after.rating,
       isPlacement: placing,
+      // The game that finishes the placement games: the first rating shown.
+      justPlaced: !placing && before.gamesPlayed < PLACEMENT_GAMES,
       gamesPlayed: after.gamesPlayed
     };
   }
@@ -8373,6 +8379,17 @@ function sendLateResults(nk, run, playerIds) {
     notify(nk, playerId, NotifyCode.RESULT_LATE, "result_late", __spreadValues({}, lateResultContent(run, playerId)), false);
   }
 }
+function rankedResultContent(run, playerId) {
+  const first = run.placements.filter((p) => p.place === 1);
+  return __spreadProps(__spreadValues({}, lateResultContent(run, playerId)), { tied: first.length > 1 });
+}
+function sendRankedResults(nk, run) {
+  if (!run.rankedMode) return;
+  for (const player of run.players) {
+    if (!run.ratings || !run.ratings[player.id]) continue;
+    notify(nk, player.id, NotifyCode.RESULT_RANKED, "result_ranked", __spreadValues({}, rankedResultContent(run, player.id)), false);
+  }
+}
 
 // src/standing/rejoin.ts
 var REJOIN_REFUSED_PREFIX = "standing_refused:";
@@ -8520,7 +8537,8 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
       }
       if (stored) {
         try {
-          sendLateResults(nk, stored, effect.lateResultTo);
+          if (stored.rankedMode) sendRankedResults(nk, stored);
+          else sendLateResults(nk, stored, effect.lateResultTo);
         } catch (e) {
           logger.warn("Lobby %s: could not tell leavers the result of run %s: %v", lobby.code, stored.runId, e);
         }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FlagReason, RunRecord } from '../lobby/protocol'
 import { type RatingRecord, applyRatings, newRating, planRatings } from './apply'
+import { PLACEMENT_GAMES } from './elo'
 import { nextSeasonBest } from './metrics'
 import { configureSeason } from './season'
 
@@ -40,12 +41,21 @@ describe('planRatings', () => {
 		const plan = planRatings(run(), clean, { a: seasoned(600), b: seasoned(600) })
 		expect(plan.updates.a).toMatchObject({ rating: 620, wins: 1, losses: 0, gamesPlayed: 11, lastMatchAt: 61_000 })
 		expect(plan.updates.b).toMatchObject({ rating: 580, wins: 0, losses: 1, gamesPlayed: 11 })
-		expect(plan.results.a).toEqual({ delta: 20, newRating: 620, isPlacement: false, gamesPlayed: 11 })
+		expect(plan.results.a).toEqual({ delta: 20, newRating: 620, isPlacement: false, justPlaced: false, gamesPlayed: 11 })
+	})
+
+	it('marks the game that ends the placement games, and shows the rating then', () => {
+		const last = { ...newRating(), rating: 640, gamesPlayed: PLACEMENT_GAMES - 1 }
+		const plan = planRatings(run(), clean, { a: last, b: seasoned(600) })
+		expect(plan.results.a.justPlaced).toBe(true)
+		expect(plan.results.a.isPlacement).toBe(false)
+		expect(plan.results.a.newRating).toBe(plan.updates.a.rating)
+		expect(plan.results.b.justPlaced).toBe(false)
 	})
 
 	it('hides the rating change while a player is still in placement games', () => {
 		const plan = planRatings(run(), clean, {})
-		expect(plan.results.a).toEqual({ delta: null, newRating: null, isPlacement: true, gamesPlayed: 1 })
+		expect(plan.results.a).toEqual({ delta: null, newRating: null, isPlacement: true, justPlaced: false, gamesPlayed: 1 })
 		// ...but still stores it.
 		expect(plan.updates.a.rating).toBeGreaterThan(600)
 	})
