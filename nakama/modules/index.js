@@ -9698,6 +9698,101 @@ function rpcAdminRatingsSet(ctx, logger, nk, payload) {
   return JSON.stringify({ written: written.length, cleared: cleared.length });
 }
 
+// src/rating/replay.ts
+var LIST_PAGE7 = 100;
+var LIST_PAGES_PER_CALL = 10;
+var FOLD_MAX_RUNS = 100;
+function isReplayable(run, startedAt) {
+  return !!run.rankedMode && (run.status === "agreed" || run.status === "partial") && run.endedAt >= startedAt;
+}
+function listRuns(nk, startedAt, cursor) {
+  const runs = [];
+  let next = cursor;
+  for (let pages = 0; pages < LIST_PAGES_PER_CALL; pages++) {
+    const page = nk.storageList(SYSTEM_USER_ID, RUNS_COLLECTION, LIST_PAGE7, next);
+    for (const o of page.objects || []) {
+      const run = o.value;
+      if (isReplayable(run, startedAt)) runs.push({ runId: run.runId, endedAt: run.endedAt });
+    }
+    next = page.cursor || "";
+    if (next === "") break;
+  }
+  return { runs, cursor: next };
+}
+function seedsFor(nk, run, mode, season, unseen) {
+  const out = {};
+  for (const id of unseen) out[id] = { before: null, seed: void 0 };
+  const read2 = (key) => nk.storageRead(unseen.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id })));
+  for (const o of read2(boardId(run.modId, mode, season))) out[o.userId].before = o.value;
+  if (season > 1) {
+    for (const o of read2(boardId(run.modId, mode, season - 1))) {
+      const rating = carriedOver(o.value, run.endedAt);
+      if (rating !== void 0) out[o.userId].seed = __spreadProps(__spreadValues({}, newRating()), { rating });
+    }
+  }
+  return out;
+}
+function foldRun(nk, run, state, season) {
+  const mode = run.rankedMode;
+  const board = `${run.modId}:${mode}`;
+  const known = state[board] || {};
+  const ids = run.players.map((p) => p.id);
+  const seeds = seedsFor(
+    nk,
+    run,
+    mode,
+    season,
+    ids.filter((id) => !known[id])
+  );
+  const current = {};
+  for (const id of ids) {
+    const entry = known[id];
+    if (entry) current[id] = __spreadProps(__spreadValues({}, entry.after), { rating: decayedRating(entry.after, run.endedAt) });
+    else current[id] = seeds[id].seed;
+  }
+  const updates = planRatings(run, current).updates;
+  const next = __spreadValues({}, known);
+  for (const id of Object.keys(updates)) {
+    next[id] = { before: known[id] ? known[id].before : seeds[id].before, after: updates[id] };
+  }
+  return __spreadProps(__spreadValues({}, state), { [board]: next });
+}
+function rpcAdminRatingsReplayList(ctx, _logger, nk, payload) {
+  requireServer(ctx);
+  const { startedAt, cursor } = parsePayload(payload);
+  if (typeof startedAt !== "number" || !Number.isFinite(startedAt)) throw runtimeError(INVALID_ARGUMENT, "startedAt is required");
+  if (cursor !== void 0 && typeof cursor !== "string") throw runtimeError(INVALID_ARGUMENT, "cursor must be a string");
+  try {
+    return JSON.stringify(listRuns(nk, startedAt, cursor || ""));
+  } catch (e) {
+    if (cursor) throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
+    throw e;
+  }
+}
+function rpcAdminRatingsReplayFold(ctx, _logger, nk, payload) {
+  requireServer(ctx);
+  const { runIds, state } = parsePayload(payload);
+  if (!Array.isArray(runIds) || runIds.length > FOLD_MAX_RUNS || runIds.some((id) => typeof id !== "string"))
+    throw runtimeError(INVALID_ARGUMENT, `runIds must be a list of at most ${FOLD_MAX_RUNS} ids`);
+  if (state !== void 0 && (typeof state !== "object" || state === null || Array.isArray(state)))
+    throw runtimeError(INVALID_ARGUMENT, "state must be an object");
+  const season = currentSeason(nk);
+  const stored = {};
+  for (const o of nk.storageRead(
+    runIds.map((key) => ({ collection: RUNS_COLLECTION, key, userId: SYSTEM_USER_ID }))
+  ))
+    stored[o.key] = o.value;
+  let folded = state || {};
+  let rated = 0;
+  for (const id of runIds) {
+    const run = stored[id];
+    if (!run || !isReplayable(run, 0)) continue;
+    folded = foldRun(nk, run, folded, season);
+    rated++;
+  }
+  return JSON.stringify({ state: folded, rated });
+}
+
 // src/standing/seed.ts
 var EXTRA_SEED_ENV = "QUEUE_ALLOWED_MOD_IDS_EXTRA";
 function seedAllowedModIdsExtra(nk, logger, env) {
@@ -10299,6 +10394,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_runs_purge_named", rpcAdminRunsPurgeNamed);
   initializer.registerRpc("admin_checkpoints_sweep", rpcAdminCheckpointsSweep);
   initializer.registerRpc("admin_ratings_set", rpcAdminRatingsSet);
+  initializer.registerRpc("admin_ratings_replay_list", rpcAdminRatingsReplayList);
+  initializer.registerRpc("admin_ratings_replay_fold", rpcAdminRatingsReplayFold);
   initializer.registerRpc("admin_run_get", rpcAdminRunGet);
   initializer.registerRpc("admin_run_set_result", rpcAdminRunSetResult);
   logger.info("BMP lobby module loaded");

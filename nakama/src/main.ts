@@ -66,6 +66,7 @@ import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcAdminCheckpointsSweep } from './lobby/checkpoint_sweep'
 import { rpcAdminRunsExpired, rpcAdminRunsPurgeNamed } from './lobby/retention'
 import { rpcAdminRatingsSet } from './rating/admin'
+import { rpcAdminRatingsReplayFold, rpcAdminRatingsReplayList } from './rating/replay'
 import { rpcAdminRunGet, rpcAdminRunSetResult } from './review/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
@@ -188,6 +189,8 @@ function InitModule(
 	initializer.registerRpc('admin_runs_purge_named', rpcAdminRunsPurgeNamed)
 	initializer.registerRpc('admin_checkpoints_sweep', rpcAdminCheckpointsSweep)
 	initializer.registerRpc('admin_ratings_set', rpcAdminRatingsSet)
+	initializer.registerRpc('admin_ratings_replay_list', rpcAdminRatingsReplayList)
+	initializer.registerRpc('admin_ratings_replay_fold', rpcAdminRatingsReplayFold)
 	initializer.registerRpc('admin_run_get', rpcAdminRunGet)
 	initializer.registerRpc('admin_run_set_result', rpcAdminRunSetResult)
 	logger.info('BMP lobby module loaded')
