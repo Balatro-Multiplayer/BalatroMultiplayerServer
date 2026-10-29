@@ -32,6 +32,8 @@ type ValueVector =
 			text: string
 	  }
 	| { kind: 'bignum'; m: number; e: number; text: string }
+	// Text a client may send in place of score text; the vanilla rule makes nan and inf the largest double.
+	| { kind: 'text'; value: string; text: string }
 
 export const VALUE_VECTORS: ValueVector[] = [
 	{ kind: 'double', value: 0, text: '0' },
@@ -70,6 +72,10 @@ export const VALUE_VECTORS: ValueVector[] = [
 	{ kind: 'bignum', m: 1, e: 100, text: '100,1' },
 	{ kind: 'bignum', m: 5, e: 3, text: '5000' },
 	{ kind: 'bignum', m: -1, e: 100, text: '0' },
+	{ kind: 'text', value: 'nan', text: LARGEST_DOUBLE_TEXT },
+	{ kind: 'text', value: 'inf', text: LARGEST_DOUBLE_TEXT },
+	{ kind: 'text', value: 'infinity', text: LARGEST_DOUBLE_TEXT },
+	{ kind: 'text', value: 'naneinf', text: LARGEST_DOUBLE_TEXT },
 ]
 
 // Score text and the canonical text it normalizes to. A null result is
@@ -152,7 +158,9 @@ describe('score text from game values', () => {
 				? `double ${v.value}`
 				: v.kind === 'omega'
 					? `omega [${v.array}] sign ${v.sign}`
-					: `bignum ${v.m}e${v.e}`
+					: v.kind === 'text'
+						? `text ${v.value}`
+						: `bignum ${v.m}e${v.e}`
 		it(`${label} -> ${v.text.slice(0, 40)}`, () => {
 			if (v.kind === 'double') {
 				const n =
@@ -169,6 +177,8 @@ describe('score text from game values', () => {
 					x === 'inf' ? Number.POSITIVE_INFINITY : x === 'nan' ? Number.NaN : x,
 				)
 				expect(fromArray(array, v.sign)).toBe(v.text)
+			} else if (v.kind === 'text') {
+				expect(parseLegacyScore(v.value)).toBe(v.text)
 			}
 			// A bignum (Talisman's old mantissa and exponent number) is read
 			// from the game by the Lua side only, so the table row checks that
@@ -294,7 +304,10 @@ const LEGACY_VECTORS: [string, string][] = [
 	['e12#34#56', TOP_SCORE],
 	['10##5', TOP_SCORE],
 	['-5', '0'],
-	['nan', '0'],
+	['nan', LARGEST_DOUBLE_TEXT],
+	['NaN', LARGEST_DOUBLE_TEXT],
+	['infinity', LARGEST_DOUBLE_TEXT],
+	['-inf', '0'],
 	['banana', '0'],
 	['', '0'],
 ]

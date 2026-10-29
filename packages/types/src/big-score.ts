@@ -190,7 +190,7 @@ const HYPER_E = /^(e*)([0-9]+(?:\.[0-9]+)?)e\+?([0-9]+)$/
 /**
  * Score text of text from a log written before score text existed: commas
  * ("2,832"), Lua exponent text ("1.5e+20"), Balatro notation ("1.235e1,234",
- * "e1.2e10"), "naneinf", and Talisman's array forms (the top score). A number
+ * "e1.2e10"), "nan", "inf", "infinity" and "naneinf" (the largest double), and Talisman's array forms (the top score). A number
  * is read as a double. Anything unreadable is "0". Text that is already score
  * text comes back normalized, except comma-grouped digits: those are read as
  * an integer, because every old client wrote them that way.
@@ -206,7 +206,7 @@ export function parseLegacyScore(input: unknown): string {
 	if (cleaned === '') return ZERO_SCORE
 	const value = Number(cleaned)
 	if (!Number.isNaN(value) && (Number.isFinite(value) || !HYPER_E.test(cleaned))) return fromNumber(value)
-	if (cleaned === 'naneinf' || cleaned === 'inf' || cleaned === 'infinity')
+	if (cleaned === 'naneinf' || cleaned === 'nan' || cleaned === 'inf' || cleaned === 'infinity')
 		return fromNumber(Number.POSITIVE_INFINITY)
 	const tower = HYPER_E.exec(cleaned)
 	if (tower !== null) {

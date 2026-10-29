@@ -1,4 +1,3 @@
-import { normalizeScore } from '../../../packages/types/src/big-score'
 // Ending a started game: every participant reports the placements
 // (mpapi_report_result), and once they're all in -- or the clock runs out --
 // the reports are reconciled into one result, handed off to be stored, and
@@ -12,6 +11,7 @@ import {
 	ServerOp,
 } from '../lobby/protocol'
 import { type Lobby, type Outbound, type Step, emptyGame } from '../lobby/state'
+import { normalizeScore } from '../../../packages/types/src/big-score'
 
 // A report's placements, or why it's malformed. Every participant must be
 // placed exactly once.

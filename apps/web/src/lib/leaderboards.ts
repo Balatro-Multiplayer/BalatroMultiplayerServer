@@ -99,6 +99,6 @@ export function formatMetric(
 ): string {
   if (value === null || value === undefined) return '-'
   if (kind === 'time') return formatDuration(Number(value))
-  // A score is score text; an old number shows as the same score.
+  // A score is score text; a plain number shows as the same score.
   return displayScore(typeof value === 'string' ? value : fromNumber(value)) ?? '-'
 }

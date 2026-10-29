@@ -245,7 +245,7 @@ async function applySecondaryMetric(
 			eq(matchmakingRatings.season, seasonId),
 		)
 
-		// A score board reads the score text; the old number metric is ignored.
+		// A score board reads the score text; a plain number metric is ignored.
 		if (cfg.kind === 'score') {
 			const cols = seasonBestColumns(match.modId, p.metricText)
 			if (cols.seasonBestText === null || cols.seasonBestLen === null || cols.seasonBestRev === null) continue

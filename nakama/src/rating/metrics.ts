@@ -1,8 +1,9 @@
-import { compareScores, fromNumber, normalizeScore } from '../../../packages/types/src/big-score'
-
 // Secondary leaderboard metrics: a per-mod personal best tracked alongside
 // the rating. The same table as apps/server's features/ratings/metrics.config.ts
 // (client-reported and plausibility-bounded, never re-simulated).
+
+import { compareScores, fromNumber, normalizeScore } from '../../../packages/types/src/big-score'
+
 export type MetricKind = 'score' | 'time_ms'
 
 export interface MetricConfig {
@@ -22,15 +23,15 @@ const BOUNDS = {
 	time_ms: { min: 10_000, max: 6 * 60 * 60 * 1000 },
 }
 
-// What a placement reports for the season best: the old number, or score
-// text. A score board reads only the text; a time board reads only the number.
+// What a placement reports for the season best: score text for a score board,
+// a plain number for a time board. Each board reads only its own field.
 export interface ReportedMetric {
 	metric?: number
 	metricText?: string
 }
 
 // A stored season best, shown the way its board keeps it: score text for a
-// score board (an old number becomes its score text), a number for a time
+// score board (a stored plain number becomes its score text), a number for a time
 // board. Anything else is null.
 export function seasonBestOf(modId: string, stored: unknown): number | string | null {
 	const config = METRIC_CONFIG[modId]

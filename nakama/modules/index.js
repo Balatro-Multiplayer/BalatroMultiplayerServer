@@ -4762,7 +4762,7 @@ function parseLegacyScore(input) {
   if (cleaned === "") return ZERO_SCORE;
   const value = Number(cleaned);
   if (!Number.isNaN(value) && (Number.isFinite(value) || !HYPER_E.test(cleaned))) return fromNumber(value);
-  if (cleaned === "naneinf" || cleaned === "inf" || cleaned === "infinity")
+  if (cleaned === "naneinf" || cleaned === "nan" || cleaned === "inf" || cleaned === "infinity")
     return fromNumber(Number.POSITIVE_INFINITY);
   const tower = HYPER_E.exec(cleaned);
   if (tower !== null) {
