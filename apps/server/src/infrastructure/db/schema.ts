@@ -777,8 +777,8 @@ export const matchRunLogs = pgTable(
 		carbonHash: text('carbon_hash'),
 		eventCount: integer('event_count').notNull().default(0),
 		status: varchar('status', { length: 16 }).notNull().default('partial'), // partial | complete
-		// null | 'hash_mismatch' | 'elapsed_time_gate' -- set by Phase 8's
-		// evaluateAntiCheat at ranked result resolution.
+		// null | 'hash_mismatch' | 'elapsed_time_gate' | 'unverified_log' -- set
+		// by Phase 8's evaluateAntiCheat at ranked result resolution.
 		flagReason: varchar('flag_reason', { length: 32 }),
 		finalizedAt: timestamp('finalized_at', { withTimezone: true }),
 		// The earliest the log may go: the run's end + 180 days. The sweep keeps

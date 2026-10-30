@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+	LOGS_COLLECTION,
 	RATINGS_COLLECTION,
 	RUNS_COLLECTION,
 	SYSTEM_USER_ID,
@@ -146,6 +147,43 @@ describe('rpcAdminRatingsReplayFold', () => {
 			state: {},
 		})
 		expect(out.state['MultiplayerSPDRN:solo'].a.after.gamesPlayed).toBe(1)
+	})
+
+	it('caps a PvP season best at a trusted log, and keeps it for a deleted or untrusted one', () => {
+		const pvp = run('r1', T0, {
+			modId: 'MultiplayerPvP',
+			placements: [
+				{ playerId: 'a', place: 1, metricText: '20,3' },
+				{ playerId: 'b', place: 2, metricText: '20,3' },
+				{ playerId: 'c', place: 3, metricText: '20,3' },
+			],
+			players: [
+				{ id: 'a', displayName: 'A' },
+				{ id: 'b', displayName: 'B' },
+				{ id: 'c', displayName: 'C' },
+			],
+		})
+		const nk = nkWith([pvp])
+		const stored = (playerId: string, check: string) =>
+			nk.objects.set(`${LOGS_COLLECTION}/${SYSTEM_USER_ID}/r1:${playerId}`, {
+				value: {
+					lines: [JSON.stringify([5, 'hand_result', ['500', 1]])],
+					check,
+				},
+				version: 1,
+			})
+		stored('a', 'match')
+		stored('c', 'mismatch')
+		// b's log was deleted by retention.
+		const out = call(rpcAdminRatingsReplayFold, nk, {
+			runIds: ['r1'],
+			state: {},
+		})
+		const board = out.state['MultiplayerPvP:solo']
+		expect(board.a.after.seasonBest).toBeNull()
+		expect(board.a.after.wins).toBe(1)
+		expect(board.b.after.seasonBest).toBe('20,3')
+		expect(board.c.after.seasonBest).toBe('20,3')
 	})
 
 	it('seeds a player with no record this season from last season', () => {

@@ -436,6 +436,7 @@ export interface ForfeitEvidence {
 
 export type FlagExplanation =
   | { reason: 'hash_mismatch'; text: string }
+  | { reason: 'unverified_log'; text: string }
   | {
       reason: 'elapsed_time_gate'
       text: string

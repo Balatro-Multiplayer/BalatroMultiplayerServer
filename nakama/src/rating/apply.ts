@@ -45,9 +45,11 @@ export interface RatingPlan {
 
 // Who is rated: everyone in an agreed or partial result (a disputed one isn't
 // trusted). An anti-cheat flag (lobby/anticheat.ts) doesn't withhold a rating.
+// `bounds` caps each player's season best at their replay log (logBounds).
 export function planRatings(
 	run: RunRecord,
 	current: { [userId: string]: RatingRecord | undefined },
+	bounds: { [userId: string]: string } = {},
 ): RatingPlan {
 	const plan: RatingPlan = { updates: {}, results: {} }
 	if (run.status !== 'agreed' && run.status !== 'partial') return plan
@@ -72,7 +74,7 @@ export function planRatings(
 			wins: before.wins + (won ? 1 : 0),
 			losses: before.losses + (won ? 0 : 1),
 			gamesPlayed: before.gamesPlayed + 1,
-			seasonBest: nextSeasonBest(run.modId, p, before.seasonBest),
+			seasonBest: nextSeasonBest(run.modId, p, before.seasonBest, bounds[p.playerId]),
 			lastMatchAt: run.endedAt,
 		}
 		plan.updates[p.playerId] = after
@@ -140,6 +142,7 @@ export function applyRatings(
 	logger: nkruntime.Logger,
 	run: RunRecord,
 	mode: string,
+	bounds: { [userId: string]: string } = {},
 ): { [userId: string]: RatingResult } {
 	const season = currentSeason(nk)
 	const key = boardId(run.modId, mode, season)
@@ -152,7 +155,7 @@ export function applyRatings(
 			run.endedAt,
 			season,
 		)
-		const plan = planRatings(run, current)
+		const plan = planRatings(run, current, bounds)
 		const ids = Object.keys(plan.updates)
 		if (ids.length === 0) return {}
 		try {

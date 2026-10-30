@@ -18,7 +18,7 @@ import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.j
 export type LogCheck = 'match' | 'mismatch' | 'unavailable'
 // What kind of game an entry came from (nakama review/ranked.ts LobbyKind).
 export type GameKind = 'ranked' | 'casual' | 'private'
-export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
+export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate' | 'unverified_log'
 
 export interface NakamaRun {
 	runId: string

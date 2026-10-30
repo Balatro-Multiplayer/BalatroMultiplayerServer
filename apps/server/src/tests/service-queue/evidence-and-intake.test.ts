@@ -127,6 +127,12 @@ describe('anti-cheat explanations', () => {
 		expect(flag.text).toContain('10 scored hands need at least 30s')
 	})
 
+	it('explains a ranked log that could not be checked', () => {
+		const flag = explainFlag('unverified_log', 0, 0)
+		expect(flag.reason).toBe('unverified_log')
+		expect(flag.text).toContain('season best')
+	})
+
 	it('explains a hash mismatch, and anything else as-is', () => {
 		expect(explainFlag('hash_mismatch', 0, 0).reason).toBe('hash_mismatch')
 		expect(explainFlag(null, 0, 0)).toEqual({ reason: 'unknown', text: 'Flag reason: none recorded' })

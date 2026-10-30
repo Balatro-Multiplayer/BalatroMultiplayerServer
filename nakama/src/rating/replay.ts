@@ -6,13 +6,18 @@
 // and returns the state after them.
 import { INVALID_ARGUMENT, runtimeError } from '../errors'
 import {
+	type LogCheck,
+	LOGS_COLLECTION,
 	RATINGS_COLLECTION,
 	RUNS_COLLECTION,
 	type RunRecord,
 	SYSTEM_USER_ID,
 } from '../lobby/protocol'
+import { logKey } from '../lobby/storage'
 import { parsePayload, requireServer } from '../rpc'
+import { eventsOfStored, type LogEvent } from '../shared/replay/events'
 import { boardId, newRating, planRatings, type RatingRecord } from './apply'
+import { logBounds } from './metrics'
 import { carriedOver, currentSeason, decayedRating } from './season'
 
 const LIST_PAGE = 100
@@ -111,6 +116,31 @@ function seedsFor(
 	return out
 }
 
+// Each player's season best bound, as the live game set it (lobby/match.ts),
+// from the stored logs and the check each was stored with. A log retention
+// deleted bounds nothing, so its claim counts. Logs are large, so a game with
+// no claimed score (a time board) reads none.
+function storedBounds(
+	nk: nkruntime.Nakama,
+	run: RunRecord,
+): { [userId: string]: string } {
+	if (!run.placements.some((p) => p.metricText !== undefined)) return {}
+	const events: { [userId: string]: LogEvent[] } = {}
+	const checks: { [userId: string]: LogCheck } = {}
+	for (const o of nk.storageRead(
+		run.players.map((p) => ({
+			collection: LOGS_COLLECTION,
+			key: logKey(run.runId, p.id),
+			userId: SYSTEM_USER_ID,
+		})),
+	)) {
+		const id = o.key.slice(run.runId.length + 1)
+		events[id] = eventsOfStored(o.value)
+		checks[id] = (o.value as { check?: LogCheck }).check || 'unavailable'
+	}
+	return logBounds(events, checks)
+}
+
 function nameOf(run: RunRecord, userId: string): string {
 	const player = run.players.find((p) => p.id === userId)
 	return player ? player.displayName : ''
@@ -145,7 +175,7 @@ function foldRun(
 			}
 		else current[id] = seeds[id].seed
 	}
-	const updates = planRatings(run, current).updates
+	const updates = planRatings(run, current, storedBounds(nk, run)).updates
 	const next = { ...known }
 	for (const id of Object.keys(updates)) {
 		next[id] = {

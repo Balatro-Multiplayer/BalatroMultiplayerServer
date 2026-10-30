@@ -157,6 +157,7 @@ export function conflictSides(
 
 export type FlagExplanation =
 	| { reason: 'hash_mismatch'; text: string }
+	| { reason: 'unverified_log'; text: string }
 	| { reason: 'elapsed_time_gate'; text: string; hands: number; elapsedMs: number; minimumMs: number }
 	| { reason: 'unknown'; text: string }
 
@@ -177,6 +178,11 @@ export function explainFlag(reason: string | null, hands: number, elapsedMs: num
 		return {
 			reason,
 			text: "The replay log's checksum does not match the events it carries: the log was altered or is incomplete.",
+		}
+	if (reason === 'unverified_log')
+		return {
+			reason,
+			text: 'In a ranked game, the replay log is missing, cut off or has no checksum, so the season best it claims could not be checked.',
 		}
 	if (reason === 'elapsed_time_gate') {
 		const minimumMs = hands * MIN_MS_PER_HAND

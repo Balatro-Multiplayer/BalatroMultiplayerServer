@@ -4517,6 +4517,7 @@ function runFlags(run, events, checks) {
   for (const player of run.players) {
     if (checks[player.id] === "mismatch") flags[player.id] = "hash_mismatch";
     else if (handCount(events[player.id]) * MIN_MS_PER_HAND > elapsedMs) flags[player.id] = "elapsed_time_gate";
+    else if (run.rankedMode && checks[player.id] === "unavailable") flags[player.id] = "unverified_log";
   }
   return flags;
 }
@@ -7425,13 +7426,32 @@ function seasonBestOf(modId, stored) {
   }
   return typeof stored === "number" && Number.isFinite(stored) ? stored : null;
 }
-function nextSeasonBest(modId, reported, current) {
+function roundTotalOf(value) {
+  if (typeof value === "string") return normalizeScore(value);
+  return typeof value === "number" && Number.isFinite(value) ? fromNumber(value) : null;
+}
+function logBounds(events, checks) {
+  const bounds = {};
+  for (const userId in checks) {
+    if (checks[userId] !== "match") continue;
+    let bound = ZERO_SCORE;
+    for (const event2 of events[userId] || []) {
+      if (event2.opcode !== "hand_result" || !Array.isArray(event2.args)) continue;
+      const total = roundTotalOf(event2.args[0]);
+      if (total !== null && compareScores(total, bound) === 1) bound = total;
+    }
+    bounds[userId] = bound;
+  }
+  return bounds;
+}
+function nextSeasonBest(modId, reported, current, bound) {
   const config = METRIC_CONFIG[modId];
   if (!config) return current;
   if (config.kind === "score") {
     const best = seasonBestOf(modId, current);
     const text = reported.metricText === void 0 ? null : normalizeScore(reported.metricText);
     if (text === null) return best;
+    if (bound !== void 0 && compareScores(text, bound) === 1) return best;
     if (best === null) return text;
     return compareScores(text, best) === 1 ? text : best;
   }
@@ -7483,7 +7503,7 @@ function newRating() {
     lastMatchAt: 0
   };
 }
-function planRatings(run, current) {
+function planRatings(run, current, bounds = {}) {
   const plan = { updates: {}, results: {} };
   if (run.status !== "agreed" && run.status !== "partial") return plan;
   const placements = run.placements;
@@ -7506,7 +7526,7 @@ function planRatings(run, current) {
       wins: before.wins + (won ? 1 : 0),
       losses: before.losses + (won ? 0 : 1),
       gamesPlayed: before.gamesPlayed + 1,
-      seasonBest: nextSeasonBest(run.modId, p, before.seasonBest),
+      seasonBest: nextSeasonBest(run.modId, p, before.seasonBest, bounds[p.playerId]),
       lastMatchAt: run.endedAt
     };
     plan.updates[p.playerId] = after;
@@ -7550,7 +7570,7 @@ function loadRatings(nk, modId, mode, playerIds, now, season) {
   }
   return { current, versions };
 }
-function applyRatings(nk, logger, run, mode) {
+function applyRatings(nk, logger, run, mode, bounds = {}) {
   const season = currentSeason(nk);
   const key = boardId(run.modId, mode, season);
   for (let attempt = 0; attempt < WRITE_ATTEMPTS3; attempt++) {
@@ -7562,7 +7582,7 @@ function applyRatings(nk, logger, run, mode) {
       run.endedAt,
       season
     );
-    const plan = planRatings(run, current);
+    const plan = planRatings(run, current, bounds);
     const ids = Object.keys(plan.updates);
     if (ids.length === 0) return {};
     try {
@@ -8718,11 +8738,11 @@ function apply(ctx, logger, nk, dispatcher, state, raw) {
   return __spreadProps(__spreadValues({}, state), { lobby: step.lobby, presences, label });
 }
 function judged(nk, logger, run, logs, events) {
-  const flags = runFlags(run, events, logChecksOf(run, logs, (input) => nk.sha256Hash(input)));
-  const flagged = __spreadProps(__spreadValues({}, run), { flags });
+  const checks = logChecksOf(run, logs, (input) => nk.sha256Hash(input));
+  const flagged = __spreadProps(__spreadValues({}, run), { flags: runFlags(run, events, checks) });
   if (!run.rankedMode) return flagged;
   try {
-    return __spreadProps(__spreadValues({}, flagged), { ratings: applyRatings(nk, logger, run, run.rankedMode) });
+    return __spreadProps(__spreadValues({}, flagged), { ratings: applyRatings(nk, logger, run, run.rankedMode, logBounds(events, checks)) });
   } catch (e) {
     logger.error("Could not rate run %s: %v", run.runId, e);
     return flagged;
@@ -10010,6 +10030,23 @@ function seedsFor(nk, run, mode, season, unseen) {
   }
   return out;
 }
+function storedBounds(nk, run) {
+  if (!run.placements.some((p) => p.metricText !== void 0)) return {};
+  const events = {};
+  const checks = {};
+  for (const o of nk.storageRead(
+    run.players.map((p) => ({
+      collection: LOGS_COLLECTION,
+      key: logKey(run.runId, p.id),
+      userId: SYSTEM_USER_ID
+    }))
+  )) {
+    const id = o.key.slice(run.runId.length + 1);
+    events[id] = eventsOfStored(o.value);
+    checks[id] = o.value.check || "unavailable";
+  }
+  return logBounds(events, checks);
+}
 function nameOf(run, userId) {
   const player = run.players.find((p) => p.id === userId);
   return player ? player.displayName : "";
@@ -10035,7 +10072,7 @@ function foldRun(nk, run, state, season) {
       });
     else current[id] = seeds[id].seed;
   }
-  const updates = planRatings(run, current).updates;
+  const updates = planRatings(run, current, storedBounds(nk, run)).updates;
   const next = __spreadValues({}, known);
   for (const id of Object.keys(updates)) {
     next[id] = {

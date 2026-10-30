@@ -28,6 +28,12 @@ describe('anti-cheat flags', () => {
 		expect(flags).toEqual({ b: 'elapsed_time_gate', c: 'hash_mismatch' })
 	})
 
+	it('flags a ranked player whose log is missing, cut off or could not be checked', () => {
+		const ranked = { ...run(60_000), rankedMode: 'nemesis' } as RunRecord
+		const flags = runFlags(ranked, { a: log('hand_result') }, { a: 'match', b: 'unavailable', c: 'mismatch' })
+		expect(flags).toEqual({ b: 'unverified_log', c: 'hash_mismatch' })
+	})
+
 	it('flags nobody in a clean game', () => {
 		expect(runFlags(run(60_000), { a: log('hand_result') }, { a: 'match', b: 'unavailable', c: 'match' })).toEqual({})
 	})

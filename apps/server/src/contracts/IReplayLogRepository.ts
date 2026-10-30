@@ -1,6 +1,9 @@
 export type LobbyRunStatus = 'active' | 'completed' | 'abandoned' | 'terminated'
 export type PlayerLogStatus = 'partial' | 'complete'
-export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
+export type FlagReason =
+	| 'hash_mismatch'
+	| 'elapsed_time_gate'
+	| 'unverified_log'
 
 export interface RunRow {
 	id: string

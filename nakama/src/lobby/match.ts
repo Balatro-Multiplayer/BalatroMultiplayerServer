@@ -49,6 +49,7 @@ import {
 } from './state'
 import { displayNameOf, readProfile } from '../player/profile'
 import { applyRatings } from '../rating/apply'
+import { logBounds } from '../rating/metrics'
 import { currentSeason } from '../rating/season'
 import { enqueue } from '../mirror/outbox'
 import { chatCheck, chatPost, reportEvidence } from './chat'
@@ -182,8 +183,9 @@ function apply(
 
 // A finished run is flagged (lobby/anticheat.ts) and, for a ranked game,
 // rated before it's stored, so the run and each player's pointer carry what
-// it did to their rating. A rating failure must not lose the run, so it
-// leaves the run unrated instead.
+// it did to their rating. Each season best is capped at the player's own
+// trusted log (rating/metrics.ts logBounds). A rating failure must not lose
+// the run, so it leaves the run unrated instead.
 function judged(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
@@ -191,11 +193,11 @@ function judged(
 	logs: { [userId: string]: PlayerLog },
 	events: { [userId: string]: LogEvent[] },
 ): RunRecord {
-	const flags = runFlags(run, events, logChecksOf(run, logs, (input) => nk.sha256Hash(input)))
-	const flagged = { ...run, flags }
+	const checks = logChecksOf(run, logs, (input) => nk.sha256Hash(input))
+	const flagged = { ...run, flags: runFlags(run, events, checks) }
 	if (!run.rankedMode) return flagged
 	try {
-		return { ...flagged, ratings: applyRatings(nk, logger, run, run.rankedMode) }
+		return { ...flagged, ratings: applyRatings(nk, logger, run, run.rankedMode, logBounds(events, checks)) }
 	} catch (e) {
 		logger.error('Could not rate run %s: %v', run.runId, e)
 		return flagged

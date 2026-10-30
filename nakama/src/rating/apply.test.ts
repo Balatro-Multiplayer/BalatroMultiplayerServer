@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { RunRecord } from '../lobby/protocol'
+import type { LogEvent } from '../shared/replay/events'
 import { type RatingRecord, applyRatings, newRating, planRatings } from './apply'
 import { PLACEMENT_GAMES } from './elo'
-import { nextSeasonBest, seasonBestOf } from './metrics'
+import { logBounds, nextSeasonBest, seasonBestOf } from './metrics'
 import { configureSeason } from './season'
 
 function run(overrides: Partial<RunRecord> = {}): RunRecord {
@@ -112,6 +113,21 @@ describe('planRatings', () => {
 		const faster = run({ placements: [{ playerId: 'a', place: 1, metric: 90_000 }, { playerId: 'b', place: 2 }] })
 		expect(planRatings(faster, current).updates.a.seasonBest).toBe(90_000)
 	})
+
+	it('still rates a player whose claimed PvP score is above their replay log', () => {
+		const pvp = run({
+			modId: 'MultiplayerPvP',
+			placements: [
+				{ playerId: 'a', place: 1, metricText: '20,3' },
+				{ playerId: 'b', place: 2, metricText: '20,3' },
+			],
+		})
+		const plan = planRatings(pvp, { a: seasoned(600), b: seasoned(600) }, { a: '500' })
+		expect(plan.updates.a.seasonBest).toBeNull()
+		expect(plan.updates.a.wins).toBe(1)
+		expect(plan.updates.a.rating).toBeGreaterThan(600)
+		expect(plan.updates.b.seasonBest).toBe('20,3')
+	})
 })
 
 describe('nextSeasonBest', () => {
@@ -148,6 +164,38 @@ describe('nextSeasonBest', () => {
 	})
 	it('ignores a mod with no metric', () => {
 		expect(nextSeasonBest('OtherMod', { metric: 100_000, metricText: '5' }, null)).toBeNull()
+	})
+	it('ignores a PvP score above the bound from the replay log', () => {
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '20,3' }, '40', '1234.5,1')).toBe('40')
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '501' }, null, '500')).toBeNull()
+	})
+	it('keeps a PvP score at or below the bound', () => {
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '500' }, '40', '500')).toBe('500')
+		expect(nextSeasonBest('MultiplayerPvP', { metricText: '500' }, '40', '1234.5,1')).toBe('500')
+	})
+})
+
+const hand = (total: unknown): LogEvent => ({ t: 0, opcode: 'hand_result', args: [total, 1] })
+
+describe('logBounds', () => {
+	it('is the largest round total in each trusted log, compared as score text', () => {
+		const events = {
+			a: [hand('900'), { t: 0, opcode: 'hand_scored', args: { score: '20,3' } }, hand('1234.5,1'), hand('50')],
+			b: [hand('7')],
+		}
+		expect(logBounds(events, { a: 'match', b: 'match' })).toEqual({ a: '1234.5,1', b: '7' })
+	})
+	it('bounds a trusted log with no scored hand at 0', () => {
+		expect(logBounds({}, { a: 'match' })).toEqual({ a: '0' })
+	})
+	it('has no bound for a log that is missing, cut off or does not match', () => {
+		expect(logBounds({ a: [hand('5')], b: [hand('5')] }, { a: 'mismatch', b: 'unavailable' })).toEqual({})
+	})
+	it('reads a round total written as a plain number', () => {
+		expect(logBounds({ a: [hand(900), hand('40')] }, { a: 'match' })).toEqual({ a: '900' })
+	})
+	it('skips a round total that is not score text', () => {
+		expect(logBounds({ a: [hand('nope'), hand(null), hand('40')] }, { a: 'match' })).toEqual({ a: '40' })
 	})
 })
 

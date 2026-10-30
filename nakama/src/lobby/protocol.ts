@@ -312,7 +312,7 @@ export interface RunRecord {
 	contest?: Contest
 }
 
-export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate'
+export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate' | 'unverified_log'
 
 // A game a player is still in, as run_active answers it: their own replay
 // events so far, for a client that restarted mid-game to play catch-up.
