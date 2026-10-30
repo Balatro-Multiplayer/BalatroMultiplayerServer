@@ -65,6 +65,7 @@ describe('SENDER_RULES', () => {
 			'pvp_win',
 			'pvp_player_won',
 			'pvp_end_pvp',
+			'pvp_round_state',
 			'pvp_death_pending',
 			'pvp_player_lives',
 			'spdrn_match_timeout',
@@ -123,11 +124,11 @@ describe('host-only actions', () => {
 		expect(r.payload).toEqual({ cid: 'c1', action: key, reason: 'not_host' })
 	})
 
-	it('drops a forged pvp_win aimed at one player too', () => {
+	it.each(['pvp_win', 'pvp_round_state'])('drops a forged %s aimed at one player too', (key) => {
 		const step = send(
 			lobbyWith('a', 'b', 'c'),
 			'b',
-			'pvp_win',
+			key,
 			{ winner_id: 'b' },
 			'c',
 		)
