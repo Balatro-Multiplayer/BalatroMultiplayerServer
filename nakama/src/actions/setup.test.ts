@@ -16,7 +16,13 @@ import {
 	newLobby,
 	snapshotFor,
 } from '../lobby/state'
-import { SETUP_STATE_KEY, rollVote, setupOf, setupTick } from './setup'
+import {
+	SETUP_STATE_KEY,
+	rollVote,
+	setupOf,
+	setupTick,
+	stakeCap,
+} from './setup'
 
 const info = (name: string) => ({
 	displayName: name,
@@ -176,6 +182,62 @@ describe('the Draft', () => {
 		expect(draft.order).toEqual(['a', 'b'])
 		expect(draft.first).toBe(1)
 		expect((broadcastSetup(step)?.open as OpenDraftView).actor).toBe('b')
+	})
+
+	it('never rolls one stake more than 4 times in a pool of 9', () => {
+		const lobby = started('a', 'b')
+		// Every draw is 0: uncapped, all nine decks would land on stake 1.
+		random = () => 0
+		const step = send(lobby, 'a', 'mpapi_setup_draft', {
+			id: 'draft',
+			candidates: decks('a1', 'b1', 'c1', 'd1', 'e1', 'f1', 'g1', 'h1', 'i1'),
+			maxStake: 8,
+		})
+		const counts: { [stake: number]: number } = {}
+		for (const item of openDraft(step.lobby).pool)
+			counts[item.stake as number] = (counts[item.stake as number] || 0) + 1
+		expect(Math.max(...Object.values(counts))).toBe(4)
+		expect(stakeCap(9, 8)).toBe(4)
+	})
+
+	it('repeats a deck up to maxRepeats times, never on one stake twice', () => {
+		const lobby = started('a', 'b')
+		// Few decks, so repeats are certain; all draws 0 would pile on stake 1.
+		random = () => 0
+		const step = send(lobby, 'a', 'mpapi_setup_draft', {
+			id: 'draft',
+			candidates: decks('x', 'y', 'z'),
+			poolSize: 9,
+			maxStake: 8,
+			maxRepeats: 3,
+		})
+		const pool = openDraft(step.lobby).pool
+		expect(pool).toHaveLength(9)
+		const pairs = pool.map((i) => `${i.art}|${i.stake}`)
+		expect(new Set(pairs).size).toBe(9)
+		expect(new Set(pool.map((i) => i.key)).size).toBe(9)
+		for (const art of ['x', 'y', 'z'])
+			expect(pool.filter((i) => i.art === art)).toHaveLength(3)
+	})
+
+	it('keeps a deck once without maxRepeats', () => {
+		const lobby = started('a', 'b')
+		random = () => 0
+		const step = send(lobby, 'a', 'mpapi_setup_draft', {
+			id: 'draft',
+			candidates: decks('x', 'y', 'z'),
+			maxStake: 8,
+		})
+		expect(
+			openDraft(step.lobby)
+				.pool.map((i) => i.key)
+				.sort(),
+		).toEqual(['x', 'y', 'z'])
+	})
+
+	it('relaxes the stake cap when too few stakes exist to honour it', () => {
+		expect(stakeCap(9, 2)).toBe(5)
+		expect(stakeCap(9, 1)).toBe(9)
 	})
 
 	it('rotates single bans until `keep` tiles are left', () => {

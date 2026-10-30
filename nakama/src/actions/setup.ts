@@ -73,6 +73,76 @@ function pickIndex(length: number, random: () => number): number {
 	return Math.min(length - 1, Math.floor(random() * length))
 }
 
+// How often one stake may show up in a pool: 4, which is (9 - 1) / 2 for the
+// 9-deck draft (the draft's pool size minus 1, over 2). Hard-coded for now
+// rather than derived from the pool size.
+export const MAX_SAME_STAKE = 4
+
+// The cap for a pool of `size`: MAX_SAME_STAKE, but never so low that
+// `maxStake` stakes cannot cover the whole pool.
+export function stakeCap(size: number, maxStake: number): number {
+	return Math.max(MAX_SAME_STAKE, Math.ceil(size / maxStake))
+}
+
+// The deck an item shows: `art` when its key is only a tracking identity.
+function artOf(item: SetupItem): string {
+	return typeof item.art === 'string' ? item.art : item.key
+}
+
+// Expands each candidate into `repeats` pool entries (`key#2`, ...) that all
+// show the same art, so the sampled pool can hold one deck several times. A
+// candidate that arrives with its stake stays single: repeating it would
+// repeat its deck/stake pair.
+function repeated(items: SetupItem[], repeats: number): SetupItem[] {
+	if (repeats <= 1) return items
+	const out: SetupItem[] = []
+	for (const item of items) {
+		if (item.stake !== undefined) {
+			out.push(item)
+			continue
+		}
+		for (let n = 1; n <= repeats; n++)
+			out.push({ ...item, key: `${item.key}#${n}`, art: artOf(item) })
+	}
+	return out
+}
+
+// Rolls a stake from 1 to maxStake for every pool item without one. A stake
+// at the cap is skipped, and so is a stake the item's deck already sits on:
+// no deck/stake pair twice. Stakes the candidates arrived with count too.
+function rollStakes(
+	pool: SetupItem[],
+	maxStake: number,
+	random: () => number,
+): SetupItem[] {
+	const cap = stakeCap(pool.length, maxStake)
+	const counts: { [stake: number]: number } = {}
+	const taken: { [pair: string]: boolean } = {}
+	for (const item of pool)
+		if (item.stake !== undefined) {
+			counts[item.stake] = (counts[item.stake] || 0) + 1
+			taken[`${artOf(item)}|${item.stake}`] = true
+		}
+	return pool.map((item) => {
+		if (item.stake !== undefined) return item
+		const art = artOf(item)
+		const free: number[] = []
+		const open: number[] = []
+		for (let stake = 1; stake <= maxStake; stake++) {
+			if (taken[`${art}|${stake}`]) continue
+			free.push(stake)
+			if ((counts[stake] || 0) < cap) open.push(stake)
+		}
+		const from = open.length > 0 ? open : free.length > 0 ? free : null
+		const stake = from
+			? from[pickIndex(from.length, random)]
+			: 1 + pickIndex(maxStake, random)
+		counts[stake] = (counts[stake] || 0) + 1
+		taken[`${art}|${stake}`] = true
+		return { ...item, stake }
+	})
+}
+
 // The participants still seated, in start order.
 function seatedParticipants(lobby: Lobby): string[] {
 	const started = lobby.game.started
@@ -133,7 +203,11 @@ function finishDraft(
 	survivors: SetupItem[],
 ): GameState {
 	const setup = setupOf(game)
-	const result: DraftResult = { kind: 'draft', survivors, banned: draft.banned }
+	const result: DraftResult = {
+		kind: 'draft',
+		survivors,
+		banned: draft.banned,
+	}
 	const started = game.started
 	// One kept tile with a stake is the run's stake: a restart keeps it.
 	const keptStake = survivors.length === 1 ? survivors[0].stake : undefined
@@ -293,8 +367,10 @@ function changed(game: GameState, now: number): Reduction {
 }
 
 // {id, candidates: [{key, stake?, ...}], poolSize?, keep?, schedule?,
-// maxStake?, turnSeconds?} -- host only. The server samples the pool, rolls
-// any missing stake from 1 to maxStake, and rolls who acts first.
+// maxStake?, maxRepeats?, turnSeconds?} -- host only. The server samples the
+// pool (a candidate up to maxRepeats times, never twice on one stake), rolls
+// any missing stake from 1 to maxStake (one stake under half the pool), and
+// rolls who acts first.
 const startDraft: AuthoritativeAction = {
 	key: 'mpapi_setup_draft',
 	reduce(lobby, ctx, params) {
@@ -303,28 +379,33 @@ const startDraft: AuthoritativeAction = {
 		if (refusal) return { reject: refusal }
 		const candidates = parseCandidates(p.candidates)
 		if (!candidates) return { reject: 'bad_params' }
+		if (p.maxStake !== undefined && !isWhole(p.maxStake, 1, MAX_STAKE))
+			return { reject: 'bad_params' }
+		const maxRepeats = p.maxRepeats === undefined ? 1 : p.maxRepeats
+		if (!isWhole(maxRepeats, 1, MAX_CANDIDATES)) return { reject: 'bad_params' }
+		const maxStake = p.maxStake as number | undefined
+		// Without stakes to tell repeats apart, a deck sits in the pool once.
+		const repeats = maxStake === undefined ? 1 : Math.min(maxRepeats, maxStake)
 		const poolSize = p.poolSize === undefined ? candidates.length : p.poolSize
-		if (!isWhole(poolSize, 1, candidates.length))
+		if (!isWhole(poolSize, 1, candidates.length * repeats))
 			return { reject: 'bad_params' }
 		const keep = p.keep === undefined ? 1 : p.keep
 		if (!isWhole(keep, 0, poolSize)) return { reject: 'bad_params' }
 		const schedule = p.schedule === undefined ? null : parseSchedule(p.schedule)
 		if (p.schedule !== undefined && !schedule) return { reject: 'bad_params' }
-		if (p.maxStake !== undefined && !isWhole(p.maxStake, 1, MAX_STAKE))
-			return { reject: 'bad_params' }
 		const turnSeconds = stepSeconds(p.turnSeconds, DEFAULT_TURN_SECONDS)
 		if (turnSeconds === null) return { reject: 'bad_params' }
 
 		const order = seatedParticipants(lobby)
 		if (order.length === 0) return { reject: 'not_in_game' }
-		const maxStake = p.maxStake as number | undefined
-		const pool = shuffled(candidates, ctx.random)
-			.slice(0, poolSize)
-			.map((item) =>
-				item.stake === undefined && maxStake !== undefined
-					? { ...item, stake: 1 + pickIndex(maxStake, ctx.random) }
-					: item,
-			)
+		const sampled = shuffled(repeated(candidates, repeats), ctx.random).slice(
+			0,
+			poolSize,
+		)
+		const pool =
+			maxStake === undefined
+				? sampled
+				: rollStakes(sampled, maxStake, ctx.random)
 		const turns = schedule || deriveSchedule(poolSize, keep, order.length)
 		const turnMs = turnSeconds * 1000
 		const draft: OpenDraft = {
@@ -386,7 +467,11 @@ export function rollVote(vote: OpenVote, random: () => number): VoteResult {
 		if (ticket < counts[option]) return { kind: 'vote', option, counts }
 		ticket -= counts[option]
 	}
-	return { kind: 'vote', option: vote.options[vote.options.length - 1], counts }
+	return {
+		kind: 'vote',
+		option: vote.options[vote.options.length - 1],
+		counts,
+	}
 }
 
 function closeVote(
