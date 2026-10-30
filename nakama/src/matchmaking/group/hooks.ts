@@ -67,7 +67,7 @@ export function memberFactsOf(
 			if (!refusals[id]) refusals[id] = { code: VERSION_MISMATCH }
 		}
 	}
-	return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) }
+	return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket) }
 }
 
 function numberOr(value: unknown, fallback: number | null): number | null {

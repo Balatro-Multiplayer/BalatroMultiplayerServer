@@ -52,4 +52,4 @@ metrics:
 
 matchmaker:
   interval_sec: 5
-  max_tickets: 3
+  max_tickets: 1000

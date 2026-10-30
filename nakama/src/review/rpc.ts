@@ -121,6 +121,6 @@ export function moderationContextOf(nk: nkruntime.Nakama, settings: ServerSettin
 		mods: readModReport(nk, userId),
 		standing: standingFor(nk, settings, userId, now),
 		integrity: readIntegrity(nk, userId),
-		ranked: rankedContextOf(liveRecordsOf(nk, userId, now), match ? match.label : null),
+		ranked: rankedContextOf(liveRecordsOf(nk, userId), match ? match.label : null),
 	}
 }

@@ -6547,7 +6547,6 @@ function partitionTeams(groups) {
 
 // src/matchmaking/queue.ts
 var QUEUE_COLLECTION = "queue_presence";
-var QUEUE_STALE_MS = 30 * 6e4;
 var LIST_PAGE4 = 100;
 var MATCH_LIST_LIMIT = 100;
 var NOTIFICATIONS_STREAM = 0;
@@ -6572,11 +6571,11 @@ function recordOf(input, output, sessionId, now) {
   const gameMode = queueKey(mode, props.kind === "ranked" ? "ranked" : "casual");
   return { modId, gameMode, ticket, sessionId, at: now };
 }
-function countQueues(modId, records, labels, now) {
+function countQueues(modId, records, labels) {
   const gameModes = {};
   const entry = (mode) => gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 };
   for (const r of records) {
-    if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue;
+    if (r.modId !== modId) continue;
     entry(r.gameMode).queued++;
   }
   for (const raw of labels) {
@@ -6669,17 +6668,17 @@ function writeGroupRecords(nk, record, members) {
 function sessionsOf(nk, userId) {
   return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
 }
-function liveTicketHolders(nk, userIds, exceptTicket, now) {
+function liveTicketHolders(nk, userIds, exceptTicket) {
   return userIds.filter((userId) => {
-    const records = ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => r.ticket !== exceptTicket && now - r.at <= QUEUE_STALE_MS);
+    const records = ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => r.ticket !== exceptTicket);
     if (records.length === 0) return false;
     const sessions = sessionsOf(nk, userId);
     return records.some((r) => sessions.indexOf(r.sessionId) !== -1);
   });
 }
-function liveRecordsOf(nk, userId, now) {
+function liveRecordsOf(nk, userId) {
   const sessions = sessionsOf(nk, userId);
-  return ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => now - r.at <= QUEUE_STALE_MS && sessions.indexOf(r.sessionId) !== -1);
+  return ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => sessions.indexOf(r.sessionId) !== -1);
 }
 function liveQueuedPlayers(nk, modId, now) {
   const byUser = {};
@@ -6718,7 +6717,7 @@ function rpcQueueCounts(ctx, logger, nk, payload) {
     throw runtimeError(INVALID_ARGUMENT, "Missing or invalid modId");
   const query = "+label.modId:" + modId.replace(/[^A-Za-z0-9_]/g, "\\$&") + " +label.type:public";
   const labels = nk.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query).map((m) => m.label || "");
-  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()));
+  return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels));
 }
 
 // src/matchmaking/matched.ts
@@ -7066,7 +7065,7 @@ function moderationContextOf(nk, settings, userId, now) {
     mods: readModReport(nk, userId),
     standing: standingFor(nk, settings, userId, now),
     integrity: readIntegrity(nk, userId),
-    ranked: rankedContextOf(liveRecordsOf(nk, userId, now), match ? match.label : null)
+    ranked: rankedContextOf(liveRecordsOf(nk, userId), match ? match.label : null)
   };
 }
 
@@ -9545,7 +9544,7 @@ function memberFactsOf(nk, settings, modId, memberIds, exceptTicket, now) {
       if (!refusals[id]) refusals[id] = { code: VERSION_MISMATCH };
     }
   }
-  return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket, now) };
+  return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket) };
 }
 function numberOr(value, fallback) {
   return typeof value === "number" ? value : fallback;

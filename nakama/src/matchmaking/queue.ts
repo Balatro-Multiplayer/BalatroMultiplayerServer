@@ -14,8 +14,6 @@ import { parsePayload } from '../rpc'
 import { queueKey } from './matched'
 
 export const QUEUE_COLLECTION = 'queue_presence'
-// A record this old is no longer counted, whatever its session.
-export const QUEUE_STALE_MS = 30 * 60_000
 const LIST_PAGE = 100
 const MATCH_LIST_LIMIT = 100
 const NOTIFICATIONS_STREAM = 0
@@ -75,12 +73,11 @@ export function countQueues(
 	modId: string,
 	records: QueueRecord[],
 	labels: string[],
-	now: number,
 ): QueueCounts {
 	const gameModes: QueueCounts['gameModes'] = {}
 	const entry = (mode: string) => (gameModes[mode] = gameModes[mode] || { queued: 0, inMatch: 0 })
 	for (const r of records) {
-		if (r.modId !== modId || now - r.at > QUEUE_STALE_MS) continue
+		if (r.modId !== modId) continue
 		entry(r.gameMode).queued++
 	}
 	for (const raw of labels) {
@@ -217,32 +214,31 @@ function sessionsOf(nk: nkruntime.Nakama, userId: string): string[] {
 	return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId)
 }
 
-// Which of userIds hold a live ticket (a fresh record whose session is still
+// Which of userIds hold a live ticket (a record whose session is still
 // connected) other than exceptTicket.
 export function liveTicketHolders(
 	nk: nkruntime.Nakama,
 	userIds: string[],
 	exceptTicket: string | null,
-	now: number,
 ): string[] {
 	return userIds.filter((userId) => {
 		const records = ownRecords(nk, userId)
 			.filter(isRecord)
 			.map((o) => o.value as unknown as QueueRecord)
-			.filter((r) => r.ticket !== exceptTicket && now - r.at <= QUEUE_STALE_MS)
+			.filter((r) => r.ticket !== exceptTicket)
 		if (records.length === 0) return false
 		const sessions = sessionsOf(nk, userId)
 		return records.some((r) => sessions.indexOf(r.sessionId) !== -1)
 	})
 }
 
-// The user's own fresh records whose session is still connected.
-export function liveRecordsOf(nk: nkruntime.Nakama, userId: string, now: number): QueueRecord[] {
+// The user's own records whose session is still connected.
+export function liveRecordsOf(nk: nkruntime.Nakama, userId: string): QueueRecord[] {
 	const sessions = sessionsOf(nk, userId)
 	return ownRecords(nk, userId)
 		.filter(isRecord)
 		.map((o) => o.value as unknown as QueueRecord)
-		.filter((r) => now - r.at <= QUEUE_STALE_MS && sessions.indexOf(r.sessionId) !== -1)
+		.filter((r) => sessions.indexOf(r.sessionId) !== -1)
 }
 
 export interface QueuedPlayer {
@@ -304,5 +300,5 @@ export function rpcQueueCounts(
 	const labels = nk
 		.matchList(MATCH_LIST_LIMIT, true, null, 1, null, query)
 		.map((m) => m.label || '')
-	return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels, Date.now()))
+	return JSON.stringify(countQueues(modId, liveRecords(nk, modId, Date.now()), labels))
 }

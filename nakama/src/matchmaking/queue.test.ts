@@ -7,7 +7,6 @@ import {
 	countQueues,
 	QUEUE_COLLECTION,
 	liveRecords,
-	QUEUE_STALE_MS,
 	recordOf,
 	rpcQueueCounts,
 } from './queue'
@@ -39,12 +38,11 @@ describe('recordOf', () => {
 })
 
 describe('countQueues', () => {
-	it('counts fresh records and matchmade lobbies of the mod per queue', () => {
-		const now = QUEUE_STALE_MS * 2
+	it('counts records and matchmade lobbies of the mod per queue', () => {
+		const now = 3_600_000
 		const records = [
 			{ modId: 'MultiplayerSPDRN', gameMode: 'standard', sessionId: 's', ticket: 'a', at: now - 1000 },
 			{ modId: 'MultiplayerSPDRN', gameMode: 'standard', sessionId: 's', ticket: 'b', at: now },
-			{ modId: 'MultiplayerSPDRN', gameMode: 'ranked:standard', sessionId: 's', ticket: 'c', at: 0 }, // stale
 			{ modId: 'Other', gameMode: 'standard', sessionId: 's', ticket: 'd', at: now },
 		]
 		const labels = [
@@ -54,7 +52,7 @@ describe('countQueues', () => {
 			label({ mode: 'standard', modId: 'Other' }),
 			'not json',
 		]
-		expect(countQueues('MultiplayerSPDRN', records, labels, now)).toEqual({
+		expect(countQueues('MultiplayerSPDRN', records, labels)).toEqual({
 			modId: 'MultiplayerSPDRN',
 			gameModes: {
 				standard: { queued: 2, inMatch: 2 },
