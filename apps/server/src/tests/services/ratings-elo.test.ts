@@ -25,34 +25,34 @@ describe('ratings/elo', () => {
 		})
 
 		it('returns higher K for placement players (game 0)', () => {
-			// baseK = 200 - 0*40 = 200; performance = 0 → 200*(1+0) = 200
-			expect(effectiveK(0, 0)).toBe(200)
+			// baseK = 200; performance 0 -> 200 -> 40 + (200 - 40) / 2 = 120
+			expect(effectiveK(0, 0)).toBe(120)
 		})
 
 		it('scales down K with each placement game', () => {
-			// game 1: baseK = 200 - 40 = 160
-			expect(effectiveK(1, 0)).toBe(160)
-			// game 2: baseK = 120
-			expect(effectiveK(2, 0)).toBe(120)
+			// game 1: baseK = 160 -> 40 + (160 - 40) / 2 = 100
+			expect(effectiveK(1, 0)).toBe(100)
+			// game 2: baseK = 120 -> 80
+			expect(effectiveK(2, 0)).toBe(80)
 			// game 4: baseK = 40 (last placement)
 			expect(effectiveK(4, 0)).toBe(40)
 		})
 
 		it('scales K by performance during placement', () => {
-			// game 0: baseK = 200; performance 1 → 200*(1+1) = 400
-			expect(effectiveK(0, 1)).toBe(400)
-			// game 0: performance 0.5 → 200*(1+0.5) = 300
-			expect(effectiveK(0, 0.5)).toBe(300)
+			// game 0: baseK = 200; performance 1 -> 400 -> 40 + (400 - 40) / 2 = 220
+			expect(effectiveK(0, 1)).toBe(220)
+			// game 0: performance 0.5 -> 300 -> 170
+			expect(effectiveK(0, 0.5)).toBe(170)
 		})
 
 		it('clamps performance below 0 to 0', () => {
-			// performance -1 → clamped to 0 → 200*(1+0) = 200
-			expect(effectiveK(0, -1)).toBe(200)
+			// performance -1 -> clamped to 0 -> 120
+			expect(effectiveK(0, -1)).toBe(120)
 		})
 
 		it('clamps performance above 1 to 1', () => {
-			// performance 2 → clamped to 1 → 200*(1+1) = 400
-			expect(effectiveK(0, 2)).toBe(400)
+			// performance 2 -> clamped to 1 -> 220
+			expect(effectiveK(0, 2)).toBe(220)
 		})
 	})
 

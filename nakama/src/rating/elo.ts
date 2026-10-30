@@ -25,11 +25,13 @@ function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, value))
 }
 
-// Placement games use a decaying base K scaled by performance.
+// Placement games use a decaying base K scaled by performance; only half of
+// the extra over K_ESTABLISHED applies.
 export function effectiveK(gamesPlayed: number, performance: number): number {
 	if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED
 	const baseK = 200 - gamesPlayed * 40
-	return baseK * (1 + clamp(performance, 0, 1))
+	const placementK = baseK * (1 + clamp(performance, 0, 1))
+	return K_ESTABLISHED + (placementK - K_ESTABLISHED) / 2
 }
 
 export function expectedScore(ratingA: number, ratingB: number): number {

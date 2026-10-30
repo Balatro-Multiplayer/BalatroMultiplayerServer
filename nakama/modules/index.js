@@ -7264,7 +7264,8 @@ function clamp(value, min, max) {
 function effectiveK(gamesPlayed, performance) {
   if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
   const baseK = 200 - gamesPlayed * 40;
-  return baseK * (1 + clamp(performance, 0, 1));
+  const placementK = baseK * (1 + clamp(performance, 0, 1));
+  return K_ESTABLISHED + (placementK - K_ESTABLISHED) / 2;
 }
 function expectedScore(ratingA, ratingB) {
   return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
