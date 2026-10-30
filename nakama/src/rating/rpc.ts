@@ -26,7 +26,7 @@ function boardOf(payload: string): { modId: string; mode: string; input: { [key:
 }
 
 // {modId, mode, playerId?} -> the player's (default: the caller's) rating record on that board (a fresh one if
-// they haven't played it), plus whether they're still in placement games.
+// they haven't played it), plus whether they're still in placement games and how many there are.
 export function rpcRatingGet(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -41,7 +41,7 @@ export function rpcRatingGet(
 	if (typeof playerId !== 'string' || !USER_ID_PATTERN.test(playerId))
 		throw runtimeError(INVALID_ARGUMENT, 'playerId is not a user id')
 	const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating()
-	return JSON.stringify({ ...rating, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
+	return JSON.stringify({ ...rating, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES, placementGames: PLACEMENT_GAMES })
 }
 
 // {modId, mode, cursor?} -> {entries: [{rank, playerId, name, rating, wins,
