@@ -31,9 +31,7 @@ export function EventDetail({
     case 'discard': {
       const refs = Array.isArray(args[1]) ? (args[1] as unknown[]) : []
       if (refs.length === 0) return <ArgsView args={args} />
-      return (
-        <span className='flex flex-wrap gap-2'>{chipsFor(refs, registry)}</span>
-      )
+      return <span className='flex flex-wrap gap-2'>{chipsFor(refs, registry)}</span>
     }
 
     case 'sell':
@@ -69,9 +67,7 @@ export function EventDetail({
     case 'pack_skip': {
       const refs = Array.isArray(args[0]) ? (args[0] as unknown[]) : []
       if (refs.length === 0) return <ArgsView args={args} />
-      return (
-        <span className='flex flex-wrap gap-2'>{chipsFor(refs, registry)}</span>
-      )
+      return <span className='flex flex-wrap gap-2'>{chipsFor(refs, registry)}</span>
     }
 
     default:
