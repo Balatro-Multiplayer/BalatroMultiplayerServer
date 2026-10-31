@@ -105,7 +105,9 @@ function argsFor(opcode: string, tokens: string[]): unknown {
     case 'play':
     case 'discard':
       // [positions, card refs, owned jokers (play only, newer mods)]
-      return tokens[2] !== undefined
+      // Older logs print a nested list as "table: 0x..." (with spaces), so
+      // anything after a "table:" token is that noise, not a joker snapshot.
+      return tokens[2] !== undefined && !tokens[1]?.startsWith('table:')
         ? [numbers(tokens[0]), refList(tokens[1]), words(tokens[2])]
         : [numbers(tokens[0]), refList(tokens[1])]
     case 'idol_roll':

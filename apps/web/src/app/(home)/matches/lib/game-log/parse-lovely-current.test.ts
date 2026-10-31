@@ -100,3 +100,20 @@ describe('newer carbon text', () => {
     expect(p?.rounds[0]?.label).toBe('Ante 1 · Small Blind')
   })
 })
+
+describe('older carbon text', () => {
+  test('ignores table: noise instead of reading it as jokers or refs', () => {
+    const line = [
+      'INFO - [G] 2026-10-30 00:18:30 :: DEBUG :: MULTIPLAYER :: Game starting — 2026-10-30T00:18:30-0400',
+      'INFO - [G] :: TRACE :: MULTIPLAYER :: MP_RLOG: 25139 play 1.2.3.5.6 table: 0x2a3664d8.table: 0x2ae19400.table: 0x2bccd848',
+    ].join(String.fromCharCode(10))
+    const events = parseCurrentLovelyLog(line).games[0]?.events ?? []
+    const play = events.find((e) => e[1] === 'play')
+    expect(play?.[2]).toEqual([[1, 2, 3, 5, 6], []])
+    const log = buildGameLog([{ playerId: 'me', events }])
+    const hand = log.players[0]?.rounds[0]?.events.find(
+      (e) => e.type === 'hand'
+    )
+    expect(hand?.type === 'hand' && hand.jokers.length).toBe(0)
+  })
+})
