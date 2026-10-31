@@ -11,6 +11,16 @@ import { PlayingCardVisual } from './playing-card-visual'
 // c_asteroid). Not a real name lookup, just enough to be more readable than
 // the bare key: "c_fool" -> "Fool", "c_mp_something" -> "Mp Something".
 function prettifyKey(key: string): string {
+  const pack = /^p_(\w+?)_(normal|jumbo|mega)_\d+$/.exec(key)
+  if (pack) {
+    const kind =
+      (pack[1] ?? '').charAt(0).toUpperCase() + (pack[1] ?? '').slice(1)
+    const size =
+      pack[2] === 'normal'
+        ? ''
+        : `${pack[2]?.charAt(0).toUpperCase()}${pack[2]?.slice(1)} `
+    return `${size}${kind} Pack`
+  }
   return key
     .replace(/^[a-z]_/, '')
     .split('_')
