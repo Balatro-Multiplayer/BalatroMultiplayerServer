@@ -169,4 +169,42 @@ describe('buildGameLog', () => {
       p?.finalDeck[1]?.type === 'playing_card' && p.finalDeck[1].value
     ).toBe('Ace')
   })
+
+  test('puts shops in their own section with the idol roll first', () => {
+    const idol = (t: number, roll: number, winner: string): Ev => [
+      t,
+      'idol_roll',
+      { roll, winner, cards: ['KS2', 'QH1'] },
+    ]
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        idol(5, 0.1, 'KS'),
+        [10, 'select_blind', [0, 'bl_small']],
+        idol(20, 0.9, 'QH'),
+        [21, 'cashout', null],
+        [25, 'reroll', null],
+        [26, 'money_delta', [-5]],
+        [30, 'leave_shop', null],
+        [31, 'select_blind', [0, 'bl_big']],
+      ]),
+    ])
+    const rounds = log.players[0]?.rounds ?? []
+    expect(rounds.map((r) => [r.kind, r.index])).toEqual([
+      ['blind', 1],
+      ['shop', 1.5],
+      ['blind', 2],
+    ])
+    // The opening roll opens the first blind; the end-of-blind roll opens
+    // the shop and is labelled with the blind it applies to.
+    expect(rounds[0]?.events[0]?.type).toBe('idol')
+    const shop = rounds[1]
+    expect(shop?.events[0]?.type).toBe('idol')
+    expect(shop?.events[0]?.type === 'idol' && shop.events[0].appliesTo).toBe(
+      'Ante 1 · Big Blind'
+    )
+    expect(shop?.shopSpent).toBe(5)
+    expect(shop?.shopRerolls).toBe(1)
+    expect(rounds[0]?.events.some((e) => e.type === 'cashout')).toBe(true)
+  })
 })

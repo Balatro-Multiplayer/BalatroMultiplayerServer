@@ -24,10 +24,10 @@ import { PlayerLabel } from '../components/player-label'
 import { RunStatusBadge } from '../components/status-badge'
 import { buildCardRegistries } from '../lib/build-card-registries'
 import { decodePlayerLogs } from '../lib/decode-player-logs'
-import { getDeckInfo, getRulesetInfo } from '../lib/ruleset-info'
-import { computePlayerSpending } from '../lib/spending'
 import { formatElapsedMs } from '../lib/format'
 import { findMatchInfo, findPlayerOutcomeArgs } from '../lib/manifest'
+import { getDeckInfo, getRulesetInfo } from '../lib/ruleset-info'
+import { computePlayerSpending } from '../lib/spending'
 import { buildTimeline, FRAMING_OPCODES } from '../lib/timeline'
 import type { RunReplayResponse } from '../lib/types'
 
@@ -186,7 +186,10 @@ export default function MatchReplayPage() {
                       : null
                 if (!info || typeof value !== 'string') return null
                 return (
-                  <InfoTooltipLabel label={value} description={info.description} />
+                  <InfoTooltipLabel
+                    label={value}
+                    description={info.description}
+                  />
                 )
               }}
             />
@@ -296,9 +299,9 @@ export default function MatchReplayPage() {
               Itemized Purchases sums each shop purchase's own recorded cost.
               Observed Balance Decrease/Increase sums every recorded balance
               change for any reason (purchases, rerolls, blind rewards,
-              interest, joker triggers, ...), not shop purchases alone --
-              expect it to run higher than Itemized Purchases, that's not by
-              itself a sign of anything wrong.
+              interest, joker triggers, ...), not shop purchases alone -- expect
+              it to run higher than Itemized Purchases, that's not by itself a
+              sign of anything wrong.
             </p>
           </CardContent>
         </Card>

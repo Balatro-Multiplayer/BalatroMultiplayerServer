@@ -56,10 +56,21 @@ export type GameEvent =
   | { type: 'cashout'; t: number; dollars: number | null }
   | { type: 'life_lost'; t: number; lost: number; lives: number | null }
   | { type: 'ready'; t: number; ready: boolean }
-  | ({ type: 'idol' } & IdolRoll)
+  | ({
+      type: 'idol'
+      /** Label of the blind this roll applies to, when the log reaches it. */
+      appliesTo: string | null
+    } & IdolRoll)
   | { type: 'other'; t: number; opcode: string; args: unknown }
 
 export interface RoundLog {
+  /** A blind, or the shop that follows it (cash out -> leave shop). */
+  kind: 'blind' | 'shop'
+  /**
+   * Alignment key across players: blinds are whole numbers in the order they
+   * were entered, a shop is its blind's index + 0.5 (so a player who skipped
+   * a blind, and so has no shop after it, still lines up with the other).
+   */
   index: number
   /** 1-based ante, counted from blind order (3 blinds per ante). */
   ante: number
@@ -82,6 +93,9 @@ export interface RoundLog {
   discards: number
   moneyGained: number
   moneySpent: number
+  /** Shops only: dollars spent on purchases and rerolls, and reroll count. */
+  shopSpent: number
+  shopRerolls: number
 }
 
 export interface PlayerGameLog {

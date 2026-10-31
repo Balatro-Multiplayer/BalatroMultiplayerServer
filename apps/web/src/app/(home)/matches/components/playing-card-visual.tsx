@@ -99,7 +99,9 @@ export function PlayingCardVisual({
   } else if (suitRow !== undefined && valueColumn !== undefined) {
     layers.push("url('/atlases/8BitDeck.png')")
     positions.push(spriteOffset(valueColumn, suitRow))
-    const enhancementPos = enhancement ? ENHANCEMENT_POSITION[enhancement] : undefined
+    const enhancementPos = enhancement
+      ? ENHANCEMENT_POSITION[enhancement]
+      : undefined
     if (enhancementPos) {
       layers.push("url('/atlases/Enhancers.png')")
       positions.push(spriteOffset(enhancementPos.x, enhancementPos.y))

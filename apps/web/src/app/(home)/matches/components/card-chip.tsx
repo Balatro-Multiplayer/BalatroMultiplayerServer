@@ -1,8 +1,8 @@
 import Image from 'next/image'
-import { jokers } from '@/shared/jokers'
 import { vouchers } from '@/shared/vouchers'
 import type { ResolvedCard } from '../lib/card-ref'
 import { tagValue } from '../lib/card-ref'
+import { jokerArt } from '../lib/joker-art'
 import { PlayingCardVisual } from './playing-card-visual'
 
 // Turns a raw SMODS center key into a readable label when no art/name lookup
@@ -32,12 +32,20 @@ function lookupByKind(
   kind: string,
   ident: string
 ): { name: string; file: string } | null {
-  if (kind === 'Joker' || kind === 'j') return jokers[ident] ?? null
+  if (kind === 'Joker' || kind === 'j') return jokerArt(ident)
   if (kind === 'Voucher') return vouchers[ident] ?? null
   return null
 }
 
-export function CardChip({ card }: { card: ResolvedCard }) {
+// `artOnly` drops the name next to the art (the name and edition stay in the
+// tooltip); used where a row of jokers should read as a lineup.
+export function CardChip({
+  card,
+  artOnly = false,
+}: {
+  card: ResolvedCard
+  artOnly?: boolean
+}) {
   if (card.type === 'playing_card') {
     return (
       <span className='inline-flex items-center gap-1.5'>
@@ -57,6 +65,19 @@ export function CardChip({ card }: { card: ResolvedCard }) {
 
   const known = lookupByKind(card.kind, card.ident)
   const edition = tagValue(card.tags, 'ed:')
+
+  if (known && artOnly) {
+    return (
+      <Image
+        src={`/cards/${known.file}`}
+        alt={known.name}
+        title={edition ? `${known.name} (${edition})` : known.name}
+        width={56}
+        height={76}
+        className='rounded-sm'
+      />
+    )
+  }
 
   if (known) {
     return (

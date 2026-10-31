@@ -156,6 +156,7 @@ function newRound(
       ? 'Before the first blind'
       : `Ante ${ante} · ${name}${entry === 'skipped' ? ' (skipped)' : ''}`
   return {
+    kind: 'blind',
     index,
     ante,
     slot,
@@ -174,7 +175,27 @@ function newRound(
     discards: 0,
     moneyGained: 0,
     moneySpent: 0,
+    shopSpent: 0,
+    shopRerolls: 0,
     lastScore: null,
+  }
+}
+
+// The shop between a blind and the next one. It exists for every blind that
+// was cashed out, so each Idol roll has a guaranteed home at the top of one.
+function newShop(blind: RoundDraft, t: number): RoundDraft {
+  const name = blind.blindKey
+    ? blindName(blind.blindKey)
+    : SLOT_LABELS[blind.slot]
+  return {
+    ...newRound(blind.index, 'selected', t),
+    kind: 'shop',
+    index: blind.index + 0.5,
+    ante: blind.ante,
+    slot: blind.slot,
+    label: `Ante ${blind.ante} · Shop after ${name}`,
+    isPvp: false,
+    anteKey: blind.anteKey,
   }
 }
 
@@ -208,6 +229,12 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
   let itemizedPurchases = 0
   let pendingDollars: number | null = null
   let sawBlind = false
+  let blindOrdinal = 0
+  // Idol rolls are logged when a blind ends but apply to the next blind played:
+  // held until the shop opens (then shown first in it), or, for the roll made
+  // before the first blind, carried into that blind.
+  let heldIdols: GameEvent[] = []
+  const carriedIdols: GameEvent[] = []
   let finalDeck: ResolvedCard[] = []
   const consumedMoney = new Set<number>()
 
@@ -256,11 +283,14 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
       case 'skip_blind': {
         sawBlind = true
         current = newRound(
-          rounds.length,
+          ++blindOrdinal,
           opcode === 'select_blind' ? 'selected' : 'skipped',
           t,
           typeof a[1] === 'string' ? a[1] : null
         )
+        if (opcode === 'select_blind') {
+          current.events.push(...carriedIdols.splice(0))
+        }
         rounds.push(current)
         break
       }
@@ -371,10 +401,17 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
         break
       }
 
-      case 'cashout':
+      case 'cashout': {
         push({ type: 'cashout', t, dollars: pendingDollars })
         pendingDollars = null
+        if (current.kind === 'blind' && current.entry !== 'setup') {
+          current = newShop(current, t)
+          current.events.push(...heldIdols)
+          heldIdols = []
+          rounds.push(current)
+        }
         break
+      }
 
       case 'money_delta': {
         if (consumedMoney.has(i)) break
@@ -399,24 +436,31 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
       }
 
       case 'idol_roll': {
+        let idol: GameEvent | null = null
         if (Array.isArray(args)) {
           // Positional form: [roll, winner, cards]
-          push({
+          idol = {
             type: 'idol',
             t,
+            appliesTo: null,
             roll: typeof a[0] === 'number' ? a[0] : null,
             winner: typeof a[1] === 'string' ? a[1] : '',
             cards: parseIdolTokens(a[2]),
-          })
+          }
         } else if (isPlainRecord(args)) {
-          push({
+          idol = {
             type: 'idol',
             t,
+            appliesTo: null,
             roll: typeof args.roll === 'number' ? args.roll : 0,
             winner: typeof args.winner === 'string' ? args.winner : '',
             cards: parseIdolTokens(args.cards),
-          })
+          }
         }
+        if (!idol) break
+        if (current.kind === 'shop') current.events.unshift(idol)
+        else if (current.entry === 'setup') carriedIdols.push(idol)
+        else heldIdols.push(idol)
         break
       }
 
@@ -481,9 +525,31 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
         cost = followingSpend()
       }
 
+      if (current.kind === 'shop') {
+        current.shopSpent += cost ?? 0
+        if (action === 'reroll') current.shopRerolls++
+      }
       push({ type: 'shop', t, action, card, targets, cost })
     }
   }
+
+  // Rolls that never reached a shop (the run ended first) stay with the
+  // blind they were logged in.
+  current.events.push(...heldIdols)
+  rounds[0]?.events.push(...carriedIdols)
+
+  // Each roll applies to the next blind actually played after it.
+  rounds.forEach((round, at) => {
+    const target =
+      round.kind === 'blind'
+        ? round
+        : rounds
+            .slice(at + 1)
+            .find((r) => r.kind === 'blind' && r.entry === 'selected')
+    for (const event of round.events) {
+      if (event.type === 'idol') event.appliesTo = target?.label ?? null
+    }
+  })
 
   // Money per round, from every recorded balance change.
   const moneyByRound = tallyMoney(events, rounds)

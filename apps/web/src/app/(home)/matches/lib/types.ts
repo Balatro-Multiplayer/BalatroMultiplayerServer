@@ -18,7 +18,10 @@ export interface MyRunsResponse {
 }
 
 export type PlayerLogStatus = 'partial' | 'complete'
-export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate' | 'unverified_log'
+export type FlagReason =
+  | 'hash_mismatch'
+  | 'elapsed_time_gate'
+  | 'unverified_log'
 
 export interface PlayerLogRow {
   playerId: string

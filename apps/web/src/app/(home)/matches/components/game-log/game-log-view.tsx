@@ -19,6 +19,7 @@ import { CardChip } from '../card-chip'
 import { InfoTooltipLabel } from '../info-tooltip-label'
 import { OpcodeBadge } from '../opcode-badge'
 import { DeckPanel } from './deck-panel'
+import { EconomyChart } from './economy-chart'
 import { HandRow } from './hand-row'
 import { IdolTrack } from './idol-track'
 
@@ -58,7 +59,13 @@ function EventLine({ event }: { event: GameEvent }) {
       return (
         <div className='flex items-start gap-2'>
           {time}
-          <div className='min-w-0 flex-1'>
+          <div className='min-w-0 flex-1 space-y-1'>
+            {event.appliesTo && (
+              <p className='text-muted-foreground text-xs'>
+                Idol roll for{' '}
+                <span className='text-foreground'>{event.appliesTo}</span>
+              </p>
+            )}
             <IdolTrack roll={event} />
           </div>
         </div>
@@ -151,6 +158,13 @@ function RoundColumn({
   return (
     <div className='space-y-2'>
       <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-xs'>
+        {round.kind === 'shop' && (
+          <span className='font-mono text-foreground'>
+            Spent ${round.shopSpent}
+            {round.shopRerolls > 0 &&
+              ` · ${round.shopRerolls} reroll${round.shopRerolls === 1 ? '' : 's'}`}
+          </span>
+        )}
         {round.handsPlayed > 0 && (
           <span>
             {round.handsPlayed} hand{round.handsPlayed === 1 ? '' : 's'}
@@ -166,11 +180,12 @@ function RoundColumn({
             Score {formatScore(round.finalScore)}
           </span>
         )}
-        {(round.moneyGained > 0 || round.moneySpent > 0) && (
-          <span className='font-mono'>
-            +${round.moneyGained} / -${round.moneySpent}
-          </span>
-        )}
+        {round.kind === 'blind' &&
+          (round.moneyGained > 0 || round.moneySpent > 0) && (
+            <span className='font-mono'>
+              +${round.moneyGained} / -${round.moneySpent}
+            </span>
+          )}
       </div>
       <div className='space-y-1.5'>
         {events.length === 0 ? (
@@ -205,7 +220,13 @@ function PlayerSummary({
       </div>
       <dl className='grid grid-cols-2 gap-x-4 gap-y-1 text-xs'>
         <dt className='text-muted-foreground'>Blinds reached</dt>
-        <dd>{player.rounds.filter((r) => r.entry !== 'setup').length}</dd>
+        <dd>
+          {
+            player.rounds.filter(
+              (r) => r.kind === 'blind' && r.entry !== 'setup'
+            ).length
+          }
+        </dd>
         <dt className='text-muted-foreground'>Lives lost</dt>
         <dd>{player.livesLost}</dd>
         <dt className='text-muted-foreground'>Rerolls</dt>
@@ -221,7 +242,7 @@ function PlayerSummary({
           <div className='flex flex-wrap gap-x-3 gap-y-1'>
             {player.finalJokers.map((joker, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: ordered, static
-              <CardChip key={i} card={joker} />
+              <CardChip key={i} card={joker} artOnly />
             ))}
           </div>
         </div>
@@ -256,13 +277,10 @@ export function GameLogView({
     () => log.players.filter((p) => filter === 'all' || p.playerId === filter),
     [log.players, filter]
   )
-  const maxIndex = Math.max(
-    0,
-    ...log.players.flatMap((p) => p.rounds.map((r) => r.index))
-  )
-  const roundIndexes = Array.from({ length: maxIndex + 1 }, (_, i) => i).filter(
-    (index) => log.players.some((p) => p.rounds.some((r) => r.index === index))
-  )
+  // Blinds are whole numbers and their shops sit at +0.5 between them.
+  const roundIndexes = [
+    ...new Set(log.players.flatMap((p) => p.rounds.map((r) => r.index))),
+  ].sort((a, b) => a - b)
 
   const first = log.players[0]
   const deckInfo = getDeckInfo(first?.deck)
@@ -393,17 +411,24 @@ export function GameLogView({
           variant={showMoney ? 'default' : 'outline'}
           className='ml-auto'
           onClick={() => setShowMoney((v) => !v)}
+          title='Also list every individual money change (payouts, interest, spending) as its own line'
         >
-          Balance changes
+          Money changes
         </Button>
       </div>
 
+      <EconomyChart log={log} players={visible} playerLabel={playerLabel} />
+
       {roundIndexes.map((index) => {
-        const label =
-          log.players.flatMap((p) => p.rounds).find((r) => r.index === index)
-            ?.label ?? ''
+        const first = log.players
+          .flatMap((p) => p.rounds)
+          .find((r) => r.index === index)
+        const label = first?.label ?? ''
         return (
-          <Card key={index}>
+          <Card
+            key={index}
+            className={cn(first?.kind === 'shop' && 'ml-4 border-dashed')}
+          >
             <CardHeader>
               <CardTitle className='text-base'>{label}</CardTitle>
             </CardHeader>
