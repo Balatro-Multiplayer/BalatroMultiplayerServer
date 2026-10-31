@@ -66,6 +66,14 @@ function EventLine({ event }: { event: GameEvent }) {
                 <span className='text-foreground'>{event.appliesTo}</span>
               </p>
             )}
+            {event.jokers.length > 0 && (
+              <div className='flex flex-wrap gap-1.5'>
+                {event.jokers.map((joker, i) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: ordered, static
+                  <CardChip key={i} card={joker} artOnly />
+                ))}
+              </div>
+            )}
             <IdolTrack roll={event} />
           </div>
         </div>

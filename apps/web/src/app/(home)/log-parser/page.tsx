@@ -10,6 +10,7 @@ import type { DecodedPlayerLog } from '../matches/lib/decode-player-logs'
 import { buildGameLog } from '../matches/lib/game-log/build-game-log'
 import {
   isCurrentLovelyLog,
+  type LovelyGame,
   parseCurrentLovelyLog,
 } from '../matches/lib/game-log/parse-lovely-current'
 import { parseLovelyIdolRolls } from '../matches/lib/game-log/parse-lovely-idol'
@@ -17,6 +18,8 @@ import { parseReplayUpload } from '../matches/lib/game-log/parse-upload'
 import type { GameLog, IdolRoll } from '../matches/lib/game-log/types'
 import { LegacyGamesView } from './_legacy/legacy-game-view'
 import { type ParsedLogGame, parseLogSource } from './_legacy/log-source-parser'
+
+const fileLabel = (name: string) => name.replace(/\.[^.]+$/, '')
 
 interface LogView {
   id: string
@@ -45,6 +48,7 @@ export default function LogParserPage() {
     const nextViews: LogView[] = []
     const games: ParsedLogGame[] = []
     const rolls: IdolRoll[] = []
+    const lovelyGames: { file: string; game: LovelyGame }[] = []
 
     for (const file of Array.from(files)) {
       const text = await file.text()
@@ -65,14 +69,8 @@ export default function LogParserPage() {
       if (isCurrentLovelyLog(text)) {
         const parsed = parseCurrentLovelyLog(text)
         for (const game of parsed.games) {
-          if (game.events.length <= 2) continue
-          nextViews.push({
-            id: `${file.name}-${game.index}`,
-            label: `${files.length > 1 ? `${file.name} · ` : ''}Game ${game.index}${
-              game.startedAt ? ` · ${game.startedAt.slice(11, 16)}` : ''
-            }`,
-            log: buildGameLog([{ playerId: 'You', events: game.events }]),
-          })
+          if (game.events.length > 2)
+            lovelyGames.push({ file: file.name, game })
         }
         if (parsed.games.length > 0) continue
       }
@@ -94,6 +92,40 @@ export default function LogParserPage() {
       setLegacyGames([])
       setIdolRolls([])
       return
+    }
+
+    // Logs from different players' clients that started the same game (same
+    // "Game starting" time) are one match: show them side by side.
+    const used = new Set<{ file: string; game: LovelyGame }>()
+    for (const entry of lovelyGames) {
+      if (used.has(entry)) continue
+      const sameGame = lovelyGames.filter(
+        (other) =>
+          entry.game.startedAt !== null &&
+          other.game.startedAt === entry.game.startedAt &&
+          !used.has(other)
+      )
+      const distinct = sameGame.filter(
+        (other, i) => sameGame.findIndex((o) => o.file === other.file) === i
+      )
+      const group = distinct.length > 1 ? distinct : [entry]
+      for (const member of group) used.add(member)
+      const time = entry.game.startedAt
+        ? ` · ${entry.game.startedAt.slice(11, 16)}`
+        : ''
+      nextViews.push({
+        id: `${entry.file}-${entry.game.index}`,
+        label:
+          group.length > 1
+            ? `Match${time} · ${group.map((m) => fileLabel(m.file)).join(' vs ')}`
+            : `${files.length > 1 ? `${entry.file} · ` : ''}Game ${entry.game.index}${time}`,
+        log: buildGameLog(
+          group.map((m) => ({
+            playerId: group.length > 1 ? fileLabel(m.file) : 'You',
+            events: m.game.events,
+          }))
+        ),
+      })
     }
 
     if (replayLogs.length > 0) {

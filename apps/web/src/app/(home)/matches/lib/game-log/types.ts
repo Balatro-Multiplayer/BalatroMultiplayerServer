@@ -60,6 +60,8 @@ export type GameEvent =
       type: 'idol'
       /** Label of the blind this roll applies to, when the log reaches it. */
       appliesTo: string | null
+      /** Jokers owned when the roll was made. */
+      jokers: ResolvedCard[]
     } & IdolRoll)
   | { type: 'other'; t: number; opcode: string; args: unknown }
 
