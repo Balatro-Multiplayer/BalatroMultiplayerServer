@@ -7,7 +7,9 @@ import {
 	DEPLOY_ACTOR_ID,
 	DEPLOY_ROLE,
 	type StaffActionEntry,
+	parseReason,
 } from '../../shared/staff-log/actions.js'
+import { AppError } from '../../shared/utils/errors.js'
 
 // Guards every /api/deploy route. With no DEPLOY_TOKEN the routes do not
 // exist as far as a caller can tell (404). Otherwise the call must carry
@@ -44,4 +46,16 @@ export async function logDeployAction(
 		...entry,
 		staff: { playerId: DEPLOY_ACTOR_ID, role: DEPLOY_ROLE },
 	})
+}
+
+// The JSON body of a deploy call, or an empty object when there is none.
+export function readBody(req: Request): Record<string, unknown> {
+	return (req.body ?? {}) as Record<string, unknown>
+}
+
+// The reason every deploy route needs. A missing or bad reason is a 400.
+export function requireReason(body: Record<string, unknown>): string {
+	const checked = parseReason(body.reason)
+	if (!checked.ok) throw new AppError(checked.message, 400)
+	return checked.reason
 }
