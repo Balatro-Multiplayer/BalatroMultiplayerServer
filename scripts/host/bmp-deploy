@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# The forced command for the deploy SSH key. Installed once on the Official
+# server host as /usr/local/bin/bmp-deploy. It reads SSH_ORIGINAL_COMMAND and
+# accepts only:
+#
+#   full <40-hex sha>   Full deploy: Nakama, API, website
+#   web <40-hex sha>    Web deploy: API and website
+#   status              print DEPLOYED_COMMIT and health; changes nothing
+#
+# A deploy downloads the commit from public GitHub, backs up the files it is
+# about to replace, copies the commit over the server folder, runs
+# scripts/host-deploy.sh from there, then writes DEPLOYED_COMMIT. A failed
+# step exits non-zero and leaves DEPLOYED_COMMIT as it was.
+#
+# The folder is a copy, not a git checkout.
+set -euo pipefail
+
+ROOT="${BMP_DEPLOY_ROOT:-/root/bmp-nakama/server}"
+LOCK="${BMP_DEPLOY_LOCK:-/var/lock/bmp-deploy.lock}"
+BACKUP_DIR="${BMP_BACKUP_DIR:-/root/bmp-nakama/deploy-backups}"
+BACKUPS_KEPT=10
+TARBALL_BASE="${BMP_TARBALL_BASE:-https://codeload.github.com/Balatro-Multiplayer/BalatroMultiplayerServer/tar.gz}"
+
+log() { echo "[bmp-deploy] $*"; }
+die() {
+	echo "[bmp-deploy] ERROR: $*" >&2
+	exit "${2:-1}"
+}
+
+# Paths the copy never touches. Each one is state that lives only on the host,
+# or a file the deploy itself rewrites. The copy never uses --delete, so a
+# file that exists only on the host is left alone anyway; these rules stop the
+# files that ALSO exist in the commit from being overwritten.
+#
+#   .env, .env.*              secrets for compose (root, apps/server, apps/web)
+#   /DEPLOYED_COMMIT          written by this script after a good deploy
+#   /nginx/upstream.conf      tracked, but deploy-color-swap.sh rewrites it on
+#                             every cutover: it names the live API color
+#   /packages/internal/       a private package replaces this public stub at
+#                             deploy time (challenge strategy)
+#   /data/, /logs/            host state folders
+#   /releases/, /clients/     launcher builds and client files kept on the host
+#   node_modules/             never shipped; images build their own
+#   *.local*                  host-only overrides (the .gitignore patterns)
+#
+# State kept elsewhere needs no rule: Postgres and the model cache are named
+# Docker volumes, the Discord archives are ARCHIVE_DIR (/opt/bmp/archives), and
+# the nginx certificates are /etc/nginx/ssl.
+EXCLUDES=(
+	--exclude='.env'
+	--exclude='.env.*'
+	--exclude='/DEPLOYED_COMMIT'
+	--exclude='/nginx/upstream.conf'
+	--exclude='/packages/internal/'
+	--exclude='/data/'
+	--exclude='/logs/'
+	--exclude='/releases/'
+	--exclude='/clients/'
+	--exclude='node_modules/'
+	--exclude='*.local*'
+	--exclude='/.claude/'
+)
+
+CMD="${SSH_ORIGINAL_COMMAND:-}"
+SHA=""
+if [[ "$CMD" =~ ^(full|web)\ ([0-9a-f]{40})$ ]]; then
+	ACTION="${BASH_REMATCH[1]}"
+	SHA="${BASH_REMATCH[2]}"
+elif [ "$CMD" = status ]; then
+	ACTION=status
+else
+	die "refused: allowed commands are 'full <40-hex sha>', 'web <40-hex sha>' and 'status'" 2
+fi
+
+container_health() {
+	docker inspect --format='{{.State.Health.Status}}' "$1" 2>/dev/null || echo unknown
+}
+
+probe() { # probe <label> <command...>
+	local label="$1"
+	shift
+	if "$@" >/dev/null 2>&1; then echo "$label: ok"; else echo "$label: DOWN"; fi
+}
+
+status() {
+	echo "deployed_commit: $(cat "$ROOT/DEPLOYED_COMMIT" 2>/dev/null || echo unknown)"
+	echo "nakama: $(container_health bmp-nakama)"
+	probe api docker exec bmp-nginx wget -q --spider http://127.0.0.1:8788/health
+	probe web docker exec bmp-nginx wget -q --spider http://web:3000/
+}
+
+if [ "$ACTION" = status ]; then
+	status
+	exit 0
+fi
+
+mkdir -p "$(dirname "$LOCK")"
+exec 9>"$LOCK"
+if ! flock -n 9; then
+	die "another deploy is running; try again when it ends"
+fi
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+log "deploy: $ACTION $SHA"
+log "step: download the commit"
+curl -fsSL --retry 3 --retry-delay 2 -o "$TMP/src.tar.gz" "$TARBALL_BASE/$SHA" ||
+	die "could not download $TARBALL_BASE/$SHA"
+mkdir "$TMP/new"
+tar -xzf "$TMP/src.tar.gz" -C "$TMP/new" --strip-components=1 --no-same-owner ||
+	die "could not unpack the download"
+[ -x "$TMP/new/scripts/host-deploy.sh" ] && [ -f "$TMP/new/docker-compose.yml" ] ||
+	die "the download is not a server commit (no scripts/host-deploy.sh or docker-compose.yml)"
+[ -d "$ROOT" ] || die "server folder $ROOT not found"
+
+if [ "$ACTION" = web ]; then
+	if ! diff -rq "$ROOT/nakama" "$TMP/new/nakama" >/dev/null 2>&1; then
+		log "WARNING: nakama/ changed between the server folder (DEPLOYED_COMMIT $(cat "$ROOT/DEPLOYED_COMMIT" 2>/dev/null || echo unknown)) and $SHA."
+		log "WARNING: a Web deploy does not restart Nakama. Run a Full deploy to apply it."
+	fi
+fi
+
+log "step: back up the files about to be replaced"
+mkdir -p "$BACKUP_DIR"
+BACKUP="$BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)-before-${SHA:0:12}.tar.gz"
+# A dry run of the real copy, with the real exclude rules, names exactly the
+# files the copy would write. Back up those that exist now, so .env and the
+# other excluded state never enter a backup.
+rsync -rlptc --inplace --dry-run --out-format='%n' "${EXCLUDES[@]}" "$TMP/new/" "$ROOT/" |
+	while IFS= read -r path; do
+		[ -f "$ROOT/$path" ] && printf '%s\n' "$path"
+	done >"$TMP/backup-list" || true
+tar -czf "$BACKUP" -C "$ROOT" --files-from="$TMP/backup-list" ||
+	die "backup failed; nothing was changed"
+log "backup: $BACKUP"
+# Keep the newest few.
+# shellcheck disable=SC2012
+ls -1t "$BACKUP_DIR"/*.tar.gz 2>/dev/null | tail -n +$((BACKUPS_KEPT + 1)) | xargs -r rm -f
+
+log "step: copy the commit over $ROOT"
+# -c compares content, so a file with the same size and time is still caught.
+# --inplace keeps each file's inode. nginx and Nakama bind-mount single files
+# (nginx/prod/server.conf, nakama/prod.yml); a rename-based copy would leave
+# the running container looking at the old file.
+rsync -rlptc --inplace "${EXCLUDES[@]}" "$TMP/new/" "$ROOT/" || die "copy failed"
+
+log "step: run host-deploy.sh $ACTION"
+(cd "$ROOT" && ./scripts/host-deploy.sh "$ACTION") || die "host-deploy.sh $ACTION failed; DEPLOYED_COMMIT is unchanged"
+
+printf '%s\n' "$SHA" >"$ROOT/DEPLOYED_COMMIT.tmp"
+mv "$ROOT/DEPLOYED_COMMIT.tmp" "$ROOT/DEPLOYED_COMMIT"
+log "done: DEPLOYED_COMMIT is now $SHA"
