@@ -187,7 +187,9 @@ jobs:
             echo
             if [ -n "$WAITED" ]; then
               echo "- Wait: $((WAITED / 60)) min from the close."
-              if [ "$FORCED" = true ]; then
+              if [ "$FORCED" = true ] && [ "$RUNNING_AT_END" = unknown ]; then
+                echo "- Force limit reached: the live Ranked count could not be read; the deploy went ahead."
+              elif [ "$FORCED" = true ]; then
                 echo "- Force limit reached: $RUNNING_AT_END Ranked matches were still running; the deploy went ahead."
               else
                 echo "- No Ranked match was running when the deploy started."
