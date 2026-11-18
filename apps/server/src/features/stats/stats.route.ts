@@ -26,7 +26,7 @@ import { createQueueStats } from './queue-counts.js'
 
 // Legacy match total from the old www system (Seasons 1–6).
 // Unique players is not carried forward — account systems don't overlap.
-const LEGACY_MATCHES = 453_792
+const LEGACY_MATCHES = 664_900
 const LEGACY_UNIQUE_PLAYERS = 0
 
 const TOTALS_TTL_MS = 5 * 60 * 1000
