@@ -32,6 +32,7 @@ export const STAFF_ACTIONS = [
 	'season_activate',
 	'season_end',
 	'mod_pin',
+	'announcement',
 	'custom_mod_create',
 	'custom_mod_update',
 	'custom_mod_delete',

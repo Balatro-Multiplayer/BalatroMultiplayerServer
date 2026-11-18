@@ -7,6 +7,7 @@ import {
 import { parseReason } from '../../shared/staff-log/actions.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { syncModRegistry } from '../mods/mods-sync.service.js'
+import { announce } from './announce.js'
 import { logDeployAction, requireDeployToken } from './deploy-auth.js'
 
 // Routes GitHub Actions call with the deploy token (ADR 0012). Add a route
@@ -70,6 +71,8 @@ export function createDeployRouter() {
 			next(err)
 		}
 	})
+
+	router.post('/announce', announce)
 
 	return router
 }
