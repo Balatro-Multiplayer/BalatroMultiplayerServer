@@ -1,0 +1,217 @@
+name: Full deploy
+
+# Runs only by hand: Actions > Full deploy > Run workflow.
+# Closes Ranked, tells every online player, waits for Ranked matches to end,
+# deploys Nakama, the API and the website to the Official server, then opens
+# Ranked again.
+#
+# The wait is always 30 minutes from the close. Then the run checks every
+# minute and deploys when no Ranked match is running, or 80 minutes after the
+# close. A Ranked match still running then carries over the Nakama restart by
+# checkpoint.
+#
+# If the run fails or is cancelled before the deploy step starts, it opens
+# Ranked again. If the deploy step starts and fails, Ranked stays closed: an
+# admin opens it on the config page after a fix. The run summary says so.
+#
+# Needs the secrets DEPLOY_SSH_KEY and DEPLOY_SSH_KNOWN_HOSTS, the variables
+# DEPLOY_SSH_HOST and DEPLOY_SSH_USER, the organization secret
+# BMP_DEPLOY_TOKEN and the organization variable BMP_API_URL.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to deploy
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+# Shared with the Web deploy, so the two never run at the same time.
+concurrency:
+  group: official-server-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DEPLOY_SSH_HOST: ${{ vars.DEPLOY_SSH_HOST }}
+      DEPLOY_SSH_USER: ${{ vars.DEPLOY_SSH_USER }}
+      BMP_API_URL: ${{ vars.BMP_API_URL }}
+      BMP_DEPLOY_TOKEN: ${{ secrets.BMP_DEPLOY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/deploy
+
+      - name: Resolve the ref to a full sha
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$REF" --jq .sha)
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Could not resolve '$REF' to a commit sha"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short=${sha:0:7}" >> "$GITHUB_OUTPUT"
+          echo "Deploying $REF = $sha"
+
+      - name: Check the deploy settings
+        run: |
+          for name in DEPLOY_SSH_HOST DEPLOY_SSH_USER BMP_API_URL BMP_DEPLOY_TOKEN; do
+            [ -n "${!name}" ] || { echo "::error::$name is not set"; exit 1; }
+          done
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
+          cat > "$RUNNER_TEMP/ssh_config" <<CONF
+          Host deploy-target
+            HostName $DEPLOY_SSH_HOST
+            User $DEPLOY_SSH_USER
+            IdentityFile $RUNNER_TEMP/deploy_key
+            IdentitiesOnly yes
+            UserKnownHostsFile $RUNNER_TEMP/known_hosts
+            StrictHostKeyChecking yes
+            BatchMode yes
+            ServerAliveInterval 30
+          CONF
+
+      - name: Status before
+        run: ssh -F "$RUNNER_TEMP/ssh_config" deploy-target status
+
+      - name: Close Ranked
+        id: close
+        env:
+          SHORT: ${{ steps.sha.outputs.short }}
+        run: |
+          body=$(jq -n --arg reason "Full deploy $SHORT" '{reason: $reason}')
+          status=$(scripts/deploy/api-call.sh POST ranked/close "$body")
+          case "$status" in
+            200) ;;
+            502)
+              # Ranked is already off; only cancelling the queue tickets failed.
+              echo "::warning::Ranked is closed, but cancelling the queue tickets failed: $(head -c 300 "$RUNNER_TEMP/deploy-api.json")"
+              ;;
+            *)
+              echo "::error::Closing Ranked failed ($status): $(head -c 300 "$RUNNER_TEMP/deploy-api.json")"
+              exit 1
+              ;;
+          esac
+          echo "close_epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
+          echo "Ranked is closed."
+
+      - name: Announce
+        env:
+          SHORT: ${{ steps.sha.outputs.short }}
+        run: |
+          body=$(jq -n --arg reason "Full deploy $SHORT" \
+            '{text: "Ranked is closed for a server update. Matches in progress can finish. Back in about 45 minutes.", reason: $reason}')
+          status=$(scripts/deploy/api-call.sh POST announce "$body")
+          # Ranked is already closed; a missing Announcement does not stop the deploy.
+          if [ "$status" != 200 ]; then
+            echo "::warning::The Announcement was not sent ($status): $(head -c 300 "$RUNNER_TEMP/deploy-api.json")"
+          fi
+
+      - name: Wait for Ranked matches to end
+        id: wait
+        env:
+          CLOSE_EPOCH: ${{ steps.close.outputs.close_epoch }}
+        run: RESULT_FILE="$GITHUB_OUTPUT" scripts/deploy/wait-for-ranked.sh
+
+      - name: Deploy Nakama, the API and the website
+        id: deploy
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          # From here on, Ranked stays closed if anything fails.
+          echo "started=true" >> "$GITHUB_OUTPUT"
+          ssh -F "$RUNNER_TEMP/ssh_config" deploy-target "full $SHA"
+
+      - name: Open Ranked
+        id: open
+        env:
+          SHORT: ${{ steps.sha.outputs.short }}
+        run: |
+          body=$(jq -n --arg reason "Full deploy $SHORT done" '{reason: $reason}')
+          status=$(scripts/deploy/api-call.sh POST ranked/open "$body")
+          if [ "$status" != 200 ]; then
+            echo "::error::Opening Ranked failed ($status): $(head -c 300 "$RUNNER_TEMP/deploy-api.json")"
+            exit 1
+          fi
+
+      - name: Status after
+        run: ssh -F "$RUNNER_TEMP/ssh_config" deploy-target status
+
+      # The run failed or was cancelled before the deploy step started.
+      - name: Open Ranked again after an early stop
+        id: reopen
+        if: ${{ always() && steps.close.outcome != 'skipped' && steps.deploy.outputs.started != 'true' }}
+        env:
+          SHORT: ${{ steps.sha.outputs.short }}
+        run: |
+          body=$(jq -n --arg reason "Full deploy $SHORT stopped before the deploy" '{reason: $reason}')
+          status=$(scripts/deploy/api-call.sh POST ranked/open "$body")
+          if [ "$status" = 200 ]; then
+            echo "Ranked is open again."
+          else
+            echo "::error::Opening Ranked failed ($status). Open it on the config page."
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+          STARTED: ${{ steps.deploy.outputs.started }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          OPEN_OUTCOME: ${{ steps.open.outcome }}
+          REOPEN_OUTCOME: ${{ steps.reopen.outcome }}
+          WAITED: ${{ steps.wait.outputs.waited_seconds }}
+          FORCED: ${{ steps.wait.outputs.forced }}
+          RUNNING_AT_END: ${{ steps.wait.outputs.running_at_end }}
+        run: |
+          {
+            echo "### Full deploy ${SHA:-unknown}"
+            echo
+            if [ -n "$WAITED" ]; then
+              echo "- Wait: $((WAITED / 60)) min from the close."
+              if [ "$FORCED" = true ]; then
+                echo "- Force limit reached: $RUNNING_AT_END Ranked matches were still running; the deploy went ahead."
+              else
+                echo "- No Ranked match was running when the deploy started."
+              fi
+            else
+              echo "- Wait: the run stopped before the wait ended."
+            fi
+            if [ "$STARTED" != true ]; then
+              if [ "$REOPEN_OUTCOME" = success ]; then
+                echo "- Result: the run stopped before the deploy. Ranked was opened again."
+              elif [ "$REOPEN_OUTCOME" = failure ]; then
+                echo "- **Ranked may still be CLOSED.** The run stopped before the deploy and opening Ranked failed. Open it on the config page."
+              else
+                echo "- Result: the run stopped before Ranked was closed."
+              fi
+            elif [ "$DEPLOY_OUTCOME" = success ] && [ "$OPEN_OUTCOME" = success ]; then
+              echo "- Result: deployed, and Ranked is open."
+            elif [ "$DEPLOY_OUTCOME" = success ]; then
+              echo "- **Ranked is still CLOSED.** The deploy worked, but opening Ranked failed. Open it on the config page."
+            else
+              echo "- **Ranked is still CLOSED.** The deploy step failed or was cancelled. Fix the problem, then open Ranked on the config page."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/known_hosts" "$RUNNER_TEMP/ssh_config"
