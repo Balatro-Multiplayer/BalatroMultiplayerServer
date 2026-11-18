@@ -11958,6 +11958,42 @@ function rpcWebLoginLink(ctx, logger, nk, payload) {
   return JSON.stringify({ url });
 }
 
+// src/matchmaking/ranked_close.ts
+var RANKED_PREFIX2 = "ranked:";
+var DEFAULT_REASON = "Ranked is closed for a server update";
+var MATCH_LIST_LIMIT2 = 1e4;
+function rpcAdminRankedQueueCancel(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const reason = typeof input.reason === "string" && input.reason ? input.reason : DEFAULT_REASON;
+  let cancelled = 0;
+  for (const { userId, record } of liveQueuedPlayers(nk, null, Date.now())) {
+    if (record.gameMode.indexOf(RANKED_PREFIX2) !== 0) continue;
+    notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+      modId: record.modId,
+      mode: record.gameMode.slice(RANKED_PREFIX2.length),
+      reason,
+      requeue: false
+    });
+    clearMatched(nk, record.modId, record.gameMode, [userId]);
+    cancelled++;
+  }
+  logger.info("Ranked queue cancelled: %d ticket(s)", cancelled);
+  return JSON.stringify({ cancelled });
+}
+function rpcAdminRankedLive(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  let running = 0;
+  for (const m of nk.matchList(MATCH_LIST_LIMIT2, true, null, null, null, "+label.started:T")) {
+    try {
+      const label = JSON.parse(m.label || "{}");
+      if (label.started === true && typeof label.mode === "string" && label.mode.indexOf(RANKED_PREFIX2) === 0) running++;
+    } catch (e) {
+    }
+  }
+  return JSON.stringify({ running });
+}
+
 // src/moderation/network_admin.ts
 var IP_HASH_PURGE_MAX = 500;
 function rpcAdminNetworkBans(ctx, logger, nk, payload) {
@@ -12090,6 +12126,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_discord_set", rpcAdminDiscordSet);
   initializer.registerRpc("admin_integrity_set", rpcAdminIntegritySet);
   initializer.registerRpc("admin_queue_cancel", rpcAdminQueueCancel);
+  initializer.registerRpc("admin_ranked_queue_cancel", rpcAdminRankedQueueCancel);
+  initializer.registerRpc("admin_ranked_live", rpcAdminRankedLive);
   initializer.registerRpc("admin_mirror_pull", rpcAdminMirrorPull);
   initializer.registerRpc("admin_mirror_ack", rpcAdminMirrorAck);
   initializer.registerRpc("admin_profile_set", rpcAdminProfileSet);

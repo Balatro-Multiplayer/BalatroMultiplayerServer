@@ -96,6 +96,7 @@ import {
 	rpcLauncherChallengeAnswer,
 	rpcLauncherSessionStart,
 } from './integrity'
+import { rpcAdminRankedLive, rpcAdminRankedQueueCancel } from './matchmaking/ranked_close'
 import { checkServerKind } from './server_kind'
 import { requireIpHashSalt } from './moderation/network'
 import {
@@ -202,6 +203,8 @@ function InitModule(
 	initializer.registerRpc('admin_discord_set', rpcAdminDiscordSet)
 	initializer.registerRpc('admin_integrity_set', rpcAdminIntegritySet)
 	initializer.registerRpc('admin_queue_cancel', rpcAdminQueueCancel)
+	initializer.registerRpc('admin_ranked_queue_cancel', rpcAdminRankedQueueCancel)
+	initializer.registerRpc('admin_ranked_live', rpcAdminRankedLive)
 	initializer.registerRpc('admin_mirror_pull', rpcAdminMirrorPull)
 	initializer.registerRpc('admin_mirror_ack', rpcAdminMirrorAck)
 	initializer.registerRpc('admin_profile_set', rpcAdminProfileSet)

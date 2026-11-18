@@ -1,4 +1,4 @@
-import { desc, isNotNull, isNull } from 'drizzle-orm'
+import { desc, eq, isNotNull, isNull } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { serverConfig, modVersions, chatAllowlist, seasons, modRegistry } from '../db/schema.js'
 import type { AppConfig } from '../../state/config.js'
@@ -22,6 +22,14 @@ export async function pinnedSmodsIds(): Promise<string[]> {
 		.from(modRegistry)
 		.where(isNotNull(modRegistry.rankedVersion))
 	return [...new Set(rows.flatMap((row) => row.smodsIds))].sort()
+}
+
+// The Ranked queue switch; loadConfigFromDb() then applies and pushes it.
+export async function setRankedEnabled(enabled: boolean): Promise<void> {
+	await db
+		.update(serverConfig)
+		.set({ rankedEnabled: enabled, updatedAt: new Date() })
+		.where(eq(serverConfig.id, 1))
 }
 
 export async function loadConfigFromDb(): Promise<AppConfig> {
