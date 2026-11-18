@@ -29,6 +29,9 @@ export const NotifyCode = {
 	// The live push of one that also waits unread in the store; the client
 	// marks it read once shown.
 	NOTIFICATION: 112,
+	// {text}: an Announcement, one chat line to every online player
+	// (announcement.ts). Transient; a client that does not know it ignores it.
+	ANNOUNCEMENT: 113,
 }
 
 const CODES: number[] = Object.keys(NotifyCode).map((k) => (NotifyCode as { [k: string]: number })[k])

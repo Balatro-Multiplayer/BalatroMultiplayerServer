@@ -4546,7 +4546,10 @@ var NotifyCode = {
   // {id, kind, params, sentAt}: a stored Notification (notification/store.ts).
   // The live push of one that also waits unread in the store; the client
   // marks it read once shown.
-  NOTIFICATION: 112
+  NOTIFICATION: 112,
+  // {text}: an Announcement, one chat line to every online player
+  // (announcement.ts). Transient; a client that does not know it ignores it.
+  ANNOUNCEMENT: 113
 };
 var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
 function isNotifyCode(code) {
@@ -7893,6 +7896,20 @@ function rpcAdminMirrorAck(ctx, logger, nk, payload) {
     throw runtimeError(INVALID_ARGUMENT, "keys must be a list of entry keys");
   ackEntries(nk, keys);
   return JSON.stringify({ acked: keys.length });
+}
+
+// src/announcement.ts
+var ANNOUNCEMENT_MAX_LENGTH = 300;
+function rpcAdminAnnounce(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (!text) throw runtimeError(INVALID_ARGUMENT, "text is required");
+  if (text.length > ANNOUNCEMENT_MAX_LENGTH)
+    throw runtimeError(INVALID_ARGUMENT, `text is over ${ANNOUNCEMENT_MAX_LENGTH} characters`);
+  nk.notificationSendAll("announcement", { text }, NotifyCode.ANNOUNCEMENT, false);
+  logger.info("Announcement sent (%d characters)", text.length);
+  return JSON.stringify({ ok: true });
 }
 
 // src/rating/metrics.ts
@@ -12072,6 +12089,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("leaderboard_get", rpcLeaderboardGet);
   initializer.registerRpc("admin_ping", rpcAdminPing);
   initializer.registerRpc("admin_notify", rpcAdminNotify);
+  initializer.registerRpc("admin_announce", rpcAdminAnnounce);
   initializer.registerRpc("admin_contest_withdrawn", rpcAdminContestWithdrawn);
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);

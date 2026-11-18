@@ -20,6 +20,7 @@ import {
 	rpcAdminPing,
 	rpcAdminPlayerGet,
 } from './admin'
+import { rpcAdminAnnounce } from './announcement'
 import {
 	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
@@ -184,6 +185,7 @@ function InitModule(
 	// Server to server only (http key); see admin.ts.
 	initializer.registerRpc('admin_ping', rpcAdminPing)
 	initializer.registerRpc('admin_notify', rpcAdminNotify)
+	initializer.registerRpc('admin_announce', rpcAdminAnnounce)
 	initializer.registerRpc('admin_contest_withdrawn', rpcAdminContestWithdrawn)
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
