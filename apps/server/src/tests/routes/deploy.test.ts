@@ -1,6 +1,7 @@
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../../env.js'
+import { syncModRegistry } from '../../features/mods/mods-sync.service.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import * as modsGateway from '../../infrastructure/gateways/mods.gateway.js'
 import { recordStaffAction } from '../../infrastructure/gateways/staff-log.gateway.js'
@@ -21,6 +22,10 @@ vi.mock(
 		setRankedVersion: vi.fn(),
 	}),
 )
+
+vi.mock('../../features/mods/mods-sync.service.js', () => ({
+	syncModRegistry: vi.fn().mockResolvedValue({}),
+}))
 
 const app = createTestApp()
 const original = env.DEPLOY_TOKEN
@@ -114,9 +119,30 @@ describe('PUT /api/deploy/pins', () => {
 		})
 		const res = await pin(TOKEN)
 		expect(res.status).toBe(400)
-		expect(res.body.error).toMatch(/version/i)
+		expect(res.body.error).toMatch(/not on Thunderstore yet/)
+		expect(syncModRegistry).toHaveBeenCalledTimes(1)
+		expect(modsGateway.setRankedVersion).toHaveBeenCalledTimes(2)
 		expect(loadConfigFromDb).not.toHaveBeenCalled()
 		expect(recordStaffAction).not.toHaveBeenCalled()
+	})
+
+	it('syncs the registry and pins when the version only shows up after the sync', async () => {
+		env.DEPLOY_TOKEN = TOKEN
+		vi.mocked(modsGateway.setRankedVersion)
+			.mockResolvedValueOnce({ ok: false, reason: 'version-not-found' })
+			.mockResolvedValueOnce({ ok: true })
+		const res = await pin(TOKEN)
+		expect(res.status).toBe(200)
+		expect(syncModRegistry).toHaveBeenCalledTimes(1)
+		expect(modsGateway.setRankedVersion).toHaveBeenCalledTimes(2)
+		expect(loadConfigFromDb).toHaveBeenCalled()
+		expect(recordStaffAction).toHaveBeenCalledTimes(1)
+	})
+
+	it('does not sync when the first pin works', async () => {
+		env.DEPLOY_TOKEN = TOKEN
+		await pin(TOKEN)
+		expect(syncModRegistry).not.toHaveBeenCalled()
 	})
 
 	it('needs package, version and reason', async () => {

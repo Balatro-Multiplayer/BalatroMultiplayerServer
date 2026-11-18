@@ -6,6 +6,7 @@ import {
 } from '../../infrastructure/gateways/mods.gateway.js'
 import { parseReason } from '../../shared/staff-log/actions.js'
 import { AppError } from '../../shared/utils/errors.js'
+import { syncModRegistry } from '../mods/mods-sync.service.js'
 import { logDeployAction, requireDeployToken } from './deploy-auth.js'
 
 // Routes GitHub Actions call with the deploy token (ADR 0012). Add a route
@@ -32,7 +33,13 @@ export function createDeployRouter() {
 
 			const mod = await findModByIdOrFullName(fullName.trim())
 			if (!mod) throw new AppError('Mod not found', 404)
-			const result = await setRankedVersion(mod.id, version.trim())
+			let result = await setRankedVersion(mod.id, version.trim())
+			// A version published moments ago is not in the registry until the
+			// sync runs (it shares an in-flight run), so sync once and look again.
+			if (!result.ok && result.reason === 'version-not-found') {
+				await syncModRegistry()
+				result = await setRankedVersion(mod.id, version.trim())
+			}
 			if (!result.ok) {
 				switch (result.reason) {
 					case 'not-found':
