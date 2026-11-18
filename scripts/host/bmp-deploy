@@ -134,6 +134,12 @@ tar -xzf "$TMP/src.tar.gz" -C "$TMP/new" --strip-components=1 --no-same-owner ||
 	die "the download is not a server commit (no scripts/host-deploy.sh or docker-compose.yml)"
 [ -d "$ROOT" ] || die "server folder $ROOT not found"
 
+# Before the first copy that knows about DEPLOYED_NAKAMA_COMMIT, the Nakama on
+# disk is the last copied commit. Record it now, or a web deploy would lose it.
+if [ ! -e "$ROOT/DEPLOYED_NAKAMA_COMMIT" ] && [ -s "$ROOT/DEPLOYED_COMMIT" ]; then
+	cp "$ROOT/DEPLOYED_COMMIT" "$ROOT/DEPLOYED_NAKAMA_COMMIT"
+fi
+
 if [ "$ACTION" = web ]; then
 	# A web deploy leaves nakama/ as it is, so the running Nakama keeps the files
 	# it started with and the difference stays visible until a full deploy.
