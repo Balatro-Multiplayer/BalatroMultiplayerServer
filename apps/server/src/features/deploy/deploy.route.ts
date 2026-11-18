@@ -9,6 +9,7 @@ import { AppError } from '../../shared/utils/errors.js'
 import { syncModRegistry } from '../mods/mods-sync.service.js'
 import { announce } from './announce.js'
 import { logDeployAction, requireDeployToken } from './deploy-auth.js'
+import { createRankedDeployRouter } from './ranked.route.js'
 
 // Routes GitHub Actions call with the deploy token (ADR 0012). Add a route
 // here only when an action needs it; every route reads a reason and logs it
@@ -16,6 +17,7 @@ import { logDeployAction, requireDeployToken } from './deploy-auth.js'
 export function createDeployRouter() {
 	const router = Router()
 	router.use(requireDeployToken)
+	router.use('/ranked', createRankedDeployRouter())
 
 	// {package: Thunderstore full name, version, reason}: pins the mod the way
 	// the admin route does (download, hash, SMODS ids), then pushes the config.
