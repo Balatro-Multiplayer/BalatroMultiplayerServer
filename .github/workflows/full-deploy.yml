@@ -7,7 +7,8 @@ name: Full deploy
 #
 # The wait is always 30 minutes from the close. Then the run checks every
 # minute and deploys when no Ranked match is running, or 80 minutes after the
-# close. A Ranked match still running then carries over the Nakama restart by
+# close. If the live Ranked count fails (a Nakama older than that route), it
+# counts the players in Ranked lobbies from the public queue counts instead. A Ranked match still running then carries over the Nakama restart by
 # checkpoint.
 #
 # If the run fails or is cancelled before the deploy step starts, it opens
@@ -181,6 +182,7 @@ jobs:
           WAITED: ${{ steps.wait.outputs.waited_seconds }}
           FORCED: ${{ steps.wait.outputs.forced }}
           RUNNING_AT_END: ${{ steps.wait.outputs.running_at_end }}
+          COUNT_SOURCE: ${{ steps.wait.outputs.count_source }}
         run: |
           {
             echo "### Full deploy ${SHA:-unknown}"
@@ -189,8 +191,12 @@ jobs:
               echo "- Wait: $((WAITED / 60)) min from the close."
               if [ "$FORCED" = true ] && [ "$RUNNING_AT_END" = unknown ]; then
                 echo "- Force limit reached: the live Ranked count could not be read; the deploy went ahead."
+              elif [ "$FORCED" = true ] && [ "$COUNT_SOURCE" = lobbies ]; then
+                echo "- Force limit reached: $RUNNING_AT_END players were still in Ranked lobbies (public queue counts); the deploy went ahead."
               elif [ "$FORCED" = true ]; then
                 echo "- Force limit reached: $RUNNING_AT_END Ranked matches were still running; the deploy went ahead."
+              elif [ "$COUNT_SOURCE" = lobbies ]; then
+                echo "- No player was in a Ranked lobby when the deploy started (public queue counts; the live Ranked count could not be read)."
               else
                 echo "- No Ranked match was running when the deploy started."
               fi
