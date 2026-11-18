@@ -18,6 +18,7 @@ import { contextOf } from '../features/service-queue/types.js'
 import { gameOfRun, matchResultDeps } from '../features/service-queue/queue.service.js'
 import { WITHDRAWN_ACTION, createReportPageService } from '../features/reports/report-page.service.js'
 import { createReportsRouter } from '../features/reports/reports.route.js'
+import { createBetaSeasonsRouter } from '../features/beta-seasons/beta-seasons.route.js'
 import { createStatsRouter } from '../features/stats/stats.route.js'
 import webadminRouter from '../features/webadmin/webadmin.route.js'
 import {
@@ -32,6 +33,7 @@ import * as reportGateway from '../infrastructure/gateways/report.gateway.js'
 import * as replayLogGateway from '../infrastructure/gateways/replay-log.gateway.js'
 import { retentionRepository } from '../infrastructure/gateways/retention.gateway.js'
 import * as serviceQueueGateway from '../infrastructure/gateways/service-queue.gateway.js'
+import { betaSeasonsRepository } from '../infrastructure/gateways/beta-seasons.gateway.js'
 import { statsRepository } from '../infrastructure/gateways/stats.gateway.js'
 import { callNakamaRpc } from '../infrastructure/nakama/admin-client.js'
 import { notifyContestWithdrawnInNakama } from '../infrastructure/nakama/moderation-sync.js'
@@ -134,6 +136,11 @@ router.use(
 	),
 )
 router.use('/api/runs', createReplayLogRouter(replayLogService))
+// Before /api/stats, so its own routes do not see these paths.
+router.use(
+	'/api/stats/beta-seasons',
+	createBetaSeasonsRouter({ betaSeasonsRepository }),
+)
 router.use('/api/stats', statsRouter)
 router.use('/api/launcher', launcherRouter)
 router.use('/api/blog', blogRouter)

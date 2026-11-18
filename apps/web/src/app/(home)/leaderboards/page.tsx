@@ -3,11 +3,18 @@
 import { useQuery } from '@tanstack/react-query'
 import { parseAsInteger, parseAsString, useQueryState } from 'nuqs'
 import { Suspense, useEffect, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
+import { BetaBoardTable } from '@/components/beta-seasons/board-table'
+import { RankBadge } from '@/components/rank-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiFetch } from '@/lib/api'
+import {
+  BETA_SEASONS_PATH,
+  type BetaBoardResponse,
+  type BetaSeason,
+  betaBoardsOf,
+} from '@/lib/beta-seasons'
 import {
   type BoardCounts,
   pickCategory,
@@ -84,6 +91,8 @@ function LeaderboardsContent() {
   )
   const [modeParam, setModeParam] = useQueryState('mode', parseAsString)
   const [seasonParam, setSeasonParam] = useQueryState('season', parseAsInteger)
+  // A Beta Season is picked apart from the live seasons: its own param.
+  const [betaParam, setBetaParam] = useQueryState('beta', parseAsInteger)
   const [page, setPage] = useState(1)
   const [debouncedSearch, setDebouncedSearch] = useState('')
 
@@ -108,7 +117,26 @@ function LeaderboardsContent() {
   const counts = countsData?.counts ?? {}
   const categories = sortCategoriesByEntries(LEADERBOARD_CATEGORIES, counts)
   const category = pickCategory(categories, categoryParam)
-  const modes = sortModesByEntries(category, counts)
+
+  const { data: betaData } = useQuery<{ seasons: BetaSeason[] }>({
+    queryKey: ['beta-seasons'],
+    queryFn: () => apiFetch(BETA_SEASONS_PATH),
+    staleTime: 60 * 60 * 1000,
+  })
+  const betaSeasons = (betaData?.seasons ?? []).filter(
+    (s) => betaBoardsOf(s, category.modId).length > 0
+  )
+  const betaSeason =
+    betaParam != null
+      ? betaSeasons.find((s) => s.number === betaParam)
+      : undefined
+
+  // A Beta Season shows only the boards it had, biggest first.
+  const modes = betaSeason
+    ? betaBoardsOf(betaSeason, category.modId).flatMap((b) =>
+        category.modes.filter((m) => gameModeKey(m.id) === b.gameMode)
+      )
+    : sortModesByEntries(category, counts)
   const mode = pickMode(modes, modeParam)
 
   const { data: seasonsData } = useQuery<SeasonsResponse>({
@@ -135,12 +163,33 @@ function LeaderboardsContent() {
           `/stats/leaderboard?modId=${encodeURIComponent(category.modId)}&gameMode=${encodeURIComponent(gameModeKey(mode.id))}${selectedSeason != null ? `&season=${selectedSeason}` : ''}&page=${page}${debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : ''}`
         ),
       enabled:
+        !betaSeason &&
         selectedSeason != null &&
         (!countsLoading || (categoryParam != null && modeParam != null)),
       placeholderData: (prev) => prev,
     })
 
+  const { data: betaBoardData, isLoading: betaLoading } =
+    useQuery<BetaBoardResponse>({
+      queryKey: [
+        'beta-board',
+        betaSeason?.number,
+        category.modId,
+        mode.id,
+        page,
+        debouncedSearch,
+      ],
+      queryFn: () =>
+        apiFetch(
+          `${BETA_SEASONS_PATH}/${betaSeason?.number}/leaderboard?modId=${encodeURIComponent(category.modId)}&gameMode=${encodeURIComponent(gameModeKey(mode.id))}&page=${page}${debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : ''}`
+        ),
+      enabled: !!betaSeason,
+      placeholderData: (prev) => prev,
+    })
+
   const entries = leaderboardData?.entries ?? []
+  const board = betaSeason ? betaBoardData : leaderboardData
+  const boardLoading = betaSeason ? betaLoading : lbLoading
 
   return (
     <div className='container space-y-6 py-8'>
@@ -160,6 +209,7 @@ function LeaderboardsContent() {
             onClick={() => {
               setCategoryParam(c.id)
               setModeParam(null)
+              setBetaParam(null)
               setPage(1)
             }}
             className={`rounded-md border px-4 py-2 font-bold font-pixel text-base transition-colors ${
@@ -203,10 +253,11 @@ function LeaderboardsContent() {
               type='button'
               onClick={() => {
                 setSeasonParam(s.id === currentSeasonId ? null : s.id)
+                setBetaParam(null)
                 setPage(1)
               }}
               className={`rounded-full border px-3 py-1 font-semibold text-xs transition-colors ${
-                selectedSeason === s.id
+                !betaSeason && selectedSeason === s.id
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border bg-muted text-muted-foreground hover:bg-accent'
               }`}
@@ -215,6 +266,33 @@ function LeaderboardsContent() {
               {s.id === currentSeasonId && (
                 <span className='ml-1.5 text-[10px] text-bal-green'>LIVE</span>
               )}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Beta Season pills: the Discord queue era, oldest first */}
+      {betaSeasons.length > 0 && (
+        <div className='flex flex-wrap items-center gap-2'>
+          <span className='font-semibold text-muted-foreground text-xs uppercase tracking-wide'>
+            Beta
+          </span>
+          {betaSeasons.map((s) => (
+            <button
+              key={s.number}
+              type='button'
+              onClick={() => {
+                setBetaParam(s.number)
+                setSeasonParam(null)
+                setPage(1)
+              }}
+              className={`rounded-full border px-3 py-1 font-semibold text-xs transition-colors ${
+                betaSeason?.number === s.number
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border bg-muted text-muted-foreground hover:bg-accent'
+              }`}
+            >
+              {s.name}
             </button>
           ))}
         </div>
@@ -233,11 +311,18 @@ function LeaderboardsContent() {
           <CardHeader>
             <CardTitle className='text-base'>
               {category.label} · {mode.label} ·{' '}
-              {seasonLabel(seasons, selectedSeason)}
+              {betaSeason
+                ? betaSeason.name
+                : seasonLabel(seasons, selectedSeason)}
             </CardTitle>
           </CardHeader>
           <CardContent className='p-0'>
-            {lbLoading ? (
+            {betaSeason ? (
+              <BetaBoardTable
+                loading={betaLoading}
+                entries={betaBoardData?.entries ?? []}
+              />
+            ) : boardLoading ? (
               <p className='p-6 text-muted-foreground text-sm'>Loading…</p>
             ) : entries.length === 0 ? (
               <p className='p-6 text-muted-foreground text-sm'>
@@ -309,10 +394,10 @@ function LeaderboardsContent() {
           </CardContent>
         </Card>
 
-        {(leaderboardData?.totalPages ?? 1) > 1 && (
+        {(board?.totalPages ?? 1) > 1 && (
           <div className='flex items-center justify-between'>
             <span className='text-muted-foreground text-xs'>
-              {leaderboardData ? `${leaderboardData.total} ranked players` : ''}
+              {board ? `${board.total} ranked players` : ''}
             </span>
             <div className='flex items-center gap-2'>
               <Button
@@ -324,17 +409,15 @@ function LeaderboardsContent() {
                 Previous
               </Button>
               <span className='text-muted-foreground text-sm'>
-                Page {page} of {leaderboardData?.totalPages ?? 1}
+                Page {page} of {board?.totalPages ?? 1}
               </span>
               <Button
                 variant='outline'
                 size='sm'
                 onClick={() =>
-                  setPage((p) =>
-                    Math.min(leaderboardData?.totalPages ?? 1, p + 1)
-                  )
+                  setPage((p) => Math.min(board?.totalPages ?? 1, p + 1))
                 }
-                disabled={page >= (leaderboardData?.totalPages ?? 1)}
+                disabled={page >= (board?.totalPages ?? 1)}
               >
                 Next
               </Button>
@@ -344,26 +427,4 @@ function LeaderboardsContent() {
       </div>
     </div>
   )
-}
-
-function RankBadge({ rank }: { rank: number }) {
-  if (rank === 1)
-    return (
-      <Badge className='border-yellow-500/30 bg-yellow-500/20 text-bal-gold'>
-        #1
-      </Badge>
-    )
-  if (rank === 2)
-    return (
-      <Badge className='border-slate-400/30 bg-slate-400/20 text-slate-300'>
-        #2
-      </Badge>
-    )
-  if (rank === 3)
-    return (
-      <Badge className='border-amber-700/30 bg-amber-700/20 text-bal-orange'>
-        #3
-      </Badge>
-    )
-  return <span className='text-muted-foreground text-sm'>#{rank}</span>
 }

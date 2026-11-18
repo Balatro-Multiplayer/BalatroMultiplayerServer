@@ -519,6 +519,13 @@
       "when": 1794900000000,
       "tag": "0073_run_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0074_beta_seasons",
+      "breakpoints": true
     }
   ]
 }

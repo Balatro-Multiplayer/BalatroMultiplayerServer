@@ -572,7 +572,37 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'allowed',
 	],
 	launcher_integrity_events: ['id', 'kind', 'reason', 'occurred_at'],
-}
+	// Beta Seasons are keyed by Discord id hash, not player id. Deletion clears
+	// players.discord_id_hash, so the rows no longer link to the account.
+	beta_seasons: ['number', 'name', 'started_at', 'ended_at'],
+	beta_season_standings: [
+		'season',
+		'mod_id',
+		'game_mode',
+		'discord_id_hash',
+		'name',
+		'rank',
+		'rating',
+		'peak_rating',
+		'wins',
+		'losses',
+		'games_played',
+	],
+	beta_season_games: [
+		'season',
+		'mod_id',
+		'game_mode',
+		'match_key',
+		'discord_id_hash',
+		'played_at',
+		'opponent_id_hash',
+		'opponent_name',
+		'result',
+		'rating_after',
+		'rating_change',
+		'deck',
+		'stake',
+	],}
 
 export const NO_PLAYER_ID_COLUMNS: readonly string[] = Object.entries(
 	NO_PLAYER_ID,

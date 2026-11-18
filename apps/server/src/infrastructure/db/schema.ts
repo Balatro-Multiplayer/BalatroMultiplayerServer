@@ -636,6 +636,81 @@ export const seasons = pgTable('seasons', {
 	endNotifiedAt: timestamp('end_notified_at', { withTimezone: true }),
 })
 
+// Beta Seasons: the ranked seasons of the Discord queue era, before Nakama.
+// They are read-only history, kept apart from `seasons` because rollover and
+// Nakama's carry-over read that table's serial ids as one sequence. Players
+// are known only by `discord_id_hash`, the same value as
+// `players.discord_id_hash`, so a legacy row links to an account when the
+// hashes match (scripts/import-beta-seasons.ts writes these tables).
+export const betaSeasons = pgTable('beta_seasons', {
+	number: integer('number').primaryKey(),
+	name: varchar('name', { length: 64 }).notNull(),
+	startedAt: timestamp('started_at', { withTimezone: true }),
+	endedAt: timestamp('ended_at', { withTimezone: true }),
+})
+
+// One player's final place on one Beta Season board.
+export const betaSeasonStandings = pgTable(
+	'beta_season_standings',
+	{
+		season: integer('season').notNull(),
+		modId: varchar('mod_id', { length: 128 }).notNull(),
+		gameMode: varchar('game_mode', { length: 128 }).notNull(),
+		discordIdHash: text('discord_id_hash').notNull(),
+		// The player's name in the queue bot at the time, shown while no
+		// account has that Discord account linked.
+		name: varchar('name', { length: 128 }).notNull(),
+		rank: integer('rank').notNull(),
+		rating: doublePrecision('rating').notNull(),
+		peakRating: doublePrecision('peak_rating'),
+		wins: integer('wins').notNull(),
+		losses: integer('losses').notNull(),
+		gamesPlayed: integer('games_played').notNull(),
+	},
+	(t) => [
+		primaryKey({
+			columns: [t.season, t.modId, t.gameMode, t.discordIdHash],
+		}),
+		index('beta_standings_board_rank_idx').on(
+			t.season,
+			t.modId,
+			t.gameMode,
+			t.rank,
+		),
+		index('beta_standings_player_idx').on(t.discordIdHash),
+	],
+)
+
+// One player's side of one Beta Season ranked game.
+export const betaSeasonGames = pgTable(
+	'beta_season_games',
+	{
+		season: integer('season').notNull(),
+		modId: varchar('mod_id', { length: 128 }).notNull(),
+		gameMode: varchar('game_mode', { length: 128 }).notNull(),
+		// The source system's game id, unique within a season.
+		matchKey: varchar('match_key', { length: 64 }).notNull(),
+		discordIdHash: text('discord_id_hash').notNull(),
+		playedAt: timestamp('played_at', { withTimezone: true }).notNull(),
+		opponentIdHash: text('opponent_id_hash'),
+		opponentName: varchar('opponent_name', { length: 128 }),
+		result: varchar('result', { length: 8 }).notNull(),
+		ratingAfter: doublePrecision('rating_after'),
+		ratingChange: doublePrecision('rating_change'),
+		deck: varchar('deck', { length: 64 }),
+		stake: varchar('stake', { length: 64 }),
+	},
+	(t) => [
+		primaryKey({ columns: [t.season, t.matchKey, t.discordIdHash] }),
+		index('beta_games_player_idx').on(
+			t.discordIdHash,
+			t.season,
+			t.gameMode,
+			t.playedAt,
+		),
+	],
+)
+
 // What the owner's season replay overwrote, kept so the old board can come back
 // (features/ratings/season-replay-apply.service.ts).
 export const seasonReplayBackups = pgTable('season_replay_backups', {

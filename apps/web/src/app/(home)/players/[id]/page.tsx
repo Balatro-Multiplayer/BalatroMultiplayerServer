@@ -9,6 +9,7 @@ import {
   gameModeKey,
 } from '@/lib/leaderboards'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { BetaSeasonsSection } from '@/components/beta-seasons/profile-section'
 
 interface PlayerProfile {
   playerId: string
@@ -168,6 +169,8 @@ export default function PlayerPage() {
           </div>
         </div>
       ))}
+
+      <BetaSeasonsSection playerId={player.playerId} />
 
       {/* TODO(API): needs endpoint — GET /api/stats/players/:id/mmr-history */}
       <ComingSoon title='MMR Trend' desc='Rating history chart over the season.' />
