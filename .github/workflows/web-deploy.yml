@@ -2,7 +2,7 @@ name: Web deploy
 
 # Runs only by hand: Actions > Web deploy > Run workflow.
 # Deploys the API and the website to the Official server. Nakama is not
-# restarted and ranked stays open. If nakama/ differs from the server folder,
+# restarted and ranked stays open. If nakama/ differs from the server folder (a Web deploy never copies it),
 # the run shows a warning and still deploys; run a Full deploy to apply it.
 # Needs the secrets DEPLOY_SSH_KEY and DEPLOY_SSH_KNOWN_HOSTS and the
 # variables DEPLOY_SSH_HOST and DEPLOY_SSH_USER.
@@ -70,6 +70,8 @@ jobs:
       - name: Deploy the API and the website
         env:
           SHA: ${{ steps.sha.outputs.sha }}
+        # bash -eo pipefail: a failed ssh must fail the step, not hide behind tee.
+        shell: bash
         run: |
           ssh -F "$RUNNER_TEMP/ssh_config" deploy-target "web $SHA" 2>&1 | tee "$RUNNER_TEMP/deploy.log"
           {
@@ -85,6 +87,7 @@ jobs:
           fi
 
       - name: Status after
+        shell: bash
         run: ssh -F "$RUNNER_TEMP/ssh_config" deploy-target status | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Remove the key

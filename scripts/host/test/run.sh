@@ -77,6 +77,12 @@ new_tree() { # a fresh checkout of the "new commit"
 	echo "upstream api-green" >"$t/nginx/upstream.conf"
 	echo "public stub" >"$t/packages/internal/src/index.ts"
 	echo "new code" >"$t/apps/server/main.ts"
+	echo "new compose local" >"$t/compose.local.yml"
+	echo "NEW=example" >"$t/.env.example"
+	echo "new local env" >"$t/.env.local"
+	echo "new prod env" >"$t/.env.production"
+	echo "new web local env" >"$t/apps/server/.env.web.local"
+	echo "new override" >"$t/docker-compose.local.override.yml"
 	cat >"$t/scripts/host-deploy.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "host-deploy $*" >>"$HOST_DEPLOY_LOG"
@@ -100,6 +106,12 @@ new_root() { # a fresh host folder holding the old copy plus state
 	echo "old bundle" >"$r/nakama/modules/index.js"
 	echo "old prod" >"$r/nakama/prod.yml"
 	echo "oldsha" >"$r/DEPLOYED_COMMIT"
+	echo "old compose local" >"$r/compose.local.yml"
+	echo "OLD=example" >"$r/.env.example"
+	echo "host local env" >"$r/.env.local"
+	echo "host prod env" >"$r/.env.production"
+	echo "host web local env" >"$r/apps/server/.env.web.local"
+	echo "host override" >"$r/docker-compose.local.override.yml"
 	echo "$r"
 }
 
@@ -147,6 +159,13 @@ assert_eq "tracked file updated" "new bundle" "$(cat "$ROOT/nakama/modules/index
 assert_eq "new file added" "new code" "$(cat "$ROOT/apps/server/main.ts")"
 assert_eq ".env untouched" "SECRET=1" "$(cat "$ROOT/.env")"
 assert_eq "apps/server/.env untouched" "API_SECRET=1" "$(cat "$ROOT/apps/server/.env")"
+assert_eq ".env.local untouched" "host local env" "$(cat "$ROOT/.env.local")"
+assert_eq ".env.production untouched" "host prod env" "$(cat "$ROOT/.env.production")"
+assert_eq ".env.*.local untouched" "host web local env" "$(cat "$ROOT/apps/server/.env.web.local")"
+assert_eq "other *.local* file untouched" "host override" "$(cat "$ROOT/docker-compose.local.override.yml")"
+assert_eq "compose.local.yml is copied" "new compose local" "$(cat "$ROOT/compose.local.yml")"
+assert_eq ".env.example is copied" "NEW=example" "$(cat "$ROOT/.env.example")"
+assert_eq "full deploy writes DEPLOYED_NAKAMA_COMMIT" "$SHA" "$(cat "$ROOT/DEPLOYED_NAKAMA_COMMIT")"
 assert_eq "data untouched" "dbfile" "$(cat "$ROOT/data/pg/base")"
 assert_eq "logs untouched" "log" "$(cat "$ROOT/logs/a.log")"
 assert_eq "upstream.conf keeps the live color" "upstream api-blue" "$(cat "$ROOT/nginx/upstream.conf")"
@@ -155,7 +174,8 @@ assert_eq "private internal index kept" "private index" "$(cat "$ROOT/packages/i
 assert_eq "one backup written" 1 "$(find "$WORK/backups" -name '*.tar.gz' | wc -l)"
 backup="$(find "$WORK/backups" -name '*.tar.gz' | head -1)"
 assert_eq "backup holds the old bundle" "old bundle" "$(tar -xzOf "$backup" nakama/modules/index.js)"
-assert_not_contains "backup excludes .env" ".env" "$(tar -tzf "$backup")"
+assert_eq "backup excludes secrets" "" "$(tar -tzf "$backup" | grep -E '(^|/)\.env(\.local|\.production|\..*\.local)?$')"
+assert_contains "backup holds the old .env.example" ".env.example" "$(tar -tzf "$backup")"
 
 # A failed host-deploy keeps DEPLOYED_COMMIT and fails.
 setup_deploy
@@ -164,7 +184,22 @@ code=$?
 assert_eq "failing host-deploy fails bmp-deploy" 1 "$code"
 assert_eq "failing host-deploy keeps DEPLOYED_COMMIT" oldsha "$(cat "$ROOT/DEPLOYED_COMMIT")"
 
-# Web deploy: warns only when nakama/ changed.
+# Web deploy: leaves nakama/ alone and warns while it differs.
+setup_deploy
+out="$(full_deploy web)"
+assert_eq "web deploy leaves the Nakama bundle" "old bundle" "$(cat "$ROOT/nakama/modules/index.js")"
+assert_eq "web deploy leaves nakama/prod.yml" "old prod" "$(cat "$ROOT/nakama/prod.yml")"
+assert_eq "web deploy still copies other code" "new code" "$(cat "$ROOT/apps/server/main.ts")"
+assert_eq "web deploy writes DEPLOYED_COMMIT" "$SHA" "$(cat "$ROOT/DEPLOYED_COMMIT")"
+assert_eq "web deploy writes no DEPLOYED_NAKAMA_COMMIT" "no" "$([ -e "$ROOT/DEPLOYED_NAKAMA_COMMIT" ] && echo yes || echo no)"
+out2="$(full_deploy web)"
+assert_contains "the warning stays on the next web deploy" "WARNING: nakama/ changed" "$out2"
+assert_contains "the warning names the Nakama commit" "commit oldsha" "$out"
+setup_deploy
+echo nakamasha >"$ROOT/DEPLOYED_NAKAMA_COMMIT"
+out="$(full_deploy web)"
+assert_contains "the warning prefers DEPLOYED_NAKAMA_COMMIT" "commit nakamasha" "$out"
+assert_eq "DEPLOYED_NAKAMA_COMMIT is not overwritten by a web deploy" nakamasha "$(cat "$ROOT/DEPLOYED_NAKAMA_COMMIT")"
 setup_deploy
 out="$(full_deploy web)"
 assert_eq "web deploy runs host-deploy web" "host-deploy web" "$(cat "$HOST_DEPLOY_LOG")"
@@ -199,6 +234,7 @@ setup_deploy
 out="$(SSH_ORIGINAL_COMMAND=status BMP_DEPLOY_ROOT="$ROOT" BMP_DEPLOY_LOCK="$WORK/lock" "$BMP_DEPLOY" 2>&1)"
 assert_eq "status exits 0" 0 "$?"
 assert_contains "status prints the commit" "deployed_commit: oldsha" "$out"
+assert_contains "status prints the Nakama commit (fallback)" "deployed_nakama_commit: oldsha" "$out"
 assert_contains "status prints nakama health" "nakama: healthy" "$out"
 assert_contains "status prints api health" "api: ok" "$out"
 assert_contains "status prints web health" "web: ok" "$out"

@@ -5,11 +5,12 @@
 #
 #   full <40-hex sha>   Full deploy: Nakama, API, website
 #   web <40-hex sha>    Web deploy: API and website
-#   status              print DEPLOYED_COMMIT and health; changes nothing
+#   status              print DEPLOYED_COMMIT, the Nakama commit and health; changes nothing
 #
 # A deploy downloads the commit from public GitHub, backs up the files it is
 # about to replace, copies the commit over the server folder, runs
-# scripts/host-deploy.sh from there, then writes DEPLOYED_COMMIT. A failed
+# scripts/host-deploy.sh from there, then writes DEPLOYED_COMMIT (and, on a full deploy, DEPLOYED_NAKAMA_COMMIT). A web
+# deploy does not copy nakama/. A failed
 # step exits non-zero and leaves DEPLOYED_COMMIT as it was.
 #
 # The folder is a copy, not a git checkout.
@@ -32,8 +33,14 @@ die() {
 # file that exists only on the host is left alone anyway; these rules stop the
 # files that ALSO exist in the commit from being overwritten.
 #
-#   .env, .env.*              secrets for compose (root, apps/server, apps/web)
+#   .env, .env.local,         secrets for compose (root, apps/server, apps/web);
+#   .env.*.local,             .env.example is tracked and is copied
+#   .env.production
 #   /DEPLOYED_COMMIT          written by this script after a good deploy
+#   /DEPLOYED_NAKAMA_COMMIT   written by a full deploy: the commit whose nakama/
+#                             the running Nakama container uses
+#   /nakama/                  (web deploy only) Nakama bind-mounts these files;
+#                             only a full deploy, which restarts it, changes them
 #   /nginx/upstream.conf      tracked, but deploy-color-swap.sh rewrites it on
 #                             every cutover: it names the live API color
 #   /packages/internal/       a private package replaces this public stub at
@@ -41,15 +48,19 @@ die() {
 #   /data/, /logs/            host state folders
 #   /releases/, /clients/     launcher builds and client files kept on the host
 #   node_modules/             never shipped; images build their own
-#   *.local*                  host-only overrides (the .gitignore patterns)
+#   *.local*                  host-only overrides (the .gitignore patterns);
+#                             compose.local.yml is tracked and is copied
 #
 # State kept elsewhere needs no rule: Postgres and the model cache are named
 # Docker volumes, the Discord archives are ARCHIVE_DIR (/opt/bmp/archives), and
 # the nginx certificates are /etc/nginx/ssl.
 EXCLUDES=(
 	--exclude='.env'
-	--exclude='.env.*'
+	--exclude='.env.local'
+	--exclude='.env.*.local'
+	--exclude='.env.production'
 	--exclude='/DEPLOYED_COMMIT'
+	--exclude='/DEPLOYED_NAKAMA_COMMIT'
 	--exclude='/nginx/upstream.conf'
 	--exclude='/packages/internal/'
 	--exclude='/data/'
@@ -57,6 +68,7 @@ EXCLUDES=(
 	--exclude='/releases/'
 	--exclude='/clients/'
 	--exclude='node_modules/'
+	--include='compose.local.yml'
 	--exclude='*.local*'
 	--exclude='/.claude/'
 )
@@ -82,8 +94,16 @@ probe() { # probe <label> <command...>
 	if "$@" >/dev/null 2>&1; then echo "$label: ok"; else echo "$label: DOWN"; fi
 }
 
+# The commit whose nakama/ is on disk. Only a full deploy writes the file; before
+# the first full deploy with it, fall back to the last copied commit.
+nakama_commit() {
+	cat "$ROOT/DEPLOYED_NAKAMA_COMMIT" 2>/dev/null ||
+		cat "$ROOT/DEPLOYED_COMMIT" 2>/dev/null || echo unknown
+}
+
 status() {
 	echo "deployed_commit: $(cat "$ROOT/DEPLOYED_COMMIT" 2>/dev/null || echo unknown)"
+	echo "deployed_nakama_commit: $(nakama_commit)"
 	echo "nakama: $(container_health bmp-nakama)"
 	probe api docker exec bmp-nginx wget -q --spider http://127.0.0.1:8788/health
 	probe web docker exec bmp-nginx wget -q --spider http://web:3000/
@@ -115,8 +135,11 @@ tar -xzf "$TMP/src.tar.gz" -C "$TMP/new" --strip-components=1 --no-same-owner ||
 [ -d "$ROOT" ] || die "server folder $ROOT not found"
 
 if [ "$ACTION" = web ]; then
+	# A web deploy leaves nakama/ as it is, so the running Nakama keeps the files
+	# it started with and the difference stays visible until a full deploy.
+	EXCLUDES+=(--exclude='/nakama/')
 	if ! diff -rq "$ROOT/nakama" "$TMP/new/nakama" >/dev/null 2>&1; then
-		log "WARNING: nakama/ changed between the server folder (DEPLOYED_COMMIT $(cat "$ROOT/DEPLOYED_COMMIT" 2>/dev/null || echo unknown)) and $SHA."
+		log "WARNING: nakama/ changed between the server folder (commit $(nakama_commit)) and $SHA."
 		log "WARNING: a Web deploy does not restart Nakama. Run a Full deploy to apply it."
 	fi
 fi
@@ -150,4 +173,8 @@ log "step: run host-deploy.sh $ACTION"
 
 printf '%s\n' "$SHA" >"$ROOT/DEPLOYED_COMMIT.tmp"
 mv "$ROOT/DEPLOYED_COMMIT.tmp" "$ROOT/DEPLOYED_COMMIT"
+if [ "$ACTION" = full ]; then
+	printf '%s\n' "$SHA" >"$ROOT/DEPLOYED_NAKAMA_COMMIT.tmp"
+	mv "$ROOT/DEPLOYED_NAKAMA_COMMIT.tmp" "$ROOT/DEPLOYED_NAKAMA_COMMIT"
+fi
 log "done: DEPLOYED_COMMIT is now $SHA"
