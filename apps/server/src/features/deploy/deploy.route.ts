@@ -1,0 +1,71 @@
+import { Router } from 'express'
+import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
+import {
+	findModByIdOrFullName,
+	setRankedVersion,
+} from '../../infrastructure/gateways/mods.gateway.js'
+import { parseReason } from '../../shared/staff-log/actions.js'
+import { AppError } from '../../shared/utils/errors.js'
+import { logDeployAction, requireDeployToken } from './deploy-auth.js'
+
+// Routes GitHub Actions call with the deploy token (ADR 0012). Add a route
+// here only when an action needs it; every route reads a reason and logs it
+// through logDeployAction.
+export function createDeployRouter() {
+	const router = Router()
+	router.use(requireDeployToken)
+
+	// {package: Thunderstore full name, version, reason}: pins the mod the way
+	// the admin route does (download, hash, SMODS ids), then pushes the config.
+	router.put('/pins', async (req, res, next) => {
+		try {
+			const { package: fullName, version } = (req.body ?? {}) as Record<
+				string,
+				unknown
+			>
+			if (typeof fullName !== 'string' || !fullName.trim())
+				throw new AppError('package is required', 400)
+			if (typeof version !== 'string' || !version.trim())
+				throw new AppError('version is required', 400)
+			const checked = parseReason((req.body as { reason?: unknown }).reason)
+			if (!checked.ok) throw new AppError(checked.message, 400)
+
+			const mod = await findModByIdOrFullName(fullName.trim())
+			if (!mod) throw new AppError('Mod not found', 404)
+			const result = await setRankedVersion(mod.id, version.trim())
+			if (!result.ok) {
+				switch (result.reason) {
+					case 'not-found':
+						throw new AppError('Mod not found', 404)
+					case 'version-not-found':
+						throw new AppError(
+							"That version is not one of this mod's versions",
+							400,
+						)
+					case 'download-unresolvable':
+						throw new AppError(
+							"Couldn't resolve that version to a download right now, try again",
+							400,
+						)
+					case 'hash-failed':
+						throw new AppError("Couldn't compute a hash for that version", 400)
+				}
+			}
+			await loadConfigFromDb()
+			await logDeployAction({
+				action: 'mod_pin',
+				reason: checked.reason,
+				detail: {
+					modId: mod.id,
+					old: { rankedVersion: mod.rankedVersion ?? null },
+					new: { rankedVersion: version.trim() },
+				},
+			})
+			res.json({ ok: true })
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	return router
+}

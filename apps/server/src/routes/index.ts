@@ -3,6 +3,7 @@ import type { QueueCountsAnswer } from '../contracts/IStatsSources.js'
 import adminRouter from '../features/admin/admin.route.js'
 import { createAuthRouter } from '../features/auth/auth.route.js'
 import { createAuthService } from '../features/auth/auth.service.js'
+import { createDeployRouter } from '../features/deploy/deploy.route.js'
 import blogRouter from '../features/blog/blog.route.js'
 import launcherRouter from '../features/launcher/launcher.route.js'
 import modsRouter from '../features/mods/mods.route.js'
@@ -139,6 +140,7 @@ router.use('/api/blog', blogRouter)
 router.use('/api/mods', modsRouter)
 router.use('/api/r2modman/updates', r2modmanReleasesRouter)
 router.use('/api/webadmin', webadminRouter)
+router.use('/api/deploy', createDeployRouter())
 router.use('/admin', adminRouter)
 router.use('/internal/nakama', createInternalNakamaRouter())
 

@@ -126,6 +126,9 @@ export const env = {
 	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
 	// Unset = those routes refuse everything.
 	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),
+	// Bearer token GitHub Actions send to /api/deploy/* (ADR 0012). Set on the
+	// Official server only. Unset = those routes answer 404.
+	DEPLOY_TOKEN: optional('DEPLOY_TOKEN', ''),
 	// The one player id (an admin) allowed to run the owner-only repair tools,
 	// such as the Season replay. Unset = nobody is the owner.
 	OWNER_PLAYER_ID: optional('OWNER_PLAYER_ID', ''),
