@@ -45,10 +45,7 @@ export function createDeployRouter() {
 					case 'not-found':
 						throw new AppError('Mod not found', 404)
 					case 'version-not-found':
-						throw new AppError(
-							"That version is not one of this mod's versions",
-							400,
-						)
+						throw new AppError('That version is not on Thunderstore yet', 400)
 					case 'download-unresolvable':
 						throw new AppError(
 							"Couldn't resolve that version to a download right now, try again",
