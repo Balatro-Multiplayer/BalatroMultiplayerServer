@@ -1,7 +1,9 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
+import Link from 'next/link'
 import { useState } from 'react'
+import { legacyMatchPath } from '@/app/(home)/matches/lib/match-view'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { apiFetch } from '@/lib/api'
@@ -147,6 +149,7 @@ function BetaGames({
                     'Rating',
                     'Deck',
                     'Stake',
+                    'Log',
                   ].map((h) => (
                     <th
                       key={h}
@@ -190,6 +193,18 @@ function BetaGames({
                     </td>
                     <td className='px-4 py-2 text-muted-foreground'>
                       {g.stake ?? '-'}
+                    </td>
+                    <td className='px-4 py-2'>
+                      {g.logId == null ? (
+                        '-'
+                      ) : (
+                        <Link
+                          href={legacyMatchPath(g.logId)}
+                          className='text-bal-blue hover:underline'
+                        >
+                          View
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}

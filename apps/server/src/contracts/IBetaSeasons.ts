@@ -65,6 +65,8 @@ export interface BetaGameRow {
 	deck: string | null
 	stake: string | null
 	opponent: BetaPlayerRef | null
+	/** The game's legacy game log, when the viewer may open it. */
+	logId: number | null
 }
 
 export interface BetaGamesQuery {
@@ -72,6 +74,8 @@ export interface BetaGamesQuery {
 	season: number
 	modId: string
 	gameMode: string
+	/** The player is viewing their own games: link unshared logs too. */
+	ownView?: boolean
 }
 
 export interface IBetaSeasonsRepository {

@@ -526,6 +526,13 @@
       "when": 1795000000000,
       "tag": "0074_beta_seasons",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1795000100000,
+      "tag": "0075_legacy_game_logs",
+      "breakpoints": true
     }
   ]
 }

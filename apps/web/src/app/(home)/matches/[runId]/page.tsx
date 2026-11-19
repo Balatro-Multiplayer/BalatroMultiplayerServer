@@ -3,15 +3,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
-import { useMemo, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { ApiError, apiFetch } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { ContestButton } from '../components/contest-button'
 import { GameLogView } from '../components/game-log/game-log-view'
-import { StaffMatchView } from '../components/staff-match-view'
 import { PlayerLabel } from '../components/player-label'
+import { ShareButtons } from '../components/share-buttons'
+import { StaffMatchView } from '../components/staff-match-view'
 import { RunStatusBadge } from '../components/status-badge'
 import { decodePlayerLogs } from '../lib/decode-player-logs'
 import { buildGameLog } from '../lib/game-log/build-game-log'
@@ -30,44 +30,6 @@ function BackLink() {
     <Link href='/matches' className='text-bal-blue text-sm hover:underline'>
       ← Back to My Matches
     </Link>
-  )
-}
-
-function ShareButtons({
-  runId,
-  shared,
-  busy,
-  onToggle,
-}: {
-  runId: string
-  shared: boolean
-  busy: boolean
-  onToggle: () => void
-}) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    await navigator.clipboard.writeText(
-      matchLink(window.location.origin, runId)
-    )
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-  return (
-    <div className='ml-auto flex items-center gap-2'>
-      {shared && (
-        <Button size='sm' variant='outline' onClick={copy}>
-          {copied ? 'Copied' : 'Copy link'}
-        </Button>
-      )}
-      <Button
-        size='sm'
-        variant={shared ? 'outline' : 'default'}
-        disabled={busy}
-        onClick={onToggle}
-      >
-        {shared ? 'Unshare' : 'Share'}
-      </Button>
-    </div>
   )
 }
 
@@ -156,7 +118,7 @@ export default function MatchPage() {
         shareSlot={
           share && (
             <ShareButtons
-              runId={runId}
+              link={() => matchLink(window.location.origin, runId)}
               shared={share.shared}
               busy={shareMutation.isPending}
               onToggle={() => shareMutation.mutate(!share.shared)}
@@ -176,7 +138,7 @@ export default function MatchPage() {
           <RunStatusBadge status={data.run.status} />
           {share && (
             <ShareButtons
-              runId={runId}
+              link={() => matchLink(window.location.origin, runId)}
               shared={share.shared}
               busy={shareMutation.isPending}
               onToggle={() => shareMutation.mutate(!share.shared)}

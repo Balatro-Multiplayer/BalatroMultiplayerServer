@@ -172,10 +172,13 @@ export const betaSeasonsRepository: IBetaSeasonsRepository = {
 	async gamesPage(q: BetaGamesQuery, pageSize, offset) {
 		const res = await db.execute(sql`
 			SELECT g.played_at, g.result, g.rating_after, g.rating_change, g.deck, g.stake,
-			       g.opponent_id_hash, g.opponent_name, ${linkedPlayerCols}
+			       g.opponent_id_hash, g.opponent_name, ${linkedPlayerCols},
+			       CASE WHEN l.shared_at IS NOT NULL OR ${q.ownView === true} THEN l.id END AS log_id
 			FROM beta_season_games g
 			LEFT JOIN players p ON g.opponent_id_hash IS NOT NULL
 			     AND p.discord_id_hash = g.opponent_id_hash AND p.deleted_at IS NULL
+			LEFT JOIN legacy_game_logs l ON l.discord_id_hash = g.discord_id_hash
+			     AND l.beta_season = g.season AND l.beta_match_key = g.match_key
 			WHERE g.discord_id_hash = ${q.discordIdHash} AND g.season = ${q.season}
 			  AND g.mod_id = ${q.modId} AND g.game_mode = ${q.gameMode}
 			ORDER BY g.played_at DESC, g.match_key DESC
@@ -195,6 +198,7 @@ export const betaSeasonsRepository: IBetaSeasonsRepository = {
 				opponent: hasOpponent
 					? playerRefOf(r, (r.opponent_name as string | null) ?? 'Unknown')
 					: null,
+				logId: numOrNull(r.log_id),
 			}
 		})
 	},

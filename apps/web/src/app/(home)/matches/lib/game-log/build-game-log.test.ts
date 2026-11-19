@@ -249,6 +249,35 @@ describe('buildGameLog with a reduced side', () => {
     expect(log.pvp[0]?.scores).toEqual({ a: '500', b: '300' })
     expect(log.pvp[0]?.winnerId).toBe('a')
   })
+  test('uses listed final jokers and vouchers over the reconstruction', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [20, 'buy', [4, 0, joker(1, 'j_joker'), 4]],
+        [30, 'final_jokers', [['j_blueprint|foil', 'j_dusk']]],
+        [31, 'final_vouchers', [['v_overstock_norm']]],
+      ]),
+      player('b', [...opening, [20, 'buy', [4, 0, joker(1, 'j_joker'), 4]]]),
+    ])
+    const [a, b] = log.players
+    expect(
+      a?.finalJokers.map((j) => j.type === 'other_card' && j.ident)
+    ).toEqual(['j_blueprint', 'j_dusk'])
+    expect(a?.finalJokers[0]?.tags).toEqual(['ed:foil'])
+    expect(a?.reconstructed).toBe(false)
+    expect(a?.vouchers).toEqual([
+      {
+        type: 'other_card',
+        kind: 'Voucher',
+        ident: 'v_overstock_norm',
+        tags: [],
+      },
+    ])
+    expect(
+      b?.finalJokers.map((j) => j.type === 'other_card' && j.ident)
+    ).toEqual(['j_joker'])
+  })
 })
 
 describe('buildGameLog joker hits', () => {

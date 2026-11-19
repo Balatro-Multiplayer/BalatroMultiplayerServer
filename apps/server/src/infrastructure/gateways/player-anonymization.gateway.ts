@@ -602,6 +602,25 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'rating_change',
 		'deck',
 		'stake',
+	],
+	// Legacy game logs: the uploader is keyed by Discord id hash, as above.
+	legacy_game_logs: [
+		'id',
+		'discord_id_hash',
+		'owner_name',
+		'opponent_name',
+		'started_at',
+		'ended_at',
+		'time_exact',
+		'result',
+		'deck',
+		'stake',
+		'seed',
+		'beta_season',
+		'beta_match_key',
+		'owner_events',
+		'opponent_events',
+		'shared_at',
 	],}
 
 export const NO_PLAYER_ID_COLUMNS: readonly string[] = Object.entries(

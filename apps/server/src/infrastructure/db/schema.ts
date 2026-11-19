@@ -711,6 +711,41 @@ export const betaSeasonGames = pgTable(
 	],
 )
 
+// Games from the legacy website's uploaded logs, converted to the replay
+// event format. The uploader is keyed by the salted Discord id hash, so a game
+// shows on the live account that has the same Discord account linked. Kept
+// apart from match_run_logs: these never expire and are not anti-cheat input.
+export const legacyGameLogs = pgTable(
+	'legacy_game_logs',
+	{
+		id: integer('id').primaryKey(),
+		discordIdHash: text('discord_id_hash'),
+		ownerName: varchar('owner_name', { length: 128 }),
+		opponentName: varchar('opponent_name', { length: 128 }),
+		startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+		endedAt: timestamp('ended_at', { withTimezone: true }),
+		// False when the log's time zone was a guess.
+		timeExact: boolean('time_exact').notNull(),
+		result: varchar('result', { length: 8 }),
+		deck: varchar('deck', { length: 64 }),
+		stake: varchar('stake', { length: 64 }),
+		seed: varchar('seed', { length: 32 }),
+		betaSeason: integer('beta_season'),
+		betaMatchKey: varchar('beta_match_key', { length: 64 }),
+		ownerEvents: text('owner_events').notNull(),
+		opponentEvents: text('opponent_events'),
+		sharedAt: timestamp('shared_at', { withTimezone: true }),
+	},
+	(t) => [
+		index('legacy_game_logs_owner_idx').on(t.discordIdHash, t.startedAt),
+		index('legacy_game_logs_beta_idx').on(
+			t.discordIdHash,
+			t.betaSeason,
+			t.betaMatchKey,
+		),
+	],
+)
+
 // What the owner's season replay overwrote, kept so the old board can come back
 // (features/ratings/season-replay-apply.service.ts).
 export const seasonReplayBackups = pgTable('season_replay_backups', {

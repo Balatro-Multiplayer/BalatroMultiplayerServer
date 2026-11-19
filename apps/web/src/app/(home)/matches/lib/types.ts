@@ -134,3 +134,38 @@ export interface MatchChatResponse {
   lines: MatchChatLine[]
   window: { from: string; to: string | null }
 }
+
+// A game from the legacy website's uploaded logs, converted to replay events
+// (apps/server features/legacy-games). The uploader's side, and a thin
+// opponent side built from what the uploader's log knew.
+export interface LegacyGameInfo {
+  id: number
+  ownerName: string | null
+  opponentName: string | null
+  result: 'win' | 'loss' | null
+  deck: string | null
+  stake: string | null
+  seed: string | null
+  /** False when the old log's time zone was a guess. */
+  timeExact: boolean
+  beta: { season: number; matchKey: string } | null
+}
+
+export interface LegacyGameResponse extends RunReplayResponse {
+  legacy: LegacyGameInfo
+}
+
+export interface LegacyGameSummary extends Omit<LegacyGameInfo, 'beta'> {
+  startedAt: string
+  endedAt: string | null
+  betaSeason: number | null
+  betaMatchKey: string | null
+  shared: boolean
+}
+
+export interface MyLegacyGamesResponse {
+  games: LegacyGameSummary[]
+  total: number
+  page: number
+  pageSize: number
+}

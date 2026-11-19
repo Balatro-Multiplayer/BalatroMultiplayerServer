@@ -148,7 +148,7 @@ describe('Beta Seasons routes', () => {
 			.query({ ...BOARD, season: 4, page: 3 })
 		expect(games.body).toMatchObject({ page: 3, total: 149, totalPages: 6 })
 		expect(repo.gamesPage).toHaveBeenCalledWith(
-			{ discordIdHash: 'abc', season: 4, ...BOARD },
+			{ discordIdHash: 'abc', season: 4, ...BOARD, ownView: false },
 			25,
 			50,
 		)

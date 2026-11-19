@@ -19,6 +19,8 @@ import { gameOfRun, matchResultDeps } from '../features/service-queue/queue.serv
 import { WITHDRAWN_ACTION, createReportPageService } from '../features/reports/report-page.service.js'
 import { createReportsRouter } from '../features/reports/reports.route.js'
 import { createBetaSeasonsRouter } from '../features/beta-seasons/beta-seasons.route.js'
+import { createLegacyGamesRouter } from '../features/legacy-games/legacy-games.route.js'
+import { createLegacyGamesService } from '../features/legacy-games/legacy-games.service.js'
 import { createStatsRouter } from '../features/stats/stats.route.js'
 import webadminRouter from '../features/webadmin/webadmin.route.js'
 import {
@@ -34,6 +36,7 @@ import * as replayLogGateway from '../infrastructure/gateways/replay-log.gateway
 import { retentionRepository } from '../infrastructure/gateways/retention.gateway.js'
 import * as serviceQueueGateway from '../infrastructure/gateways/service-queue.gateway.js'
 import { betaSeasonsRepository } from '../infrastructure/gateways/beta-seasons.gateway.js'
+import { legacyGamesRepository } from '../infrastructure/gateways/legacy-games.gateway.js'
 import { statsRepository } from '../infrastructure/gateways/stats.gateway.js'
 import { callNakamaRpc } from '../infrastructure/nakama/admin-client.js'
 import { notifyContestWithdrawnInNakama } from '../infrastructure/nakama/moderation-sync.js'
@@ -136,6 +139,15 @@ router.use(
 	),
 )
 router.use('/api/runs', createReplayLogRouter(replayLogService))
+router.use(
+	'/api/legacy-games',
+	createLegacyGamesRouter(
+		createLegacyGamesService({
+			repository: legacyGamesRepository,
+			moderators: playerGateway,
+		}),
+	),
+)
 // Before /api/stats, so its own routes do not see these paths.
 router.use(
 	'/api/stats/beta-seasons',

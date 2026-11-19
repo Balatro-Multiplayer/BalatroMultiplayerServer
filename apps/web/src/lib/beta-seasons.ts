@@ -61,6 +61,8 @@ export interface BetaGameRow {
   deck: string | null
   stake: string | null
   opponent: BetaPlayerRef | null
+  /** The game's legacy match log, when the viewer may open it. */
+  logId: number | null
 }
 
 export interface BetaGamesResponse {
