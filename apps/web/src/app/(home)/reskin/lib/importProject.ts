@@ -1,6 +1,7 @@
 // Re-import a previously generated CustomReskin ZIP to keep editing it.
 
-import { emptyProject, type ObjectEdit, type ProjectState } from './types'
+import { importRankedBundle, looksLikeRankedBundle } from './importRanked'
+import { type Catalog, emptyProject, type ObjectEdit, type ProjectState } from './types'
 import { readZip, unzipText } from './zip'
 import { PROJECT_FILE_NAME } from './generate'
 
@@ -17,7 +18,11 @@ function toSchema3(p: ProjectState): ProjectState {
   return { ...p, schema: 3, objects }
 }
 
-export async function importPack(file: File): Promise<ProjectState> {
+export async function importPack(
+  file: File,
+  catalog: Catalog,
+  onWarning?: (message: string) => void
+): Promise<ProjectState> {
   const buf = new Uint8Array(await file.arrayBuffer())
   const files = readZip(buf)
 
@@ -30,6 +35,11 @@ export async function importPack(file: File): Promise<ProjectState> {
       // merge over defaults so packs missing fields still load
       return toSchema3({ ...emptyProject(), ...parsed, schema: 3 })
     }
+  }
+
+  // A Ranked bundle ("Export for Ranked") has no project file; read it directly.
+  if (looksLikeRankedBundle(files)) {
+    return importRankedBundle(files, catalog, file.name.replace(/\.zip$/i, ''), onWarning)
   }
 
   throw new Error(

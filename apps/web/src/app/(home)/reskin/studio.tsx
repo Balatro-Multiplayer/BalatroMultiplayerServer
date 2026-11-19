@@ -33,7 +33,12 @@ import {
   supportsFsAccess,
 } from './lib/exeStore'
 import { generatePack } from './lib/generate'
+import { generateRankedBundle } from './lib/generateRanked'
+import { importMalverkPack, type MalverkResult } from './lib/importMalverk'
 import { importPack } from './lib/importProject'
+import { importRankedBundle } from './lib/importRanked'
+import { canvasRasterIO } from './lib/malverkRaster'
+import { filesFromFolder, filesFromZip } from './lib/malverkSource'
 import {
   type Catalog,
   emptyProject,
@@ -49,6 +54,9 @@ export function ReskinStudio() {
   const [busy, setBusy] = useState(false)
   const [exeBuf, setExeBuf] = useState<Uint8Array | null>(null)
   const importRef = useRef<HTMLInputElement>(null)
+  const malverkZipRef = useRef<HTMLInputElement>(null)
+  const malverkDirRef = useRef<HTMLInputElement>(null)
+  const [malverk, setMalverk] = useState<{ result: MalverkResult; name: string } | null>(null)
 
   // Optional: read the user's own Balatro.exe locally to lift a card-border
   // template, vanilla art defaults, and in-game text. Never uploaded; only
@@ -278,10 +286,89 @@ export function ReskinStudio() {
     }
   }
 
+  // Ranked export: a launcher-importable asset bundle for the Ranked-approved
+  // ReskinStudioRanked mod, not an installable mod (see lib/generateRanked.ts).
+  async function onGenerateRanked() {
+    setBusy(true)
+    try {
+      const { bytes, fileName, warnings } = await generateRankedBundle(
+        project,
+        catalog
+      )
+      const blob = new Blob([bytes.buffer as ArrayBuffer], {
+        type: 'application/zip',
+      })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success(`Exported ${fileName}`, {
+        description:
+          'In the launcher: Tools > Manage Reskin Packs > Import Bundle. Needs the Reskin Studio Ranked mod.',
+      })
+      for (const w of warnings) toast.warning(w)
+    } catch (e) {
+      toast.error('Failed to export bundle', {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function onMalverk(read: () => Promise<Map<string, Uint8Array>>, name: string) {
+    setBusy(true)
+    try {
+      const result = await importMalverkPack(await read(), canvasRasterIO, name)
+      if (result.files.size === 0 && result.report.skipped.length === 0) {
+        toast.error('Nothing could be imported from this pack')
+        return
+      }
+      setMalverk({ result, name })
+    } catch (e) {
+      toast.error('Could not read this Malverk pack', {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setBusy(false)
+      if (malverkZipRef.current) malverkZipRef.current.value = ''
+      if (malverkDirRef.current) malverkDirRef.current.value = ''
+    }
+  }
+
+  async function confirmMalverk() {
+    if (!malverk) return
+    setBusy(true)
+    try {
+      setProject(
+        await importRankedBundle(
+          malverk.result.files,
+          catalog,
+          malverk.result.suggestedName,
+          (m) => toast.warning(m)
+        )
+      )
+      toast.success('Malverk pack imported', {
+        description: 'Review it, then use Export for Ranked to make a bundle for the launcher.',
+      })
+      setMalverk(null)
+    } catch (e) {
+      toast.error('Could not load the converted pack', {
+        description: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function onImport(file: File) {
     setBusy(true)
     try {
-      setProject(await importPack(file))
+      setProject(await importPack(file, catalog, (m) => toast.warning(m)))
       toast.success('Pack imported', {
         description: 'Your previous edits are loaded.',
       })
@@ -338,6 +425,60 @@ export function ReskinStudio() {
             onClick={() => importRef.current?.click()}
           >
             <Upload className='mr-1 size-4' /> Import pack
+          </Button>
+          <input
+            ref={malverkZipRef}
+            type='file'
+            accept='.zip'
+            className='hidden'
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) onMalverk(() => filesFromZip(f), f.name.replace(/\.zip$/i, ''))
+            }}
+          />
+          <input
+            ref={malverkDirRef}
+            type='file'
+            className='hidden'
+            // @ts-expect-error non-standard but widely supported folder picker
+            webkitdirectory=''
+            onChange={(e) => {
+              const list = e.target.files
+              if (list && list.length > 0)
+                onMalverk(
+                  () => filesFromFolder(list),
+                  (list[0] as File & { webkitRelativePath?: string }).webkitRelativePath?.split('/')[0] ??
+                    'Malverk pack'
+                )
+            }}
+          />
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={busy}
+            onClick={() => malverkZipRef.current?.click()}
+            title='Convert an existing Malverk texture pack (.zip) into an editable pack'
+          >
+            <Upload className='mr-1 size-4' /> Malverk zip
+          </Button>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={busy}
+            onClick={() => malverkDirRef.current?.click()}
+            title='Convert an installed Malverk texture pack folder (also reads compressed packs)'
+          >
+            <Upload className='mr-1 size-4' /> Malverk folder
+          </Button>
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={busy}
+            onClick={onGenerateRanked}
+            title='Export textures and text as a bundle for the launcher (Ranked-legal). Requires the Reskin Studio Ranked mod.'
+          >
+            <Download className='mr-1 size-4' />
+            Export for Ranked
           </Button>
           <Button size='sm' disabled={busy} onClick={onGenerate}>
             <Download className='mr-1 size-4' />
@@ -406,7 +547,84 @@ export function ReskinStudio() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={malverk !== null} onOpenChange={(o) => !o && setMalverk(null)}>
+        <AlertDialogContent className='max-h-[85vh] overflow-y-auto'>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Import Malverk pack</AlertDialogTitle>
+            <AlertDialogDescription>
+              Nothing in the pack was run; only its texture definitions were read. Review what
+              was found, then load it into the editor.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {malverk && <MalverkReportView result={malverk.result} />}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy || malverk?.result.files.size === 0}
+              onClick={(e) => {
+                e.preventDefault()
+                void confirmMalverk()
+              }}
+            >
+              Load into editor
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
     </AssetModalProvider>
+  )
+}
+
+function MalverkReportView({ result }: { result: MalverkResult }) {
+  const r = result.report
+  return (
+    <div className='space-y-3 text-sm'>
+      {r.imported.length > 0 ? (
+        <div>
+          <div className='font-medium'>Imported</div>
+          <ul className='list-disc pl-5 text-muted-foreground'>
+            {r.imported.map((i) => (
+              <li key={i.sheet}>
+                {i.sheet}: {i.objects} object{i.objects === 1 ? '' : 's'} (from {i.from})
+              </li>
+            ))}
+            {r.localization.length > 0 && <li>text: {r.localization.join(', ')}</li>}
+            {r.sounds > 0 && (
+              <li>
+                {r.sounds} sound{r.sounds === 1 ? '' : 's'} (sounds are not editable here; use the
+                launcher to import the pack directly)
+              </li>
+            )}
+          </ul>
+        </div>
+      ) : (
+        <div className='text-muted-foreground'>No textures could be imported.</div>
+      )}
+      {r.skipped.length > 0 && (
+        <div>
+          <div className='font-medium'>Skipped ({r.skipped.length})</div>
+          <ul className='list-disc pl-5 text-muted-foreground'>
+            {r.skipped.slice(0, 20).map((k, i) => (
+              <li key={`${k.what}-${i}`}>
+                {k.what}: {k.reason}
+              </li>
+            ))}
+            {r.skipped.length > 20 && <li>and {r.skipped.length - 20} more</li>}
+          </ul>
+        </div>
+      )}
+      {r.warnings.length > 0 && (
+        <div>
+          <div className='font-medium'>Notes ({r.warnings.length})</div>
+          <ul className='list-disc pl-5 text-muted-foreground'>
+            {r.warnings.slice(0, 20).map((w, i) => (
+              <li key={`${i}-${w.slice(0, 20)}`}>{w}</li>
+            ))}
+            {r.warnings.length > 20 && <li>and {r.warnings.length - 20} more</li>}
+          </ul>
+        </div>
+      )}
+    </div>
   )
 }
