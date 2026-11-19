@@ -457,7 +457,7 @@ export function ReskinStudio() {
             size='sm'
             disabled={busy}
             onClick={() => malverkZipRef.current?.click()}
-            title='Convert an existing Malverk texture pack (.zip) into an editable pack'
+            title='Convert an uncompressed Malverk texture pack (.zip) into an editable pack. For a normal compressed zip, extract it and use Malverk folder.'
           >
             <Upload className='mr-1 size-4' /> Malverk zip
           </Button>
