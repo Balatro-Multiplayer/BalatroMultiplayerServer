@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  type StaffLogEntry,
-  NO_FILTERS,
   agoOf,
   apiQuery,
   chipActive,
   filtersOf,
   groupByDay,
+  NO_FILTERS,
   pageOf,
   paramsOfFilters,
+  ratingChangeCountOf,
+  type StaffLogEntry,
   sourceLinks,
   toggleChip,
 } from './log-view'
@@ -76,7 +77,12 @@ describe('quick chips', () => {
 
   test('Bans sets the three ban actions and keeps other filters', () => {
     const on = toggleChip('bans', { ...NO_FILTERS, player: 'Bob' }, now, 'me')
-    expect(on.action).toEqual(['chat_ban', 'queue_ban', 'account_ban', 'username_ban'])
+    expect(on.action).toEqual([
+      'chat_ban',
+      'queue_ban',
+      'account_ban',
+      'username_ban',
+    ])
     expect(on.player).toBe('Bob')
   })
 
@@ -131,5 +137,23 @@ describe('rows', () => {
     expect(sourceLinks(entry({ detail: { matchId: 'm2' } }))[0]?.href).toBe(
       '/matches/m2'
     )
+  })
+})
+
+describe('rating changes', () => {
+  test('a Season replay apply counts its logged changes; other entries none', () => {
+    expect(
+      ratingChangeCountOf(
+        entry({
+          action: 'season_replay_apply',
+          detail: { ratingChangeCount: 986 },
+        })
+      )
+    ).toBe(986)
+    expect(ratingChangeCountOf(entry({ detail: { result: {} } }))).toBe(0)
+    expect(
+      ratingChangeCountOf(entry({ detail: { ratingChangeCount: '3' } }))
+    ).toBe(0)
+    expect(ratingChangeCountOf(entry())).toBe(0)
   })
 })

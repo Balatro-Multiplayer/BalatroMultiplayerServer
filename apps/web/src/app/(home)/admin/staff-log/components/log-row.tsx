@@ -2,16 +2,18 @@ import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { STAFF_ACTION_LABELS, type Tone, toneOf } from '../lib/action-labels'
 import {
-  NO_REASON_TEXT,
-  type StaffLogEntry,
   agoOf,
   clockOf,
   lobbyCodeOf,
+  NO_REASON_TEXT,
+  ratingChangeCountOf,
+  type StaffLogEntry,
   shortId,
   sourceLinks,
   staffHref,
   targetHref,
 } from '../lib/log-view'
+import { RatingChanges } from './rating-changes'
 
 const TONES: Record<Tone, string> = {
   red: 'border-red-500/60 bg-red-500/15 text-red-300',
@@ -30,6 +32,7 @@ export function LogRow({ entry, now }: { entry: StaffLogEntry; now: Date }) {
   const code = lobbyCodeOf(entry)
   const sources = sourceLinks(entry)
   const ago = agoOf(entry.at, now)
+  const ratingChanges = ratingChangeCountOf(entry)
   return (
     <div
       data-testid='staff-log-row'
@@ -89,6 +92,9 @@ export function LogRow({ entry, now }: { entry: StaffLogEntry; now: Date }) {
           ))
         )}
       </div>
+      {ratingChanges > 0 && (
+        <RatingChanges entryId={entry.id} count={ratingChanges} />
+      )}
     </div>
   )
 }

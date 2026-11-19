@@ -266,6 +266,17 @@ export function lobbyCodeOf(entry: StaffLogEntry): string | null {
   return typeof code === 'string' && code ? code : null
 }
 
+// How many player rating changes a Season replay apply logged (0 for any other
+// entry). The list itself is fetched per entry: the log list leaves it out.
+export function ratingChangeCountOf(entry: StaffLogEntry): number {
+  const detail = entry.detail
+  if (!detail || typeof detail !== 'object') return 0
+  const { ratingChangeCount } = detail as Record<string, unknown>
+  return typeof ratingChangeCount === 'number' && ratingChangeCount > 0
+    ? ratingChangeCount
+    : 0
+}
+
 export interface RowLink {
   label: string
   href: string

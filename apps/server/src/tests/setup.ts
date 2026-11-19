@@ -99,6 +99,7 @@ vi.mock('../infrastructure/gateways/ban.gateway.js', () => ({
 vi.mock('../infrastructure/gateways/staff-log.gateway.js', () => ({
 	recordStaffAction: vi.fn().mockResolvedValue(undefined),
 	listStaffLog: vi.fn().mockResolvedValue({ entries: [], total: 0 }),
+	ratingChangesOfEntry: vi.fn().mockResolvedValue(null),
 }))
 
 // Mock the mute gateway — no real DB in tests. Default: no mutes.

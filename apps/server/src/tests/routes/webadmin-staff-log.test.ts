@@ -5,7 +5,7 @@ import { itemTypesVisibleTo } from '../../features/service-queue/permissions.js'
 import { signJwt } from '../../features/auth/jwt.js'
 import { db } from '../../infrastructure/db/index.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
-import { listStaffLog } from '../../infrastructure/gateways/staff-log.gateway.js'
+import { listStaffLog, ratingChangesOfEntry } from '../../infrastructure/gateways/staff-log.gateway.js'
 import { createSession } from '../../state/index.js'
 import { createTestApp } from './app.js'
 
@@ -59,6 +59,29 @@ describe('GET /api/webadmin/staff-log', () => {
 		const token = authAs('adm-1', ['admin'])
 		expect((await request(app).get('/api/webadmin/staff-log').query({ action: 'chat_ban,smite' }).set('Authorization', token)).status).toBe(400)
 		expect((await request(app).get('/api/webadmin/staff-log').query({ from: 'soon' }).set('Authorization', token)).status).toBe(400)
+	})
+})
+
+describe('GET /api/webadmin/staff-log/:id/rating-changes', () => {
+	const get = (id: string, auth: string) =>
+		request(app).get(`/api/webadmin/staff-log/${id}/rating-changes`).set('Authorization', auth)
+
+	it('gives an admin the list of one entry', async () => {
+		const changes = [{ userId: 'u1', name: 'One', before: null, after: { rating: 600 } }]
+		vi.mocked(ratingChangesOfEntry).mockResolvedValueOnce(changes as any)
+		const res = await get('12', authAs('adm-1', ['admin']))
+		expect(res.status).toBe(200)
+		expect(res.body).toEqual({ changes })
+		expect(vi.mocked(ratingChangesOfEntry)).toHaveBeenCalledWith(12)
+	})
+
+	it('refuses a moderator, a bad id and an entry with no list', async () => {
+		vi.mocked(ratingChangesOfEntry).mockClear()
+		expect((await get('12', authAs('mod-1', ['moderator']))).status).toBe(403)
+		expect(vi.mocked(ratingChangesOfEntry)).not.toHaveBeenCalled()
+		const admin = authAs('adm-1', ['admin'])
+		expect((await get('abc', admin)).status).toBe(400)
+		expect((await get('12', admin)).status).toBe(404)
 	})
 })
 

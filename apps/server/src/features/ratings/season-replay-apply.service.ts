@@ -2,6 +2,7 @@ import type { NakamaRpcError } from '../../infrastructure/nakama/admin-client.js
 import { type Result, err, ok } from '../../shared/utils/result.js'
 import { rankedGameModeOf } from '../nakama/mirror.service.js'
 import { seasonBestColumns } from './season-best.js'
+import { type RatingChange, ratingChangesOf } from './season-replay-changes.js'
 import {
 	type RatingRecord,
 	type ReplayState,
@@ -133,6 +134,8 @@ export interface ApplyReport {
 	dismissedItems: number
 	// Open items left because someone holds the claim or the close failed.
 	itemsLeftOpen: number
+	// Each player's rating before and after, for the staff log.
+	changes: RatingChange[]
 }
 
 export const DISMISS_NOTE =
@@ -357,6 +360,7 @@ export function createSeasonReplayApply(deps: ApplyDeps) {
 			repairedGames: repaired.length,
 			dismissedItems: closed.dismissed,
 			itemsLeftOpen: closed.failed,
+			changes: ratingChangesOf(state, playerIds),
 		})
 	}
 

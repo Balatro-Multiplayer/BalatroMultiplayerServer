@@ -4,21 +4,12 @@ import { useMutation } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { ConfirmCard } from '@/components/admin/confirm-card'
-import { Button } from '@/components/ui/button'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+  RatingChangesTable,
+  type RatingSnapshot,
+} from '@/components/admin/rating-changes-table'
+import { Button } from '@/components/ui/button'
 import { ApiError, apiFetch, apiFetchWithReason } from '@/lib/api'
-
-interface RatingRecord {
-  rating: number
-  gamesPlayed: number
-}
 
 interface ReplayResponse {
   season: { id: number; name: string }
@@ -32,8 +23,8 @@ interface ReplayResponse {
     name: string
     modId: string
     mode: string
-    before: RatingRecord | null
-    after: RatingRecord
+    before: RatingSnapshot | null
+    after: RatingSnapshot
   }[]
 }
 
@@ -44,12 +35,6 @@ interface ApplyResponse {
   repairedGames: number
   dismissedItems: number
   itemsLeftOpen: number
-}
-
-function formatRecord(record: RatingRecord | null): string {
-  return record
-    ? `${Math.round(record.rating)} (${record.gamesPlayed} games)`
-    : '-'
 }
 
 function toastError(e: Error) {
@@ -136,30 +121,16 @@ export function SeasonReplayPanel() {
               Apply this replay…
             </Button>
           )}
-          <div className='overflow-hidden rounded-lg border border-border'>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Player</TableHead>
-                  <TableHead>Board</TableHead>
-                  <TableHead>Before</TableHead>
-                  <TableHead>After</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {result.players.map((p) => (
-                  <TableRow key={`${p.modId}:${p.mode}:${p.userId}`}>
-                    <TableCell>{p.name || p.userId}</TableCell>
-                    <TableCell>
-                      {p.modId} {p.mode}
-                    </TableCell>
-                    <TableCell>{formatRecord(p.before)}</TableCell>
-                    <TableCell>{formatRecord(p.after)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <RatingChangesTable
+            rows={result.players.map((p) => ({
+              key: `${p.modId}:${p.mode}:${p.userId}`,
+              name: p.name || p.userId,
+              href: null,
+              board: `${p.modId} ${p.mode}`,
+              before: p.before,
+              after: p.after,
+            }))}
+          />
         </>
       )}
       {confirming && result && (

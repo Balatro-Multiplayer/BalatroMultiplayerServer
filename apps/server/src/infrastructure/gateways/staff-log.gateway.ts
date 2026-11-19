@@ -1,5 +1,6 @@
-import { type SQL, and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, lt, or } from 'drizzle-orm'
+import { type SQL, and, count, desc, eq, exists, gte, ilike, inArray, isNotNull, lt, or, sql } from 'drizzle-orm'
 import { QueryBuilder, alias } from 'drizzle-orm/pg-core'
+import { RATING_CHANGES_KEY, type RatingChange } from '../../features/ratings/season-replay-changes.js'
 import { itemTypesVisibleTo } from '../../features/service-queue/permissions.js'
 import type { StaffAction, StaffActionEntry } from '../../shared/staff-log/actions.js'
 import type { DbExecutor } from '../db/executor.js'
@@ -117,7 +118,8 @@ export async function listStaffLog(
 				itemId: staffLog.itemId,
 				itemType: serviceQueueItems.itemType,
 				reason: staffLog.reason,
-				detail: staffLog.detail,
+				// A Season replay's per-player list is read per entry (ratingChangesOfEntry).
+				detail: sql<unknown>`${staffLog.detail} - ${RATING_CHANGES_KEY}::text`,
 				at: staffLog.at,
 			})
 			.from(staffLog)
@@ -141,3 +143,14 @@ export async function listStaffLog(
 	return { entries, total: Number(totals?.total ?? 0) }
 }
 
+
+// The per-player rating changes a Season replay apply logged; null when the
+// entry has none. Only an admin reads these: the entries carry no queue item.
+export async function ratingChangesOfEntry(id: number): Promise<RatingChange[] | null> {
+	const [row] = await db
+		.select({ changes: sql<RatingChange[] | null>`${staffLog.detail} -> ${RATING_CHANGES_KEY}::text` })
+		.from(staffLog)
+		.where(eq(staffLog.id, id))
+		.limit(1)
+	return row?.changes ?? null
+}
