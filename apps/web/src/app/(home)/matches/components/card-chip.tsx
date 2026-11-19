@@ -1,8 +1,10 @@
 import Image from 'next/image'
+import { Badge } from '@/components/ui/badge'
 import { vouchers } from '@/shared/vouchers'
 import type { ResolvedCard } from '../lib/card-ref'
 import { tagValue } from '../lib/card-ref'
 import { jokerArt } from '../lib/joker-art'
+import { jokerModifiers } from '../lib/joker-modifiers'
 import { PlayingCardVisual } from './playing-card-visual'
 
 // Turns a raw SMODS center key into a readable label when no art/name lookup
@@ -35,6 +37,25 @@ function lookupByKind(
   if (kind === 'Joker' || kind === 'j') return jokerArt(ident)
   if (kind === 'Voucher') return vouchers[ident] ?? null
   return null
+}
+
+// An edition or sticker on a joker, as small labels (e.g. under its art).
+function ModifierLabels({ tags }: { tags: string[] }) {
+  const modifiers = jokerModifiers(tags)
+  if (modifiers.length === 0) return null
+  return (
+    <span className='flex flex-wrap justify-center gap-0.5'>
+      {modifiers.map((m) => (
+        <Badge
+          key={m.key}
+          variant='outline'
+          className='px-1 py-0 font-normal text-[10px] leading-tight'
+        >
+          {m.label}
+        </Badge>
+      ))}
+    </span>
+  )
 }
 
 // Playing cards in the log are drawn at the same size as the joker art
@@ -71,22 +92,27 @@ export function CardChip({
   const known = lookupByKind(card.kind, card.ident)
   const edition = tagValue(card.tags, 'ed:')
 
+  const isJokerCard = card.kind === 'Joker' || card.kind === 'j'
+
   if (known && artOnly) {
     return (
-      <Image
-        src={`/cards/${known.file}`}
-        alt={known.name}
-        title={edition ? `${known.name} (${edition})` : known.name}
-        width={56}
-        height={76}
-        className='rounded-sm'
-      />
+      <span className='inline-flex min-w-14 flex-col items-center gap-1'>
+        <Image
+          src={`/cards/${known.file}`}
+          alt={known.name}
+          title={edition ? `${known.name} (${edition})` : known.name}
+          width={56}
+          height={76}
+          className='rounded-sm'
+        />
+        {isJokerCard && <ModifierLabels tags={card.tags} />}
+      </span>
     )
   }
 
   if (known) {
     return (
-      <span className='inline-flex items-center gap-1.5'>
+      <span className='inline-flex items-start gap-1.5'>
         <Image
           src={`/cards/${known.file}`}
           alt={known.name}
@@ -94,11 +120,9 @@ export function CardChip({
           height={38}
           className='rounded-sm'
         />
-        <span className='text-xs'>
-          {known.name}
-          {edition && (
-            <span className='text-muted-foreground'> ({edition})</span>
-          )}
+        <span className='flex flex-col items-start gap-0.5'>
+          <span className='text-xs'>{known.name}</span>
+          {isJokerCard && <ModifierLabels tags={card.tags} />}
         </span>
       </span>
     )
