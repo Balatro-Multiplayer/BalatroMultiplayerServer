@@ -1,4 +1,4 @@
-import { DISCORD_BOT_MAX_IDS, boardName } from '@bmp/types'
+import { DISCORD_BOT_MAX_IDS, DISCORD_ID_PATTERN, boardName } from '@bmp/types'
 import { Router } from 'express'
 import { env } from '../../env.js'
 import * as standingsGateway from '../../infrastructure/gateways/discord-standings.gateway.js'
@@ -15,7 +15,6 @@ import {
 // Routes only the Discord rank-role bot (apps/discord-bot) calls, guarded by
 // its own DISCORD_BOT_API_KEY. With no key configured every request is refused.
 
-const DISCORD_ID = /^\d{17,20}$/
 export const MAX_TOP_N = 200
 
 function defaultStandingsService(): StandingsService {
@@ -50,7 +49,9 @@ export function createDiscordBotRouter(
 			if (
 				!Array.isArray(discordIds) ||
 				discordIds.length > DISCORD_BOT_MAX_IDS ||
-				!discordIds.every((id) => typeof id === 'string' && DISCORD_ID.test(id))
+				!discordIds.every(
+					(id) => typeof id === 'string' && DISCORD_ID_PATTERN.test(id),
+				)
 			)
 				throw new AppError('Bad discordIds', 400)
 			res.json(await service.standings({ modId, gameMode, topN, discordIds }))

@@ -1,6 +1,9 @@
 // POST /internal/discord-bot/* (apps/server features/discord-bot), which only
 // the Discord rank-role bot (apps/discord-bot) calls.
 
+/** A Discord id (snowflake) as text. */
+export const DISCORD_ID_PATTERN = /^\d{17,20}$/
+
 /** Most Discord ids one /standings request may carry. */
 export const DISCORD_BOT_MAX_IDS = 1000
 

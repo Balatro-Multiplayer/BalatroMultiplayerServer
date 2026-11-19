@@ -1,7 +1,9 @@
+import { DISCORD_ID_PATTERN } from '@bmp/types'
 import { type Ladder, managedRoleNames } from './ladders.js'
 
 // Every Discord-side value comes from the environment. A missing or malformed
-// required one disables the bot (main.ts logs one line and exits 0).
+// required one disables the bot (main.ts logs one line, then idles until
+// restarted).
 
 export interface BotConfig {
 	token: string
@@ -19,7 +21,6 @@ export type ConfigResult =
 	| { ok: true; config: BotConfig }
 	| { ok: false; problems: string[] }
 
-const SNOWFLAKE = /^\d{17,20}$/
 export const MAX_SYNC_MINUTES = 24 * 60
 
 export function roleEnvName(role: string): string {
@@ -35,7 +36,7 @@ export function loadConfig(
 	const read = (key: string, snowflake = false): string => {
 		const value = env[key]?.trim() ?? ''
 		if (!value) missing.push(key)
-		else if (snowflake && !SNOWFLAKE.test(value)) invalid.push(key)
+		else if (snowflake && !DISCORD_ID_PATTERN.test(value)) invalid.push(key)
 		return value
 	}
 

@@ -78,6 +78,7 @@ function sweep(trigger: string): Promise<SweepSummary> {
 }
 
 function scheduledSweep() {
+	if (disabled) return // the client is destroyed; see stayDisabled
 	sweep('scheduled').catch((err) =>
 		console.error(
 			`[discord-bot] sweep failed, nothing changed: ${(err as Error)?.message ?? err}`,
