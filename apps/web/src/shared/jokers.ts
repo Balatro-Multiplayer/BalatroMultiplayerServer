@@ -38,7 +38,6 @@ export const jokers: { [key: string]: JokerInfo } = {
   j_constellation: { name: 'Constellation', file: 'j_constellation.png' },
   j_crafty: { name: 'Crafty Joker', file: 'j_crafty.png' },
   j_crazy: { name: 'Crazy Joker', file: 'j_crazy.png' },
-  j_copycat: { name: 'Copycat', file: 'j_copycat.png' },
   j_credit_card: { name: 'Credit Card', file: 'j_credit_card.png' },
   j_delayed_grat: { name: 'Delayed Gratification', file: 'j_delayed_grat.png' },
   j_devious: { name: 'Devious Joker', file: 'j_devious.png' },
