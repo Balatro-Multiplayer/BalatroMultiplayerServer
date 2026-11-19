@@ -319,6 +319,7 @@ function LeaderboardsContent() {
           <CardContent className='p-0'>
             {betaSeason ? (
               <BetaBoardTable
+                season={betaSeason.number}
                 loading={betaLoading}
                 entries={betaBoardData?.entries ?? []}
               />

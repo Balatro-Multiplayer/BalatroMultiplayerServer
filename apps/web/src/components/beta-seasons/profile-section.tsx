@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { legacyMatchPath } from '@/app/(home)/matches/lib/match-view'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,7 +13,7 @@ import {
   type BetaPlayerStanding,
 } from '@/lib/beta-seasons'
 import { LEADERBOARD_CATEGORIES } from '@/lib/leaderboards'
-import { BetaPlayerName } from './board-table'
+import { BetaPlayerName, BetaRating, BetaRatingChange } from './board-table'
 
 interface BetaPlayerResponse {
   linked: boolean
@@ -77,11 +77,16 @@ export function BetaSeasonsSection({ playerId }: { playerId: string }) {
                 <CardContent>
                   <dl className='space-y-2 text-sm'>
                     <Stat label='Rank' value={`#${s.rank} of ${s.boardSize}`} />
-                    <Stat label='Rating' value={String(Math.round(s.rating))} />
+                    <Stat
+                      label='Rating'
+                      value={<BetaRating season={s.season} rating={s.rating} />}
+                    />
                     {s.peakRating != null && (
                       <Stat
                         label='Peak'
-                        value={String(Math.round(s.peakRating))}
+                        value={
+                          <BetaRating season={s.season} rating={s.peakRating} />
+                        }
                       />
                     )}
                     <Stat label='W / L' value={`${s.wins} / ${s.losses}`} />
@@ -183,10 +188,16 @@ function BetaGames({
                       )}
                     </td>
                     <td className='px-4 py-2'>
-                      {formatChange(g.ratingChange)}
+                      <BetaRatingChange
+                        season={standing.season}
+                        change={g.ratingChange}
+                      />
                     </td>
                     <td className='px-4 py-2 font-pixel text-bal-gold'>
-                      {g.ratingAfter == null ? '-' : Math.round(g.ratingAfter)}
+                      <BetaRating
+                        season={standing.season}
+                        rating={g.ratingAfter}
+                      />
                     </td>
                     <td className='px-4 py-2 text-muted-foreground'>
                       {g.deck ?? '-'}
@@ -252,13 +263,7 @@ const RESULT_CLASS = {
   tie: 'text-muted-foreground',
 } as const
 
-function formatChange(change: number | null): string {
-  if (change == null) return '-'
-  const n = Math.round(change * 10) / 10
-  return n > 0 ? `+${n}` : String(n)
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className='flex justify-between'>
       <dt className='text-muted-foreground'>{label}</dt>

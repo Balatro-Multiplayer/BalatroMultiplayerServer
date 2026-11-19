@@ -84,3 +84,40 @@ export function betaBoardsOf(
     .filter((b) => b.modId === modId)
     .sort((a, b) => b.entries - a.entries)
 }
+
+// Each Beta Season's rating system, fitted from its games: every season used
+// Elo, with its own start rating and scale (the rating gap that makes a 10:1
+// favourite). Season 1 has no games saved, so its scale is an estimate from
+// the spread of its standings.
+const BETA_ELO: Record<number, { start: number; scale: number }> = {
+  1: { start: 1000, scale: 1000 },
+  2: { start: 200, scale: 700 },
+  3: { start: 200, scale: 700 },
+  4: { start: 200, scale: 1200 },
+  5: { start: 200, scale: 1200 },
+  6: { start: 200, scale: 1200 },
+  7: { start: 500, scale: 1200 },
+}
+
+// The current system: new players start at 600, the scale is 1000, and no
+// rating goes below 100.
+const NOW_START = 600
+const NOW_SCALE = 1000
+const NOW_FLOOR = 100
+
+/**
+ * A Beta Season rating on the current scale: the same distance from the
+ * start rating, in the same win odds. Placement games are not modelled.
+ */
+export function ratingNow(season: number, rating: number): number {
+  const elo = BETA_ELO[season]
+  if (!elo) return Math.round(rating)
+  const mapped = NOW_START + ((rating - elo.start) * NOW_SCALE) / elo.scale
+  return Math.max(NOW_FLOOR, Math.round(mapped))
+}
+
+/** A Beta Season rating change on the current scale. */
+export function ratingChangeNow(season: number, change: number): number {
+  const elo = BETA_ELO[season]
+  return Math.round(elo ? (change * NOW_SCALE) / elo.scale : change)
+}

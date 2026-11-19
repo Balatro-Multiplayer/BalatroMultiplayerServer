@@ -1,5 +1,55 @@
 import { RankBadge } from '@/components/rank-badge'
-import type { BetaPlayerRef, BetaStandingRow } from '@/lib/beta-seasons'
+import {
+  type BetaPlayerRef,
+  type BetaStandingRow,
+  ratingChangeNow,
+  ratingNow,
+} from '@/lib/beta-seasons'
+
+/** A Beta Season rating, with the same rating on the current scale in brackets. */
+export function BetaRating({
+  season,
+  rating,
+}: {
+  season: number
+  rating: number | null
+}) {
+  if (rating == null) return <>-</>
+  return (
+    <>
+      {Math.round(rating)}{' '}
+      <span
+        className='font-normal font-readable text-muted-foreground text-xs'
+        title='On the current rating scale'
+      >
+        ({ratingNow(season, rating)})
+      </span>
+    </>
+  )
+}
+
+/** A Beta Season rating change, with the change on the current scale in brackets. */
+export function BetaRatingChange({
+  season,
+  change,
+}: {
+  season: number
+  change: number | null
+}) {
+  if (change == null) return <>-</>
+  const sign = (n: number) => (n > 0 ? `+${n}` : String(n))
+  return (
+    <>
+      {sign(Math.round(change * 10) / 10)}{' '}
+      <span
+        className='text-muted-foreground text-xs'
+        title='On the current rating scale'
+      >
+        ({sign(ratingChangeNow(season, change))})
+      </span>
+    </>
+  )
+}
 
 const HEADERS = ['Rank', 'Player', 'Rating', 'Peak', 'W', 'L', 'Games']
 
@@ -17,9 +67,11 @@ export function BetaPlayerName({ player }: { player: BetaPlayerRef }) {
 }
 
 export function BetaBoardTable({
+  season,
   loading,
   entries,
 }: {
+  season: number
   loading: boolean
   entries: BetaStandingRow[]
 }) {
@@ -57,10 +109,10 @@ export function BetaBoardTable({
                 <BetaPlayerName player={entry} />
               </td>
               <td className='px-4 py-3 font-bold font-pixel text-bal-gold'>
-                {Math.round(entry.rating)}
+                <BetaRating season={season} rating={entry.rating} />
               </td>
               <td className='px-4 py-3 font-semibold text-bal-blue'>
-                {entry.peakRating == null ? '-' : Math.round(entry.peakRating)}
+                <BetaRating season={season} rating={entry.peakRating} />
               </td>
               <td className='px-4 py-3 text-bal-green'>{entry.wins}</td>
               <td className='px-4 py-3 text-bal-red'>{entry.losses}</td>
