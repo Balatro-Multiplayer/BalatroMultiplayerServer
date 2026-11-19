@@ -1,4 +1,6 @@
 import type {
+	DiscordBotChangesAnswer,
+	DiscordBotChangesRequest,
 	DiscordBotMember,
 	DiscordBotRating,
 	DiscordBotStandingsAnswer,
@@ -12,6 +14,14 @@ import type { BoardReads } from '../../infrastructure/gateways/discord-standings
 // The request and answer shapes live in @bmp/types (discord-bot.ts), shared
 // with the bot.
 
+/**
+ * How far each changes cursor reaches back. A row's updated_at is stamped
+ * when its write starts, so a write that commits slowly can carry a time
+ * before the last cursor. Rows seen twice are harmless: the bot finds
+ * nothing to change.
+ */
+export const CHANGES_OVERLAP_MS = 2 * 60_000
+
 export interface StandingsDeps {
 	hashDiscordId(discordId: string): string
 	currentSeasonId(): Promise<number | null>
@@ -23,17 +33,23 @@ export interface StandingsDeps {
 	 * transaction (void-match.ts), so a snapshot never holds half of one.
 	 */
 	inBoardSnapshot<T>(read: (reads: BoardReads) => Promise<T>): Promise<T>
+	now(): Date
 }
 
 export class NoActiveSeasonError extends Error {}
 
 export function createStandingsService(deps: StandingsDeps) {
+	async function currentSeason(): Promise<number> {
+		const season = await deps.currentSeasonId()
+		if (season === null) throw new NoActiveSeasonError('No active season')
+		return season
+	}
+
 	return {
 		async standings(
 			req: DiscordBotStandingsRequest,
 		): Promise<DiscordBotStandingsAnswer> {
-			const season = await deps.currentSeasonId()
-			if (season === null) throw new NoActiveSeasonError('No active season')
+			const season = await currentSeason()
 			const previousSeason = await deps.previousSeasonId(season)
 
 			const hashOf = new Map(
@@ -76,6 +92,37 @@ export function createStandingsService(deps: StandingsDeps) {
 					previous: previous.get(playerId) ?? null,
 				}
 			return { season, previousSeason, players, top }
+		},
+
+		async changes(
+			req: DiscordBotChangesRequest,
+		): Promise<DiscordBotChangesAnswer> {
+			// Taken before the reads, so a write committing during them is
+			// still after the next call's `since`.
+			const cursor = new Date(deps.now().getTime() - CHANGES_OVERLAP_MS)
+			const season = await currentSeason()
+			const board = {
+				modId: req.modId,
+				gameMode: req.gameMode,
+				seasonId: season,
+			}
+			const since = req.since
+			const { changed, top } = await deps.inBoardSnapshot(async (reads) => ({
+				changed:
+					since === null
+						? []
+						: await reads.playersChangedSince(board, new Date(since)),
+				top: req.topN > 0 ? await reads.topPlayerIds(board, req.topN) : [],
+			}))
+			return {
+				season,
+				cursor: cursor.toISOString(),
+				changed: changed.map((c) => ({
+					playerId: c.playerId,
+					updatedAt: c.updatedAt.toISOString(),
+				})),
+				top,
+			}
 		},
 	}
 }

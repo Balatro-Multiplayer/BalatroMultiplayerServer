@@ -44,3 +44,26 @@ export interface DiscordBotStandingsAnswer {
 	 */
 	top: string[]
 }
+
+export interface DiscordBotChangesRequest {
+	modId: string
+	gameMode: string
+	/** How many places of the board to return in `top` (0 = none). */
+	topN: number
+	/** The previous answer's `cursor`; null on the first call. */
+	since: string | null
+}
+
+export interface DiscordBotChangesAnswer {
+	season: number
+	/** Send back as `since` next time. */
+	cursor: string
+	/**
+	 * Rows on the board written since `since` (none on the first call), with
+	 * when. The cursor reaches back a little, so a row can show up on several
+	 * calls; a new `updatedAt` means a new write.
+	 */
+	changed: { playerId: string; updatedAt: string }[]
+	/** Player ids of the first `topN` places, in order; same snapshot. */
+	top: string[]
+}

@@ -596,6 +596,8 @@ export const matchmakingRatings = pgTable(
 	(t) => [
 		primaryKey({ columns: [t.playerId, t.modId, t.gameMode, t.season] }),
 		index('mmr_rating_idx').on(t.modId, t.gameMode, t.season, t.rating),
+		// The Discord bot's "who played since" poll (discord-standings.gateway.ts).
+		index('mmr_updated_idx').on(t.modId, t.gameMode, t.season, t.updatedAt),
 	],
 )
 

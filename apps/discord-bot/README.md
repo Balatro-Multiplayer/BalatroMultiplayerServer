@@ -5,6 +5,7 @@ leaderboard. It replaces the rank roles of the archived Botlatro bot.
 
 - Every 10 minutes (and on `/sync-ranks`) it reads every member, asks the API
   for their standing and adds or removes **only the managed roles**.
+- Between sweeps it updates roles within about 30 seconds of a match (below).
 - Members with no linked Discord account lose every managed role. No message,
   no DM.
 - It starts in **dry run**: it logs what it would change and changes nothing.
@@ -53,6 +54,33 @@ with the salt used at link time and lists the top places in the public board's
 order, so the bot needs neither the database URL nor `PLAYER_ID_SALT`. The
 request and answer types are shared with the API (`@bmp/types`,
 `discord-bot.ts`).
+
+### After each match
+
+Every `MATCH_POLL_SECONDS` (30) the bot calls `POST /internal/discord-bot/changes`
+with the cursor from its last call. The API answers with the players whose
+rating row changed since then (`updated_at`, so mirrored matches, edits,
+voids and season replays or restores all count) and the current top 50. If a linked member played or the top
+50 changed, the bot re-checks those members, everyone now in the top 50 and
+everyone holding a leaderboard role. One match can push other players across
+a boundary, and this catches them.
+
+- It reuses the member cache and the Discord id to player map from the last
+  sweep, so a member who links mid-sweep waits for the next sweep.
+- The cursor reaches back 2 minutes, so slow writes aren't missed. The API
+  sends each row's `updated_at`, and a row the bot already saw doesn't count
+  again, so one match means one re-check.
+- A tick whose standings read fails keeps its cursor and is redone. A member
+  whose role change fails is tried again on the next ticks, 3 tries in all.
+  While ticks keep failing (say, a 503 between seasons) the error is logged
+  once.
+- The cursor is taken just before the first sweep, so matches played while
+  that sweep runs (minutes, the first time) still count.
+- Ticks skip while a sweep runs; the sweep stays as the safety net (new
+  links, decay, missed ticks, a player whose only match was voided). A sweep
+  that fails keeps the last links.
+- The poll uses the `mmr_updated_idx` index (migration 0076).
+- Off in dry run, since each sweep already logs the whole plan.
 
 Safety:
 
@@ -106,6 +134,7 @@ Safety:
 | `DISCORD_ROLE_STONE` … `_GLASS` | yes | Rating role ids. |
 | `DISCORD_ROLE_FOIL`, `_HOLOGRAPHIC`, `_POLYCHROME`, `_NEGATIVE` | yes | Leaderboard role ids. |
 | `SYNC_INTERVAL_MINUTES` | no | Default 10, at most 1440 (a day). |
+| `MATCH_POLL_SECONDS` | no | Default 30, from 5 to 3600. `0` turns per-match updates off. |
 | `DRY_RUN` | no | Default on. `false` or `0` applies changes. |
 | `BMP_API_URL` | no | Default `http://api:8788` (set by compose). |
 

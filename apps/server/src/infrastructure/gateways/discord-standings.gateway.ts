@@ -1,9 +1,9 @@
 import type { DiscordBotRating } from '@bmp/types'
-import { desc, inArray, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import { effectiveRating } from '../../features/ratings/effective-rating.js'
 import { PLACEMENT_GAMES } from '../../features/ratings/elo.js'
 import { db } from '../db/index.js'
-import { players, seasons } from '../db/schema.js'
+import { matchmakingRatings, players, seasons } from '../db/schema.js'
 import type { Tx } from './rating.gateway.js'
 import { leaderboardOrder } from './stats.gateway.js'
 
@@ -38,6 +38,11 @@ export interface BoardReads {
 	): Promise<Map<string, DiscordBotRating>>
 	/** Player ids of the public board's first `n` places, in order. */
 	topPlayerIds(board: BoardSeason, n: number): Promise<string[]>
+	/** Rows on the board written after `since` (mmr_updated_idx). */
+	playersChangedSince(
+		board: BoardSeason,
+		since: Date,
+	): Promise<{ playerId: string; updatedAt: Date }[]>
 }
 
 function boardReads(tx: Tx): BoardReads {
@@ -78,6 +83,23 @@ function boardReads(tx: Tx): BoardReads {
 				LIMIT ${n}
 			`)
 			return res.rows.map((row) => (row as { player_id: string }).player_id)
+		},
+
+		playersChangedSince(board, since) {
+			return tx
+				.select({
+					playerId: matchmakingRatings.playerId,
+					updatedAt: matchmakingRatings.updatedAt,
+				})
+				.from(matchmakingRatings)
+				.where(
+					and(
+						eq(matchmakingRatings.modId, board.modId),
+						eq(matchmakingRatings.gameMode, board.gameMode),
+						eq(matchmakingRatings.season, board.seasonId),
+						gt(matchmakingRatings.updatedAt, since),
+					),
+				)
 		},
 	}
 }

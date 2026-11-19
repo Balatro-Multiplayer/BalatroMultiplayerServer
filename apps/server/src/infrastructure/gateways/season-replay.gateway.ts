@@ -107,11 +107,19 @@ export async function listUnratedMatches(
 
 // One transaction: the Season's ranked rating rows become `ratings` (a player
 // the replay no longer rates loses their row) and each match gets its result.
+// Every row is stamped as written now, a restored backup's too: the Discord
+// bot's change feed (playersChangedSince) only sees rows with a new
+// updated_at, and a restore can change anyone's rating.
 export async function replaceSeasonRatings(
 	season: number,
 	ratings: Record<string, unknown>[],
 	matches: MatchResult[],
 ): Promise<void> {
+	const now = new Date()
+	const stamped: Record<string, unknown>[] = ratings.map((row) => ({
+		...row,
+		updatedAt: now,
+	}))
 	await db.transaction(async (tx) => {
 		await tx
 			.delete(matchmakingRatings)
@@ -121,10 +129,10 @@ export async function replaceSeasonRatings(
 					like(matchmakingRatings.gameMode, RANKED_BOARDS),
 				),
 			)
-		for (let i = 0; i < ratings.length; i += CHUNK)
+		for (let i = 0; i < stamped.length; i += CHUNK)
 			await tx
 				.insert(matchmakingRatings)
-				.values(ratings.slice(i, i + CHUNK) as PostgresRatingRow[])
+				.values(stamped.slice(i, i + CHUNK) as PostgresRatingRow[])
 		for (const match of matches)
 			await tx
 				.update(matchmakingMatches)

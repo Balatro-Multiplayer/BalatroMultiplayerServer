@@ -25,6 +25,8 @@ export interface GuildPort {
 	/** One role at a time (PUT/DELETE on that one role), never a full role list. */
 	addRole(memberId: string, roleId: string): Promise<void>
 	removeRole(memberId: string, roleId: string): Promise<void>
+	/** Members as last seen, without asking Discord (for per-match updates). */
+	cachedMembers(): GuildMemberInfo[]
 }
 
 export interface SweepOptions {
@@ -39,6 +41,8 @@ export interface SweepOptions {
 	batchDelayMs?: number
 	sleep?: (ms: number) => Promise<void>
 	log?: (line: string) => void
+	/** Discord id -> player id of linked members, kept up to date by each pass. */
+	links?: Map<string, string>
 }
 
 export interface SweepSummary {
@@ -48,9 +52,14 @@ export interface SweepSummary {
 	rolesAdded: number
 	rolesRemoved: number
 	errors: number
+	/** Members whose role change failed (not counting members who left). */
+	failedMemberIds: string[]
 	dryRun: boolean
 	durationMs: number
 }
+
+/** A linked member's standing with their place, and who they are linked to. */
+type LinkedMember = MemberStanding & { playerId: string }
 
 interface PlannedChange extends RoleChanges {
 	member: GuildMemberInfo
@@ -85,14 +94,14 @@ async function loadStandings(
 	ladders: Ladder[],
 	memberIds: string[],
 ): Promise<
-	Map<Ladder, { seasons: Seasons; players: Map<string, MemberStanding> }>
+	Map<Ladder, { seasons: Seasons; players: Map<string, LinkedMember> }>
 > {
 	const out = new Map<
 		Ladder,
-		{ seasons: Seasons; players: Map<string, MemberStanding> }
+		{ seasons: Seasons; players: Map<string, LinkedMember> }
 	>()
 	for (const ladder of ladders) {
-		const players = new Map<string, MemberStanding>()
+		const players = new Map<string, LinkedMember>()
 		let seasons: Seasons | null = null
 		let rankOf: Map<string, number> | null = null
 		for (const ids of chunk(memberIds, IDS_PER_REQUEST)) {
@@ -122,8 +131,9 @@ async function loadStandings(
 function withRank(
 	member: DiscordBotMember,
 	rankOf: Map<string, number>,
-): MemberStanding {
+): LinkedMember {
 	return {
+		playerId: member.playerId,
 		current: member.current && {
 			...member.current,
 			rank: rankOf.get(member.playerId) ?? null,
@@ -132,8 +142,30 @@ function withRank(
 	}
 }
 
+/** Every member of the guild. */
 export async function runSweep(opts: SweepOptions): Promise<SweepSummary> {
 	const started = Date.now()
+	const members = await opts.guild.listMembers()
+	return syncMembers(opts, members, started, { everyone: true })
+}
+
+/** Just these members, from the member cache. Unknown ids are skipped. */
+export async function syncSome(
+	opts: SweepOptions,
+	memberIds: Iterable<string>,
+): Promise<SweepSummary> {
+	const started = Date.now()
+	const wanted = new Set(memberIds)
+	const members = opts.guild.cachedMembers().filter((m) => wanted.has(m.id))
+	return syncMembers(opts, members, started)
+}
+
+async function syncMembers(
+	opts: SweepOptions,
+	members: GuildMemberInfo[],
+	started: number,
+	{ everyone = false } = {},
+): Promise<SweepSummary> {
 	const log = opts.log ?? ((line: string) => console.log(line))
 	const sleep = opts.sleep ?? defaultSleep
 	const batchSize = opts.batchSize ?? 5
@@ -146,12 +178,15 @@ export async function runSweep(opts: SweepOptions): Promise<SweepSummary> {
 		]),
 	)
 
-	const members = await opts.guild.listMembers()
 	const standings = await loadStandings(
 		opts.fetchStandings,
 		opts.ladders,
 		members.map((m) => m.id),
 	)
+	// Only once the standings are in: a failed read keeps the last links, so
+	// the per-match updates go on working until the next sweep. A full pass
+	// rebuilds them, dropping members who left.
+	if (everyone) opts.links?.clear()
 
 	const linkedIds = new Set<string>()
 	const plans: PlannedChange[] = []
@@ -161,10 +196,14 @@ export async function runSweep(opts: SweepOptions): Promise<SweepSummary> {
 			const board = standings.get(ladder)
 			if (!board) continue
 			const standing = board.players.get(member.id)
-			if (standing) linkedIds.add(member.id)
+			if (standing) {
+				linkedIds.add(member.id)
+				opts.links?.set(member.id, standing.playerId)
+			}
 			for (const role of rolesForLadder(ladder, standing, board.seasons))
 				wanted.push(opts.roleIds[role])
 		}
+		if (!linkedIds.has(member.id)) opts.links?.delete(member.id)
 		const changes = planRoleChanges(member.roleIds, wanted, managed)
 		if (changes.add.length || changes.remove.length)
 			plans.push({ member, ...changes })
@@ -177,6 +216,7 @@ export async function runSweep(opts: SweepOptions): Promise<SweepSummary> {
 		rolesAdded: 0,
 		rolesRemoved: 0,
 		errors: 0,
+		failedMemberIds: [],
 		dryRun: opts.dryRun,
 		durationMs: 0,
 	}
@@ -221,6 +261,7 @@ export async function runSweep(opts: SweepOptions): Promise<SweepSummary> {
 		} catch (err) {
 			if (!isUnknownMember(err)) {
 				summary.errors++
+				summary.failedMemberIds.push(p.member.id)
 				log(
 					`[discord-bot] failed to update ${p.member.name} (${p.member.id}): ${(err as Error)?.message ?? err}`,
 				)

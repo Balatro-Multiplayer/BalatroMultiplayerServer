@@ -9,9 +9,19 @@ import {
 import { SYNC_COMMAND, guildPort, rolePlacementProblems } from './discord.js'
 import { loadConfig } from './env.js'
 import { LADDERS } from './ladders.js'
-import { createStandingsClient } from './standings-client.js'
+import { createLiveUpdater } from './live.js'
+import {
+	createChangesClient,
+	createStandingsClient,
+} from './standings-client.js'
 import { STARTUP_RETRY_MS, closeCodeProblem, setupProblem } from './startup.js'
-import { type SweepSummary, formatSummary, runSweep } from './sweep.js'
+import {
+	type SweepOptions,
+	type SweepSummary,
+	formatSummary,
+	runSweep,
+	syncSome,
+} from './sweep.js'
 
 // Registered first: as PID 1 in a container, Node ignores SIGTERM unless it
 // has a handler, and `docker stop` would wait for its timeout.
@@ -51,24 +61,34 @@ const client = new Client({
 })
 shutdown = () => client.destroy()
 const fetchStandings = createStandingsClient(config.apiUrl, config.apiKey)
+const fetchChanges = createChangesClient(config.apiUrl, config.apiKey)
+// Discord id -> player id, from the last sweep; the per-match updates need it.
+const links = new Map<string, string>()
+
+async function sweepOptions(): Promise<SweepOptions> {
+	const guild = await client.guilds.fetch(config.guildId)
+	return {
+		guild: guildPort(guild),
+		fetchStandings,
+		ladders: LADDERS,
+		roleIds: config.roleIds,
+		dryRun: config.dryRun,
+		links,
+	}
+}
 
 let running: Promise<SweepSummary> | null = null
+let live: Promise<void> | null = null
 
 // One sweep at a time: a call while one runs gets that sweep's result.
 function sweep(trigger: string): Promise<SweepSummary> {
 	if (running) return running
 	running = (async () => {
+		await live
 		console.log(
 			`[discord-bot] sweep started (${trigger})${config.dryRun ? ' [dry-run]' : ''}`,
 		)
-		const guild = await client.guilds.fetch(config.guildId)
-		const summary = await runSweep({
-			guild: guildPort(guild),
-			fetchStandings,
-			ladders: LADDERS,
-			roleIds: config.roleIds,
-			dryRun: config.dryRun,
-		})
+		const summary = await runSweep(await sweepOptions())
 		console.log(`[discord-bot] sweep done: ${formatSummary(summary)}`)
 		return summary
 	})().finally(() => {
@@ -112,6 +132,52 @@ client.on(Events.ShardDisconnect, (event) => {
 	void stayDisabled(`${problem} (gateway close ${event.code})`)
 })
 
+const liveUpdate = createLiveUpdater({
+	fetchChanges,
+	ladders: LADDERS,
+	links,
+	leaderboardRoleIds: new Set(
+		LADDERS.flatMap((l) =>
+			l.leaderboardRoles.map((r) => config.roleIds[r.role]),
+		),
+	),
+	cachedMembers: () => {
+		const guild = client.guilds.cache.get(config.guildId)
+		return guild ? guildPort(guild).cachedMembers() : []
+	},
+	sync: async (ids) => syncSome(await sweepOptions(), ids),
+})
+
+const liveOn = !config.dryRun && config.matchPollMs > 0
+// The last tick's error, logged once: a 503 between seasons would otherwise
+// log a line every tick.
+let liveError: string | null = null
+
+// Skipped while a sweep runs: the sweep covers it, and the next tick still
+// sees the same matches (the cursor only moves after a successful tick).
+function liveTick() {
+	if (disabled) return // the client is destroyed; see stayDisabled
+	if (running || live) return
+	live = liveUpdate()
+		.then((s) => {
+			if (liveError) console.log('[discord-bot] match updates work again')
+			liveError = null
+			if (s && (s.membersChanged > 0 || s.errors > 0))
+				console.log(`[discord-bot] after matches: ${formatSummary(s)}`)
+		})
+		.catch((err) => {
+			const message = (err as Error)?.message ?? String(err)
+			if (message !== liveError)
+				console.error(
+					`[discord-bot] match update failed, nothing changed (retrying quietly): ${message}`,
+				)
+			liveError = message
+		})
+		.finally(() => {
+			live = null
+		})
+}
+
 client.once(Events.ClientReady, async (ready) => {
 	try {
 		const guild = await client.guilds.fetch(config.guildId)
@@ -134,8 +200,17 @@ client.once(Events.ClientReady, async (ready) => {
 		afterStartupError(err)
 		return
 	}
+	// The first tick only takes a cursor. Taking it before the first sweep
+	// (which waits for it) means matches played during that sweep, which can
+	// run for minutes, are picked up by the first real tick.
+	if (liveOn) liveTick()
 	scheduledSweep()
 	setInterval(scheduledSweep, config.syncIntervalMs)
+	// A dry run shows its whole plan in each sweep; per-match ticks would
+	// only repeat parts of it.
+	if (config.dryRun)
+		console.log('[discord-bot] per-match updates are off in dry run')
+	else if (liveOn) setInterval(liveTick, config.matchPollMs)
 })
 
 client.on(Events.InteractionCreate, async (interaction) => {

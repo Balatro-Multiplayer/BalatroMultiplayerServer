@@ -14,6 +14,8 @@ export interface BotConfig {
 	apiUrl: string
 	apiKey: string
 	syncIntervalMs: number
+	/** How often to check for finished matches; 0 = off. */
+	matchPollMs: number
 	dryRun: boolean
 }
 
@@ -22,6 +24,8 @@ export type ConfigResult =
 	| { ok: false; problems: string[] }
 
 export const MAX_SYNC_MINUTES = 24 * 60
+/** Slower than this and the sweep alone would be about as quick. */
+export const MAX_POLL_SECONDS = 60 * 60
 
 export function roleEnvName(role: string): string {
 	return `DISCORD_ROLE_${role.toUpperCase()}`
@@ -62,6 +66,12 @@ export function loadConfig(
 	const minutes = Number(env.SYNC_INTERVAL_MINUTES?.trim() || '10')
 	if (!Number.isFinite(minutes) || minutes < 1 || minutes > MAX_SYNC_MINUTES)
 		invalid.push('SYNC_INTERVAL_MINUTES')
+	const pollSeconds = Number(env.MATCH_POLL_SECONDS?.trim() || '30')
+	if (
+		!Number.isFinite(pollSeconds) ||
+		(pollSeconds !== 0 && (pollSeconds < 5 || pollSeconds > MAX_POLL_SECONDS))
+	)
+		invalid.push('MATCH_POLL_SECONDS')
 
 	// On unless set to false: the first real sweep strips roles from many
 	// members, so it has to be previewed first.
@@ -87,6 +97,7 @@ export function loadConfig(
 			),
 			apiKey,
 			syncIntervalMs: minutes * 60_000,
+			matchPollMs: pollSeconds * 1000,
 			dryRun,
 		},
 	}

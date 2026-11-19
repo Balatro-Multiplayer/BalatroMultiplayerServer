@@ -105,4 +105,28 @@ describe('loadConfig', () => {
 			})
 		},
 	)
+
+	it.each([
+		[undefined, 30_000],
+		['0', 0],
+		['60', 60_000],
+	])('MATCH_POLL_SECONDS=%j -> %i ms', (value, ms) => {
+		const result = loadConfig(
+			{ ...fullEnv(), MATCH_POLL_SECONDS: value },
+			LADDERS,
+		)
+		expect(result.ok && result.config.matchPollMs).toBe(ms)
+	})
+
+	it.each(['2', '3601', '3000000'])(
+		'rejects MATCH_POLL_SECONDS=%s (under 5 seconds or over an hour)',
+		(value) => {
+			expect(
+				loadConfig({ ...fullEnv(), MATCH_POLL_SECONDS: value }, LADDERS),
+			).toEqual({
+				ok: false,
+				problems: ['invalid MATCH_POLL_SECONDS'],
+			})
+		},
+	)
 })

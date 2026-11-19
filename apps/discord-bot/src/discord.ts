@@ -1,11 +1,16 @@
 import {
 	type Guild,
+	type GuildMember,
 	PermissionFlagsBits,
 	SlashCommandBuilder,
 } from 'discord.js'
-import type { GuildPort } from './sweep.js'
+import type { GuildMemberInfo, GuildPort } from './sweep.js'
 
 const REASON = 'Rank role sync'
+
+function memberInfo(m: GuildMember): GuildMemberInfo {
+	return { id: m.id, name: m.user.username, roleIds: [...m.roles.cache.keys()] }
+}
 
 // Role changes go through GuildMemberManager.addRole/removeRole: one PUT or
 // DELETE per role. GuildMemberRoleManager.add/remove with an ARRAY sends the
@@ -14,12 +19,11 @@ const REASON = 'Rank role sync'
 export function guildPort(guild: Guild): GuildPort {
 	return {
 		async listMembers() {
-			const members = await guild.members.fetch()
-			return members.map((m) => ({
-				id: m.id,
-				name: m.user.username,
-				roleIds: [...m.roles.cache.keys()],
-			}))
+			return (await guild.members.fetch()).map(memberInfo)
+		},
+		// Kept current by the Server Members intent's member updates.
+		cachedMembers() {
+			return guild.members.cache.map(memberInfo)
 		},
 		async addRole(memberId, roleId) {
 			await guild.members.addRole({

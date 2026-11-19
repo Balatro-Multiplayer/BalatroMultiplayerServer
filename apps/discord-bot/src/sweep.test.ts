@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { EXPANDED } from './ladders.js'
 import type { MemberStanding } from './rank-logic.js'
 import type { FetchStandings } from './standings-client.js'
-import { type GuildMemberInfo, type GuildPort, runSweep } from './sweep.js'
+import {
+	type GuildMemberInfo,
+	type GuildPort,
+	runSweep,
+	syncSome,
+} from './sweep.js'
 
 const roleIds: Record<string, string> = {
 	stone: 'r-stone',
@@ -20,6 +25,7 @@ function fakeGuild(members: GuildMemberInfo[]) {
 	const calls: string[] = []
 	const guild: GuildPort = {
 		listMembers: async () => members,
+		cachedMembers: () => members,
 		addRole: vi.fn(async (m: string, r: string) => {
 			calls.push(`+${m}:${r}`)
 		}),
@@ -262,8 +268,65 @@ describe('runSweep', () => {
 		})
 		expect(summary).toMatchObject({
 			errors: 1,
+			failedMemberIds: ['stuck'],
 			membersChanged: 1,
 			rolesRemoved: 1,
 		})
+	})
+
+	it('records which player each linked member is', async () => {
+		const { guild } = fakeGuild([
+			{ id: 'alice', name: 'alice', roleIds: [] },
+			{ id: 'bob', name: 'bob', roleIds: [] },
+		])
+		const links = new Map([['gone', 'p-gone']])
+		await runSweep({
+			...base,
+			guild,
+			dryRun: true,
+			links,
+			fetchStandings: standingsOf({ alice: settled(700) }),
+		})
+		expect(links).toEqual(new Map([['alice', 'p-alice']]))
+	})
+
+	it('keeps the last links when the standings read fails', async () => {
+		const { guild } = fakeGuild([{ id: 'alice', name: 'alice', roleIds: [] }])
+		const links = new Map([['alice', 'p-alice']])
+		await expect(
+			runSweep({
+				...base,
+				guild,
+				dryRun: true,
+				links,
+				fetchStandings: async () => {
+					throw new Error('HTTP 503')
+				},
+			}),
+		).rejects.toThrow('HTTP 503')
+		expect(links).toEqual(new Map([['alice', 'p-alice']]))
+	})
+})
+
+describe('syncSome', () => {
+	it('checks only the members asked for, from the cache', async () => {
+		const { guild, calls } = fakeGuild([
+			{ id: 'alice', name: 'alice', roleIds: ['r-steel'] },
+			{ id: 'bob', name: 'bob', roleIds: ['r-gold'] },
+		])
+		const fetchStandings = vi.fn(standingsOf({ alice: settled(760) }))
+		const links = new Map([
+			['alice', 'p-alice'],
+			['bob', 'p-bob'],
+		])
+		const summary = await syncSome(
+			{ ...base, guild, dryRun: false, fetchStandings, links },
+			['alice', 'not-cached'],
+		)
+		expect(calls).toEqual(['-alice:r-steel', '+alice:r-gold'])
+		expect(fetchStandings.mock.calls[0][0].discordIds).toEqual(['alice'])
+		expect(summary.membersChecked).toBe(1)
+		// Bob wasn't checked, so his link stays.
+		expect(links.get('bob')).toBe('p-bob')
 	})
 })

@@ -23,10 +23,13 @@ const BOARD = {
 	gameMode: 'ranked:pvp_ranked_expanded',
 }
 
-function appWith(standings = vi.fn()) {
+function appWith(standings = vi.fn(), changes = vi.fn()) {
 	const app = express()
 	app.use(express.json())
-	app.use('/internal/discord-bot', createDiscordBotRouter({ standings }))
+	app.use(
+		'/internal/discord-bot',
+		createDiscordBotRouter({ standings, changes }),
+	)
 	app.use(errorHandler)
 	return app
 }
@@ -117,6 +120,42 @@ describe('/internal/discord-bot', () => {
 			discordIds: [ALICE, BOB],
 		})
 	})
+
+	it('checks /changes requests and passes valid ones through', async () => {
+		env.DISCORD_BOT_API_KEY = KEY
+		const answer = { season: 2, cursor: 'c', changed: [], top: [] }
+		const changes = vi.fn().mockResolvedValue(answer)
+		const app = appWith(vi.fn(), changes)
+		const post = (body: object) =>
+			request(app)
+				.post('/internal/discord-bot/changes')
+				.set('X-BMP-Internal-Key', KEY)
+				.send(body)
+		expect((await post({ ...BOARD, topN: 50, since: 'soon' })).status).toBe(400)
+		expect((await post({ ...BOARD, topN: 50 })).status).toBe(400)
+		expect(
+			(await post({ ...BOARD, gameMode: 'x', topN: 50, since: null })).status,
+		).toBe(400)
+		expect(changes).not.toHaveBeenCalled()
+
+		const since = '2026-11-19T12:00:00.000Z'
+		const res = await post({ ...BOARD, topN: 50, since })
+		expect(res.status).toBe(200)
+		expect(res.body).toEqual(answer)
+		expect(changes).toHaveBeenCalledWith({ ...BOARD, topN: 50, since })
+	})
+
+	it('answers /changes with 503 between seasons', async () => {
+		env.DISCORD_BOT_API_KEY = KEY
+		const changes = vi
+			.fn()
+			.mockRejectedValue(new NoActiveSeasonError('No active season'))
+		const res = await request(appWith(vi.fn(), changes))
+			.post('/internal/discord-bot/changes')
+			.set('X-BMP-Internal-Key', KEY)
+			.send({ ...BOARD, topN: 50, since: null })
+		expect(res.status).toBe(503)
+	})
 })
 
 describe('standings service', () => {
@@ -134,6 +173,7 @@ describe('standings service', () => {
 					].filter(([h]) => hashes.includes(h)) as [string, string][],
 				),
 			inBoardSnapshot: (read) => read(reads()),
+			now: () => new Date('2026-11-19T12:00:00.000Z'),
 			...over,
 		}
 	}
@@ -148,6 +188,9 @@ describe('standings service', () => {
 							['p-bob', { gamesPlayed: 12, rating: 760 }],
 						]),
 			topPlayerIds: async () => ['p-someone', 'p-alice'],
+			playersChangedSince: async () => [
+				{ playerId: 'p-alice', updatedAt: new Date('2026-11-19T11:59:45Z') },
+			],
 			...over,
 		}
 	}
@@ -228,6 +271,7 @@ describe('standings service', () => {
 							order.push('top')
 							return []
 						},
+						playersChangedSince: async () => [],
 					})
 					order.push('close')
 					return out
@@ -245,5 +289,64 @@ describe('standings service', () => {
 		await expect(
 			service.standings({ ...BOARD, topN: 0, discordIds: [] }),
 		).rejects.toBeInstanceOf(NoActiveSeasonError)
+	})
+
+	it('names who changed since the cursor, minus the overlap, and the top N', async () => {
+		const playersChangedSince = vi
+			.fn()
+			.mockResolvedValue([
+				{ playerId: 'p-alice', updatedAt: new Date('2026-11-19T11:59:45Z') },
+			])
+		const service = createStandingsService(
+			deps({ inBoardSnapshot: (read) => read(reads({ playersChangedSince })) }),
+		)
+		const since = '2026-11-19T11:59:30.000Z'
+		expect(await service.changes({ ...BOARD, topN: 50, since })).toEqual({
+			season: 2,
+			cursor: '2026-11-19T11:58:00.000Z',
+			changed: [{ playerId: 'p-alice', updatedAt: '2026-11-19T11:59:45.000Z' }],
+			top: ['p-someone', 'p-alice'],
+		})
+		expect(playersChangedSince).toHaveBeenCalledWith(
+			{ ...BOARD, seasonId: 2 },
+			new Date(since),
+		)
+	})
+
+	it('only hands out a cursor on the first call', async () => {
+		const playersChangedSince = vi.fn()
+		const service = createStandingsService(
+			deps({ inBoardSnapshot: (read) => read(reads({ playersChangedSince })) }),
+		)
+		const answer = await service.changes({ ...BOARD, topN: 0, since: null })
+		expect(answer).toMatchObject({ changed: [], top: [] })
+		expect(playersChangedSince).not.toHaveBeenCalled()
+	})
+
+	it('reads changes and the top list in one snapshot', async () => {
+		const order: string[] = []
+		const service = createStandingsService(
+			deps({
+				inBoardSnapshot: async (read) => {
+					order.push('open')
+					const out = await read(
+						reads({
+							playersChangedSince: async () => {
+								order.push('changed')
+								return []
+							},
+							topPlayerIds: async () => {
+								order.push('top')
+								return []
+							},
+						}),
+					)
+					order.push('close')
+					return out
+				},
+			}),
+		)
+		await service.changes({ ...BOARD, topN: 50, since: '2026-11-19T11:00:00Z' })
+		expect(order).toEqual(['open', 'changed', 'top', 'close'])
 	})
 })

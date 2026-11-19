@@ -262,6 +262,21 @@ export async function rebuildScope(
 			`[void-match] replayed ${n} of ${scopedMatches.length} resolved matches in scope`,
 		)
 
+		// Stamp the whole rebuilt board as written now, just before the commit.
+		// The Discord bot's change feed (playersChangedSince) only looks back a
+		// couple of minutes; rows stamped early in a long rebuild would fall
+		// behind its cursor by the time the board commits.
+		await tx
+			.update(matchmakingRatings)
+			.set({ updatedAt: new Date() })
+			.where(
+				and(
+					eq(matchmakingRatings.modId, modId),
+					eq(matchmakingRatings.gameMode, gameMode),
+					eq(matchmakingRatings.season, season.id),
+				),
+			)
+
 		return before
 	})
 	// After the commit, not inside it: a mirrored match that waited on the
