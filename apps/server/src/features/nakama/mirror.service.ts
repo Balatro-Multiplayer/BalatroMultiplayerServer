@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { seasonBestColumns } from '../ratings/season-best.js'
+import { raisesAntiCheatItem } from '../service-queue/automatic-rules.js'
 import { compressToBase64 } from '../../shared/utils/compression.js'
 import { DELETED_PLAYER_ID, DELETED_PLAYER_NAME } from '../../shared/deleted-player.js'
 import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.js'
@@ -15,10 +16,27 @@ import { CHAT_KEEP_MS, EVIDENCE_KEEP_MS } from '../../shared/retention-periods.j
 // What admin_mirror_pull returns
 // ---------------------------------------------------------------------------
 
-export type LogCheck = 'match' | 'mismatch' | 'unavailable'
+// 'incomplete': the stored log has a gap, so its check code was not compared.
+export type LogCheck = 'match' | 'mismatch' | 'unavailable' | 'incomplete'
 // What kind of game an entry came from (nakama review/ranked.ts LobbyKind).
 export type GameKind = 'ranked' | 'casual' | 'private'
 export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate' | 'unverified_log'
+
+export type ConnectionKind =
+	| 'joined'
+	| 'rejoined'
+	| 'left'
+	| 'disconnected'
+	| 'kicked'
+	| 'timed_out'
+	| 'catch_up_limit'
+
+// What lobby_runs.connections holds, with Postgres player ids.
+export interface RunConnections {
+	events: { playerId: string; kind: ConnectionKind; at: number; by?: string; reason?: string }[]
+	// playerId -> the highest log event number the server held at the end.
+	logHeld: { [playerId: string]: number }
+}
 
 export interface NakamaRun {
 	runId: string
@@ -41,6 +59,18 @@ export interface NakamaRun {
 	gameMode?: string
 	lobbyType?: 'public' | 'private'
 	logChecks?: { [userId: string]: LogCheck }
+	// Events each player's log still lacks at the end of the game.
+	logGaps?: { [userId: string]: number }
+	// The highest log event number the server held, per player, at the end.
+	logHeld?: { [userId: string]: number }
+	// Each seat change during the game, in order.
+	presence?: {
+		userId: string
+		kind: ConnectionKind
+		at: number
+		by?: string
+		reason?: string
+	}[]
 	flags?: { [userId: string]: FlagReason }
 	// A ranked run's rating result per player Nakama rated ({} when it rated
 	// nobody: a disputed result).
@@ -57,6 +87,7 @@ export interface NakamaLog {
 	truncated: boolean
 	carbonHash: string | null
 	check: LogCheck
+	gaps?: number
 }
 
 export interface NakamaRating {
@@ -116,7 +147,19 @@ export interface PulledNotice {
 	version: number
 }
 
-export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice
+// A player contested a game that is still running (nakama mpapi_contest).
+export interface PulledContest {
+	key: string
+	kind: 'contest'
+	at: number
+	runId: string
+	code: string
+	by: string
+	against: string
+	lobbyKind: GameKind
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice | PulledContest
 
 export interface MirrorPlayer {
 	steamIdHash: string | null
@@ -150,6 +193,7 @@ export interface RunRows {
 		status: 'completed' | 'abandoned' | 'terminated'
 		startedAt: Date
 		finalizedAt: Date
+		connections: RunConnections | null
 	}
 	logs: {
 		runId: string
@@ -196,6 +240,8 @@ export interface RunRows {
 	}[]
 	// Flagged players: an anti_cheat service-queue item.
 	flagged: { playerId: string; reason: FlagReason }[]
+	// False when every player of the match is flagged: no item is made.
+	raiseAntiCheatItems: boolean
 	// A disputed game (matchmade or private): each report that differs from the result,
 	// against the first report that agrees with it (match_result_conflicts).
 	conflicts: {
@@ -207,7 +253,7 @@ export interface RunRows {
 		conflictingPlacements: { playerId: string; place: number }[]
 	}[]
 	// A contested run: a contest service-queue item (Nakama review's hold).
-	contest: { contesterId: string; againstId: string } | null
+	contest: { contesterId: string; againstId: string; at: Date } | null
 }
 
 export function rankedGameModeOf(mode: string): string {
@@ -271,6 +317,23 @@ export interface ForfeitRow {
 	reconnectedAt: Date
 }
 
+// The Contest of a game that is still running: its page can open before the
+// run is stored.
+export interface ContestRow {
+	runId: string
+	contesterId: string
+	againstId: string
+	madeAt: Date
+}
+
+export function contestRowOf(
+	entry: PulledContest,
+	contesterId: string,
+	againstId: string,
+): ContestRow {
+	return { runId: entry.runId, contesterId, againstId, madeAt: new Date(entry.at) }
+}
+
 export function forfeitRowOf(
 	entry: PulledForfeit,
 	playerId: string,
@@ -303,6 +366,40 @@ function ratedDespiteFlag(run: PulledRun['run'], hasFlag: boolean): boolean {
 	)
 }
 
+function logCheckOf(run: PulledRun['run'], userId: string, log: NakamaLog | undefined) {
+	return (run.logChecks && run.logChecks[userId]) || (log ? log.check : 'unavailable')
+}
+
+// Runs stored before flags existed have only their log checks.
+function flagReasonOf(run: PulledRun['run'], userId: string, log: NakamaLog | undefined): FlagReason | null {
+	if (run.flags) return run.flags[userId] || null
+	return logCheckOf(run, userId, log) === 'mismatch' ? 'hash_mismatch' : null
+}
+
+// The run's seat changes and held log counts for the staff match view. A
+// player with no Postgres row is left out; a kick by 'server' stays as it is.
+export function connectionsOf(run: NakamaRun, ids: Map<string, string>): RunConnections | null {
+	const events: RunConnections['events'] = []
+	for (const e of run.presence ?? []) {
+		const playerId = ids.get(e.userId)
+		if (!playerId) continue
+		events.push({
+			playerId,
+			kind: e.kind,
+			at: e.at,
+			...(e.by ? { by: ids.get(e.by) ?? e.by } : {}),
+			...(e.reason ? { reason: e.reason } : {}),
+		})
+	}
+	const logHeld: RunConnections['logHeld'] = {}
+	for (const [userId, held] of Object.entries(run.logHeld ?? {})) {
+		const playerId = ids.get(userId)
+		if (playerId) logHeld[playerId] = held
+	}
+	if (events.length === 0 && Object.keys(logHeld).length === 0) return null
+	return { events, logHeld }
+}
+
 // ids maps every Nakama user in the run to their player id.
 export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	const { run } = entry
@@ -314,15 +411,8 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 	const flagged: RunRows['flagged'] = []
 	for (const player of seated) {
 		const log = entry.logs[player.id]
-		const check =
-			(run.logChecks && run.logChecks[player.id]) ||
-			(log ? log.check : 'unavailable')
-		// Runs stored before flags existed have only their log checks.
-		const flagReason: FlagReason | null = run.flags
-			? run.flags[player.id] || null
-			: check === 'mismatch'
-				? 'hash_mismatch'
-				: null
+		const check = logCheckOf(run, player.id, log)
+		const flagReason = flagReasonOf(run, player.id, log)
 		if (flagReason)
 			flagged.push({ playerId: pg(player.id), reason: flagReason })
 		logs.push({
@@ -331,7 +421,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			compressedEvents: compressToBase64(eventsJsonOf(log)),
 			carbonHash: log ? log.carbonHash : null,
 			eventCount: log ? log.eventCount : 0,
-			status: check === 'unavailable' ? 'partial' : 'complete',
+			status: check === 'unavailable' || check === 'incomplete' ? 'partial' : 'complete',
 			flagReason,
 			finalizedAt,
 			expiresAt: new Date(run.endedAt + EVIDENCE_KEEP_MS),
@@ -398,7 +488,7 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 		conflicts: conflictsOf(run, ids),
 		contest:
 			run.contest && ids.has(run.contest.by) && ids.has(run.contest.against)
-				? { contesterId: pg(run.contest.by), againstId: pg(run.contest.against) }
+				? { contesterId: pg(run.contest.by), againstId: pg(run.contest.against), at: new Date(run.contest.at) }
 				: null,
 		lobbyRun: {
 			id: run.runId,
@@ -411,11 +501,16 @@ export function runRowsOf(entry: PulledRun, ids: Map<string, string>): RunRows {
 			status: runStatusOf(run.status),
 			startedAt: new Date(run.startedAt),
 			finalizedAt,
+			connections: connectionsOf(run, ids),
 		},
 		logs,
 		match,
 		ratings,
 		flagged,
+		raiseAntiCheatItems: raisesAntiCheatItem({
+			playerCount: run.players.length,
+			flaggedCount: run.players.filter((p) => flagReasonOf(run, p.id, entry.logs[p.id])).length,
+		}),
 	}
 }
 
@@ -526,6 +621,7 @@ export interface MirrorDeps {
 		storeChat(rows: ChatRows): Promise<void>
 		storeForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void>
 		storeNoticeAcceptance(row: NoticeAcceptanceRow): Promise<void>
+		storeContest(row: ContestRow): Promise<void>
 	}
 }
 
@@ -598,6 +694,10 @@ export function createMirrorService(deps: MirrorDeps) {
 				} else if (entry.kind === 'forfeit') {
 					const playerId = ids.get(entry.userId)
 					if (playerId) await store.storeForfeit(forfeitRowOf(entry, playerId), entry.lobbyKind ?? null)
+				} else if (entry.kind === 'contest') {
+					const contesterId = ids.get(entry.by)
+					const againstId = ids.get(entry.against)
+					if (contesterId && againstId) await store.storeContest(contestRowOf(entry, contesterId, againstId))
 				} else if (entry.kind === 'notice') {
 					const playerId = ids.get(entry.userId)
 					if (playerId)

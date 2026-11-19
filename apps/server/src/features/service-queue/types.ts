@@ -16,6 +16,7 @@ export const ACTION_KEYS = [
 	'chat_mute',
 	'queue_ban',
 	'account_ban',
+	'username_ban',
 	'void',
 	'overturn',
 	'reopen',
@@ -27,7 +28,7 @@ export type ActionKey = (typeof ACTION_KEYS)[number]
 export const CHAT_MUTE_DURATIONS = ['24h', '7d', '30d', 'permanent'] as const
 export type ChatMuteDuration = (typeof CHAT_MUTE_DURATIONS)[number]
 
-export const BAN_DURATIONS = ['7d', '30d', 'permanent'] as const
+export const BAN_DURATIONS = ['24h', '7d', '30d', 'permanent'] as const
 export type BanDuration = (typeof BAN_DURATIONS)[number]
 
 export type Duration = ChatMuteDuration | BanDuration
@@ -45,6 +46,16 @@ export interface ItemContext {
 	integrityTrigger?: IntegrityTrigger
 	// A contest item: who contested, and whom (null when no one was named).
 	contest?: ContestParties
+	// A flagged chat item: the flagged messages it holds (flagged_messages ids).
+	flaggedMessageIds?: number[]
+	// A staff report item: the match, who reported it and why.
+	staffReport?: StaffReportContext
+}
+
+export interface StaffReportContext {
+	runId: string
+	reporterId: string
+	note: string
 }
 
 export interface ContestParties {
@@ -52,7 +63,7 @@ export interface ContestParties {
 	againstId: string | null
 }
 
-export type ItemEventKind = 'viewed' | 'claimed' | 'released' | 'acted' | 'noted' | 'reopened'
+export type ItemEventKind = 'viewed' | 'claimed' | 'released' | 'acted' | 'noted' | 'reopened' | 'withdrawn'
 
 // Who a target-taking action (warn, mute, ban) can be aimed at, per type.
 export type TargetRole = 'subject' | 'reporter' | 'first_reporter' | 'conflicting_reporter' | 'contester'
@@ -88,14 +99,31 @@ export function playerIdOfActor(actor: string | null): string | null {
 
 export function contextOf(value: unknown): ItemContext {
 	if (typeof value !== 'object' || value === null) return {}
-	const record = value as { lobbyKind?: unknown; integrityTrigger?: unknown; contest?: unknown }
+	const record = value as {
+		lobbyKind?: unknown
+		integrityTrigger?: unknown
+		contest?: unknown
+		flaggedMessageIds?: unknown
+		staffReport?: unknown
+	}
 	return {
 		...(isLobbyKind(record.lobbyKind) ? { lobbyKind: record.lobbyKind } : {}),
 		...(record.integrityTrigger === 'ranked' || record.integrityTrigger === 'repeated'
 			? { integrityTrigger: record.integrityTrigger }
 			: {}),
 		...contestOf(record.contest),
+		...staffReportOf(record.staffReport),
+		...(Array.isArray(record.flaggedMessageIds) && record.flaggedMessageIds.every((id) => Number.isInteger(id))
+			? { flaggedMessageIds: record.flaggedMessageIds as number[] }
+			: {}),
 	}
+}
+
+function staffReportOf(value: unknown): { staffReport?: StaffReportContext } {
+	if (typeof value !== 'object' || value === null) return {}
+	const { runId, reporterId, note } = value as { runId?: unknown; reporterId?: unknown; note?: unknown }
+	if (typeof runId !== 'string' || typeof reporterId !== 'string' || typeof note !== 'string') return {}
+	return { staffReport: { runId, reporterId, note } }
 }
 
 function contestOf(value: unknown): { contest?: ContestParties } {

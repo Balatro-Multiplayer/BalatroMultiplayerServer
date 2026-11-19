@@ -9,12 +9,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { apiFetch } from '@/lib/api'
 import {
-  firstMode,
+  type BoardCounts,
+  pickCategory,
+  pickMode,
+  sortCategoriesByEntries,
+  sortModesByEntries,
+} from '@/lib/leaderboard-order'
+import {
   formatMetric,
   gameModeKey,
-  getCategory,
-  getMode,
   LEADERBOARD_CATEGORIES,
+  seasonLabel,
 } from '@/lib/leaderboards'
 
 interface Season {
@@ -34,6 +39,11 @@ interface LeaderboardEntry {
   losses: number
   gamesPlayed: number
   seasonBest: number | string | null
+}
+
+interface BoardCountsResponse {
+  season: number | null
+  counts: BoardCounts
 }
 
 interface SeasonsResponse {
@@ -70,7 +80,7 @@ function LeaderboardsContent() {
   const [search, setSearch] = useState('')
   const [categoryParam, setCategoryParam] = useQueryState(
     'category',
-    parseAsString.withDefault('speedrun')
+    parseAsString
   )
   const [modeParam, setModeParam] = useQueryState('mode', parseAsString)
   const [seasonParam, setSeasonParam] = useQueryState('season', parseAsInteger)
@@ -87,8 +97,19 @@ function LeaderboardsContent() {
     return () => clearTimeout(t)
   }, [search])
 
-  const category = getCategory(categoryParam)
-  const mode = getMode(category, modeParam)
+  // Mods and game modes are ordered by their entries in the current season.
+  // With no choice in the URL the page opens on the biggest of each.
+  const { data: countsData, isLoading: countsLoading } =
+    useQuery<BoardCountsResponse>({
+      queryKey: ['leaderboard-counts'],
+      queryFn: () => apiFetch('/stats/leaderboard-counts'),
+      staleTime: 10 * 60 * 1000,
+    })
+  const counts = countsData?.counts ?? {}
+  const categories = sortCategoriesByEntries(LEADERBOARD_CATEGORIES, counts)
+  const category = pickCategory(categories, categoryParam)
+  const modes = sortModesByEntries(category, counts)
+  const mode = pickMode(modes, modeParam)
 
   const { data: seasonsData } = useQuery<SeasonsResponse>({
     queryKey: ['seasons'],
@@ -113,7 +134,9 @@ function LeaderboardsContent() {
         apiFetch(
           `/stats/leaderboard?modId=${encodeURIComponent(category.modId)}&gameMode=${encodeURIComponent(gameModeKey(mode.id))}${selectedSeason != null ? `&season=${selectedSeason}` : ''}&page=${page}${debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : ''}`
         ),
-      enabled: selectedSeason != null,
+      enabled:
+        selectedSeason != null &&
+        (!countsLoading || (categoryParam != null && modeParam != null)),
       placeholderData: (prev) => prev,
     })
 
@@ -128,18 +151,18 @@ function LeaderboardsContent() {
         </p>
       </div>
 
-      {/* Category selector (Speedrun / PvP) */}
+      {/* Mod selector, biggest board first */}
       <div className='flex flex-wrap gap-2'>
-        {LEADERBOARD_CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <button
             key={c.id}
             type='button'
             onClick={() => {
-              setCategoryParam(c.id === 'speedrun' ? null : c.id)
+              setCategoryParam(c.id)
               setModeParam(null)
               setPage(1)
             }}
-            className={`rounded-md border px-4 py-2 font-bold text-sm transition-colors ${
+            className={`rounded-md border px-4 py-2 font-bold font-pixel text-base transition-colors ${
               category.id === c.id
                 ? 'border-primary bg-primary text-primary-foreground'
                 : 'border-border bg-muted text-muted-foreground hover:bg-accent'
@@ -150,14 +173,14 @@ function LeaderboardsContent() {
         ))}
       </div>
 
-      {/* Mode tabs (depend on category) */}
+      {/* Game mode tabs, biggest board first */}
       <div className='flex flex-wrap gap-1 border-border border-b'>
-        {category.modes.map((m) => (
+        {modes.map((m) => (
           <button
             key={m.id}
             type='button'
             onClick={() => {
-              setModeParam(m.id === firstMode(category).id ? null : m.id)
+              setModeParam(m.id)
               setPage(1)
             }}
             className={`-mb-px border-b-2 px-4 py-2 font-medium text-sm transition-colors ${
@@ -188,7 +211,7 @@ function LeaderboardsContent() {
                   : 'border-border bg-muted text-muted-foreground hover:bg-accent'
               }`}
             >
-              {s.name ?? `Season ${s.id}`}
+              {seasonLabel(seasons, s.id)}
               {s.id === currentSeasonId && (
                 <span className='ml-1.5 text-[10px] text-bal-green'>LIVE</span>
               )}
@@ -209,7 +232,8 @@ function LeaderboardsContent() {
         <Card>
           <CardHeader>
             <CardTitle className='text-base'>
-              {category.label} · {mode.label} · Season {selectedSeason ?? '…'}
+              {category.label} · {mode.label} ·{' '}
+              {seasonLabel(seasons, selectedSeason)}
             </CardTitle>
           </CardHeader>
           <CardContent className='p-0'>
@@ -228,7 +252,7 @@ function LeaderboardsContent() {
                         'Rank',
                         'Player',
                         'Rating',
-                        category.metricLabel,
+                        ...(category.metricLabel ? [category.metricLabel] : []),
                         'W',
                         'L',
                         'Games',
@@ -259,12 +283,14 @@ function LeaderboardsContent() {
                             {entry.displayName}
                           </a>
                         </td>
-                        <td className='px-4 py-3 font-bold text-bal-gold'>
+                        <td className='px-4 py-3 font-bold font-pixel text-bal-gold'>
                           {Math.round(entry.rating)}
                         </td>
-                        <td className='px-4 py-3 font-semibold text-bal-blue'>
-                          {formatMetric(category.metric, entry.seasonBest)}
-                        </td>
+                        {category.metricLabel && (
+                          <td className='px-4 py-3 font-semibold text-bal-blue'>
+                            {formatMetric(category.metric, entry.seasonBest)}
+                          </td>
+                        )}
                         <td className='px-4 py-3 text-bal-green'>
                           {entry.wins}
                         </td>

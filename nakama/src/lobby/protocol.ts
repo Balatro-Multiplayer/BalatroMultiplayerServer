@@ -1,6 +1,7 @@
 // Wire protocol between MPAPI (networking/nakama_lobby.lua) and the bmp_lobby
 // match. Every payload is JSON. Op codes are plain objects rather than enums:
 // isolatedModules builds can't inline const enums.
+import type { TellOutcome } from '../notification/kinds'
 import type { QueueRefusalCode } from '../matchmaking/queue_refusal'
 import type { AccountStanding, RequiredStanding } from '../standing/standing'
 
@@ -21,6 +22,10 @@ export const ClientOp = {
 	// {catchingUp} -- the sender is (or is no longer) replaying its own run
 	// after a crash. The seat is safe either way: nothing waits for it.
 	CATCHING_UP: 6,
+	// {playerId, fromStart?} -- a spectator asks for the run of the player it watches: that
+	// player's Run save and the events after it (answered with SPECTATE_RUN).
+	// fromStart asks for the whole log and no Run save.
+	SPECTATE_VIEW: 7,
 } as const
 
 export const ServerOp = {
@@ -54,6 +59,8 @@ export const ServerOp = {
 	// GroupQueueMessage, to the home lobby's players: its group queue moved on
 	// (matchmaking/group).
 	GROUP_QUEUE: 112,
+	// SpectateRun, to the spectator that asked (ClientOp.SPECTATE_VIEW).
+	SPECTATE_RUN: 113,
 } as const
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included),
@@ -127,6 +134,13 @@ export interface PlayerLog {
 	lines: string[]
 	bytes: number
 	truncated: boolean
+	// The highest event number held with no gap before it. A client that
+	// numbers its events (seq, from 1 per run) is told this in each log ack and
+	// sends again from the next one. Absent for a client that sends no numbers.
+	seq?: number
+	// The highest event number that arrived beyond a gap and was not kept.
+	// More than seq at the end of the game means the log has a gap.
+	ahead?: number
 }
 
 // One Draft tile: a mod's own item, opaque to the server but for `key`, which
@@ -233,6 +247,60 @@ export interface GameState {
 	// The result was pending at some point in this run. Stays set after the
 	// flag clears, so the settled run knows to tell players who left earlier.
 	resultWasPending?: boolean
+	// The latest complete Run save of each player (actions/run_save.ts), apart
+	// from the log. Never sent to a client from here.
+	runSaves?: { [userId: string]: RunSave }
+	// A player's Run save still missing parts.
+	runSavePending?: { [userId: string]: PendingRunSave }
+	// Who joined, left, dropped or came back while the game ran, in order
+	// (lobby/presence.ts). Absent in match state from before it was kept.
+	presence?: PresenceEvent[]
+}
+
+// How a player's seat changed during a game.
+export type PresenceKind =
+	// Took a seat.
+	| 'joined'
+	// Came back to the seat they had (after a disconnect or on a new session).
+	| 'rejoined'
+	// Asked to leave: gone for good.
+	| 'left'
+	// The socket dropped without a leave; the seat is held for the grace period.
+	| 'disconnected'
+	// The host or the server removed them.
+	| 'kicked'
+	// The grace period ran out while they were away.
+	| 'timed_out'
+	// The catch-up limit ran out while they were catching up.
+	| 'catch_up_limit'
+
+export interface PresenceEvent {
+	userId: string
+	kind: PresenceKind
+	at: number
+	// A kick: who did it ('server' for an admin or a ban).
+	by?: string
+	// A kick by the server: why.
+	reason?: string
+}
+
+// One player's Run save: the base64 text of the compressed save, whole, with
+// the event position it was taken at and the hash of the log up to there.
+export interface RunSave {
+	id: string
+	pos: number
+	hash: string
+	data: string
+	at: number
+}
+
+export interface PendingRunSave {
+	id: string
+	count: number
+	pos: number
+	hash: string
+	// Part index (as text) -> its data.
+	parts: { [index: string]: string }
 }
 
 export interface Contest {
@@ -250,6 +318,10 @@ export interface GameView {
 	// GameState.resultPending as a plain boolean: a host that takes over mid-run
 	// reads it here, since only the old host knew it had asked for the hold.
 	resultPending: boolean
+	// How many of the viewer's own numbered log events the server holds (the
+	// highest seq with no gap). A client that rejoins numbers its next event
+	// from here, so the server does not skip it as a copy.
+	logSeq: number
 	setup: SetupView
 }
 
@@ -278,8 +350,21 @@ export interface RatingResult {
 	gamesPlayed: number
 }
 
+// What a staff edit of a finished game did to one player's stored rating:
+// the match's rating change before and after the edit (null: not rated, or
+// still in the placement games), and the amounts added to the stored record.
+export interface RatingChange {
+	oldDelta: number | null
+	newDelta: number | null
+	rating: number
+	wins: number
+	losses: number
+	gamesPlayed: number
+}
+
 // A stored replay log against the client's own closing hash (log_check.ts).
-export type LogCheck = 'match' | 'mismatch' | 'unavailable'
+// 'incomplete': the stored log still has a gap, so its hash says nothing.
+export type LogCheck = 'match' | 'mismatch' | 'unavailable' | 'incomplete'
 
 // A finished game, as stored in RUNS_COLLECTION.
 export interface RunRecord {
@@ -306,13 +391,27 @@ export interface RunRecord {
 	lobbyType?: 'public' | 'private'
 	// Each rated player's result, once the game was rated.
 	ratings?: { [userId: string]: RatingResult }
+	// Each player's seat changes during the game, in order.
+	presence?: PresenceEvent[]
+	// userId -> the highest log event the server held with no gap before it
+	// when the game ended (the acknowledgement the client last got).
+	logHeld?: { [userId: string]: number }
 	// Players whose result is suspect (lobby/anticheat.ts); still rated.
 	flags?: { [userId: string]: FlagReason }
 	// Set when a moderator replaced the recorded result (review/result.ts):
 	// the placements it had before, and when.
 	overturned?: { at: number; previous: Placement[] }
+	// Set when staff voided the game (rating/match_edit.ts); its ratings were
+	// taken back and `ratings` removed.
+	voided?: { at: number }
+	// The last staff edit's effect on each player's stored rating, kept so a
+	// repeated edit can answer with it (the API applies it to its own copy).
+	ratingChanges?: { [userId: string]: RatingChange }
 	// Set for a contested run: who contested whom, and when.
 	contest?: Contest
+	// What staff last told each player about this run (rating/match_edit.ts),
+	// so deciding it again the same way tells them nothing new.
+	told?: { [userId: string]: TellOutcome }
 }
 
 export type FlagReason = 'hash_mismatch' | 'elapsed_time_gate' | 'unverified_log'
@@ -333,6 +432,15 @@ export interface ActiveRun {
 	// A matchmade game's bar for coming back (lobby/match.ts); null for a
 	// private lobby, which never gates.
 	requiredStanding: RequiredStanding | null
+	// The owner's latest complete Run save, for a rejoin from zero; null when
+	// they have none, or when the log no longer matches it (runSaveSkipped says
+	// why). Only the owner's own active run carries it.
+	runSave: Omit<RunSave, 'at'> | null
+	runSaveSkipped: 'hash_mismatch' | 'beyond_log' | null
+	// The text the log hash is taken over: the log's events as they arrived,
+	// joined into a JSON array. A client that resumes the log needs it to hash
+	// the events it adds to the old ones.
+	logText: string
 }
 
 // The other participants' logs so far, each as ActiveRun's events.
@@ -368,6 +476,17 @@ export interface SpectateSnapshot {
 	runId: string | null
 	players: { playerId: string; displayName: string }[]
 	snapshot: SpectatorSnapshotEntry[]
+}
+
+// A spectator's starting point for one player: the player's Run save, checked
+// against the log as in ActiveRun, and the events after it (all of them when
+// there is no save). `pos` is how many events the save covers.
+export interface SpectateRun {
+	playerId: string
+	runSave: ActiveRun['runSave']
+	runSaveSkipped: ActiveRun['runSaveSkipped']
+	pos: number
+	events: ReplayEvent[]
 }
 
 export interface SpectateEvent {

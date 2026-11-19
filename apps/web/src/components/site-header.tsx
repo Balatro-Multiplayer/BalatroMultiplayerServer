@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { MobileMenu } from '@/app/_components/mobile-menu'
 import { NavAuth } from '@/app/_components/nav-auth'
+import { StaffMenu } from '@/app/_components/staff-menu'
 import { MotionToggle } from '@/components/motion-toggle'
 import {
   DropdownMenu,
@@ -28,7 +29,7 @@ const TOOLS = [{ href: '/reskin', label: 'Custom Reskin Studio' }]
 // are owned by the app, not the docs framework.
 // One source of truth for nav-item styling so links and the Tools trigger match.
 const navItemClass = (active: boolean) =>
-  `rounded-md px-3 py-1.5 text-sm transition-colors ${
+  `rounded-md px-3 py-1.5 font-pixel text-base transition-colors ${
     active
       ? 'font-medium text-foreground'
       : 'text-muted-foreground hover:text-foreground'
@@ -40,7 +41,7 @@ export function SiteHeader() {
   return (
     <header className='sticky top-0 z-50 w-full border-border border-b bg-background/80 backdrop-blur'>
       <div className='container mx-auto flex h-14 items-center gap-4'>
-        <Link href='/' className='flex shrink-0 items-center gap-2 font-bold'>
+        <Link href='/' className='flex shrink-0 items-center gap-2 font-bold font-pixel text-lg'>
           <Image
             src='/logo.png'
             alt=''
@@ -84,6 +85,8 @@ export function SiteHeader() {
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <StaffMenu itemClass={navItemClass} />
         </nav>
 
         <div className='ml-auto flex items-center gap-1'>

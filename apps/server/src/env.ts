@@ -60,14 +60,14 @@ export const env = {
 	DISCORD_CLIENT_SECRET: optional('DISCORD_CLIENT_SECRET', ''),
 	DISCORD_REDIRECT_URI: optional(
 		'DISCORD_REDIRECT_URI',
-		'https://new.balatromp.com/api/auth/discord/callback',
+		'https://balatromp.com/api/auth/discord/callback',
 	),
 
 	PLAYER_ID_SALT: required('PLAYER_ID_SALT'),
 
 	ADMIN_SECRET: required('ADMIN_SECRET'),
 
-	WEB_BASE_URL: optional('WEB_BASE_URL', 'https://new.balatromp.com'),
+	WEB_BASE_URL: optional('WEB_BASE_URL', 'https://balatromp.com'),
 
 	// When true, only players holding the 'tester' privilege may create lobbies or
 	// queue for matches. Everyone else is rejected. Off by default.
@@ -126,6 +126,9 @@ export const env = {
 	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
 	// Unset = those routes refuse everything.
 	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),
+	// Bearer token GitHub Actions send to /api/deploy/* (ADR 0012). Set on the
+	// Official server only. Unset = those routes answer 404.
+	DEPLOY_TOKEN: optional('DEPLOY_TOKEN', ''),
 	// The one player id (an admin) allowed to run the owner-only repair tools,
 	// such as the Season replay. Unset = nobody is the owner.
 	OWNER_PLAYER_ID: optional('OWNER_PLAYER_ID', ''),

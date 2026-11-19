@@ -4,7 +4,7 @@
 // ranked queue keys each mod's Find Game pillars use (PvP:
 // ui/main_menu/find_game.lua `count_key`), in the mod's pillar order.
 
-import { displayScore, fromNumber } from '@bmp/types'
+import { BOARD_NAMES, displayScore, fromNumber } from '@bmp/types'
 
 export type MetricKind = 'time' | 'score'
 
@@ -20,36 +20,28 @@ export interface LeaderboardCategory {
   label: string
   modId: string
   metric: MetricKind
-  /** Column header for the secondary metric. */
-  metricLabel: string
+  /** Column header for the secondary metric; null when the board shows none. */
+  metricLabel: string | null
   modes: LeaderboardMode[]
 }
 
 export const LEADERBOARD_CATEGORIES: LeaderboardCategory[] = [
   {
     id: 'speedrun',
-    label: 'Speedrun',
+    label: BOARD_NAMES.MultiplayerSPDRN.label,
     modId: 'MultiplayerSPDRN',
     metric: 'time',
     metricLabel: 'Best Time',
-    modes: [
-      { id: 'spdrn_white_stake_triple', label: 'White Stake Triple' },
-      { id: 'spdrn_gold_stake_single', label: 'Gold Stake Single' },
-    ],
+    modes: Object.entries(BOARD_NAMES.MultiplayerSPDRN.modes).map(([id, label]) => ({ id, label })),
   },
   {
     id: 'pvp',
-    label: 'PvP',
+    label: BOARD_NAMES.MultiplayerPvP.label,
     modId: 'MultiplayerPvP',
     metric: 'score',
-    metricLabel: 'Best Score',
-    modes: [
-      { id: 'pvp_ranked_vanilla', label: 'Vanilla' },
-      { id: 'pvp_ranked_balanced', label: 'Balanced' },
-      { id: 'pvp_ranked_expanded', label: 'Expanded' },
-      { id: 'pvp_ranked_majorleague', label: 'MLBa' },
-      { id: 'pvp_ranked_smallworld', label: 'Smallworld' },
-    ],
+    // PvP is won by beating the opponent's score, so a best score ranks nothing.
+    metricLabel: null,
+    modes: Object.entries(BOARD_NAMES.MultiplayerPvP.modes).map(([id, label]) => ({ id, label })),
   },
 ]
 
@@ -61,24 +53,16 @@ export function gameModeKey(modeId: string): string {
   return `ranked:${modeId}`
 }
 
-export function getCategory(id: string | null | undefined): LeaderboardCategory {
-  // biome-ignore lint/style/noNonNullAssertion: LEADERBOARD_CATEGORIES is non-empty
-  return LEADERBOARD_CATEGORIES.find((c) => c.id === id) ?? LEADERBOARD_CATEGORIES[0]!
-}
-
-/** Returns the mode if it belongs to the category, otherwise the first mode. */
-export function getMode(
-  category: LeaderboardCategory,
-  modeId: string | null | undefined,
-): LeaderboardMode {
-  // biome-ignore lint/style/noNonNullAssertion: every category has at least one mode
-  return category.modes.find((m) => m.id === modeId) ?? category.modes[0]!
-}
-
-/** First mode of a category (every category has at least one). */
-export function firstMode(category: LeaderboardCategory): LeaderboardMode {
-  // biome-ignore lint/style/noNonNullAssertion: every category has at least one mode
-  return category.modes[0]!
+/**
+ * The name shown for a season: its own name, the same one its pill shows.
+ * Falls back to "Season N" for a season with no name or one not loaded yet.
+ */
+export function seasonLabel(
+  seasons: readonly { id: number; name: string | null }[],
+  seasonId: number | null
+): string {
+  if (seasonId === null) return 'Season …'
+  return seasons.find((s) => s.id === seasonId)?.name ?? `Season ${seasonId}`
 }
 
 /** Format ms as m:ss.mmm (speedrun completion time). */

@@ -126,6 +126,31 @@ describe('service-queue.gateway', () => {
 		})
 	})
 
+	describe('listServiceQueueItems lanes', () => {
+		const base = { page: 1, limit: 50, sort: 'priority' as const, status: 'all' as const, now: new Date('2026-02-01T00:00:00Z') }
+
+		it.each(['main', 'automatic'] as const)('filters the %s lane by item type', async (lane) => {
+			const [total] = selects([{ total: 0 }], [])
+			await listServiceQueueItems({ ...base, lane })
+			expect(total.argsOf('where')?.[0]).toBeDefined()
+		})
+	})
+
+	describe('listServiceQueueItems hideClaimedFrom', () => {
+		it('adds a condition that leaves out items claimed by others', async () => {
+			const [total] = selects([{ total: 0 }], [])
+			await listServiceQueueItems({
+				page: 1,
+				limit: 50,
+				sort: 'priority',
+				status: 'open',
+				hideClaimedFrom: 'mod-1',
+				now: new Date('2026-02-01T00:00:00Z'),
+			})
+			expect(total.argsOf('where')?.[0]).toBeDefined()
+		})
+	})
+
 	describe('getServiceQueueItemById', () => {
 		it('returns the row when found', async () => {
 			selects([SAMPLE_ROW])

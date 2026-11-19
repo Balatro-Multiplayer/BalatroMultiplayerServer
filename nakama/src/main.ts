@@ -20,6 +20,7 @@ import {
 	rpcAdminPing,
 	rpcAdminPlayerGet,
 } from './admin'
+import { rpcAdminAnnounce } from './announcement'
 import {
 	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
@@ -66,6 +67,9 @@ import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcAdminCheckpointsSweep } from './lobby/checkpoint_sweep'
 import { rpcAdminRunsExpired, rpcAdminRunsPurgeNamed } from './lobby/retention'
 import { rpcAdminRatingsSet } from './rating/admin'
+import { rpcAdminMatchEdit } from './rating/match_edit'
+import { rpcAdminReportAction } from './notification/report_action'
+import { rpcAdminRunTellVoided } from './notification/tell_voided'
 import { rpcAdminRatingsReplayFold, rpcAdminRatingsReplayList } from './rating/replay'
 import {
 	rpcAdminRatingsBoardExport,
@@ -75,22 +79,34 @@ import {
 import { rpcAdminRunGet, rpcAdminRunSetResult } from './review/rpc'
 import { rpcRunGet, rpcRunLogs, rpcRunsMine } from './lobby/storage'
 import { rpcLegacyRatingsImport } from './rating/legacy'
+import { rpcAdminSeasonEndNotify } from './notification/season_end'
+import { rpcAdminPunishmentNotify } from './notification/punishment'
 import { configureSeason } from './rating/season'
 import { seedAllowedModIdsExtra } from './standing/seed'
 import { refuseClientAccountDelete, rpcAdminAccountDelete, rpcAdminProfileSet } from './player/admin'
 import { rpcSessionInit, rpcTosAccept } from './player/session'
+import { rpcAdminContestWithdrawn } from './notification/contest_withdrawn'
+import { rpcNotificationsPending, rpcNotificationsRead } from './notification/rpc'
 import { rpcMuteSet, rpcProfileSetDisplay, rpcProfileSetJoker, rpcProfileSetMods } from './player/rpc'
 import { rpcReportSubmit } from './moderation/report'
 import { rpcAdminDiscordSet, rpcDiscordLinkStart, rpcDiscordUnlink } from './player/discord'
+import { rpcWebLoginLink } from './player/web_login'
 import {
 	rpcAdminIntegritySet,
 	rpcAdminQueueCancel,
 	rpcLauncherChallengeAnswer,
 	rpcLauncherSessionStart,
 } from './integrity'
+import { rpcAdminRankedLive, rpcAdminRankedQueueCancel } from './matchmaking/ranked_close'
 import { checkServerKind } from './server_kind'
 import { requireIpHashSalt } from './moderation/network'
-import { rpcAdminIpHashesPurge, rpcAdminNetworkBanLift, rpcAdminNetworkBans } from './moderation/network_admin'
+import {
+	rpcAdminIpHashesPurge,
+	rpcAdminNetworkBanLift,
+	rpcAdminNetworkBans,
+	rpcAdminNetworkCheck,
+	rpcAdminPlayerNetworks,
+} from './moderation/network_admin'
 
 function InitModule(
 	ctx: nkruntime.Context,
@@ -145,8 +161,11 @@ function InitModule(
 	initializer.registerRpc('account_standing', rpcAccountStanding)
 	initializer.registerRpc('avatar_catalog', rpcAvatarCatalog)
 	initializer.registerRpc('mute_set', rpcMuteSet)
+	initializer.registerRpc('notifications_pending', rpcNotificationsPending)
+	initializer.registerRpc('notifications_read', rpcNotificationsRead)
 	initializer.registerRpc('discord_link_start', rpcDiscordLinkStart)
 	initializer.registerRpc('discord_unlink', rpcDiscordUnlink)
+	initializer.registerRpc('web_login_link', rpcWebLoginLink)
 	initializer.registerRpc('chat_enable', rpcChatEnable)
 	initializer.registerRpc('chat_send', rpcChatSend)
 	initializer.registerRpc('report_submit', rpcReportSubmit)
@@ -167,12 +186,16 @@ function InitModule(
 	// Server to server only (http key); see admin.ts.
 	initializer.registerRpc('admin_ping', rpcAdminPing)
 	initializer.registerRpc('admin_notify', rpcAdminNotify)
+	initializer.registerRpc('admin_announce', rpcAdminAnnounce)
+	initializer.registerRpc('admin_contest_withdrawn', rpcAdminContestWithdrawn)
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
 	initializer.registerRpc('admin_ban_lift', rpcAdminBanLift)
 	initializer.registerRpc('admin_ban_index_forget', rpcAdminBanIndexForget)
 	initializer.registerRpc('admin_network_bans', rpcAdminNetworkBans)
 	initializer.registerRpc('admin_network_ban_lift', rpcAdminNetworkBanLift)
+	initializer.registerRpc('admin_network_check', rpcAdminNetworkCheck)
+	initializer.registerRpc('admin_player_networks', rpcAdminPlayerNetworks)
 	initializer.registerRpc('admin_ip_hashes_purge', rpcAdminIpHashesPurge)
 	initializer.registerRpc('admin_lobby_list', rpcAdminLobbyList)
 	initializer.registerRpc('admin_lobby_get', rpcAdminLobbyGet)
@@ -182,6 +205,8 @@ function InitModule(
 	initializer.registerRpc('admin_discord_set', rpcAdminDiscordSet)
 	initializer.registerRpc('admin_integrity_set', rpcAdminIntegritySet)
 	initializer.registerRpc('admin_queue_cancel', rpcAdminQueueCancel)
+	initializer.registerRpc('admin_ranked_queue_cancel', rpcAdminRankedQueueCancel)
+	initializer.registerRpc('admin_ranked_live', rpcAdminRankedLive)
 	initializer.registerRpc('admin_mirror_pull', rpcAdminMirrorPull)
 	initializer.registerRpc('admin_mirror_ack', rpcAdminMirrorAck)
 	initializer.registerRpc('admin_profile_set', rpcAdminProfileSet)
@@ -199,8 +224,13 @@ function InitModule(
 	initializer.registerRpc('admin_ratings_season_export', rpcAdminRatingsSeasonExport)
 	initializer.registerRpc('admin_ratings_board_export', rpcAdminRatingsBoardExport)
 	initializer.registerRpc('admin_ratings_season_clear', rpcAdminRatingsSeasonClear)
+	initializer.registerRpc('admin_season_end_notify', rpcAdminSeasonEndNotify)
+	initializer.registerRpc('admin_punishment_notify', rpcAdminPunishmentNotify)
 	initializer.registerRpc('admin_run_get', rpcAdminRunGet)
 	initializer.registerRpc('admin_run_set_result', rpcAdminRunSetResult)
+	initializer.registerRpc('admin_match_edit', rpcAdminMatchEdit)
+	initializer.registerRpc('admin_run_tell_voided', rpcAdminRunTellVoided)
+	initializer.registerRpc('admin_report_action', rpcAdminReportAction)
 	logger.info('BMP lobby module loaded')
 }
 

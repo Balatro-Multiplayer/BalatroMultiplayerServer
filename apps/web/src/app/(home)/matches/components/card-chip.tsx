@@ -58,6 +58,10 @@ function ModifierLabels({ tags }: { tags: string[] }) {
   )
 }
 
+// Playing cards in the log are drawn at the same size as the joker art
+// beside them (the deck viewer keeps the full size).
+export const JOKER_CHIP_WIDTH = 28
+
 // `artOnly` drops the name next to the art (the name and edition stay in the
 // tooltip); used where a row of jokers should read as a lineup.
 export function CardChip({
@@ -76,6 +80,7 @@ export function CardChip({
           enhancement={tagValue(card.tags, 'e:')}
           edition={tagValue(card.tags, 'ed:')}
           seal={tagValue(card.tags, 's:')}
+          width={JOKER_CHIP_WIDTH}
         />
         <span className='text-xs'>
           {card.value} of {card.suit}
@@ -111,7 +116,7 @@ export function CardChip({
         <Image
           src={`/cards/${known.file}`}
           alt={known.name}
-          width={28}
+          width={JOKER_CHIP_WIDTH}
           height={38}
           className='rounded-sm'
         />

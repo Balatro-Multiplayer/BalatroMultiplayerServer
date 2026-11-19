@@ -83,8 +83,22 @@ vi.mock('../infrastructure/gateways/ban.gateway.js', () => ({
 	listBans: vi.fn().mockResolvedValue([]),
 	insertBan: vi.fn().mockResolvedValue(undefined),
 	liftBan: vi.fn().mockResolvedValue(null),
-	BAN_TYPES: ['chat', 'queue', 'account'],
-	isBanType: (v: unknown) => v === 'chat' || v === 'queue' || v === 'account',
+	listEndedBansToTell: vi.fn().mockResolvedValue([]),
+	markBanEndNotified: vi.fn().mockResolvedValue(undefined),
+	usernameBannedSql: { sql: 'false' },
+	usernameBannedAmong: vi.fn().mockResolvedValue(new Set()),
+	banNameWhileBanned: vi.fn().mockResolvedValue(null),
+	staffNamesOf: vi.fn(
+		async (rows: { id: string; steamName: string }[]) => new Map(rows.map((r) => [r.id, r.steamName])),
+	),
+	BAN_TYPES: ['chat', 'queue', 'account', 'username'],
+	isBanType: (v: unknown) => v === 'chat' || v === 'queue' || v === 'account' || v === 'username',
+}))
+
+// Mock the staff log gateway: no real DB in tests. Default: an empty log.
+vi.mock('../infrastructure/gateways/staff-log.gateway.js', () => ({
+	recordStaffAction: vi.fn().mockResolvedValue(undefined),
+	listStaffLog: vi.fn().mockResolvedValue({ entries: [], total: 0 }),
 }))
 
 // Mock the mute gateway — no real DB in tests. Default: no mutes.

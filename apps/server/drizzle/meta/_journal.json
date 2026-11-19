@@ -435,6 +435,90 @@
       "when": 1793700000000,
       "tag": "0061_match_run_logs_shared_at",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1793800000000,
+      "tag": "0062_staff_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1793900000000,
+      "tag": "0063_chat_review_labels",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1794000000000,
+      "tag": "0064_player_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794100000000,
+"tag": "0065_strike_ladders",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794200000000,
+      "tag": "0066_appeals",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0067_preset_reasons",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794400000000,
+      "tag": "0068_report_withdraw",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0069_season_end_notified",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0070_report_reporter_told",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1794700000000,
+      "tag": "0071_ban_end_notified",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0072_contests",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0073_run_connections",
+      "breakpoints": true
     }
   ]
 }

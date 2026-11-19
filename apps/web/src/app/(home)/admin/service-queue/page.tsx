@@ -1,6 +1,6 @@
 'use client'
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import {
   parseAsBoolean,
@@ -9,30 +9,37 @@ import {
   parseAsStringLiteral,
   useQueryStates,
 } from 'nuqs'
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react'
+import { UndoStrip } from '@/components/admin/decision-bar/decision-bar'
+import { staffSend } from '@/components/admin/decision-bar/delayed-send'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
+import { nextItemId } from './lib/focus'
+import { forgetKeepClaim } from './lib/claim-keep'
 import { InvestigationPanel } from './components/investigation-panel'
 import { QueueList } from './components/queue-list'
-import { type ListFilters, listQueue, queueKeys } from './lib/api'
+import {
+  downloadChatLabels,
+  type ListFilters,
+  listQueue,
+  queueKeys,
+} from './lib/api'
 import { ITEM_TYPES } from './lib/types'
 
 // The queue's state lives in the URL, so a link opens the same view.
 const urlState = {
   type: parseAsStringLiteral(ITEM_TYPES),
-  status: parseAsStringLiteral([
-    'open',
-    'resolved',
-    'all',
-  ] as const).withDefault('open'),
-  sort: parseAsStringLiteral(['priority', 'age'] as const).withDefault(
-    'priority'
-  ),
   subject: parseAsString.withDefault(''),
-  mine: parseAsBoolean.withDefault(false),
-  age: parseAsInteger.withDefault(0),
   page: parseAsInteger.withDefault(1),
+  automatic: parseAsBoolean.withDefault(false),
   item: parseAsInteger,
 }
 
@@ -64,12 +71,23 @@ export default function ServiceQueuePage() {
 }
 
 function ServiceQueue() {
-  const { isModerator, pending } = useAuth()
+  const { isAdmin, isModerator, pending } = useAuth()
   const router = useRouter()
+  const qc = useQueryClient()
   const [url, setUrl] = useQueryStates(urlState, { history: 'replace' })
   const [subjectDraft, setSubjectDraft] = useState(url.subject)
   const [cursor, setCursor] = useState(0)
   const now = useMinuteClock()
+  // The item whose action waits to be sent: it stays open on the server for
+  // 5 s, so the rail marks it and the next item is never it.
+  const waiting = useSyncExternalStore(
+    staffSend.subscribe,
+    staffSend.getSnapshot,
+    () => null
+  )
+  const waitingId = waiting?.tag?.startsWith('queue:')
+    ? Number(waiting.tag.slice('queue:'.length))
+    : null
 
   useEffect(() => {
     if (!pending && !isModerator) router.replace('/')
@@ -85,12 +103,19 @@ function ServiceQueue() {
 
   const filters: ListFilters = useMemo(
     () => ({
-      itemType: url.type,
-      status: url.status,
-      sort: url.sort,
+      // A player search looks through every item, automatic ones too.
+      lane: url.automatic
+        ? ('automatic' as const)
+        : url.subject.trim()
+          ? null
+          : ('main' as const),
+      itemType: url.automatic ? null : url.type,
+      status: 'open' as const,
+      sort: 'priority' as const,
       subject: url.subject,
-      claimedByMe: url.mine,
-      olderThanHours: url.age,
+      claimedByMe: false,
+      olderThanHours: 0,
+      hideClaimed: true,
       page: url.page,
     }),
     [url]
@@ -105,12 +130,6 @@ function ServiceQueue() {
       setCursor(0)
       void setUrl({
         ...('itemType' in patch ? { type: patch.itemType } : {}),
-        ...(patch.status ? { status: patch.status } : {}),
-        ...(patch.sort ? { sort: patch.sort } : {}),
-        ...(patch.claimedByMe !== undefined ? { mine: patch.claimedByMe } : {}),
-        ...(patch.olderThanHours !== undefined
-          ? { age: patch.olderThanHours }
-          : {}),
         ...(patch.page !== undefined ? { page: patch.page } : {}),
       })
     },
@@ -125,39 +144,92 @@ function ServiceQueue() {
     refetchInterval: LIST_REFRESH_MS,
   })
 
+  // The cursor starts on the open item's row; when that item is not in the
+  // visible list, no row has it until j or k moves it.
+  const hasList = list !== undefined
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new open item or the first list resets the cursor, not each refresh
+  useEffect(() => {
+    if (url.item === null || !list) return
+    setCursor(list.items.findIndex((i) => i.id === url.item))
+  }, [url.item, hasList])
+
   const openItem = useCallback(
     (id: number) => void setUrl({ item: id }),
     [setUrl]
+  )
+  // Opens the next item without a reload; with none left, back to the rail.
+  // It reads a fresh first page under the current type chip, not the cached
+  // rail, which can be 30 s old and name an item someone has claimed since.
+  const openNext = useCallback(
+    async (fromId: number) => {
+      const fresh = { ...filters, page: 1 }
+      const latest = await qc
+        .fetchQuery({
+          queryKey: queueKeys.list(fresh),
+          queryFn: () => listQueue(fresh),
+          staleTime: 0,
+        })
+        .catch(() => list)
+      void setUrl({
+        item: nextItemId(
+          latest?.items ?? [],
+          fromId,
+          waitingId === null ? [] : [waitingId]
+        ),
+      })
+    },
+    [qc, filters, setUrl, list, waitingId]
   )
   const showAllItems = useCallback(
     (playerId: string) => {
       setSubjectDraft(playerId)
       setCursor(0)
-      void setUrl({ subject: playerId, type: null, status: 'all', page: 1 })
+      void setUrl({
+        subject: playerId,
+        type: null,
+        automatic: false,
+        page: 1,
+      })
     },
     [setUrl]
   )
+
+  const totalOpen = list
+    ? Object.values(list.counts).reduce((a, b) => a + b, 0)
+    : 0
 
   if (pending) return <div className='container py-8'>Loading…</div>
   if (!isModerator) return null
 
   const selected = url.item
   return (
-    <div className='container max-w-none px-0 md:px-4 md:py-4'>
-      <div className='grid h-[calc(100dvh-4rem)] grid-cols-1 overflow-hidden border-border md:grid-cols-[minmax(320px,420px)_1fr] md:rounded-lg md:border'>
+    <div className='w-full px-0 md:px-4 md:py-4'>
+      <div className='grid h-[calc(100dvh-4rem)] grid-cols-1 gap-4 overflow-hidden md:grid-cols-[minmax(300px,360px)_1fr]'>
         <div
           className={cn(
-            'flex min-h-0 flex-col border-border md:border-r',
+            'flex min-h-0 flex-col overflow-hidden border-border bg-card/80 md:rounded-lg md:border',
             selected !== null && 'hidden md:flex'
           )}
           data-testid='queue-pane'
         >
-          <div className='border-border border-b px-3 py-2'>
-            <h1 className='font-bold text-xl tracking-tight'>Service Queue</h1>
-            <p className='text-muted-foreground text-xs'>
-              j / k to move, Enter to open. Opening an item claims it for 15
-              minutes.
+          <div className='border-border border-b px-4 py-3'>
+            <h1 className='font-bold text-2xl tracking-tight'>Service Queue</h1>
+            <p
+              className='text-muted-foreground text-sm'
+              data-testid='queue-counts'
+            >
+              {totalOpen} open · {list?.claimedByOthers ?? 0} claimed by others
             </p>
+            {isAdmin && (
+              <Button
+                size='sm'
+                variant='outline'
+                className='mt-2'
+                onClick={() => void downloadChatLabels()}
+              >
+                Download chat labels
+              </Button>
+            )}
           </div>
           <QueueList
             filters={{ ...filters, subject: subjectDraft }}
@@ -165,25 +237,29 @@ function ServiceQueue() {
             list={list}
             isLoading={isLoading}
             selectedId={selected}
+            waitingId={waitingId}
             cursor={cursor}
             setCursor={setCursor}
             now={now}
             onOpen={openItem}
+            automaticTab={url.automatic}
+            setAutomaticTab={(on) => void setUrl({ automatic: on })}
           />
         </div>
         <div
           className={cn(
-            'min-h-0 overflow-y-auto',
-            selected === null && 'hidden md:block'
+            'flex min-h-0 flex-col overflow-hidden border-border bg-card/80 md:rounded-lg md:border',
+            selected === null && 'hidden md:flex'
           )}
           data-testid='panel-pane'
         >
           {selected === null ? (
             <p className='p-6 text-muted-foreground text-sm'>
-              Pick an item from the queue.
+              Pick an item from the list.
             </p>
           ) : (
             <>
+              <UndoStrip />
               <div className='border-border border-b p-2 md:hidden'>
                 <Button
                   size='sm'
@@ -199,6 +275,13 @@ function ServiceQueue() {
                 now={now}
                 onOpenItem={openItem}
                 onShowAllItems={showAllItems}
+                onSkip={() => {
+                  // Skip always gives the claim up, even just after a link click.
+                  forgetKeepClaim()
+                  void openNext(selected)
+                }}
+                onClosed={() => void openNext(selected)}
+                onUndone={() => openItem(selected)}
               />
             </>
           )}

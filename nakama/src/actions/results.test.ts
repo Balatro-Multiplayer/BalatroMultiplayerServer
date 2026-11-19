@@ -20,6 +20,7 @@ import {
 import { type Checkpoint, checkpointOf, resumeFrom } from '../lobby/checkpoint'
 import { runWrites } from '../lobby/storage'
 import { MAX_LOG_BATCH, MAX_LOG_EVENTS } from './registry'
+import { logGapsOf } from '../lobby/log_check'
 import { reconcile, settle } from './results'
 
 const info = (name: string) => ({
@@ -457,6 +458,24 @@ describe('contest', () => {
 		expect(echoed.length).toBeGreaterThan(0)
 	})
 
+	it('records the Contest for the mirror right away, before the run ends', () => {
+		const lobby = startedMatchmade('a', 'b', 'c')
+		const step = send(lobby, 'a', 'mpapi_contest', { opponentId: 'c' }, 2000)
+		const made = step.out.filter((o) => o.kind === 'contest')
+		expect(made).toEqual([
+			{
+				kind: 'contest',
+				runId: lobby.game.started?.runId,
+				code: lobby.code,
+				by: 'a',
+				against: 'c',
+				at: 2000,
+				lobbyKind: expect.any(String),
+			},
+		])
+		expect(saved(step)).toBeUndefined()
+	})
+
 	it('needs the opponent named in a match of more than 2', () => {
 		const lobby = startedMatchmade('a', 'b', 'c')
 		expect(rejection(send(lobby, 'a', 'mpapi_contest', {}))).toBe('bad_params')
@@ -773,6 +792,97 @@ describe('replay logs', () => {
 		})
 	})
 
+	describe('numbered events (seq)', () => {
+		const numbered = (from: number, count: number, run?: string) =>
+			Array.from({ length: count }, (_, i) => ({ t: from + i, opcode: 'play', seq: from + i, run }))
+		const batchOf = (lobby: Lobby, events: unknown[]) =>
+			send(lobby, 'a', 'mpapi_log_events', { events, ack: true })
+		const ackOf = (step: Step) =>
+			step.out.filter((o): o is Send => o.kind === 'send' && o.op === ServerOp.ACTION && o.to.length === 1 && o.to[0] === 'a')[0]
+				?.payload as { params: unknown }
+
+		it('tells the sender the highest number held in the ack', () => {
+			const step = batchOf(started('a', 'b'), numbered(1, 3))
+			expect(step.lobby.game.logs.a.lines).toHaveLength(3)
+			expect(ackOf(step).params).toEqual({ ack: true, got: 3 })
+		})
+
+		it('does not keep a batch lost before it, and tells where to start again', () => {
+			let lobby = batchOf(started('a', 'b'), numbered(1, 3)).lobby
+			// events 4 to 6 never arrived; 7 to 9 did
+			const step = batchOf(lobby, numbered(7, 3))
+			expect(step.lobby.game.logs.a.lines).toHaveLength(3)
+			expect(ackOf(step).params).toEqual({ ack: true, got: 3 })
+			expect(step.out.filter((o) => o.kind === 'send' && o.op === ServerOp.ACTION && o.to.length > 1)).toEqual([])
+			// the client sends again from 4: the log is whole and in order
+			lobby = batchOf(step.lobby, numbered(4, 6)).lobby
+			expect(lobby.game.logs.a.lines).toEqual(
+				Array.from({ length: 9 }, (_, i) => `[${i + 1},"play",null]`),
+			)
+			expect(logGapsOf(lobby.game.logs.a)).toBe(0)
+		})
+
+		it('keeps a refused batch again when it is sent a second time', () => {
+			const lobby = started('a', 'b')
+			expect(rejection(send(lobby, 'a', 'mpapi_log_events', { events: [] }))).toBe('bad_params')
+			const step = batchOf(lobby, numbered(1, 2))
+			expect(step.lobby.game.logs.a.lines).toHaveLength(2)
+		})
+
+		it('keeps a copy of a batch it already holds only once', () => {
+			const first = batchOf(started('a', 'b'), numbered(1, 4))
+			const again = batchOf(first.lobby, numbered(1, 4))
+			expect(again.lobby.game.logs.a.lines).toHaveLength(4)
+			expect(ackOf(again).params).toEqual({ ack: true, got: 4 })
+			// no copy reaches the others
+			expect(again.out.filter((o) => o.kind === 'send' && o.to.includes('b'))).toEqual([])
+			// a batch that overlaps what it holds keeps only the new events
+			const overlap = batchOf(first.lobby, numbered(3, 4))
+			expect(overlap.lobby.game.logs.a.lines).toHaveLength(6)
+		})
+
+		it('counts the events it saw beyond a gap that is never filled', () => {
+			const lobby = batchOf(batchOf(started('a', 'b'), numbered(1, 3)).lobby, numbered(8, 2)).lobby
+			expect(lobby.game.logs.a.seq).toBe(3)
+			expect(logGapsOf(lobby.game.logs.a)).toBe(6)
+		})
+
+		it('keeps the old behaviour for events with no number', () => {
+			const step = send(started('a', 'b'), 'a', 'mpapi_log_events', {
+				events: [{ t: 1, opcode: 'play' }, { t: 2, opcode: 'play' }],
+				ack: true,
+			})
+			expect(step.lobby.game.logs.a.lines).toHaveLength(2)
+			expect(ackOf(step).params).toEqual({ ack: true })
+			expect(logGapsOf(step.lobby.game.logs.a)).toBe(0)
+		})
+
+		it('tells a rejoining player how many events it holds, so the next ones are kept', () => {
+			let lobby = batchOf(started('a', 'b'), numbered(1, 4)).lobby
+			expect(snapshotFor(lobby, 'a', 2000).game.logSeq).toBe(4)
+			expect(snapshotFor(lobby, 'b', 2000).game.logSeq).toBe(0)
+			// a new process rejoins: it starts from the snapshot's count
+			lobby = disconnect(lobby, 'a', 'a-s1', 1600).lobby
+			lobby = join(lobby, 'a', 'a-s2', info('a')).lobby
+			const from = snapshotFor(lobby, 'a', 2000).game.logSeq + 1
+			const step = batchOf(lobby, numbered(from, 2))
+			expect(step.lobby.game.logs.a.lines).toHaveLength(6)
+			expect(ackOf(step).params).toEqual({ ack: true, got: 6 })
+			// numbering again from 1 would be skipped as copies
+			expect(batchOf(lobby, numbered(1, 2)).lobby.game.logs.a.lines).toHaveLength(4)
+		})
+
+		it('numbers a single event the same way', () => {
+			const lobby = started('a', 'b')
+			const lost = send(lobby, 'a', 'mpapi_log_event', { t: 5, opcode: 'play', seq: 5, ack: true })
+			expect(lost.lobby.game.logs.a.lines).toEqual([])
+			expect((ackOf(lost).params as { got: number }).got).toBe(0)
+			const first = send(lobby, 'a', 'mpapi_log_event', { t: 1, opcode: 'play', seq: 1, ack: true })
+			expect(first.lobby.game.logs.a.lines).toHaveLength(1)
+			expect((ackOf(first).params as { got: number }).got).toBe(1)
+		})
+	})
+
 	describe('batches (mpapi_log_events)', () => {
 		const batch = (lobby: Lobby, from: string, events: unknown[], now = 1500) =>
 			send(lobby, from, 'mpapi_log_events', { events }, now)
@@ -867,28 +977,33 @@ describe('replay logs', () => {
 
 describe('active run', () => {
 	it('is null when no game is running', () => {
-		expect(activeRunOf({ ...started('a', 'b'), game: emptyGame() }, 'a')).toBeNull()
+		expect(
+			activeRunOf({ ...started('a', 'b'), game: emptyGame() }, 'a', sha256),
+		).toBeNull()
 	})
 
 	it('gives a participant their own events so far, as {t, opcode, args}', () => {
 		const lobby = log2(started('a', 'b'))
-		const active = activeRunOf(lobby, 'a')
+		const active = activeRunOf(lobby, 'a', sha256)
 		expect(active).toMatchObject({ runId: lobby.game.started?.runId, code: lobby.code, modId: lobby.modId })
 		expect(active?.events).toEqual([{ t: 1, opcode: 'play', args: null }])
-		expect(activeRunOf(lobby, 'b')?.events).toEqual([])
+		expect(activeRunOf(lobby, 'b', sha256)?.events).toEqual([])
 	})
 
 	it("names the game's bar for coming back, null for a lobby without one", () => {
 		const lobby = log2(started('a', 'b'))
-		expect(activeRunOf(lobby, 'a')?.requiredStanding).toBeNull()
-		expect(activeRunOf({ ...lobby, requiredStanding: 'verified' }, 'a')?.requiredStanding).toBe('verified')
+		expect(activeRunOf(lobby, 'a', sha256)?.requiredStanding).toBeNull()
+		expect(
+			activeRunOf({ ...lobby, requiredStanding: 'verified' }, 'a', sha256)
+				?.requiredStanding,
+		).toBe('verified')
 	})
 
 	it('is null for someone who is not playing or has left', () => {
 		const lobby = started('a', 'b')
-		expect(activeRunOf(lobby, 'z')).toBeNull()
+		expect(activeRunOf(lobby, 'z', sha256)).toBeNull()
 		const gone = { ...lobby, players: lobby.players.filter((p) => p.id !== 'b') }
-		expect(activeRunOf(gone, 'b')).toBeNull()
+		expect(activeRunOf(gone, 'b', sha256)).toBeNull()
 	})
 })
 
@@ -919,6 +1034,35 @@ describe('storage writes', () => {
 			logChecks: { a: 'unavailable', b: 'unavailable' },
 		})
 		expect(writes[2].value).toMatchObject({ code: save.run.code, startedAt: save.run.startedAt })
+	})
+})
+
+describe('connection record of a finished game', () => {
+	it('keeps a disconnect, a rejoin and a leave on the run, and the held log counts', () => {
+		let lobby = log2(started('a', 'b'))
+		lobby = disconnect(lobby, 'a', 'a-s1', 1600).lobby
+		lobby = join(lobby, 'a', 'a-s2', info('a'), 1700).lobby
+		lobby = leave(lobby, 'b', 1800).lobby
+		lobby = settle(lobby, 1900).lobby
+		const save = saved(report(lobby, 'a', places('a', 'b'), 2000)) as Save
+		expect(save.run.presence).toEqual([
+			{ userId: 'a', kind: 'joined', at: expect.any(Number) },
+			{ userId: 'b', kind: 'joined', at: expect.any(Number) },
+			{ userId: 'a', kind: 'disconnected', at: 1600 },
+			{ userId: 'a', kind: 'rejoined', at: 1700 },
+			{ userId: 'b', kind: 'left', at: 1800 },
+		])
+		const writes = runWrites(save.run, save.logs, sha256)
+		expect(writes[0].value).toMatchObject({ logHeld: { a: 1, b: 0 } })
+	})
+
+	it('lists a joined row for each player of a game with no seat change', () => {
+		const lobby = report(started('a', 'b'), 'a', places('b', 'a')).lobby
+		const save = saved(report(lobby, 'b', places('b', 'a'))) as Save
+		expect(save.run.presence).toEqual([
+			{ userId: 'a', kind: 'joined', at: save.run.startedAt },
+			{ userId: 'b', kind: 'joined', at: save.run.startedAt },
+		])
 	})
 })
 

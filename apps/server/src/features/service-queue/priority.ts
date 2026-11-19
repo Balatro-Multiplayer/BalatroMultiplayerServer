@@ -22,8 +22,12 @@ export const BASE_PRIORITY: Readonly<Record<ItemType, number>> = {
 	match_conflict: 40,
 	// Ratings are held until it is decided.
 	contest: 45,
+	// A player waiting on a decision about their own punishment.
+	appeal: 50,
 	forfeit_reconciliation: 35,
 	flagged_chat: 20,
+	// A moderator asked admins to look at a match.
+	staff_report: 50,
 }
 
 const RANKED_BONUS = 15
