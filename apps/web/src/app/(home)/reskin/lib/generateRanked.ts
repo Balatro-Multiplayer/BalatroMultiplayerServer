@@ -126,7 +126,9 @@ export async function generateRankedBundle(
     warnings.push(`${skipped.shader} default shader(s) were left out (not supported in Ranked bundles).`)
   if (skipped.gif > 0)
     warnings.push(`${skipped.gif} animated GIF(s) were exported as their first frame only.`)
-  const sheetEdits = Object.values(project.sheets).some((s) => Object.keys(s).length > 0)
+  const sheetEdits =
+    (project.deckSkins?.length ?? 0) > 0 ||
+    Object.values(project.sheets).some((s) => Object.keys(s).length > 0)
   if (sheetEdits)
     warnings.push('Playing card, chip and shop sign sheets were left out (not supported in Ranked bundles).')
   if (project.options.icon) warnings.push('The mod-list icon was left out (the bundle is not a mod).')

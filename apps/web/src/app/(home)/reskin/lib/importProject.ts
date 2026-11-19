@@ -1,13 +1,18 @@
 // Re-import a previously generated CustomReskin ZIP to keep editing it.
 
-import { importRankedBundle, looksLikeRankedBundle } from './importRanked'
-import { type Catalog, emptyProject, type ObjectEdit, type ProjectState } from './types'
-import { readZip, unzipText } from './zip'
+import { migrateDeckSkins, validateDeckSkins } from './deckSkins'
 import { PROJECT_FILE_NAME } from './generate'
+import { importRankedBundle, looksLikeRankedBundle } from './importRanked'
+import {
+  type Catalog,
+  emptyProject,
+  type ObjectEdit,
+  type ProjectState,
+} from './types'
+import { readZip, unzipText } from './zip'
 
-/** Bring an older (schema 2) project up to schema 3 by seeding each still's
- *  `base`/`render` from its final sprite, so the render toggles are editable. */
-function toSchema3(p: ProjectState): ProjectState {
+/** Preserve older still edits and migrate the original single card sheet. */
+function upgradeProject(p: ProjectState): ProjectState {
   const objects: Record<string, ObjectEdit> = {}
   for (const [id, e] of Object.entries(p.objects)) {
     objects[id] =
@@ -15,7 +20,9 @@ function toSchema3(p: ProjectState): ProjectState {
         ? { ...e, base: e.sprites[0], render: e.render ?? {} }
         : e
   }
-  return { ...p, schema: 3, objects }
+  const upgraded = migrateDeckSkins({ ...p, schema: 4, objects })
+  validateDeckSkins(upgraded.deckSkins)
+  return upgraded
 }
 
 export async function importPack(
@@ -31,15 +38,20 @@ export async function importPack(
     const parsed = JSON.parse(unzipText(projectBytes)) as ProjectState
     // The on-disk schema may predate the current literal; read it as a number.
     const schema = (parsed as { schema?: number }).schema
-    if (parsed && (schema === 2 || schema === 3)) {
+    if (parsed && (schema === 2 || schema === 3 || schema === 4)) {
       // merge over defaults so packs missing fields still load
-      return toSchema3({ ...emptyProject(), ...parsed, schema: 3 })
+      return upgradeProject({ ...emptyProject(), ...parsed, schema: 4 })
     }
   }
 
   // A Ranked bundle ("Export for Ranked") has no project file; read it directly.
   if (looksLikeRankedBundle(files)) {
-    return importRankedBundle(files, catalog, file.name.replace(/\.zip$/i, ''), onWarning)
+    return importRankedBundle(
+      files,
+      catalog,
+      file.name.replace(/\.zip$/i, ''),
+      onWarning
+    )
   }
 
   throw new Error(
