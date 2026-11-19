@@ -7,7 +7,7 @@ import { INVALID_ARGUMENT, NOT_FOUND, runtimeError } from './errors'
 import { lookupCode } from './lobby/codes'
 import type { LobbySignal } from './lobby/protocol'
 import { currentLobby } from './lobby/rpc'
-import { isBanType, readBans } from './moderation/bans'
+import { isBanType, readBans, type Ban } from './moderation/bans'
 import { applyBan, liftBan, forgetBanIndex } from './moderation/enforce'
 import { banNetworks } from './moderation/network'
 import { playerView, profileFor } from './player/profile'
@@ -114,7 +114,9 @@ export function parseExpiresAt(value: unknown): number | null | undefined {
 	return undefined
 }
 
-// {userId, type, banId, expiresAt?, reason?} -> {bans}.
+// {userId, type, banId, expiresAt?, durationMs?, reason?} -> {bans}. A timed
+// ban comes with durationMs and no expiresAt: its clock starts when the player
+// is first told (moderation/enforce.ts startPendingBans).
 export function rpcAdminBanApply(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -129,7 +131,10 @@ export function rpcAdminBanApply(
 	const expiresAt = parseExpiresAt(input.expiresAt)
 	if (expiresAt === undefined) throw runtimeError(INVALID_ARGUMENT, 'expiresAt must be a time or null')
 	const reason = typeof input.reason === 'string' ? input.reason : ''
-	const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason })
+	const ban: Ban = { banId: input.banId, expiresAt, reason }
+	if (typeof input.durationMs === 'number' && Number.isFinite(input.durationMs) && input.durationMs > 0)
+		ban.durationMs = input.durationMs
+	const bans = applyBan(nk, logger, userId, input.type, ban)
 	if (bans.account && banNetworks(nk, settingsOf(ctx), userId, bans.account, Date.now()))
 		logger.info('Network ban %s from %s', bans.account.banId, userId)
 	return JSON.stringify({ bans })

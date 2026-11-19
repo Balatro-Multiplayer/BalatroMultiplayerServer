@@ -17,7 +17,7 @@ import { clearModReport } from '../standing/storage'
 import { PERMISSION_DENIED, runtimeError } from '../errors'
 import { ACCOUNT_BANNED, banMessage } from '../moderation/access'
 import { activeBan, bansFromList, readBans, withBan, writeBans, BAN_TYPES } from '../moderation/bans'
-import { enforceAccountBan } from '../moderation/enforce'
+import { enforceAccountBan, startPendingBans } from '../moderation/enforce'
 import { banNetworks } from '../moderation/network'
 import { settingsOf, type ServerSettings } from '../server_kind'
 import { parsePayload, requireUser } from '../rpc'
@@ -145,6 +145,9 @@ export function rpcSessionInit(
 		writeBans(nk, userId, bans)
 		logger.info('Synced player %s from Postgres player %s', userId, sync.playerId)
 	}
+	// A login is the player's next session start: a timed ban issued while they
+	// were away starts its clock now.
+	startPendingBans(nk, userId, Date.now())
 	// An account ban the sync brought over (or one Nakama's own ban somehow
 	// missed) ends the login here.
 	const accountBan = activeBan(readBans(nk, userId), 'account', Date.now())

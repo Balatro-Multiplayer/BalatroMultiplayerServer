@@ -3,7 +3,9 @@ import { CURRENT_LOBBY_COLLECTION, CURRENT_LOBBY_KEY, SYSTEM_USER_ID } from '../
 import { NotifyCode } from '../notify'
 import { fakeLogger, fakeNk } from '../testing/fake_nk'
 import { readBans } from './bans'
-import { applyBan, BAN_INDEX_COLLECTION, checkLoginBan, liftBan, forgetBanIndex } from './enforce'
+import { MIRROR_COLLECTION } from '../mirror/outbox'
+import { chatBanRefusal } from './access'
+import { applyBan, BAN_INDEX_COLLECTION, checkLoginBan, liftBan, forgetBanIndex, startPendingBans } from './enforce'
 
 const U = '11111111-1111-4111-8111-111111111111'
 
@@ -142,5 +144,84 @@ describe('forgetBanIndex', () => {
 		put('custom:steamhash:live', entry(LIVE, 1000))
 		expect(forgetBanIndex(nk as any, ['running', 'permanent', 'live', 'unknown'], 2000)).toEqual({ deleted: 0 })
 		expect(indexKeys(nk)).toHaveLength(3)
+	})
+})
+
+const DAY = 24 * 60 * 60 * 1000
+const mirrored = (nk: ReturnType<typeof fakeNk>) =>
+	[...nk.objects.entries()].filter(([k]) => k.startsWith(MIRROR_COLLECTION + '/')).map(([, o]) => o.value)
+
+describe('a ban whose clock starts when the player is told', () => {
+	const timed = (banId: string) => ({ banId, expiresAt: null, durationMs: DAY, reason: '' })
+
+	it('has no end while the player is offline, and still refuses from the start', () => {
+		const { nk } = world()
+		nk.streamUserList = () => []
+		applyBan(nk as any, fakeLogger, U, 'chat', timed('c1'))
+		expect(readBans(nk as any, U).chat).toEqual(timed('c1'))
+		expect(chatBanRefusal(readBans(nk as any, U), Date.now() + 365 * DAY)).toBe('You are banned from chat')
+		expect(mirrored(nk)).toEqual([])
+	})
+
+	it('starts at once when the player is online and gets the Notification', () => {
+		const { nk } = world()
+		nk.streamUserList = () => [{ sessionId: 's' }]
+		const before = Date.now()
+		applyBan(nk as any, fakeLogger, U, 'queue', timed('q1'))
+		const ban = readBans(nk as any, U).queue!
+		expect(ban.expiresAt).toBeGreaterThanOrEqual(before + DAY)
+		expect(ban.expiresAt).toBeLessThanOrEqual(Date.now() + DAY)
+		expect(nk.notifications[0].content.expiresAt).toBe(ban.expiresAt)
+		expect(mirrored(nk)).toEqual([expect.objectContaining({ kind: 'ban_started', banId: 'q1', expiresAt: ban.expiresAt })])
+	})
+
+	it('starts at the next session start and runs its full length from then', () => {
+		const { nk } = world()
+		nk.streamUserList = () => []
+		applyBan(nk as any, fakeLogger, U, 'chat', timed('c1'))
+		const seen = Date.now() + 3 * DAY
+		const bans = startPendingBans(nk as any, U, seen)
+		expect(bans.chat!.expiresAt).toBe(seen + DAY)
+		expect(readBans(nk as any, U).chat!.expiresAt).toBe(seen + DAY)
+		expect(mirrored(nk)).toEqual([expect.objectContaining({ kind: 'ban_started', banId: 'c1', expiresAt: seen + DAY })])
+		// A later session start does not move the end.
+		startPendingBans(nk as any, U, seen + 2 * DAY)
+		expect(readBans(nk as any, U).chat!.expiresAt).toBe(seen + DAY)
+		expect(mirrored(nk)).toHaveLength(1)
+	})
+
+	it('keeps the start when the API repeats an apply', () => {
+		const { nk } = world()
+		nk.streamUserList = () => [{ sessionId: 's' }]
+		applyBan(nk as any, fakeLogger, U, 'chat', timed('c1'))
+		const end = readBans(nk as any, U).chat!.expiresAt
+		applyBan(nk as any, fakeLogger, U, 'chat', timed('c1'))
+		expect(readBans(nk as any, U).chat!.expiresAt).toBe(end)
+		expect(mirrored(nk)).toHaveLength(1)
+	})
+
+	it('leaves a permanent ban and a username ban without a clock', () => {
+		const { nk } = world()
+		nk.streamUserList = () => [{ sessionId: 's' }]
+		applyBan(nk as any, fakeLogger, U, 'chat', { banId: 'c', expiresAt: null, reason: '' })
+		expect(readBans(nk as any, U).chat).toEqual({ banId: 'c', expiresAt: null, reason: '' })
+		expect(mirrored(nk)).toEqual([])
+	})
+
+	it('starts an account ban at the first refused login, and later logins see the same end', () => {
+		const { nk } = world()
+		nk.streamUserList = () => []
+		applyBan(nk as any, fakeLogger, U, 'account', timed('a1'))
+		const seen = Date.now() + 2 * DAY
+		expect(() => checkLoginBan(nk as any, fakeLogger, 'device:dev1', seen)).toThrow(
+			`Account banned until ${new Date(seen + DAY).toISOString()}`,
+		)
+		expect(readBans(nk as any, U).account!.expiresAt).toBe(seen + DAY)
+		expect(() => checkLoginBan(nk as any, fakeLogger, 'custom:765', seen + 3600_000)).toThrow(
+			`Account banned until ${new Date(seen + DAY).toISOString()}`,
+		)
+		expect(mirrored(nk)).toHaveLength(1)
+		checkLoginBan(nk as any, fakeLogger, 'custom:765', seen + DAY)
+		expect(readBans(nk as any, U)).toEqual({})
 	})
 })
