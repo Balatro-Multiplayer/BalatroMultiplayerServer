@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { type ResolvedCard, tagValue } from '../../lib/card-ref'
+import { deckCardKey } from '../../lib/deck-card-key'
 import { PlayingCardVisual } from '../playing-card-visual'
 
 type PlayingCard = Extract<ResolvedCard, { type: 'playing_card' }>
@@ -98,7 +99,7 @@ function buildSections(cards: PlayingCard[]): DeckSection[] {
       (a, b) => rankIndex(a.value) - rankIndex(b.value)
     )) {
       const d = describe(card)
-      const key = `${card.suit}|${card.value}|${card.tags.join('|')}`
+      const key = deckCardKey(card)
       const existing = entries.get(key)
       if (existing) existing.count++
       else entries.set(key, { card, count: 1, ...d })
@@ -121,7 +122,11 @@ function buildSections(cards: PlayingCard[]): DeckSection[] {
   }
   const stones = cards.filter((c) => describe(c).isStone)
   if (stones.length > 0) {
-    sections.push({ key: 'stone', label: 'Stone Cards', entries: group(stones) })
+    sections.push({
+      key: 'stone',
+      label: 'Stone Cards',
+      entries: group(stones),
+    })
   }
   return sections
 }
@@ -250,7 +255,7 @@ export function DeckPanel({
                     <div className='flex flex-wrap gap-x-3 gap-y-5'>
                       {section.entries.map((entry) => (
                         <DeckCardEntry
-                          key={`${entry.card.suit}|${entry.card.value}|${entry.card.tags.join('|')}`}
+                          key={deckCardKey(entry.card)}
                           entry={entry}
                         />
                       ))}

@@ -49,7 +49,7 @@ const ENHANCEMENT_POSITION: Record<string, { x: number; y: number }> = {
 
 const BASE_CARD_POSITION = { x: 1, y: 0 }
 
-const SEAL_POSITION:Record<string, { x: number; y: number }> = {
+const SEAL_POSITION: Record<string, { x: number; y: number }> = {
   Gold: { x: 2, y: 0 },
   Purple: { x: 4, y: 4 },
   Red: { x: 5, y: 4 },
@@ -151,7 +151,9 @@ export function PlayingCardVisual({
       className='shrink-0'
       style={{ width: CARD_WIDTH * scale, height: CARD_HEIGHT * scale }}
     >
-      <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+      <div
+        style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}
+      >
         {card}
       </div>
     </div>
