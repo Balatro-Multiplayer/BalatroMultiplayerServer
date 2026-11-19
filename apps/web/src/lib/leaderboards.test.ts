@@ -5,6 +5,7 @@ const seasons = [
   { id: 1, name: 'Season 1' },
   { id: 2, name: 'Closed Beta' },
   { id: 3, name: null },
+  { id: 4, name: '  ' },
 ]
 
 describe('seasonLabel', () => {
@@ -12,6 +13,7 @@ describe('seasonLabel', () => {
     ['a season named after its number', 1, 'Season 1'],
     ['a season with its own name', 2, 'Closed Beta'],
     ['a season with no name', 3, 'Season 3'],
+    ['a season with a blank name', 4, 'Season 4'],
     ['a season that is not in the list', 9, 'Season 9'],
     ['no season picked yet', null, 'Season …'],
   ]

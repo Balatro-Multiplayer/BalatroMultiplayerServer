@@ -92,8 +92,6 @@ export function CardChip({
   const known = lookupByKind(card.kind, card.ident)
   const edition = tagValue(card.tags, 'ed:')
 
-  const isJokerCard = card.kind === 'Joker' || card.kind === 'j'
-
   if (known && artOnly) {
     return (
       <span className='inline-flex min-w-14 flex-col items-center gap-1'>
@@ -105,7 +103,7 @@ export function CardChip({
           height={76}
           className='rounded-sm'
         />
-        {isJokerCard && <ModifierLabels tags={card.tags} />}
+        <ModifierLabels tags={card.tags} />
       </span>
     )
   }
@@ -122,7 +120,7 @@ export function CardChip({
         />
         <span className='flex flex-col items-start gap-0.5'>
           <span className='text-xs'>{known.name}</span>
-          {isJokerCard && <ModifierLabels tags={card.tags} />}
+          <ModifierLabels tags={card.tags} />
         </span>
       </span>
     )

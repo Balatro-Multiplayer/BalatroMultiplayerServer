@@ -86,6 +86,12 @@ function sameJoker(a: ResolvedCard, b: ResolvedCard): boolean {
   )
 }
 
+function sameTags(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedB = [...b].sort()
+  return [...a].sort().every((tag, i) => tag === sortedB[i])
+}
+
 function isJoker(card: ResolvedCard): boolean {
   return (
     card.type === 'other_card' && (card.kind === 'Joker' || card.kind === 'j')
@@ -569,9 +575,15 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
 
     function removeFromSnapshot(card: ResolvedCard) {
       if (!snapshotJokers || card.type !== 'other_card') return
-      const at = snapshotJokers.findIndex(
-        (j) => j.type === 'other_card' && j.ident === card.ident
+      // Remove the exact copy (same edition and stickers) when there is one:
+      // two copies of a joker can differ only by a label.
+      const sameIdent = (j: ResolvedCard) =>
+        j.type === 'other_card' && j.ident === card.ident
+      const exact = snapshotJokers.findIndex(
+        (j) =>
+          sameIdent(j) && j.type === 'other_card' && sameTags(j.tags, card.tags)
       )
+      const at = exact !== -1 ? exact : snapshotJokers.findIndex(sameIdent)
       if (at === -1) return
       snapshotJokers = snapshotJokers.filter((_, i) => i !== at)
       snapshotAdjusted = true

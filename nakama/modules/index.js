@@ -57,9 +57,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
 ));
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
 var require_Char = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isHighSurrogate = isHighSurrogate;
@@ -107,9 +107,9 @@ var require_Char = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
 var require_BuiltinStrategies = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.keepStartCensorStrategy = keepStartCensorStrategy2;
@@ -171,9 +171,9 @@ var require_BuiltinStrategies = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
 var require_Interval = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareIntervals = compareIntervals;
@@ -191,9 +191,9 @@ var require_Interval = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
 var require_MatchPayload = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareMatchByPositionAndId = compareMatchByPositionAndId2;
@@ -207,9 +207,9 @@ var require_MatchPayload = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
 var require_TextCensor = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TextCensor = void 0;
@@ -300,9 +300,9 @@ var require_TextCensor = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
 var require_BlacklistedTerm = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignIncrementingIds = assignIncrementingIds2;
@@ -313,9 +313,9 @@ var require_BlacklistedTerm = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
 var require_DataSet = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PhraseBuilder = exports.DataSet = void 0;
@@ -482,17 +482,17 @@ var require_DataSet = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
 var require_Matcher = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
 var require_Nodes = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.SyntaxKind = void 0;
@@ -506,9 +506,9 @@ var require_Nodes = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
 var require_Util = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.potentiallyMatchesEmptyString = potentiallyMatchesEmptyString;
@@ -549,9 +549,9 @@ var require_Util = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
 var require_TransformerSet = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TransformerSet = void 0;
@@ -591,9 +591,9 @@ var require_TransformerSet = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
 var require_CharacterIterator = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CharacterIterator = void 0;
@@ -656,9 +656,9 @@ var require_CharacterIterator = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
 var require_IntervalCollection = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IntervalCollection = void 0;
@@ -700,9 +700,9 @@ var require_IntervalCollection = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
 var require_RegExpMatcher = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.RegExpMatcher = void 0;
@@ -878,9 +878,9 @@ var require_RegExpMatcher = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
 var require_ParserError = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ParserError = void 0;
@@ -905,9 +905,9 @@ var require_ParserError = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
 var require_Parser = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Parser = void 0;
@@ -1099,9 +1099,9 @@ var require_Parser = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
 var require_Pattern = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.pattern = pattern2;
@@ -1122,9 +1122,9 @@ var require_Pattern = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
 var require_Transformers = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSimpleTransformer = createSimpleTransformer2;
@@ -1138,9 +1138,9 @@ var require_Transformers = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
 var require_transformer = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CollapseDuplicatesTransformer = void 0;
@@ -1172,9 +1172,9 @@ var require_transformer = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
 var require_collapse_duplicates = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.collapseDuplicatesTransformer = collapseDuplicatesTransformer2;
@@ -1198,9 +1198,9 @@ var require_collapse_duplicates = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
 var require_remap_characters = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.remapCharactersTransformer = remapCharactersTransformer2;
@@ -1228,9 +1228,9 @@ var require_remap_characters = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
 var require_confusables = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.confusables = void 0;
@@ -1308,9 +1308,9 @@ var require_confusables = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
 var require_resolve_confusables = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveConfusablesTransformer = resolveConfusablesTransformer2;
@@ -1322,9 +1322,9 @@ var require_resolve_confusables = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
 var require_dictionary = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.dictionary = void 0;
@@ -1343,9 +1343,9 @@ var require_dictionary = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
 var require_resolve_leetspeak = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveLeetSpeakTransformer = resolveLeetSpeakTransformer2;
@@ -1357,9 +1357,9 @@ var require_resolve_leetspeak = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
 var require_to_ascii_lowercase = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.toAsciiLowerCaseTransformer = toAsciiLowerCaseTransformer2;
@@ -1371,9 +1371,9 @@ var require_to_ascii_lowercase = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
 var require_english = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.englishDataset = exports.englishRecommendedTransformers = exports.englishRecommendedWhitelistMatcherTransformers = exports.englishRecommendedBlacklistMatcherTransformers = void 0;
@@ -1423,9 +1423,9 @@ var require_english = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
 var require_skip_non_alphabetic = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.skipNonAlphabeticTransformer = skipNonAlphabeticTransformer2;
@@ -1437,9 +1437,9 @@ var require_skip_non_alphabetic = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
 var require_dist = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -2854,6 +2854,14 @@ function resumeFrom(checkpoint, now) {
     }),
     sharedRules: lobby.sharedRules ? __spreadProps(__spreadValues({}, lobby.sharedRules), {
       deadline: lobby.sharedRules.deadline + downtime
+    }) : void 0,
+    almanac: lobby.almanac ? __spreadProps(__spreadValues({}, lobby.almanac), {
+      offers: Object.fromEntries(
+        Object.entries(lobby.almanac.offers).map(([ante, offer]) => [
+          ante,
+          offer.deadline === void 0 ? offer : __spreadProps(__spreadValues({}, offer), { deadline: offer.deadline + downtime })
+        ])
+      )
     }) : void 0
   });
 }
@@ -3471,8 +3479,8 @@ function everyone(lobby) {
   return lobby.players.map((p) => p.id);
 }
 function announce(lobby, reason, requeue = false) {
-  const view3 = viewOf(lobby);
-  const payload = view3 && __spreadProps(__spreadValues({}, view3), { reason, requeue });
+  const view2 = viewOf(lobby);
+  const payload = view2 && __spreadProps(__spreadValues({}, view2), { reason, requeue });
   return { kind: "send", op: ServerOp.GROUP_QUEUE, payload, to: everyone(lobby) };
 }
 function withGroup(lobby, groupQueue) {
@@ -6506,19 +6514,19 @@ function rpcAvatarCatalog(ctx, logger, nk, payload) {
 function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  let view3;
+  let view2;
   if (input.userId !== void 0) {
     if (typeof input.userId !== "string" || !USER_ID2.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
     if (!readProfile(nk, input.userId)) throw runtimeError(NOT_FOUND, "No such player");
-    view3 = viewOf3(nk, input.userId, "");
+    view2 = viewOf3(nk, input.userId, "");
   } else {
     const privileges = input.privileges;
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
       throw runtimeError(INVALID_ARGUMENT, "userId or privileges is required");
     const progress = emptyProgress();
-    view3 = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
+    view2 = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
   }
-  return JSON.stringify(__spreadProps(__spreadValues({}, view3), { jokers: view3.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
+  return JSON.stringify(__spreadProps(__spreadValues({}, view2), { jokers: view2.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
 }
 function testingRpcsAllowed(ctx) {
   return settingsOf(ctx).testingRpcs;
@@ -7562,9 +7570,9 @@ function announceStandings(nk, settings, now) {
   let told = 0;
   for (const userId of reporterIds(nk)) {
     if (!isOnline(nk, userId)) continue;
-    const view3 = standingFor(nk, settings, userId, now, config);
-    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view3));
-    pushToLobby(nk, userId, { standing: view3.standing });
+    const view2 = standingFor(nk, settings, userId, now, config);
+    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view2));
+    pushToLobby(nk, userId, { standing: view2.standing });
     told++;
   }
   return told;
@@ -7841,9 +7849,9 @@ function rpcAdminLobbyGet(ctx, logger, nk, payload) {
   requireServer(ctx);
   const lobby = lobbyByCode(nk, parsePayload(payload).code);
   const signal2 = { type: "admin_view" };
-  const view3 = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
-  if (!view3) throw runtimeError(NOT_FOUND, "No such lobby");
-  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view3)), { matchId: lobby.matchId }) });
+  const view2 = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
+  if (!view2) throw runtimeError(NOT_FOUND, "No such lobby");
+  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view2)), { matchId: lobby.matchId }) });
 }
 function rpcAdminLobbyKick(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -8944,8 +8952,8 @@ function answerGroupSignal(lobby, signal2, switches, now) {
     case "group_members":
       return unchanged(lobby, homeFactsOf(lobby));
     case "group_status": {
-      const view3 = viewOf(lobby);
-      return unchanged(lobby, view3 && view3.partyId === signal2.partyId ? view3 : null);
+      const view2 = viewOf(lobby);
+      return unchanged(lobby, view2 && view2.partyId === signal2.partyId ? view2 : null);
     }
     case "group_open":
       return answered(
@@ -9028,6 +9036,33 @@ function senderRefusal(lobby, from, key, params) {
   return claimed === from ? null : { kind: "not_self", key: ruled, from, hostId, claimed };
 }
 
+// src/lobby/draft_support.ts
+function seededRng(id) {
+  let rng = 1;
+  for (let i = 0; i < id.length; i++)
+    rng = (rng * 31 + id.charCodeAt(i)) % 2147483647;
+  return rng;
+}
+function nextRng(rng) {
+  return rng * 16807 % 2147483647;
+}
+function rejectStep(lobby, from, action2, reason) {
+  return {
+    lobby,
+    out: [
+      {
+        kind: "send",
+        op: ServerOp.ACTION_REJECTED,
+        to: [from],
+        payload: { action: action2, reason }
+      }
+    ]
+  };
+}
+function paramsObject(input) {
+  return input && typeof input === "object" && !Array.isArray(input) ? input : {};
+}
+
 // src/lobby/almanac.ts
 var ALMANAC_RULESET = "ruleset_mp_almanac";
 var ALMANAC_RANKED_MODE = "pvp_ranked_almanac";
@@ -9055,10 +9090,11 @@ var DECK_ANTES = {
   b_mp_echodeck: 7
 };
 var MILESTONES2 = [2, 3, 5, 7];
+var DECK_PICK_MS = 6e4;
 function isAlmanac(lobby) {
-  return lobby.modId === "MultiplayerPvP" && (lobby.rankedMode === ALMANAC_RANKED_MODE || !lobby.rankedMode && !lobby.gameMode && (lobby.metadata.ruleset === ALMANAC_RULESET || lobby.metadata.deck === "Almanac"));
+  return lobby.modId === PVP_MOD_ID && (lobby.rankedMode === ALMANAC_RANKED_MODE || !lobby.rankedMode && !lobby.gameMode && (lobby.metadata.ruleset === ALMANAC_RULESET || lobby.metadata.deck === "Almanac"));
 }
-function view(lobby, offer, player) {
+function offerMessage(lobby, offer, player, now) {
   return {
     kind: "send",
     op: ServerOp.ACTION,
@@ -9072,31 +9108,24 @@ function view(lobby, offer, player) {
         id: offer.id,
         ante: offer.ante,
         choices: offer.choices,
-        picked: offer.picks[player]
+        picked: offer.picks[player],
+        ms_left: offer.deadline === void 0 ? void 0 : Math.max(0, offer.deadline - now)
       }
     }
   };
 }
-function almanacAction(lobby, from, key, input) {
+function almanacAction(lobby, from, key, input, now) {
   var _a;
   if (!["pvp_almanac_open", "pvp_almanac_pick", "pvp_almanac_offer"].includes(key))
     return null;
-  const refuse3 = (reason) => ({
-    lobby,
-    out: [
-      {
-        kind: "send",
-        op: ServerOp.ACTION_REJECTED,
-        to: [from],
-        payload: { action: key, reason }
-      }
-    ]
-  });
+  const refuse3 = (reason) => rejectStep(lobby, from, key, reason);
   if (key === "pvp_almanac_offer") return refuse3("server_only");
   const started = lobby.game.started;
-  if (!isAlmanac(lobby) || !started || started.players.length !== 2 || lobby.players.length !== 2 || !started.players.some((p) => p.id === from))
+  if (!isAlmanac(lobby) || !started || started.players.length !== 2 || !started.players.some((p) => p.id === from))
     return refuse3("unavailable");
-  const params = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  if (lobby.players.length > 2) return refuse3("too_many_players");
+  if (lobby.players.length !== 2) return refuse3("unavailable");
+  const params = paramsObject(input);
   const ante = params.ante;
   if (typeof ante !== "number" || !MILESTONES2.includes(ante))
     return refuse3("bad_ante");
@@ -9109,7 +9138,7 @@ function almanacAction(lobby, from, key, input) {
   };
   const existing = current.offers[ante];
   if (key === "pvp_almanac_open") {
-    if (existing) return { lobby, out: [view(lobby, existing, from)] };
+    if (existing) return { lobby, out: [offerMessage(lobby, existing, from, now)] };
     const previous = MILESTONES2[MILESTONES2.indexOf(ante) - 1];
     if (previous && !players.every((p) => {
       var _a2;
@@ -9119,23 +9148,29 @@ function almanacAction(lobby, from, key, input) {
     const pool = Object.keys(DECK_ANTES).filter(
       (deck) => DECK_ANTES[deck] <= ante && players.every((p) => !current.acquired[p].includes(deck))
     ).sort();
-    let rng = 1;
     const id = `${started.runId}:decks:${ante}`;
-    for (let i = 0; i < id.length; i++)
-      rng = (rng * 31 + id.charCodeAt(i)) % 2147483647;
+    let rng = seededRng(id);
     const choices = [];
     while (choices.length < 3 && pool.length > 0) {
-      rng = rng * 16807 % 2147483647;
+      rng = nextRng(rng);
       choices.push(pool.splice(rng % pool.length, 1)[0]);
     }
-    const offer2 = { id, ante, choices, picks: {} };
+    const offer2 = {
+      id,
+      ante,
+      choices,
+      picks: {},
+      deadline: now + DECK_PICK_MS
+    };
     const next2 = __spreadProps(__spreadValues({}, lobby), {
       almanac: __spreadProps(__spreadValues({}, current), { offers: __spreadProps(__spreadValues({}, current.offers), { [ante]: offer2 }) })
     });
-    return { lobby: next2, out: [view(next2, offer2, from)] };
+    return { lobby: next2, out: [offerMessage(next2, offer2, from, now)] };
   }
   if (!existing || params.id !== existing.id) return refuse3("stale_offer");
-  if (existing.picks[from]) return { lobby, out: [view(lobby, existing, from)] };
+  if (existing.deadline !== void 0 && now >= existing.deadline)
+    return almanacTick(lobby, now);
+  if (existing.picks[from]) return { lobby, out: [offerMessage(lobby, existing, from, now)] };
   if (typeof params.deck !== "string" || !existing.choices.includes(params.deck))
     return refuse3("not_offered");
   const offer = __spreadProps(__spreadValues({}, existing), {
@@ -9148,7 +9183,38 @@ function almanacAction(lobby, from, key, input) {
     })
   });
   const next = __spreadProps(__spreadValues({}, lobby), { almanac: state });
-  return { lobby: next, out: [view(next, offer, from)] };
+  return { lobby: next, out: [offerMessage(next, offer, from, now)] };
+}
+function almanacTick(lobby, now) {
+  const current = lobby.almanac;
+  const started = lobby.game.started;
+  if (!current || lobby.closed || !started || current.run !== started.runId || current.players.some((id) => !lobby.players.some((p) => p.id === id)))
+    return { lobby, out: [] };
+  const offers = __spreadValues({}, current.offers);
+  const acquired = __spreadValues({}, current.acquired);
+  const expired = [];
+  for (const key of Object.keys(offers)) {
+    const offer = offers[key];
+    if (offer.deadline === void 0 || now < offer.deadline || current.players.every((id) => !!offer.picks[id]))
+      continue;
+    const picks = __spreadValues({}, offer.picks);
+    for (const id of current.players) {
+      if (picks[id] || offer.choices.length === 0) continue;
+      const rolled = offer.choices[nextRng(seededRng(`${offer.id}:${id}`)) % offer.choices.length];
+      picks[id] = rolled;
+      acquired[id] = [...acquired[id], rolled];
+    }
+    offers[key] = __spreadProps(__spreadValues({}, offer), { picks });
+    expired.push(offers[key]);
+  }
+  if (expired.length === 0) return { lobby, out: [] };
+  const next = __spreadProps(__spreadValues({}, lobby), { almanac: __spreadProps(__spreadValues({}, current), { offers, acquired }) });
+  return {
+    lobby: next,
+    out: expired.flatMap(
+      (offer) => current.players.map((id) => offerMessage(next, offer, id, now))
+    )
+  };
 }
 
 // src/lobby/shared_rules.ts
@@ -9179,13 +9245,13 @@ function message(lobby, key, params, to) {
   };
 }
 function roll(state, count2) {
-  state.rng = state.rng * 16807 % 2147483647;
+  state.rng = nextRng(state.rng);
   return state.rng % count2;
 }
 function eligible(ante) {
   return Object.keys(RULE_ANTES).filter((key) => RULE_ANTES[key] <= ante).sort();
 }
-function view2(lobby, state, id, now) {
+function view(lobby, state, id, now) {
   if (state.rules) {
     return message(
       lobby,
@@ -9239,8 +9305,20 @@ function sharedRulesTick(lobby, now) {
   const next = __spreadProps(__spreadValues({}, lobby), { sharedRules: state });
   return {
     lobby: next,
-    out: state.players.map((id) => view2(next, state, id, now))
+    out: state.players.map((id) => view(next, state, id, now))
   };
+}
+function sharedRulesEnabled(lobby) {
+  return lobby.modId === PVP_MOD_ID && (isAlmanac(lobby) || !lobby.rankedMode && !lobby.gameMode && lobby.metadata.shared_pvp_rules === true);
+}
+function startBlindRefusal(lobby, key, params) {
+  var _a;
+  if (key !== "pvp_start_blind" || !sharedRulesEnabled(lobby)) return null;
+  if ("shared_rules" in paramsObject(params)) return "rules_required";
+  const started = lobby.game.started;
+  if (started && ((_a = lobby.sharedRules) == null ? void 0 : _a.run) === started.runId)
+    return "rules_required";
+  return null;
 }
 function sharedRulesAction(lobby, from, key, input, now) {
   var _a, _b;
@@ -9251,22 +9329,14 @@ function sharedRulesAction(lobby, from, key, input, now) {
     "pvp_rules_offer"
   ].includes(key))
     return null;
-  const refuse3 = (reason) => ({
-    lobby,
-    out: [
-      {
-        kind: "send",
-        op: ServerOp.ACTION_REJECTED,
-        to: [from],
-        payload: { action: key, reason }
-      }
-    ]
-  });
+  const refuse3 = (reason) => rejectStep(lobby, from, key, reason);
   if (key === "pvp_rules_offer") return refuse3("server_only");
   const started = lobby.game.started;
-  if (lobby.modId !== "MultiplayerPvP" || !started || !isAlmanac(lobby) && (lobby.rankedMode || lobby.gameMode || lobby.metadata.shared_pvp_rules !== true) || started.players.length !== 2 || lobby.players.length !== 2 || !started.players.some((player) => player.id === from))
+  if (!started || !sharedRulesEnabled(lobby) || started.players.length !== 2 || !started.players.some((player) => player.id === from))
     return refuse3("unavailable");
-  const params = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  if (lobby.players.length > 2) return refuse3("too_many_players");
+  if (lobby.players.length !== 2) return refuse3("unavailable");
+  const params = paramsObject(input);
   const current = ((_a = lobby.sharedRules) == null ? void 0 : _a.run) === started.runId ? lobby.sharedRules : void 0;
   if (key === "pvp_rules_open") {
     if (from !== lobby.hostId) return refuse3("not_host");
@@ -9281,16 +9351,14 @@ function sharedRulesAction(lobby, from, key, input, now) {
     if (current && id === current.id) {
       return {
         lobby,
-        out: current.players.map((id2) => view2(lobby, current, id2, now))
+        out: current.players.map((id2) => view(lobby, current, id2, now))
       };
     }
     if (current && ante === current.ante && !roundId)
       return refuse3("stale_encounter");
     if (current && !current.rules) return refuse3("draft_in_progress");
     const players = started.players.map((player) => player.id).sort();
-    let rng = 1;
-    for (let i = 0; i < id.length; i++)
-      rng = (rng * 31 + id.charCodeAt(i)) % 2147483647;
+    const rng = seededRng(id);
     const startingHands = {};
     if (params.starting_hands && typeof params.starting_hands === "object") {
       for (const player of players) {
@@ -9322,7 +9390,7 @@ function sharedRulesAction(lobby, from, key, input, now) {
     const next2 = __spreadProps(__spreadValues({}, lobby), { sharedRules: state2 });
     return {
       lobby: next2,
-      out: players.map((player) => view2(next2, state2, player, now))
+      out: players.map((player) => view(next2, state2, player, now))
     };
   }
   if (!current)
@@ -9330,7 +9398,7 @@ function sharedRulesAction(lobby, from, key, input, now) {
   if (key === "pvp_rules_sync") {
     const ticked = sharedRulesTick(lobby, now);
     if (ticked.out.length) return ticked;
-    return { lobby, out: [view2(lobby, current, from, now)] };
+    return { lobby, out: [view(lobby, current, from, now)] };
   }
   if (params.id !== current.id) return refuse3("stale_encounter");
   if (now >= current.deadline) return sharedRulesTick(lobby, now);
@@ -9342,7 +9410,7 @@ function sharedRulesAction(lobby, from, key, input, now) {
   const next = __spreadProps(__spreadValues({}, lobby), { sharedRules: state });
   return {
     lobby: next,
-    out: state.rules ? state.players.map((id) => view2(next, state, id, now)) : [view2(next, state, from, now)]
+    out: state.rules ? state.players.map((id) => view(next, state, id, now)) : [view(next, state, from, now)]
   };
 }
 
@@ -9431,7 +9499,7 @@ function relayAction(lobby, senderId, data, ctx) {
     return refuse3("too_large");
   const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params));
   if (!budgeted) return refuse3("rate_limited");
-  const almanac = almanacAction(budgeted, senderId, key, params);
+  const almanac = almanacAction(budgeted, senderId, key, params, ctx.now);
   if (almanac) return almanac;
   const sharedRules = sharedRulesAction(
     budgeted,
@@ -9441,6 +9509,8 @@ function relayAction(lobby, senderId, data, ctx) {
     ctx.now
   );
   if (sharedRules) return sharedRules;
+  const rulesRequired = startBlindRefusal(budgeted, key, params);
+  if (rulesRequired) return refuse3(rulesRequired);
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
     if (!authoritative) return refuse3("not_authoritative");
@@ -9648,12 +9718,12 @@ function messageOf(refusal) {
   }
 }
 function rejoinRejectMessage(refusal) {
-  const view3 = {
+  const view2 = {
     reason: refusal.reason,
     mods: refusal.reason === "mods_not_allowed" ? refusal.mods : [],
     message: messageOf(refusal)
   };
-  return REJOIN_REFUSED_PREFIX + JSON.stringify(view3);
+  return REJOIN_REFUSED_PREFIX + JSON.stringify(view2);
 }
 
 // src/lobby/match.ts
@@ -10192,13 +10262,22 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
     sharedRulesTick(ticked.lobby, now)
   );
   if (!rulesTicked) return null;
-  const setupTicked = apply(
+  const decksTicked = apply(
     ctx,
     logger,
     nk,
     dispatcher,
     rulesTicked,
-    setupTick(rulesTicked.lobby, now, Math.random)
+    almanacTick(rulesTicked.lobby, now)
+  );
+  if (!decksTicked) return null;
+  const setupTicked = apply(
+    ctx,
+    logger,
+    nk,
+    dispatcher,
+    decksTicked,
+    setupTick(decksTicked.lobby, now, Math.random)
   );
   if (!setupTicked) return null;
   const settled = apply(
@@ -10393,7 +10472,7 @@ function callModeration(nk, logger, env, request) {
   }
 }
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
 var import_index = __toESM(require_dist(), 1);
 var DataSet = import_index.default.DataSet;
 var ParserError = import_index.default.ParserError;

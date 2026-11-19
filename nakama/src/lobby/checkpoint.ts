@@ -96,6 +96,19 @@ export function resumeFrom(checkpoint: Checkpoint, now: number): Lobby {
 					deadline: lobby.sharedRules.deadline + downtime,
 				}
 			: undefined,
+		almanac: lobby.almanac
+			? {
+					...lobby.almanac,
+					offers: Object.fromEntries(
+						Object.entries(lobby.almanac.offers).map(([ante, offer]) => [
+							ante,
+							offer.deadline === undefined
+								? offer
+								: { ...offer, deadline: offer.deadline + downtime },
+						]),
+					),
+				}
+			: undefined,
 	}
 }
 

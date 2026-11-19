@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DECK_ANTES, almanacAction } from './almanac'
+import { DECK_ANTES, DECK_PICK_MS, almanacAction, almanacTick } from './almanac'
 import { checkpointOf, resumeFrom } from './checkpoint'
 import { ServerOp } from './protocol'
 import { action } from './relay'
@@ -131,9 +131,10 @@ describe('Almanac deck ledger through the real relay', () => {
 		lobby = pick(lobby, 'a', 2, deck).lobby
 		const checkpoint = present(checkpointOf(lobby, 100))
 		lobby = resumeFrom(JSON.parse(JSON.stringify(checkpoint)), 5_000)
+		const resumed = lobby.almanac
 		lobby = { ...lobby, hostId: 'b' }
 		const sync = open(lobby, 'a', 2)
-		expect(sync.lobby.almanac).toEqual(checkpoint.lobby.almanac)
+		expect(sync.lobby.almanac).toEqual(resumed)
 		expect(
 			sync.out.find((out) => out.kind === 'send' && out.op === ServerOp.ACTION),
 		).toMatchObject({ payload: { from: 'b', params: { picked: deck } } })
@@ -155,7 +156,7 @@ describe('Almanac deck ledger through the real relay', () => {
 		]
 		for (const attempt of attempts)
 			expect(attempt.out[0]).toMatchObject({ op: ServerOp.ACTION_REJECTED })
-		expect(almanacAction(lobby, 'a', 'ordinary_action', {})).toBeNull()
+		expect(almanacAction(lobby, 'a', 'ordinary_action', {}, 100)).toBeNull()
 	})
 	it('starts a new ledger after rematch without changing the previous game', () => {
 		const lobby = open(fixture(), 'a', 2).lobby
@@ -170,5 +171,68 @@ describe('Almanac deck ledger through the real relay', () => {
 		expect(state(restarted).run).toBe('NEXT')
 		expect(state(restarted).acquired).toEqual({ a: [], b: [] })
 		expect(state(lobby).run).toBe('RUN')
+	})
+})
+
+describe('Almanac deck offer deadline', () => {
+	it('rolls the pick of a player who never answers and tells both players', () => {
+		let lobby = open(fixture(), 'a', 2).lobby
+		const [first] = state(lobby).offers[2].choices
+		lobby = pick(lobby, 'a', 2, first).lobby
+		expect(almanacTick(lobby, 100 + DECK_PICK_MS - 1).out).toEqual([])
+		const step = almanacTick(lobby, 100 + DECK_PICK_MS)
+		const offer = state(step.lobby).offers[2]
+		expect(offer.picks.a).toBe(first)
+		expect(offer.choices).toContain(offer.picks.b)
+		expect(state(step.lobby).acquired.b).toEqual([offer.picks.b])
+		expect(step.out.map((out) => out.kind === 'send' && out.to[0])).toEqual([
+			'a',
+			'b',
+		])
+		expect(almanacTick(step.lobby, 100 + DECK_PICK_MS + 1).out).toEqual([])
+		// The next milestone is no longer blocked by the silent player.
+		expect(
+			state(send(step.lobby, 'a', 'pvp_almanac_open', { ante: 3 }).lobby).offers[3],
+		).toBeDefined()
+	})
+	it('refuses a pick that arrives after the deadline and settles the offer', () => {
+		const lobby = open(fixture(), 'a', 2).lobby
+		const step = action(
+			lobby,
+			'a',
+			{
+				cid: '',
+				action: 'pvp_almanac_pick',
+				to: '*',
+				params: {
+					id: state(lobby).offers[2].id,
+					ante: 2,
+					deck: state(lobby).offers[2].choices[0],
+				},
+			},
+			{
+				now: 100 + DECK_PICK_MS,
+				newSeed: () => 'SEED',
+				newId: () => 'RUN',
+				random: () => 0,
+			},
+		)
+		expect(Object.keys(state(step.lobby).offers[2].picks).sort()).toEqual(['a', 'b'])
+	})
+	it('moves the deadline by the downtime on resume', () => {
+		const lobby = open(fixture(), 'a', 2).lobby
+		const resumed = resumeFrom(present(checkpointOf(lobby, 1_000)), 5_000)
+		expect(state(resumed).offers[2].deadline).toBe(100 + DECK_PICK_MS + 4_000)
+	})
+	it('says why a lobby with three players cannot draft', () => {
+		const lobby = fixture()
+		const crowded = join({ ...lobby, maxPlayers: 3 }, 'c', 'c', {
+			displayName: 'c',
+			preferredJoker: null,
+			mods: null,
+		}).lobby
+		expect(open(crowded, 'a', 2).out[0]).toMatchObject({
+			payload: { reason: 'too_many_players' },
+		})
 	})
 })
