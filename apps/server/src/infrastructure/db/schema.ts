@@ -156,6 +156,9 @@ export const serverConfig = pgTable('server_config', {
 	achievementsEnabled: boolean('achievements_enabled')
 		.notNull()
 		.default(true),
+	// The strike ladders' steps (features/strikes/ladder.ts). Null: the defaults.
+	chatLadderSteps: jsonb('chat_ladder_steps'),
+	playLadderSteps: jsonb('play_ladder_steps'),
 	updatedAt: timestamp('updated_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),
@@ -208,6 +211,13 @@ export const reports = pgTable('reports', {
 	// Submitter-added detail from their scoped /reports/:id status page (§15.5),
 	// kept distinct from `message` (the in-game submission-time note).
 	additionalDetail: text('additional_detail'),
+	// Set once, when the game's one-time page for this report is first opened.
+	// Later opens of the plain address show only "Submitted".
+	pageOpenedAt: timestamp('page_opened_at', { withTimezone: true }),
+	// Set when the reporter withdrew it before staff decided.
+	withdrawnAt: timestamp('withdrawn_at', { withTimezone: true }),
+	// Set once, when the reporter was told staff acted on the player they reported.
+	reporterToldAt: timestamp('reporter_told_at', { withTimezone: true }),
 	createdAt: timestamp('created_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),
@@ -216,6 +226,34 @@ export const reports = pgTable('reports', {
 	index('reports_reported_idx').on(t.reportedId),
 	index('reports_reporter_idx').on(t.reporterId),
 ])
+
+// A player's Contest of a match: made in the game, or from the website after
+// the match. A match has one queue item (service_queue_items, type 'contest',
+// source_id = run id) and this table holds every Contest it carries, one per
+// player.
+export const contests = pgTable(
+	'contests',
+	{
+		id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+		runId: varchar('run_id', { length: 36 }).notNull(),
+		// 'in_game' | 'website'
+		kind: varchar('kind', { length: 16 }).notNull(),
+		contesterId: uuid('contester_id')
+			.notNull()
+			.references(() => players.id),
+		// The player contested in the game; null for a website Contest.
+		againstId: uuid('against_id').references(() => players.id),
+		// 'stalling' | 'rule_breaking' | 'other', set on the Contest page.
+		reason: varchar('reason', { length: 16 }),
+		detail: text('detail'),
+		// Set once, when the Contest's one-time page is first opened.
+		pageOpenedAt: timestamp('page_opened_at', { withTimezone: true }),
+		// Set when the contester withdrew it before staff decided.
+		withdrawnAt: timestamp('withdrawn_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [uniqueIndex('contests_run_contester_idx').on(t.runId, t.contesterId)],
+)
 
 // Chat messages saved when a lobby receives a report.
 // Contains the buffered history at report time plus all subsequent messages.
@@ -324,10 +362,9 @@ export const forfeitReconciliationFlags = pgTable(
 // (reports, match_result_conflicts, forfeit_reconciliation_flags): reports.status
 // has a real independent reader today (the player-scoped GET /api/reports/:id
 // status page) so it must stay accurate -- resolving one of those 3 types
-// writes BOTH the source table's own status column (via the existing
-// resolveReport/resolveMatchConflict/dismissForfeitReconciliationFlag/
-// voidForfeitReconciliationFlag gateway functions, unchanged) and this row's
-// status, in one transaction. For the 2 gap types (flagged_chat, anti_cheat)
+// writes BOTH the source table's own status column (via the queue's
+// setReportStatus/setMatchConflictStatus/setForfeitFlagStatus writes) and this
+// row's status, in one transaction. For the 2 gap types (flagged_chat, anti_cheat)
 // -- confirmed via grep to have zero other readers of any status-like
 // concept -- this table alone is authoritative; no status column was added
 // to flagged_messages or match_run_logs for this.
@@ -452,8 +489,59 @@ export const playerWarnings = pgTable(
 		issuedAt: timestamp('issued_at', { withTimezone: true })
 			.notNull()
 			.defaultNow(),
+		// Set when staff lift the warning (a granted appeal); a lifted warning no longer counts as a strike.
+		liftedAt: timestamp('lifted_at', { withTimezone: true }),
+		liftedBy: text('lifted_by'),
 	},
 	(t) => [index('player_warnings_player_idx').on(t.playerId)],
+)
+
+// A player's appeal of one punishment, or of the network ban that blocks them.
+// Each one is also a service queue item (itemType 'appeal', sourceId = this id).
+// A punishment is a player_bans or player_warnings row, told apart by id alone.
+export const appeals = pgTable(
+	'appeals',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		playerId: uuid('player_id')
+			.notNull()
+			.references(() => players.id),
+		// 'punishment' | 'network_ban'
+		targetKind: varchar('target_kind', { length: 16 }).notNull(),
+		punishmentId: uuid('punishment_id'),
+		// The network bans that covered the player's address when they appealed.
+		networkBanIds: jsonb('network_ban_ids').notNull().default(sql`'[]'::jsonb`),
+		message: text('message').notNull(),
+		// 'open' | 'denied' | 'granted'
+		status: varchar('status', { length: 16 }).notNull().default('open'),
+		decisionReason: text('decision_reason'),
+		// 'lifted' | 'shortened' on a granted appeal
+		outcome: varchar('outcome', { length: 16 }),
+		decidedBy: text('decided_by'),
+		decidedAt: timestamp('decided_at', { withTimezone: true }),
+		// When Nakama confirmed the player's decision Notification.
+		notifiedAt: timestamp('notified_at', { withTimezone: true }),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [
+		index('appeals_player_idx').on(t.playerId, t.createdAt),
+		index('appeals_punishment_idx').on(t.punishmentId),
+	],
+)
+
+// A staff note on a player (the player page). Staff read it; the player never does.
+export const playerNotes = pgTable(
+	'player_notes',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		playerId: uuid('player_id')
+			.notNull()
+			.references(() => players.id),
+		authorId: uuid('author_id').notNull(),
+		note: text('note').notNull(),
+		createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [index('player_notes_player_idx').on(t.playerId, t.createdAt)],
 )
 
 // Unused since the move to Nakama (which holds disconnect grace itself); kept
@@ -544,7 +632,119 @@ export const seasons = pgTable('seasons', {
 	startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
 	endsAt: timestamp('ends_at', { withTimezone: true }).notNull(),
 	endedAt: timestamp('ended_at', { withTimezone: true }),
+	// When Nakama confirmed it told the ranked players how the season ended.
+	endNotifiedAt: timestamp('end_notified_at', { withTimezone: true }),
 })
+
+// Beta Seasons: the ranked seasons of the Discord queue era, before Nakama.
+// They are read-only history, kept apart from `seasons` because rollover and
+// Nakama's carry-over read that table's serial ids as one sequence. Players
+// are known only by `discord_id_hash`, the same value as
+// `players.discord_id_hash`, so a legacy row links to an account when the
+// hashes match (scripts/import-beta-seasons.ts writes these tables).
+export const betaSeasons = pgTable('beta_seasons', {
+	number: integer('number').primaryKey(),
+	name: varchar('name', { length: 64 }).notNull(),
+	startedAt: timestamp('started_at', { withTimezone: true }),
+	endedAt: timestamp('ended_at', { withTimezone: true }),
+})
+
+// One player's final place on one Beta Season board.
+export const betaSeasonStandings = pgTable(
+	'beta_season_standings',
+	{
+		season: integer('season').notNull(),
+		modId: varchar('mod_id', { length: 128 }).notNull(),
+		gameMode: varchar('game_mode', { length: 128 }).notNull(),
+		discordIdHash: text('discord_id_hash').notNull(),
+		// The player's name in the queue bot at the time, shown while no
+		// account has that Discord account linked.
+		name: varchar('name', { length: 128 }).notNull(),
+		rank: integer('rank').notNull(),
+		rating: doublePrecision('rating').notNull(),
+		peakRating: doublePrecision('peak_rating'),
+		wins: integer('wins').notNull(),
+		losses: integer('losses').notNull(),
+		gamesPlayed: integer('games_played').notNull(),
+	},
+	(t) => [
+		primaryKey({
+			columns: [t.season, t.modId, t.gameMode, t.discordIdHash],
+		}),
+		index('beta_standings_board_rank_idx').on(
+			t.season,
+			t.modId,
+			t.gameMode,
+			t.rank,
+		),
+		index('beta_standings_player_idx').on(t.discordIdHash),
+	],
+)
+
+// One player's side of one Beta Season ranked game.
+export const betaSeasonGames = pgTable(
+	'beta_season_games',
+	{
+		season: integer('season').notNull(),
+		modId: varchar('mod_id', { length: 128 }).notNull(),
+		gameMode: varchar('game_mode', { length: 128 }).notNull(),
+		// The source system's game id, unique within a season.
+		matchKey: varchar('match_key', { length: 64 }).notNull(),
+		discordIdHash: text('discord_id_hash').notNull(),
+		playedAt: timestamp('played_at', { withTimezone: true }).notNull(),
+		opponentIdHash: text('opponent_id_hash'),
+		opponentName: varchar('opponent_name', { length: 128 }),
+		result: varchar('result', { length: 8 }).notNull(),
+		ratingAfter: doublePrecision('rating_after'),
+		ratingChange: doublePrecision('rating_change'),
+		deck: varchar('deck', { length: 64 }),
+		stake: varchar('stake', { length: 64 }),
+	},
+	(t) => [
+		primaryKey({ columns: [t.season, t.matchKey, t.discordIdHash] }),
+		index('beta_games_player_idx').on(
+			t.discordIdHash,
+			t.season,
+			t.gameMode,
+			t.playedAt,
+		),
+	],
+)
+
+// Games from the legacy website's uploaded logs, converted to the replay
+// event format. The uploader is keyed by the salted Discord id hash, so a game
+// shows on the live account that has the same Discord account linked. Kept
+// apart from match_run_logs: these never expire and are not anti-cheat input.
+export const legacyGameLogs = pgTable(
+	'legacy_game_logs',
+	{
+		id: integer('id').primaryKey(),
+		discordIdHash: text('discord_id_hash'),
+		ownerName: varchar('owner_name', { length: 128 }),
+		opponentName: varchar('opponent_name', { length: 128 }),
+		startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
+		endedAt: timestamp('ended_at', { withTimezone: true }),
+		// False when the log's time zone was a guess.
+		timeExact: boolean('time_exact').notNull(),
+		result: varchar('result', { length: 8 }),
+		deck: varchar('deck', { length: 64 }),
+		stake: varchar('stake', { length: 64 }),
+		seed: varchar('seed', { length: 32 }),
+		betaSeason: integer('beta_season'),
+		betaMatchKey: varchar('beta_match_key', { length: 64 }),
+		ownerEvents: text('owner_events').notNull(),
+		opponentEvents: text('opponent_events'),
+		sharedAt: timestamp('shared_at', { withTimezone: true }),
+	},
+	(t) => [
+		index('legacy_game_logs_owner_idx').on(t.discordIdHash, t.startedAt),
+		index('legacy_game_logs_beta_idx').on(
+			t.discordIdHash,
+			t.betaSeason,
+			t.betaMatchKey,
+		),
+	],
+)
 
 // What the owner's season replay overwrote, kept so the old board can come back
 // (features/ratings/season-replay-apply.service.ts).
@@ -708,6 +908,8 @@ export const playerBans = pgTable(
 		reason: text('reason').notNull().default(''),
 		liftedAt: timestamp('lifted_at', { withTimezone: true }), // set when lifted early
 		liftedBy: text('lifted_by'),
+		// When Nakama confirmed the player's "ban ended" Notification.
+		endNotifiedAt: timestamp('end_notified_at', { withTimezone: true }),
 	},
 	(t) => [index('player_bans_player_idx').on(t.playerId)],
 )
@@ -755,6 +957,10 @@ export const lobbyRuns = pgTable(
 			.notNull()
 			.defaultNow(),
 		finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+		// Each player's joins, leaves and rejoins with the log counts the server held at
+		// the end (RunConnections in features/nakama/mirror.service.ts). Null for a
+		// run mirrored before Nakama kept them.
+		connections: jsonb('connections'),
 	},
 	(t) => [index('lobby_runs_lobby_code_idx').on(t.lobbyCode)],
 )
@@ -1011,3 +1217,83 @@ export const launcherIntegrityEvents = pgTable(
 	},
 	(t) => [index('launcher_integrity_events_player_idx').on(t.playerId)],
 )
+
+// The staff log: one row per staff action with who, when, whom and the reason
+// (shared/staff-log/actions.ts). Rows from before the log hold an empty reason.
+export const staffLog = pgTable(
+	'staff_log',
+	{
+		id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+		staffPlayerId: uuid('staff_player_id').notNull(),
+		staffRole: varchar('staff_role', { length: 16 }).notNull(),
+		action: varchar('action', { length: 32 }).notNull(),
+		targetPlayerId: uuid('target_player_id'),
+		// The queue item the action was taken on. No foreign key: the log outlives the item.
+		itemId: integer('item_id'),
+		reason: text('reason').notNull(),
+		detail: jsonb('detail'),
+		at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [
+		index('staff_log_at_idx').on(t.at),
+		index('staff_log_staff_idx').on(t.staffPlayerId, t.at),
+		index('staff_log_target_idx').on(t.targetPlayerId, t.at),
+	],
+)
+
+// One training label for one flagged chat message, saved when staff decide
+// the flagged chat item that holds it. No player id: it is training data.
+export const chatReviewLabels = pgTable(
+	'chat_review_labels',
+	{
+		id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+		// The queue item that was decided and the flagged message in it; one label
+		// for each pair, so a reopened and decided item replaces its labels.
+		itemId: integer('item_id').notNull(),
+		flaggedMessageId: integer('flagged_message_id').notNull(),
+		message: text('message').notNull(),
+		// The lines said before the message in its lobby, oldest first.
+		context: jsonb('context').notNull().default(sql`'[]'::jsonb`),
+		// The guard's score and the moderation band; null when the guard did not judge it.
+		score: doublePrecision('score'),
+		band: varchar('band', { length: 64 }),
+		// 'not_harmful' | 'harmful_no_action' | 'harmful' (features/service-queue/flagged-chat.ts).
+		label: varchar('label', { length: 32 }).notNull(),
+		decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+	},
+	(t) => [uniqueIndex('chat_review_labels_item_message_idx').on(t.itemId, t.flaggedMessageId)],
+)
+
+// One punishment counted on a strike ladder (features/strikes/ladder.ts). The
+// strike counts for 3 months from issuedAt, and stops counting at once when its
+// punishment is lifted (a warning is lifted only by a granted appeal). It keeps the recommended step and,
+// when staff picked another, the reason they gave.
+export const playerStrikes = pgTable(
+	'player_strikes',
+	{
+		id: uuid('id').primaryKey().defaultRandom(),
+		playerId: uuid('player_id')
+			.notNull()
+			.references(() => players.id),
+		ladder: varchar('ladder', { length: 8 }).notNull(),
+		banId: uuid('ban_id').references(() => playerBans.id),
+		warningId: uuid('warning_id').references(() => playerWarnings.id),
+		recommendedStep: varchar('recommended_step', { length: 16 }).notNull(),
+		appliedStep: varchar('applied_step', { length: 16 }).notNull(),
+		deviationReason: text('deviation_reason'),
+		issuedAt: timestamp('issued_at', { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+	},
+	(t) => [index('player_strikes_player_idx').on(t.playerId, t.ladder)],
+)
+
+// The preset reasons of one queue item type: an ordered list of short notes
+// (features/service-queue/preset-reasons.ts). Seeded by migration 0067.
+export const presetReasons = pgTable('preset_reasons', {
+	itemType: varchar('item_type', { length: 32 }).primaryKey(),
+	reasons: jsonb('reasons').notNull(),
+	updatedAt: timestamp('updated_at', { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+})

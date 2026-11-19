@@ -115,6 +115,42 @@ describe('runRowsOf', () => {
 		})
 	})
 
+	it('stores a log with a gap as partial and flags no hash mismatch for it', () => {
+		const entry = { ...run({ flags: undefined, logChecks: { na: 'match', nb: 'incomplete' }, logGaps: { na: 0, nb: 3 } }), rating: null }
+		const rows = runRowsOf(entry, ids)
+		expect(rows.logs.map((l) => l.status)).toEqual(['complete', 'partial'])
+		expect(rows.flagged).toEqual([])
+		// a complete log whose code differs is still a hash mismatch
+		const mismatch = runRowsOf({ ...entry, run: { ...entry.run, logChecks: { na: 'match', nb: 'mismatch' } } }, ids)
+		expect(mismatch.flagged).toEqual([{ playerId: 'pg-b', reason: 'hash_mismatch' }])
+	})
+
+	it('stores the seat changes and held log counts under Postgres player ids', () => {
+		const entry = {
+			...run({
+				presence: [
+					{ userId: 'na', kind: 'disconnected', at: T0 + 1000 },
+					{ userId: 'na', kind: 'rejoined', at: T0 + 5000 },
+					{ userId: 'nb', kind: 'left', at: T0 + 9000 },
+					{ userId: 'nb', kind: 'kicked', at: T0 + 9500, by: 'server', reason: 'banned' },
+					{ userId: 'unknown', kind: 'left', at: T0 + 9900 },
+				],
+				logHeld: { na: 12, nb: 7 },
+			}),
+			rating: null,
+		}
+		expect(runRowsOf(entry, ids).lobbyRun.connections).toEqual({
+			events: [
+				{ playerId: 'pg-a', kind: 'disconnected', at: T0 + 1000 },
+				{ playerId: 'pg-a', kind: 'rejoined', at: T0 + 5000 },
+				{ playerId: 'pg-b', kind: 'left', at: T0 + 9000 },
+				{ playerId: 'pg-b', kind: 'kicked', at: T0 + 9500, by: 'server', reason: 'banned' },
+			],
+			logHeld: { 'pg-a': 12, 'pg-b': 7 },
+		})
+		expect(runRowsOf({ ...entry, run: run().run }, ids).lobbyRun.connections).toBeNull()
+	})
+
 	it('maps a private, abandoned or restarted run without a match or ratings', () => {
 		const entry = { ...run({ gameMode: undefined, rankedMode: undefined, lobbyType: undefined, status: 'abandoned', logChecks: {} }), rating: null }
 		const rows = runRowsOf(entry, ids)
@@ -149,6 +185,14 @@ describe('runRowsOf: flags and disputes', () => {
 		// A casual run, or a record from before ratings were stored: no marker.
 		expect(runRowsOf(run({ rankedMode: undefined, gameMode: 'duel', ratings: {} }), ids).match?.resultPlacements[0]).not.toHaveProperty('rated')
 		expect(runRowsOf(run(), ids).match?.resultPlacements[0]).not.toHaveProperty('rated')
+	})
+
+	it('makes no anti-cheat item when every player of the match is flagged, and one when a single player is', () => {
+		const both = runRowsOf(run({ flags: { na: 'hash_mismatch', nb: 'hash_mismatch' } }), ids)
+		expect(both.flagged).toHaveLength(2)
+		expect(both.raiseAntiCheatItems).toBe(false)
+		const one = runRowsOf(run({ flags: { nb: 'hash_mismatch' } }), ids)
+		expect(one.raiseAntiCheatItems).toBe(true)
 	})
 
 	it('takes the run\'s own flags over its log checks', () => {
@@ -211,7 +255,7 @@ describe('runRowsOf: contests', () => {
 
 	it('files the contester and the contested player, as player ids', () => {
 		const rows = runRowsOf(contested(), ids)
-		expect(rows.contest).toEqual({ contesterId: 'pg-b', againstId: 'pg-a' })
+		expect(rows.contest).toMatchObject({ contesterId: 'pg-b', againstId: 'pg-a', at: expect.any(Date) })
 		expect(rows.lobbyRun.status).toBe('completed')
 		expect(runRowsOf(run(), ids).contest).toBeNull()
 	})
@@ -251,6 +295,24 @@ describe('chatRowsOf', () => {
 		expect(rows.flaggedMessage).toMatchObject({ matches: { source: 'remote', band: 'high' }, mirrorKey: 'k-chat' })
 	})
 
+	it('stores the guard score with the verdict, and still files the flag with band only', () => {
+		const verdict = { source: 'remote', band: 'review', guardSafety: 'Controversial', guardScore: 0.5, guardContextUsed: true }
+		const rows = chatRowsOf({ ...line(true), line: { ...line(true).line, verdict } }, 'pg-a', null)
+		expect(rows.chat.moderationVerdict).toEqual(verdict)
+		expect(rows.flaggedMessage?.matches).toEqual({ source: 'remote', band: 'review' })
+	})
+
+	it('stores the guard score of a line that was not flagged', () => {
+		const verdict = { source: 'remote', band: 'clean', guardSafety: 'Safe', guardScore: 0.01, guardContextUsed: false }
+		const rows = chatRowsOf({ ...line(false), line: { ...line(false).line, verdict } }, 'pg-a', 'hash')
+		expect(rows.chat).toMatchObject({ flagged: false, moderationVerdict: verdict })
+		expect(rows.flaggedMessage).toBeNull()
+	})
+
+	it('stores no verdict for an older line that has none', () => {
+		expect(chatRowsOf(line(false), 'pg-a', 'hash').chat.moderationVerdict).toBeNull()
+	})
+
 	it('keeps what the local word filter matched as the API wrote it', () => {
 		const matches = [{ word: 'fuck', startIndex: 0, endIndex: 3 }]
 		const entry = line(true)
@@ -272,6 +334,7 @@ function deps() {
 		storeChat: vi.fn(async () => undefined),
 		storeForfeit: vi.fn(async () => undefined),
 		storeNoticeAcceptance: vi.fn(async () => undefined),
+		storeContest: vi.fn(async () => undefined),
 	}
 	const service = createMirrorService({ players, store })
 	return { players, store, service }
@@ -412,5 +475,22 @@ describe('rankedGameModeOf', () => {
 	it('keys a Nakama board the way the website reads it', () => {
 		expect(rankedGameModeOf('duel')).toBe('ranked:duel')
 		expect(rankedGameModeOf('ranked:duel')).toBe('ranked:duel')
+	})
+})
+
+describe('a contest entry', () => {
+	it('records the Contest of a game that is still running', async () => {
+		const { store, service } = deps()
+		const result = await service.storePull({
+			entries: [{ key: 'k-c', kind: 'contest', at: T0, runId: 'r1', code: 'ABCDE', by: 'na', against: 'nb', lobbyKind: 'ranked' }],
+			players: {
+				na: { steamIdHash: null, legacyPlayerId: null, displayName: '' },
+				nb: { steamIdHash: null, legacyPlayerId: null, displayName: '' },
+			},
+		})
+		expect(result.stored).toEqual(['k-c'])
+		expect(store.storeContest).toHaveBeenCalledWith(
+			expect.objectContaining({ runId: 'r1', contesterId: 'pg-a', madeAt: new Date(T0) }),
+		)
 	})
 })

@@ -6,6 +6,8 @@ import type {
 	RunWithLogs,
 } from '../../contracts/IReplayLogRepository.js'
 import { db } from '../db/index.js'
+import { shownNameOf } from '../../shared/players/shown-name.js'
+import { usernameBannedAmong } from './ban.gateway.js'
 import { lobbyRuns, matchRunLogs, players } from '../db/schema.js'
 
 // A player's own runs, for "My Matches". Two queries (run ids this player has a log row for, then
@@ -72,6 +74,20 @@ export async function getRunIdsForMatchIds(
 	return map
 }
 
+// The run a lobby is playing now: its newest active run, if any. Codes are
+// reused, so only an active run counts.
+export async function getActiveRunIdForLobbyCode(
+	lobbyCode: string,
+): Promise<string | null> {
+	const [row] = await db
+		.select({ id: lobbyRuns.id })
+		.from(lobbyRuns)
+		.where(and(eq(lobbyRuns.lobbyCode, lobbyCode), eq(lobbyRuns.status, 'active')))
+		.orderBy(desc(lobbyRuns.startedAt))
+		.limit(1)
+	return row?.id ?? null
+}
+
 export async function getRunWithLogs(
 	runId: string,
 ): Promise<RunWithLogs | undefined> {
@@ -125,7 +141,8 @@ export async function setShared(
 	return rows.length > 0
 }
 
-// The name other players see: the Discord name when the player chose it.
+// The name other players see: the Discord name when the player chose it, the
+// Ban name under a username ban.
 export async function getDisplayNames(
 	playerIds: string[],
 ): Promise<Map<string, string>> {
@@ -133,18 +150,13 @@ export async function getDisplayNames(
 	const rows = await db
 		.select({
 			id: players.id,
+			nakamaUserId: players.nakamaUserId,
 			steamName: players.steamName,
 			discordUsername: players.discordUsername,
 			useDiscordName: players.useDiscordName,
 		})
 		.from(players)
 		.where(inArray(players.id, playerIds))
-	return new Map(
-		rows.map((row) => [
-			row.id,
-			row.useDiscordName && row.discordUsername
-				? row.discordUsername
-				: row.steamName,
-		]),
-	)
+	const banned = await usernameBannedAmong(playerIds)
+	return new Map(rows.map((row) => [row.id, shownNameOf(row, banned.has(row.id))]))
 }

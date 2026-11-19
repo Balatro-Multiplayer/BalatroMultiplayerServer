@@ -57,9 +57,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
 ));
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
 var require_Char = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isHighSurrogate = isHighSurrogate;
@@ -107,9 +107,9 @@ var require_Char = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
 var require_BuiltinStrategies = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.keepStartCensorStrategy = keepStartCensorStrategy2;
@@ -171,9 +171,9 @@ var require_BuiltinStrategies = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
 var require_Interval = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareIntervals = compareIntervals;
@@ -191,9 +191,9 @@ var require_Interval = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
 var require_MatchPayload = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareMatchByPositionAndId = compareMatchByPositionAndId2;
@@ -207,9 +207,9 @@ var require_MatchPayload = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
 var require_TextCensor = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TextCensor = void 0;
@@ -300,9 +300,9 @@ var require_TextCensor = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
 var require_BlacklistedTerm = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignIncrementingIds = assignIncrementingIds2;
@@ -313,9 +313,9 @@ var require_BlacklistedTerm = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
 var require_DataSet = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PhraseBuilder = exports.DataSet = void 0;
@@ -358,8 +358,8 @@ var require_DataSet = __commonJS({
         this.patternIdToPhraseContainer.clear();
         const containers = this.containers.splice(0);
         for (const container of containers) {
-          const remove2 = predicate(container);
-          if (!remove2)
+          const remove3 = predicate(container);
+          if (!remove3)
             this.registerContainer(container);
         }
         return this;
@@ -482,17 +482,17 @@ var require_DataSet = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
 var require_Matcher = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
 var require_Nodes = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.SyntaxKind = void 0;
@@ -506,9 +506,9 @@ var require_Nodes = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
 var require_Util = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.potentiallyMatchesEmptyString = potentiallyMatchesEmptyString;
@@ -549,9 +549,9 @@ var require_Util = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
 var require_TransformerSet = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TransformerSet = void 0;
@@ -591,9 +591,9 @@ var require_TransformerSet = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
 var require_CharacterIterator = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CharacterIterator = void 0;
@@ -656,9 +656,9 @@ var require_CharacterIterator = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
 var require_IntervalCollection = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IntervalCollection = void 0;
@@ -700,9 +700,9 @@ var require_IntervalCollection = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
 var require_RegExpMatcher = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.RegExpMatcher = void 0;
@@ -878,15 +878,15 @@ var require_RegExpMatcher = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
 var require_ParserError = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ParserError = void 0;
     var ParserError2 = class extends Error {
-      constructor(message, line, column) {
-        super(`${line}:${column}: ${message}`);
+      constructor(message2, line, column) {
+        super(`${line}:${column}: ${message2}`);
         __publicField(this, "name", "ParserError");
         /**
          * The line on which the error occurred (one-based).
@@ -905,9 +905,9 @@ var require_ParserError = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
 var require_Parser = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Parser = void 0;
@@ -1039,8 +1039,8 @@ var require_Parser = __commonJS({
         }
         return { kind: Nodes_1.SyntaxKind.Literal, chars };
       }
-      reportError(message, { line = this.line, column = this.column } = {}) {
-        throw new ParserError_1.ParserError(message, line, column);
+      reportError(message2, { line = this.line, column = this.column } = {}) {
+        throw new ParserError_1.ParserError(message2, line, column);
       }
       // Marks the current position.
       mark() {
@@ -1099,9 +1099,9 @@ var require_Parser = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
 var require_Pattern = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.pattern = pattern2;
@@ -1122,9 +1122,9 @@ var require_Pattern = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
 var require_Transformers = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSimpleTransformer = createSimpleTransformer2;
@@ -1138,9 +1138,9 @@ var require_Transformers = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
 var require_transformer = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CollapseDuplicatesTransformer = void 0;
@@ -1172,9 +1172,9 @@ var require_transformer = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
 var require_collapse_duplicates = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.collapseDuplicatesTransformer = collapseDuplicatesTransformer2;
@@ -1198,9 +1198,9 @@ var require_collapse_duplicates = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
 var require_remap_characters = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.remapCharactersTransformer = remapCharactersTransformer2;
@@ -1228,9 +1228,9 @@ var require_remap_characters = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
 var require_confusables = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.confusables = void 0;
@@ -1308,9 +1308,9 @@ var require_confusables = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
 var require_resolve_confusables = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveConfusablesTransformer = resolveConfusablesTransformer2;
@@ -1322,9 +1322,9 @@ var require_resolve_confusables = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
 var require_dictionary = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.dictionary = void 0;
@@ -1343,9 +1343,9 @@ var require_dictionary = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
 var require_resolve_leetspeak = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveLeetSpeakTransformer = resolveLeetSpeakTransformer2;
@@ -1357,9 +1357,9 @@ var require_resolve_leetspeak = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
 var require_to_ascii_lowercase = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.toAsciiLowerCaseTransformer = toAsciiLowerCaseTransformer2;
@@ -1371,9 +1371,9 @@ var require_to_ascii_lowercase = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
 var require_english = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.englishDataset = exports.englishRecommendedTransformers = exports.englishRecommendedWhitelistMatcherTransformers = exports.englishRecommendedBlacklistMatcherTransformers = void 0;
@@ -1423,9 +1423,9 @@ var require_english = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
 var require_skip_non_alphabetic = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.skipNonAlphabeticTransformer = skipNonAlphabeticTransformer2;
@@ -1437,9 +1437,9 @@ var require_skip_non_alphabetic = __commonJS({
   }
 });
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
 var require_dist = __commonJS({
-  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
+  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -1488,8 +1488,8 @@ var RESOURCE_EXHAUSTED = 8;
 var FAILED_PRECONDITION = 9;
 var UNAVAILABLE = 14;
 var UNAUTHENTICATED = 16;
-function runtimeError(code, message) {
-  return { code, message };
+function runtimeError(code, message2) {
+  return { code, message: message2 };
 }
 
 // src/rpc.ts
@@ -1535,7 +1535,11 @@ var ClientOp = {
   ACTION: 5,
   // {catchingUp} -- the sender is (or is no longer) replaying its own run
   // after a crash. The seat is safe either way: nothing waits for it.
-  CATCHING_UP: 6
+  CATCHING_UP: 6,
+  // {playerId, fromStart?} -- a spectator asks for the run of the player it watches: that
+  // player's Run save and the events after it (answered with SPECTATE_RUN).
+  // fromStart asks for the whole log and no Run save.
+  SPECTATE_VIEW: 7
 };
 var ServerOp = {
   // Snapshot, to the joining player only.
@@ -1567,7 +1571,9 @@ var ServerOp = {
   REPLAY_TAIL: 111,
   // GroupQueueMessage, to the home lobby's players: its group queue moved on
   // (matchmaking/group).
-  GROUP_QUEUE: 112
+  GROUP_QUEUE: 112,
+  // SpectateRun, to the spectator that asked (ClientOp.SPECTATE_VIEW).
+  SPECTATE_RUN: 113
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -1764,7 +1770,7 @@ function reporterIds(nk) {
 // src/moderation/bans.ts
 var MODERATION_COLLECTION = "moderation";
 var BANS_KEY = "bans";
-var BAN_TYPES = ["chat", "queue", "account"];
+var BAN_TYPES = ["chat", "queue", "account", "username"];
 function isBanType(value) {
   return typeof value === "string" && BAN_TYPES.indexOf(value) !== -1;
 }
@@ -1864,6 +1870,182 @@ function banMessage(what, ban) {
 var ACCOUNT_BANNED = "Account banned";
 var NETWORK_BANNED = "Your network is banned from online play.";
 var NETWORK_BAN_MESSAGE = NETWORK_BANNED + " To appeal, email bmp@virtualized.dev";
+
+// ../packages/types/src/ban-name.ts
+var BAN_NAME_DECKS = [
+  "Magic",
+  "Nebula",
+  "Ghost",
+  "Abandoned",
+  "Checkered",
+  "Zodiac",
+  "Painted",
+  "Anaglyph",
+  "Plasma",
+  "Erratic"
+];
+var BAN_NAME_JOKERS = [
+  "Greedy",
+  "Lusty",
+  "Wrathful",
+  "Gluttonous",
+  "Jolly",
+  "Zany",
+  "Mad",
+  "Crazy",
+  "Droll",
+  "Sly",
+  "Wily",
+  "Clever",
+  "Devious",
+  "Crafty",
+  "Half",
+  "Stencil",
+  "Four Fingers",
+  "Mime",
+  "Credit Card",
+  "Ceremonial Dagger",
+  "Banner",
+  "Mystic Summit",
+  "Marble",
+  "Loyalty Card",
+  "8 Ball",
+  "Misprint",
+  "Dusk",
+  "Raised Fist",
+  "Chaos the Clown",
+  "Fibonacci",
+  "Steel",
+  "Scary Face",
+  "Abstract",
+  "Delayed Gratification",
+  "Hack",
+  "Pareidolia",
+  "Gros Michel",
+  "Even Steven",
+  "Odd Todd",
+  "Scholar",
+  "Business Card",
+  "Supernova",
+  "Ride the Bus",
+  "Space",
+  "Egg",
+  "Burglar",
+  "Blackboard",
+  "Runner",
+  "Ice Cream",
+  "DNA",
+  "Splash",
+  "Blue",
+  "Sixth Sense",
+  "Constellation",
+  "Hiker",
+  "Faceless",
+  "Green",
+  "Superposition",
+  "To Do List",
+  "Cavendish",
+  "Card Sharp",
+  "Red Card",
+  "Madness",
+  "Square",
+  "Seance",
+  "Riff-raff",
+  "Vampire",
+  "Shortcut",
+  "Hologram",
+  "Vagabond",
+  "Baron",
+  "Cloud 9",
+  "Rocket",
+  "Obelisk",
+  "Midas Mask",
+  "Luchador",
+  "Photograph",
+  "Gift Card",
+  "Turtle Bean",
+  "Erosion",
+  "Reserved Parking",
+  "Mail-In Rebate",
+  "To the Moon",
+  "Hallucination",
+  "Fortune Teller",
+  "Juggler",
+  "Drunkard",
+  "Stone",
+  "Golden",
+  "Lucky Cat",
+  "Baseball Card",
+  "Bull",
+  "Diet Cola",
+  "Trading Card",
+  "Flash Card",
+  "Popcorn",
+  "Spare Trousers",
+  "Ancient",
+  "Ramen",
+  "Walkie Talkie",
+  "Seltzer",
+  "Castle",
+  "Smiley Face",
+  "Campfire",
+  "Golden Ticket",
+  "Mr. Bones",
+  "Acrobat",
+  "Sock and Buskin",
+  "Swashbuckler",
+  "Troubadour",
+  "Certificate",
+  "Smeared",
+  "Throwback",
+  "Hanging Chad",
+  "Rough Gem",
+  "Bloodstone",
+  "Arrowhead",
+  "Onyx Agate",
+  "Glass",
+  "Showman",
+  "Flower Pot",
+  "Blueprint",
+  "Wee",
+  "Merry Andy",
+  "Oops! All 6s",
+  "The Idol",
+  "Seeing Double",
+  "Matador",
+  "Hit the Road",
+  "The Duo",
+  "The Trio",
+  "The Family",
+  "The Order",
+  "The Tribe",
+  "Stuntman",
+  "Invisible",
+  "Brainstorm",
+  "Satellite",
+  "Shoot the Moon",
+  "Driver's License",
+  "Cartomancer",
+  "Astronomer",
+  "Burnt",
+  "Bootstraps",
+  "Canio",
+  "Triboulet",
+  "Yorick",
+  "Chicot",
+  "Perkeo"
+];
+function hash(text, multiplier, seed) {
+  let h = seed;
+  for (let i = 0; i < text.length; i++) h = (h * multiplier + text.charCodeAt(i)) % 4294967296;
+  return h;
+}
+function banNameOf(playerId) {
+  const id = playerId.toLowerCase();
+  const deck = BAN_NAME_DECKS[hash(id, 33, 5381) % BAN_NAME_DECKS.length];
+  const joker = BAN_NAME_JOKERS[hash(id, 31, 52711) % BAN_NAME_JOKERS.length];
+  return `${deck} ${joker}`;
+}
 
 // src/shared/avatars/ids.ts
 var AVATAR_IDS = [
@@ -2126,11 +2308,19 @@ function displayNameOf(profile) {
   if (profile.useDiscordName && profile.discordUsername) return profile.discordUsername;
   return profile.steamName;
 }
-function playerView(userId, profile) {
+function banNameFor(nk, userId) {
+  return activeBan(readBans(nk, userId), "username", Date.now()) ? banNameOf(userId) : null;
+}
+function shownNameOf(nk, userId, profile) {
+  var _a;
+  return (_a = banNameFor(nk, userId)) != null ? _a : displayNameOf(profile);
+}
+function playerView(nk, userId, profile) {
   return {
     id: userId,
     steamName: profile.steamName,
-    displayName: displayNameOf(profile),
+    displayName: shownNameOf(nk, userId, profile),
+    usernameBanned: banNameFor(nk, userId) !== null,
     useDiscordName: profile.useDiscordName,
     preferredJoker: profile.preferredJoker,
     discordLinked: profile.discordIdHash !== null,
@@ -2625,11 +2815,21 @@ function setupAfterDowntime(game, downtime) {
 
 // src/lobby/checkpoint.ts
 var CLAIM_TIMEOUT_MS = 3e4;
+function withoutPendingRunSaves(lobby) {
+  if (!lobby.game.runSavePending) return lobby;
+  const _a = lobby.game, { runSavePending } = _a, game = __objRest(_a, ["runSavePending"]);
+  return __spreadProps(__spreadValues({}, lobby), { game });
+}
 function checkpointOf(lobby, now) {
   if (lobby.closed || lobby.players.length === 0) return null;
   const gq = lobby.groupQueue;
   const parkedUntil = gq && gq.phase === "away" ? gq.until : 0;
-  return { lobby, at: now, claimedAt: null, expiresAt: Math.max(now + CHECKPOINT_TTL_MS, parkedUntil) };
+  return {
+    lobby: withoutPendingRunSaves(lobby),
+    at: now,
+    claimedAt: null,
+    expiresAt: Math.max(now + CHECKPOINT_TTL_MS, parkedUntil)
+  };
 }
 function isExpired(checkpoint, now) {
   return now >= checkpointExpiry(checkpoint);
@@ -2651,7 +2851,18 @@ function resumeFrom(checkpoint, now) {
     game: __spreadProps(__spreadValues({}, lobby.game), {
       settleFrom: settleFrom === null ? null : settleFrom + downtime,
       setup: setupAfterDowntime(lobby.game, downtime)
-    })
+    }),
+    sharedRules: lobby.sharedRules ? __spreadProps(__spreadValues({}, lobby.sharedRules), {
+      deadline: lobby.sharedRules.deadline + downtime
+    }) : void 0,
+    almanac: lobby.almanac ? __spreadProps(__spreadValues({}, lobby.almanac), {
+      offers: Object.fromEntries(
+        Object.entries(lobby.almanac.offers).map(([ante, offer]) => [
+          ante,
+          offer.deadline === void 0 ? offer : __spreadProps(__spreadValues({}, offer), { deadline: offer.deadline + downtime })
+        ])
+      )
+    }) : void 0
   });
 }
 function seatHoldersOf(lobby) {
@@ -2839,6 +3050,10 @@ function pullEntries(nk, limit) {
     } else if (entry.kind === "forfeit" || entry.kind === "notice") {
       userIds[entry.userId] = true;
       entries.push(__spreadValues({ key: object.key }, entry));
+    } else if (entry.kind === "contest") {
+      userIds[entry.by] = true;
+      userIds[entry.against] = true;
+      entries.push(__spreadValues({ key: object.key }, entry));
     } else {
       dropped.push(object.key);
     }
@@ -2890,6 +3105,44 @@ function noteReturn(nk, logger, userId, now) {
   }
 }
 
+// src/lobby/log_check.ts
+var FRAMING_OPCODES = { end: true, chk: true };
+function opcodeOf(line) {
+  return JSON.parse(line)[1];
+}
+function hashInput(lines) {
+  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
+}
+function claimedHash(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event2 = JSON.parse(lines[i]);
+    if (event2[1] !== "chk") continue;
+    const args = event2[2];
+    return args && typeof args.carbon === "string" ? args.carbon : null;
+  }
+  return null;
+}
+function logHeldOf(log) {
+  var _a;
+  return log ? (_a = log.seq) != null ? _a : log.lines.length : 0;
+}
+function logGapsOf(log) {
+  if (!log || log.ahead === void 0) return 0;
+  return Math.max(0, log.ahead - logHeldOf(log));
+}
+function checkLog(log, sha256) {
+  if (!log) return { carbonHash: null, check: "unavailable" };
+  const carbonHash = claimedHash(log.lines);
+  if (logGapsOf(log) > 0) return { carbonHash, check: "incomplete" };
+  if (carbonHash === null || log.truncated)
+    return { carbonHash, check: "unavailable" };
+  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
+  return {
+    carbonHash,
+    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
+  };
+}
+
 // src/review/ranked.ts
 function isRankedGameMode(gameMode) {
   return gameMode.indexOf("ranked:") === 0;
@@ -2923,31 +3176,73 @@ function lobbyKindOfLabel(label) {
 }
 
 // src/lobby/active.ts
-function activeRunOf(lobby, userId) {
+function activeRunOf(lobby, userId, sha256) {
+  var _a, _b;
   const started = lobby.game.started;
   if (!started || lobby.closed) return null;
-  if (!started.players.some((p) => p.id === userId)) return null;
+  if (!isParticipant(lobby, userId)) return null;
   if (!lobby.players.some((p) => p.id === userId)) return null;
+  const lines = (_b = (_a = lobby.game.logs[userId]) == null ? void 0 : _a.lines) != null ? _b : [];
+  const { runSave, runSaveSkipped } = checkedRunSave(
+    lobby,
+    userId,
+    lines,
+    sha256
+  );
   return {
     runId: started.runId,
     code: lobby.code,
     modId: lobby.modId,
-    events: eventsOf(lobby.game.logs[userId]),
-    requiredStanding: lobby.requiredStanding || null
+    events: eventsOf(lines),
+    requiredStanding: lobby.requiredStanding || null,
+    runSave,
+    runSaveSkipped,
+    logText: hashInput(lines)
   };
 }
 function replayTailOf(lobby, userId) {
   const started = lobby.game.started;
   if (!started || lobby.closed) return null;
   if (!started.players.some((p) => p.id === userId)) return null;
-  const tails = started.players.filter((p) => p.id !== userId).map((p) => ({ playerId: p.id, events: eventsOf(lobby.game.logs[p.id]) })).filter((tail) => tail.events.length > 0);
+  const tails = started.players.filter((p) => p.id !== userId).map((p) => {
+    var _a, _b;
+    return {
+      playerId: p.id,
+      events: eventsOf((_b = (_a = lobby.game.logs[p.id]) == null ? void 0 : _a.lines) != null ? _b : [])
+    };
+  }).filter((tail) => tail.events.length > 0);
   return tails.length > 0 ? { runId: started.runId, tails } : null;
 }
-function eventsOf(log) {
-  return (log ? log.lines : []).map((line) => {
+function eventsOf(lines) {
+  return lines.map((line) => {
     const [t, opcode, args] = JSON.parse(line);
     return { t, opcode, args };
   });
+}
+function checkedRunSave(lobby, userId, lines, sha256) {
+  var _a;
+  const save = (_a = lobby.game.runSaves) == null ? void 0 : _a[userId];
+  if (!save) return { runSave: null, runSaveSkipped: null };
+  if (save.pos > lines.length)
+    return { runSave: null, runSaveSkipped: "beyond_log" };
+  if (sha256(hashInput(lines.slice(0, save.pos))).toLowerCase() !== save.hash.toLowerCase())
+    return { runSave: null, runSaveSkipped: "hash_mismatch" };
+  return {
+    runSave: { id: save.id, pos: save.pos, hash: save.hash, data: save.data },
+    runSaveSkipped: null
+  };
+}
+
+// src/lobby/presence.ts
+var PRESENCE_CAP = 400;
+function withPresence(lobby, event2) {
+  var _a;
+  if (!lobby.game.started) return lobby;
+  const kept = ((_a = lobby.game.presence) != null ? _a : []).concat([event2]).slice(-PRESENCE_CAP);
+  return __spreadProps(__spreadValues({}, lobby), { game: __spreadProps(__spreadValues({}, lobby.game), { presence: kept }) });
+}
+function startingPresence(started) {
+  return started.players.map((p) => ({ userId: p.id, kind: "joined", at: started.startedAt }));
 }
 
 // src/lobby/catch_up.ts
@@ -3184,8 +3479,8 @@ function everyone(lobby) {
   return lobby.players.map((p) => p.id);
 }
 function announce(lobby, reason, requeue = false) {
-  const view = viewOf(lobby);
-  const payload = view && __spreadProps(__spreadValues({}, view), { reason, requeue });
+  const view2 = viewOf(lobby);
+  const payload = view2 && __spreadProps(__spreadValues({}, view2), { reason, requeue });
   return { kind: "send", op: ServerOp.GROUP_QUEUE, payload, to: everyone(lobby) };
 }
 function withGroup(lobby, groupQueue) {
@@ -3369,6 +3664,10 @@ function emptyGame() {
     logs: {}
   };
 }
+function isParticipant(lobby, userId) {
+  const started = lobby.game.started;
+  return !!started && started.players.some((p) => p.id === userId);
+}
 function lobbyType(lobby) {
   return lobby.allowedIds ? "public" : "private";
 }
@@ -3405,11 +3704,11 @@ function event(lobby, type, fields, to) {
   const payload = __spreadValues({ type, lobbyCode: lobby.code }, fields);
   return { kind: "send", op: ServerOp.EVENT, payload, to };
 }
-function rejectOp(userId, message) {
+function rejectOp(userId, message2) {
   return {
     kind: "send",
     op: ServerOp.ERROR,
-    payload: { message },
+    payload: { message: message2 },
     to: [userId]
   };
 }
@@ -3447,6 +3746,7 @@ function isCatchingUp(player) {
 function snapshotFor(lobby, userId, now = Date.now()) {
   const self = findPlayer(lobby, userId);
   return {
+    serverFeatures: { shared_pvp_rules: 2, almanac_draft: 1 },
     code: lobby.code,
     modId: lobby.modId,
     hostId: lobby.hostId,
@@ -3468,6 +3768,7 @@ function snapshotFor(lobby, userId, now = Date.now()) {
       started: lobby.game.started,
       reported: Object.keys(lobby.game.reports),
       resultPending: lobby.game.resultPending === true,
+      logSeq: logHeldOf(lobby.game.logs[userId]),
       setup: setupView(setupOf(lobby.game), now)
     },
     groupQueue: viewOf(lobby),
@@ -3482,9 +3783,10 @@ function join(lobby, userId, sessionId, info, now = Date.now()) {
     const wasAway = existing.awaySince !== null;
     const wasCatchingUp = isCatchingUp(existing);
     const back = __spreadProps(__spreadValues({}, existing), { sessionId, awaySince: null, catchingUpSince: null });
-    const next2 = __spreadProps(__spreadValues({}, lobby), {
-      players: lobby.players.map((p) => p.id === userId ? back : p)
-    });
+    const next2 = withPresence(
+      __spreadProps(__spreadValues({}, lobby), { players: lobby.players.map((p) => p.id === userId ? back : p) }),
+      { userId, kind: "rejoined", at: now }
+    );
     const out = [
       { kind: "setCurrent", userId },
       {
@@ -3517,10 +3819,13 @@ function join(lobby, userId, sessionId, info, now = Date.now()) {
     catchingUpSince: null,
     ownState: null
   };
-  const next = __spreadProps(__spreadValues({}, lobby), {
-    hostId: lobby.allowedIds && lobby.players.length === 0 ? userId : lobby.hostId,
-    players: lobby.players.concat([player])
-  });
+  const next = withPresence(
+    __spreadProps(__spreadValues({}, lobby), {
+      hostId: lobby.allowedIds && lobby.players.length === 0 ? userId : lobby.hostId,
+      players: lobby.players.concat([player])
+    }),
+    { userId, kind: "joined", at: now }
+  );
   const others = othersThan(next, userId);
   return {
     lobby: next,
@@ -3649,9 +3954,9 @@ function remove(lobby, userId, type, why) {
   }
   return closeIfAbandoned({ lobby: next, out });
 }
-function leave(lobby, userId) {
+function leave(lobby, userId, now = Date.now()) {
   if (!findPlayer(lobby, userId)) return { lobby, out: [] };
-  const step = remove(lobby, userId, "player_left", "member_left");
+  const step = remove(withPresence(lobby, { userId, kind: "left", at: now }), userId, "player_left", "member_left");
   return { lobby: step.lobby, out: step.out.concat([{ kind: "kick", userId }]) };
 }
 function disconnect(lobby, userId, sessionId, now) {
@@ -3660,9 +3965,12 @@ function disconnect(lobby, userId, sessionId, now) {
     return { lobby, out: [] };
   const away = __spreadProps(__spreadValues({}, player), { awaySince: now });
   const grouped = memberDisconnected(lobby, userId);
-  const marked = __spreadProps(__spreadValues({}, grouped.lobby), {
-    players: grouped.lobby.players.map((p) => p.id === userId ? away : p)
-  });
+  const marked = withPresence(
+    __spreadProps(__spreadValues({}, grouped.lobby), {
+      players: grouped.lobby.players.map((p) => p.id === userId ? away : p)
+    }),
+    { userId, kind: "disconnected", at: now }
+  );
   const transferred = isParked(marked) ? { lobby: marked, out: [] } : transferHostFrom(marked, userId);
   const out = grouped.out.concat([
     event(
@@ -3677,7 +3985,7 @@ function disconnect(lobby, userId, sessionId, now) {
     out: out.concat(transferred.out)
   });
 }
-function kick(lobby, byId, targetId) {
+function kick(lobby, byId, targetId, now = Date.now()) {
   if (lobby.hostId !== byId)
     return { lobby, out: [rejectOp(byId, "Only the host can kick players")] };
   if (lobbyType(lobby) === "public")
@@ -3686,9 +3994,9 @@ function kick(lobby, byId, targetId) {
     return { lobby, out: [rejectOp(byId, "You cannot kick yourself")] };
   if (!findPlayer(lobby, targetId))
     return { lobby, out: [rejectOp(byId, "Player is not in this lobby")] };
-  return removeKicked(lobby, targetId, { kickedBy: byId });
+  return removeKicked(lobby, targetId, { kickedBy: byId }, now);
 }
-function removeKicked(lobby, targetId, data) {
+function removeKicked(lobby, targetId, data, now) {
   const target = findPlayer(lobby, targetId);
   if (!target) return { lobby, out: [] };
   const announced = event(
@@ -3697,7 +4005,15 @@ function removeKicked(lobby, targetId, data) {
     { playerId: targetId, displayName: target.info.displayName, data },
     allIds(lobby)
   );
-  const marked = __spreadProps(__spreadValues({}, lobby), { kickedIds: lobby.kickedIds.concat([targetId]) });
+  const marked = withPresence(
+    __spreadProps(__spreadValues({}, lobby), { kickedIds: lobby.kickedIds.concat([targetId]) }),
+    __spreadValues({
+      userId: targetId,
+      kind: "kicked",
+      at: now,
+      by: String(data.kickedBy)
+    }, typeof data.reason === "string" ? { reason: data.reason } : {})
+  );
   const step = remove(marked, targetId, null, "member_kicked");
   return {
     lobby: step.lobby,
@@ -3706,9 +4022,9 @@ function removeKicked(lobby, targetId, data) {
     ])
   };
 }
-function adminRemove(lobby, userId, reason, onlyIfStarted = false) {
+function adminRemove(lobby, userId, reason, onlyIfStarted = false, now = Date.now()) {
   if (onlyIfStarted && lobby.game.started === null) return { lobby, out: [] };
-  return removeKicked(lobby, userId, { kickedBy: "server", reason });
+  return removeKicked(lobby, userId, { kickedBy: "server", reason }, now);
 }
 function adminView(lobby) {
   return {
@@ -3803,7 +4119,12 @@ function tick(lobby, now) {
     if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
       const started = step.lobby.game.started;
       const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
-      const removed = remove(step.lobby, p.id, "player_left", "member_disconnected");
+      const timedOut = withPresence(step.lobby, {
+        userId: p.id,
+        kind: graceRanOut ? "timed_out" : "catch_up_limit",
+        at: now
+      });
+      const removed = remove(timedOut, p.id, "player_left", "member_disconnected");
       const marked = forfeited.length > 0 && started ? __spreadProps(__spreadValues({}, removed.lobby), { forfeitedSeats: __spreadProps(__spreadValues({}, removed.lobby.forfeitedSeats || {}), { [p.id]: started.runId }) }) : removed.lobby;
       step = { lobby: marked, out: step.out.concat(forfeited, removed.out, toldAndKicked(step.lobby, current, graceRanOut)) };
     }
@@ -3909,6 +4230,25 @@ function spectateEvent(lobby, event2) {
   if (to.length === 0) return [];
   return [{ kind: "send", op: ServerOp.SPECTATE_EVENT, payload: event2, to }];
 }
+function spectateRunOf(lobby, userId, playerId, sha256, fromStart = false) {
+  var _a, _b;
+  if (!isSpectator(lobby, userId) || !isParticipant(lobby, playerId))
+    return { lobby, out: [] };
+  const lines = (_b = (_a = lobby.game.logs[playerId]) == null ? void 0 : _a.lines) != null ? _b : [];
+  const { runSave, runSaveSkipped } = fromStart ? { runSave: null, runSaveSkipped: null } : checkedRunSave(lobby, playerId, lines, sha256);
+  const pos = runSave ? runSave.pos : 0;
+  const payload = {
+    playerId,
+    runSave,
+    runSaveSkipped,
+    pos,
+    events: eventsOf(lines.slice(pos))
+  };
+  return {
+    lobby,
+    out: [{ kind: "send", op: ServerOp.SPECTATE_RUN, payload, to: [userId] }]
+  };
+}
 function spectatableLobbies(labels) {
   const lobbies = [];
   for (const raw of labels) {
@@ -4013,9 +4353,9 @@ function serverKindErrorMessage(error) {
 function checkServerKind(env, logger) {
   const result = serverSettings(env);
   if (!result.ok) {
-    const message = serverKindErrorMessage(result.error);
-    logger.error("Refusing to start: %s", message);
-    throw new Error(message);
+    const message2 = serverKindErrorMessage(result.error);
+    logger.error("Refusing to start: %s", message2);
+    throw new Error(message2);
   }
   logger.info("BMP server kind: %s", result.value.kind);
   return result.value;
@@ -4208,14 +4548,20 @@ var NotifyCode = {
   // {message, itemType, warnedAt}: a moderator's warning (service queue).
   // Persistent, so an offline player sees it at their next login.
   WARNED: 109,
-  // {runId, code, modId, status, place, rating}: the result of a run the
-  // player left before it settled (lobby/late_result.ts). Transient: an
-  // offline player reads it in their match history instead.
+  // {runId, code, modId, status, place, rating}: kept for older clients, which
+  // print it as a chat line. Transient. Current clients ignore it and read the
+  // same result from the stored Notification (112).
   RESULT_LATE: 110,
-  // {runId, code, modId, status, place, tied, players, rating}: a ranked run settled
-  // (lobby/late_result.ts). Sent to every player of it, leavers included.
-  // Transient: the match history shows the same result.
-  RESULT_RANKED: 111
+  // {runId, code, modId, status, place, tied, players, rating}: kept for older
+  // clients, as RESULT_LATE. Transient.
+  RESULT_RANKED: 111,
+  // {id, kind, params, sentAt}: a stored Notification (notification/store.ts).
+  // The live push of one that also waits unread in the store; the client
+  // marks it read once shown.
+  NOTIFICATION: 112,
+  // {text}: an Announcement, one chat line to every online player
+  // (announcement.ts). Transient; a client that does not know it ignores it.
+  ANNOUNCEMENT: 113
 };
 var CODES = Object.keys(NotifyCode).map((k) => NotifyCode[k]);
 function isNotifyCode(code) {
@@ -4513,12 +4859,14 @@ function handCount(events) {
   return events.filter((event2) => event2.opcode === HAND_OPCODE).length;
 }
 function runFlags(run, events, checks) {
+  var _a;
   const flags = {};
+  const played = run.status !== "restarted" && run.status !== "abandoned";
   const elapsedMs = run.endedAt - run.startedAt;
   for (const player of run.players) {
     if (checks[player.id] === "mismatch") flags[player.id] = "hash_mismatch";
     else if (handCount(events[player.id]) * MIN_MS_PER_HAND > elapsedMs) flags[player.id] = "elapsed_time_gate";
-    else if (run.rankedMode && checks[player.id] === "unavailable") flags[player.id] = "unverified_log";
+    else if (run.rankedMode && played && player.id in ((_a = run.reports) != null ? _a : {}) && (checks[player.id] === "unavailable" || checks[player.id] === "incomplete")) flags[player.id] = "unverified_log";
   }
   return flags;
 }
@@ -5041,6 +5389,109 @@ function callExpress(nk, logger, env, path, body) {
   return { status: response.code, body: parsed };
 }
 
+// src/notification/kinds.ts
+var NotificationKind = {
+  // A pending result ended after the player left.
+  RESULT_LATE: "result_late",
+  // A ranked result, told to every player it rated.
+  RESULT_RANKED: "result_ranked",
+  // A player withdrew their in-game Contest: the other players are told.
+  CONTEST_WITHDRAWN: "contest_withdrawn",
+  // A moderator decided a contested match.
+  CONTEST_DECIDED: "contest_decided",
+  // Staff voided a match.
+  RESULT_VOIDED: "result_voided",
+  // Staff set a match's result.
+  RESULT_CHANGED: "result_changed",
+  // Staff punished a player the recipient reported.
+  REPORT_ACTION: "report_action",
+  // A season ended: the player's place and rating on each board they are on.
+  SEASON_END: "season_end",
+  // An appeal was decided.
+  APPEAL_DECIDED: "appeal_decided",
+  // A chat, queue, account or username ban ended, by time or lifted early.
+  PUNISHMENT_ENDED: "punishment_ended",
+  // Staff gave the player a username ban: they now show as their Ban name.
+  USERNAME_BANNED: "username_banned"
+};
+
+// src/notification/store.ts
+var NOTIFICATIONS_COLLECTION = "notifications";
+var NOTIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1e3;
+var MAX_STORED_NOTIFICATIONS = 100;
+function isExpired2(notification, now) {
+  return now - notification.sentAt >= NOTIFICATION_TTL_MS;
+}
+function isStored(value) {
+  return typeof value.id === "string" && typeof value.kind === "string" && typeof value.sentAt === "number";
+}
+function readAll(nk, userId) {
+  const page = nk.storageList(
+    userId,
+    NOTIFICATIONS_COLLECTION,
+    MAX_STORED_NOTIFICATIONS + 1,
+    ""
+  );
+  const found = [];
+  for (const object of page.objects || []) {
+    if (!isStored(object.value)) continue;
+    found.push({
+      id: object.value.id,
+      kind: object.value.kind,
+      params: object.value.params || {},
+      sentAt: object.value.sentAt
+    });
+  }
+  return found.sort((a, b) => a.sentAt - b.sentAt || (a.id < b.id ? -1 : 1));
+}
+function remove2(nk, userId, ids) {
+  if (ids.length === 0) return;
+  nk.storageDelete(
+    ids.map((id) => ({
+      collection: NOTIFICATIONS_COLLECTION,
+      key: id,
+      userId
+    }))
+  );
+}
+function sendNotification(nk, userId, kind, params, now = Date.now()) {
+  const stored = {
+    id: nk.uuidv4(),
+    kind,
+    params: __spreadValues({}, params),
+    sentAt: now
+  };
+  const waiting = readAll(nk, userId);
+  const dropped = waiting.filter((n) => isExpired2(n, now)).map((n) => n.id);
+  const live = waiting.filter((n) => !isExpired2(n, now));
+  const overflow = live.slice(0, Math.max(0, live.length + 1 - MAX_STORED_NOTIFICATIONS)).map((n) => n.id);
+  remove2(nk, userId, dropped.concat(overflow));
+  nk.storageWrite([
+    {
+      collection: NOTIFICATIONS_COLLECTION,
+      key: stored.id,
+      userId,
+      value: __spreadValues({}, stored),
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+  notify(nk, userId, NotifyCode.NOTIFICATION, kind, __spreadValues({}, stored), false);
+  return stored;
+}
+function listNotifications(nk, userId, now = Date.now()) {
+  const all = readAll(nk, userId);
+  remove2(
+    nk,
+    userId,
+    all.filter((n) => isExpired2(n, now)).map((n) => n.id)
+  );
+  return all.filter((n) => !isExpired2(n, now));
+}
+function markNotificationsRead(nk, userId, ids) {
+  remove2(nk, userId, ids);
+}
+
 // src/shared/storage.ts
 var LIST_PAGE2 = 100;
 function forEachStored(nk, owner, collection, visit) {
@@ -5051,6 +5502,215 @@ function forEachStored(nk, owner, collection, visit) {
     cursor = page.cursor || "";
   } while (cursor);
   return false;
+}
+
+// src/rating/elo.ts
+var INITIAL_HIDDEN_RATING = 600;
+var PLACEMENT_GAMES = 5;
+var K_ESTABLISHED = 40;
+var RATING_FLOOR = 100;
+var SOFT_RESET_ANCHOR = 1200;
+var ELO_SCALE = 1e3;
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+function effectiveK(gamesPlayed, performance) {
+  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
+  const baseK = 200 - gamesPlayed * 40;
+  const placementK = baseK * (1 + clamp(performance, 0, 1));
+  return K_ESTABLISHED + (placementK - K_ESTABLISHED) / 2;
+}
+function expectedScore(ratingA, ratingB) {
+  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
+}
+function compute1v1(a, b, outcome) {
+  const ea = expectedScore(a.rating, b.rating);
+  const eb = 1 - ea;
+  let sa;
+  let sb;
+  if (outcome === "a_wins") {
+    sa = 1;
+    sb = 0;
+  } else if (outcome === "b_wins") {
+    sa = 0;
+    sb = 1;
+  } else {
+    sa = 0.5;
+    sb = 0.5;
+  }
+  const ka = effectiveK(a.gamesPlayed, a.performance);
+  const kb = effectiveK(b.gamesPlayed, b.performance);
+  return {
+    deltaA: Math.round(ka * (sa - ea)),
+    deltaB: Math.round(kb * (sb - eb))
+  };
+}
+function computeFFA(players) {
+  const n = players.length;
+  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
+  const kDivisor = n - 1;
+  const deltas = /* @__PURE__ */ new Map();
+  for (const p of players) {
+    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
+    let sum = 0;
+    for (const q of players) {
+      if (q.playerId === p.playerId) continue;
+      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
+      const ep = expectedScore(p.rating, q.rating);
+      sum += kp * (score - ep);
+    }
+    deltas.set(p.playerId, Math.round(sum));
+  }
+  return deltas;
+}
+function computeTeam(teams, winnerTeamIndex) {
+  const deltas = /* @__PURE__ */ new Map();
+  if (teams.length !== 2) {
+    for (const team of teams) {
+      for (const p of team) deltas.set(p.playerId, 0);
+    }
+    return deltas;
+  }
+  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
+  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
+  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
+  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
+  const winner = teams[winnerTeamIndex];
+  const loser = teams[loserTeamIndex];
+  const winnerAvg = {
+    rating: avgRating(winner),
+    gamesPlayed: avgGamesPlayed(winner),
+    performance: avgPerformance(winner)
+  };
+  const loserAvg = {
+    rating: avgRating(loser),
+    gamesPlayed: avgGamesPlayed(loser),
+    performance: avgPerformance(loser)
+  };
+  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
+  for (const p of winner) deltas.set(p.playerId, deltaA);
+  for (const p of loser) deltas.set(p.playerId, deltaB);
+  return deltas;
+}
+function applySoftReset(rating) {
+  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
+  return Math.min(pulled, SOFT_RESET_ANCHOR);
+}
+function detectRatingMode(placements) {
+  if (placements.some((p) => p.teamId)) return "team";
+  if (placements.length === 2) return "solo";
+  return "ffa";
+}
+function computeRatingDeltas(mode, placements, ratings) {
+  var _a, _b;
+  if (mode === "solo") {
+    const [a, b] = placements;
+    const ra = ratings.get(a.playerId);
+    const rb = ratings.get(b.playerId);
+    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
+    const { deltaA, deltaB } = compute1v1(
+      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
+      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
+      outcome
+    );
+    return /* @__PURE__ */ new Map([
+      [a.playerId, deltaA],
+      [b.playerId, deltaB]
+    ]);
+  }
+  if (mode === "ffa") {
+    return computeFFA(
+      placements.map((p) => {
+        var _a2;
+        const r = ratings.get(p.playerId);
+        return {
+          playerId: p.playerId,
+          rating: r.rating,
+          gamesPlayed: r.gamesPlayed,
+          performance: (_a2 = p.performance) != null ? _a2 : 0,
+          place: p.place
+        };
+      })
+    );
+  }
+  const teamMap = /* @__PURE__ */ new Map();
+  for (const p of placements) {
+    const tid = p.teamId;
+    if (!teamMap.has(tid)) teamMap.set(tid, []);
+    teamMap.get(tid).push(p);
+  }
+  const teamEntries = Array.from(teamMap.entries());
+  const winnerTeamPlace = Math.min(
+    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
+  );
+  const winnerTeamIdx = teamEntries.findIndex(
+    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
+  );
+  const teams = teamEntries.map(
+    ([, members]) => members.map((m) => {
+      var _a2;
+      const r = ratings.get(m.playerId);
+      return {
+        playerId: m.playerId,
+        rating: r.rating,
+        gamesPlayed: r.gamesPlayed,
+        performance: (_a2 = m.performance) != null ? _a2 : 0
+      };
+    })
+  );
+  return computeTeam(teams, winnerTeamIdx);
+}
+
+// src/rating/board_sync.ts
+function syncLeaderboardEntry(nk, logger, board, metadata, userId, name, record) {
+  try {
+    nk.leaderboardCreate(board, true, "desc", "set", null, metadata);
+    if (record && record.gamesPlayed >= PLACEMENT_GAMES) {
+      nk.leaderboardRecordWrite(
+        board,
+        userId,
+        name,
+        record.rating,
+        record.wins,
+        {
+          losses: record.losses,
+          gamesPlayed: record.gamesPlayed,
+          seasonBest: record.seasonBest
+        },
+        "set"
+      );
+    } else {
+      try {
+        nk.leaderboardRecordDelete(board, userId);
+      } catch (err2) {
+      }
+    }
+  } catch (e) {
+    logger.warn("Leaderboard update on %s for %s failed: %v", board, userId, e);
+  }
+}
+
+// src/moderation/username_ban.ts
+function boardParts(board) {
+  const parts = board.split(":");
+  if (parts.length < 3) return null;
+  return { modId: parts.slice(0, parts.length - 2).join(":"), mode: parts[parts.length - 2] };
+}
+function renameLeaderboardEntries(nk, logger, userId, name) {
+  const boards = [];
+  forEachStored(nk, userId, RATINGS_COLLECTION, (o) => {
+    boards.push({ board: o.key, record: o.value });
+  });
+  for (const { board, record } of boards) {
+    const metadata = boardParts(board);
+    if (metadata) syncLeaderboardEntry(nk, logger, board, metadata, userId, name, record);
+  }
+}
+function showNameChange(nk, logger, userId) {
+  const stored = readProfile(nk, userId);
+  if (!stored) return;
+  profileChanged(nk, userId, stored.profile);
+  renameLeaderboardEntries(nk, logger, userId, shownNameOf(nk, userId, stored.profile));
 }
 
 // src/moderation/enforce.ts
@@ -5103,9 +5763,15 @@ function enforceAccountBan(nk, userId, ban) {
   nk.usersBanId([userId]);
 }
 function applyBan(nk, logger, userId, type, ban) {
-  const bans = withBan(readBans(nk, userId), type, ban);
+  var _a;
+  const before = readBans(nk, userId);
+  const bans = withBan(before, type, ban);
   writeBans(nk, userId, bans);
-  pushBan(nk, userId, type, ban);
+  if (type === "username") {
+    showNameChange(nk, logger, userId);
+    if (((_a = before.username) == null ? void 0 : _a.banId) !== ban.banId)
+      sendNotification(nk, userId, NotificationKind.USERNAME_BANNED, { banName: banNameOf(userId) });
+  } else pushBan(nk, userId, type, ban);
   if (type === "queue") removeFromLobby(nk, userId, "banned", true);
   if (type === "account" && bans.account) enforceAccountBan(nk, userId, bans.account);
   logger.info("Applied %s ban %s to %s", type, ban.banId, userId);
@@ -5122,6 +5788,7 @@ function liftBan(nk, logger, userId, banId) {
   const after = withoutBan(before, banId);
   writeBans(nk, userId, after);
   releaseAccount(nk, userId, before, after);
+  if (before.username && !after.username) showNameChange(nk, logger, userId);
   logger.info("Lifted ban %s of %s", banId, userId);
   return after;
 }
@@ -5177,9 +5844,9 @@ function forgetBanIndex(nk, steamIdHashes, now) {
   if (steamIdHashes.length === 0) return { deleted: 0 };
   const forgotten = {};
   const entries = nk.storageRead(
-    steamIdHashes.map((hash) => ({
+    steamIdHashes.map((hash2) => ({
       collection: BAN_INDEX_COLLECTION,
-      key: BAN_INDEX_CUSTOM_PREFIX + STEAM_HASH_CUSTOM_ID_PREFIX + hash,
+      key: BAN_INDEX_CUSTOM_PREFIX + STEAM_HASH_CUSTOM_ID_PREFIX + hash2,
       userId: SYSTEM_USER_ID
     }))
   );
@@ -5273,8 +5940,8 @@ function withoutStale(hashes, now) {
   const cutoff = now - IP_HASH_DAYS * DAY_MS;
   let changed2 = false;
   const next = {};
-  for (const hash of Object.keys(hashes)) {
-    if (hashes[hash] > cutoff) next[hash] = hashes[hash];
+  for (const hash2 of Object.keys(hashes)) {
+    if (hashes[hash2] > cutoff) next[hash2] = hashes[hash2];
     else changed2 = true;
   }
   return changed2 ? next : hashes;
@@ -5327,22 +5994,22 @@ function writeNetworkBan(nk, ban) {
     }, SERVER_ONLY)
   ]);
 }
-function readIndex(nk, hash) {
+function readIndex(nk, hash2) {
   const objects = nk.storageRead([
     {
       collection: NETWORK_BAN_INDEX_COLLECTION,
-      key: hash,
+      key: hash2,
       userId: SYSTEM_USER_ID
     }
   ]);
   return objects.length === 0 ? [] : objects[0].value.banIds || [];
 }
-function writeIndex2(nk, hash, banIds) {
+function writeIndex2(nk, hash2, banIds) {
   if (banIds.length === 0) {
     nk.storageDelete([
       {
         collection: NETWORK_BAN_INDEX_COLLECTION,
-        key: hash,
+        key: hash2,
         userId: SYSTEM_USER_ID
       }
     ]);
@@ -5352,7 +6019,7 @@ function writeIndex2(nk, hash, banIds) {
   nk.storageWrite([
     __spreadValues({
       collection: NETWORK_BAN_INDEX_COLLECTION,
-      key: hash,
+      key: hash2,
       userId: SYSTEM_USER_ID,
       value
     }, SERVER_ONLY)
@@ -5363,13 +6030,16 @@ function clientNetworkHash(ctx, nk, settings) {
   if (!settings.networkBans || !salt || !ctx.clientIp) return null;
   return networkHash((input) => nk.sha256Hash(input), salt, ctx.clientIp);
 }
-function recordNetworkLogin(nk, userId, hash, now) {
+function recordNetworkLogin(nk, userId, hash2, now) {
   const hashes = __spreadValues({}, withoutStale(readIpHashes(nk, userId), now));
-  hashes[hash] = now;
+  hashes[hash2] = now;
   writeIpHashes(nk, userId, hashes);
 }
-function isNetworkBanned(nk, hash) {
-  return readIndex(nk, hash).length > 0;
+function isNetworkBanned(nk, hash2) {
+  return readIndex(nk, hash2).length > 0;
+}
+function networkBanIdsOn(nk, hash2) {
+  return readIndex(nk, hash2);
 }
 function banNetworks(nk, settings, userId, ban, now) {
   if (!settings.networkBans || ban.expiresAt !== null) return false;
@@ -5382,21 +6052,21 @@ function banNetworks(nk, settings, userId, ban, now) {
     bannedAt: now,
     liftedAt: null
   });
-  for (const hash of hashes) {
-    const banIds = readIndex(nk, hash);
+  for (const hash2 of hashes) {
+    const banIds = readIndex(nk, hash2);
     if (banIds.indexOf(ban.banId) === -1)
-      writeIndex2(nk, hash, banIds.concat([ban.banId]));
+      writeIndex2(nk, hash2, banIds.concat([ban.banId]));
   }
   return true;
 }
 function liftNetworkBan(nk, banId, now) {
   const ban = readNetworkBan(nk, banId);
   if (!ban || ban.liftedAt !== null) return false;
-  for (const hash of ban.hashes)
+  for (const hash2 of ban.hashes)
     writeIndex2(
       nk,
-      hash,
-      readIndex(nk, hash).filter((id) => id !== banId)
+      hash2,
+      readIndex(nk, hash2).filter((id) => id !== banId)
     );
   writeNetworkBan(nk, __spreadProps(__spreadValues({}, ban), { hashes: [], liftedAt: now }));
   return true;
@@ -5411,7 +6081,7 @@ function listNetworkBans(nk) {
 function networkBansFor(nk, userId) {
   const own = readIpHashes(nk, userId);
   return listNetworkBans(nk).filter(
-    (ban) => ban.userId === userId || ban.hashes.some((hash) => hash in own)
+    (ban) => ban.userId === userId || ban.hashes.some((hash2) => hash2 in own)
   ).map(viewOf2);
 }
 function purgeIpHashes(nk, now, max) {
@@ -5460,7 +6130,7 @@ function withResolvedMutes(profile, resolved) {
     unresolvedMutedPlayerIds: profile.unresolvedMutedPlayerIds.filter((id) => found.indexOf(id) === -1)
   });
 }
-function loginResponse(userId, profile, config, settings) {
+function loginResponse(nk, userId, profile, config, settings) {
   const tosRequired = settings.noticeRequired && profile.tosAcceptedVersion < NOTICE_VERSION;
   return {
     tosRequired,
@@ -5468,12 +6138,12 @@ function loginResponse(userId, profile, config, settings) {
     tosUpdate: tosRequired && profile.tosAcceptedVersion > 0,
     // The age question is still open (with tosRequired, inside the Notice).
     ageRequired: !profile.ageAnswered,
-    player: playerView(userId, profile),
+    player: playerView(nk, userId, profile),
     serverConfig: clientConfig(config)
   };
 }
 function syncDisplayName(nk, userId, profile) {
-  const name = displayNameOf(profile);
+  const name = shownNameOf(nk, userId, profile);
   if (nk.accountGetId(userId).user.displayName !== name)
     nk.accountUpdateId(userId, null, name, null, null, null, null, null);
 }
@@ -5522,11 +6192,11 @@ function rpcSessionInit(ctx, logger, nk, payload) {
   if (profile.discordIdHash) recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
   writeIntegrity(nk, userId, UNVERIFIED);
   clearModReport(nk, userId);
-  return JSON.stringify(loginResponse(userId, profile, readConfig(nk), settingsOf(ctx)));
+  return JSON.stringify(loginResponse(nk, userId, profile, readConfig(nk), settingsOf(ctx)));
 }
 function rpcTosAccept(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  const eligible = parsePayload(payload).chatEligible;
+  const eligible2 = parsePayload(payload).chatEligible;
   const config = readConfig(nk);
   const settings = settingsOf(ctx);
   const acceptedAt = Date.now();
@@ -5535,10 +6205,10 @@ function rpcTosAccept(ctx, logger, nk, payload) {
     userId,
     (current) => {
       const next = settings.noticeRequired ? __spreadProps(__spreadValues({}, current), { tosAcceptedVersion: NOTICE_VERSION, noticeAcceptedAt: acceptedAt }) : __spreadValues({}, current);
-      if (typeof eligible === "boolean") {
+      if (typeof eligible2 === "boolean") {
         next.ageAnswered = true;
-        next.chatEnabled = eligible;
-        next.chatBlocked = !eligible;
+        next.chatEnabled = eligible2;
+        next.chatBlocked = !eligible2;
       }
       return next;
     },
@@ -5546,7 +6216,7 @@ function rpcTosAccept(ctx, logger, nk, payload) {
   );
   if (settings.noticeRequired)
     enqueue(nk, { kind: "notice", at: acceptedAt, userId, version: NOTICE_VERSION });
-  return JSON.stringify(loginResponse(userId, profile, config, settings));
+  return JSON.stringify(loginResponse(nk, userId, profile, config, settings));
 }
 
 // src/player/rpc.ts
@@ -5561,11 +6231,11 @@ function pushToLobby(nk, userId, info) {
   nk.matchSignal(current.matchId, JSON.stringify(signal2));
 }
 function accountUpdated(nk, userId, profile) {
-  notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, "account_updated", { player: playerView(userId, profile) });
+  notify(nk, userId, NotifyCode.ACCOUNT_UPDATED, "account_updated", { player: playerView(nk, userId, profile) });
 }
 function profileChanged(nk, userId, profile) {
   syncDisplayName(nk, userId, profile);
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  pushToLobby(nk, userId, { displayName: shownNameOf(nk, userId, profile), preferredJoker: profile.preferredJoker });
   accountUpdated(nk, userId, profile);
 }
 function rpcProfileSetDisplay(ctx, logger, nk, payload) {
@@ -5582,9 +6252,9 @@ function rpcProfileSetDisplay(ctx, logger, nk, payload) {
     ctx.username
   );
   syncDisplayName(nk, userId, profile);
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  pushToLobby(nk, userId, { displayName: shownNameOf(nk, userId, profile), preferredJoker: profile.preferredJoker });
   accountUpdated(nk, userId, profile);
-  return JSON.stringify({ player: playerView(userId, profile) });
+  return JSON.stringify({ player: playerView(nk, userId, profile) });
 }
 function rpcProfileSetJoker(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -5601,9 +6271,9 @@ function rpcProfileSetJoker(ctx, logger, nk, payload) {
     },
     ctx.username
   );
-  pushToLobby(nk, userId, { displayName: displayNameOf(profile), preferredJoker: profile.preferredJoker });
+  pushToLobby(nk, userId, { displayName: shownNameOf(nk, userId, profile), preferredJoker: profile.preferredJoker });
   accountUpdated(nk, userId, profile);
-  return JSON.stringify({ player: playerView(userId, profile) });
+  return JSON.stringify({ player: playerView(nk, userId, profile) });
 }
 function rpcProfileSetMods(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -5844,19 +6514,19 @@ function rpcAvatarCatalog(ctx, logger, nk, payload) {
 function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  let view;
+  let view2;
   if (input.userId !== void 0) {
     if (typeof input.userId !== "string" || !USER_ID2.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
     if (!readProfile(nk, input.userId)) throw runtimeError(NOT_FOUND, "No such player");
-    view = viewOf3(nk, input.userId, "");
+    view2 = viewOf3(nk, input.userId, "");
   } else {
     const privileges = input.privileges;
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
       throw runtimeError(INVALID_ARGUMENT, "userId or privileges is required");
     const progress = emptyProgress();
-    view = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
+    view2 = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
   }
-  return JSON.stringify(__spreadProps(__spreadValues({}, view), { jokers: view.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
+  return JSON.stringify(__spreadProps(__spreadValues({}, view2), { jokers: view2.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
 }
 function testingRpcsAllowed(ctx) {
   return settingsOf(ctx).testingRpcs;
@@ -5950,35 +6620,6 @@ function eventsByPlayer(logs) {
   return events;
 }
 
-// src/lobby/log_check.ts
-var FRAMING_OPCODES = { end: true, chk: true };
-function opcodeOf(line) {
-  return JSON.parse(line)[1];
-}
-function hashInput(lines) {
-  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
-}
-function claimedHash(lines) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const event2 = JSON.parse(lines[i]);
-    if (event2[1] !== "chk") continue;
-    const args = event2[2];
-    return args && typeof args.carbon === "string" ? args.carbon : null;
-  }
-  return null;
-}
-function checkLog(log, sha256) {
-  if (!log) return { carbonHash: null, check: "unavailable" };
-  const carbonHash = claimedHash(log.lines);
-  if (carbonHash === null || log.truncated)
-    return { carbonHash, check: "unavailable" };
-  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
-  return {
-    carbonHash,
-    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
-  };
-}
-
 // src/lobby/storage.ts
 function myRunKey(run) {
   const reversed = String(9999999999999 - run.endedAt).padStart(13, "0");
@@ -5996,16 +6637,20 @@ function logChecksOf(run, logs, sha256) {
 function runWrites(run, logs, sha256) {
   const checks = {};
   const logChecks = {};
+  const logGaps = {};
+  const logHeld = {};
   for (const player of run.players) {
     checks[player.id] = checkLog(logs[player.id], sha256);
     logChecks[player.id] = checks[player.id].check;
+    logGaps[player.id] = logGapsOf(logs[player.id]);
+    logHeld[player.id] = logHeldOf(logs[player.id]);
   }
   const writes = [
     {
       collection: RUNS_COLLECTION,
       key: run.runId,
       userId: SYSTEM_USER_ID,
-      value: __spreadProps(__spreadValues({}, run), { logChecks }),
+      value: __spreadProps(__spreadValues({}, run), { logChecks, logGaps, logHeld }),
       permissionRead: 2,
       permissionWrite: 0
     }
@@ -6020,6 +6665,7 @@ function runWrites(run, logs, sha256) {
         lines: log ? log.lines : [],
         eventCount: log ? log.lines.length : 0,
         truncated: log ? log.truncated : false,
+        gaps: logGaps[player.id],
         carbonHash: checks[player.id].carbonHash,
         check: checks[player.id].check
       },
@@ -6924,9 +7570,9 @@ function announceStandings(nk, settings, now) {
   let told = 0;
   for (const userId of reporterIds(nk)) {
     if (!isOnline(nk, userId)) continue;
-    const view = standingFor(nk, settings, userId, now, config);
-    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view));
-    pushToLobby(nk, userId, { standing: view.standing });
+    const view2 = standingFor(nk, settings, userId, now, config);
+    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view2));
+    pushToLobby(nk, userId, { standing: view2.standing });
     told++;
   }
   return told;
@@ -7021,7 +7667,8 @@ function logsOf(nk, run, withEvents) {
       eventCount: log.eventCount || 0,
       truncated: log.truncated === true,
       carbonHash: (_a = log.carbonHash) != null ? _a : null,
-      check: log.check || "unavailable"
+      check: log.check || "unavailable",
+      gaps: log.gaps || 0
     }, withEvents ? { events: tuplesOfStored(log) } : {});
   }
   return logs;
@@ -7041,8 +7688,8 @@ function rpcAdminRunSetResult(ctx, logger, nk, payload) {
   if (!placements) throw runtimeError(INVALID_ARGUMENT, "placements must be a list of {playerId, place}");
   const overturn = overturnRun(run, placements, Date.now());
   if (!overturn.ok) {
-    const message = overturn.refusal.kind === "players_differ" ? "placements must place exactly the run's players" : overturn.refusal.kind === "unchanged" ? "That is already the recorded result" : "placements must be a list of {playerId, place}";
-    throw runtimeError(INVALID_ARGUMENT, message);
+    const message2 = overturn.refusal.kind === "players_differ" ? "placements must place exactly the run's players" : overturn.refusal.kind === "unchanged" ? "That is already the recorded result" : "placements must be a list of {playerId, place}";
+    throw runtimeError(INVALID_ARGUMENT, message2);
   }
   const next = overturn.run;
   const key = myRunKey(next);
@@ -7145,7 +7792,7 @@ function rpcAdminBanApply(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
   const userId = requireUserId2(nk, input);
-  if (!isBanType(input.type)) throw runtimeError(INVALID_ARGUMENT, "type must be 'chat', 'queue' or 'account'");
+  if (!isBanType(input.type)) throw runtimeError(INVALID_ARGUMENT, "type must be 'chat', 'queue', 'account' or 'username'");
   if (typeof input.banId !== "string" || !input.banId) throw runtimeError(INVALID_ARGUMENT, "banId is required");
   const expiresAt = parseExpiresAt(input.expiresAt);
   if (expiresAt === void 0) throw runtimeError(INVALID_ARGUMENT, "expiresAt must be a time or null");
@@ -7202,9 +7849,9 @@ function rpcAdminLobbyGet(ctx, logger, nk, payload) {
   requireServer(ctx);
   const lobby = lobbyByCode(nk, parsePayload(payload).code);
   const signal2 = { type: "admin_view" };
-  const view = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
-  if (!view) throw runtimeError(NOT_FOUND, "No such lobby");
-  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view)), { matchId: lobby.matchId }) });
+  const view2 = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
+  if (!view2) throw runtimeError(NOT_FOUND, "No such lobby");
+  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view2)), { matchId: lobby.matchId }) });
 }
 function rpcAdminLobbyKick(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -7234,7 +7881,7 @@ function rpcAdminPlayerGet(ctx, logger, nk, payload) {
   const profile = profileFor(nk, userId);
   const online = nk.streamUserList({ mode: 0, subject: userId }, true, true).length;
   return JSON.stringify(__spreadValues({
-    player: playerView(userId, profile),
+    player: playerView(nk, userId, profile),
     bans: readBans(nk, userId),
     lobby: currentLobby(nk, userId),
     online
@@ -7263,161 +7910,18 @@ function rpcAdminMirrorAck(ctx, logger, nk, payload) {
   return JSON.stringify({ acked: keys.length });
 }
 
-// src/rating/elo.ts
-var INITIAL_HIDDEN_RATING = 600;
-var PLACEMENT_GAMES = 5;
-var K_ESTABLISHED = 40;
-var RATING_FLOOR = 100;
-var SOFT_RESET_ANCHOR = 1200;
-var ELO_SCALE = 1e3;
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-function effectiveK(gamesPlayed, performance) {
-  if (gamesPlayed >= PLACEMENT_GAMES) return K_ESTABLISHED;
-  const baseK = 200 - gamesPlayed * 40;
-  const placementK = baseK * (1 + clamp(performance, 0, 1));
-  return K_ESTABLISHED + (placementK - K_ESTABLISHED) / 2;
-}
-function expectedScore(ratingA, ratingB) {
-  return 1 / (1 + __pow(10, (ratingB - ratingA) / ELO_SCALE));
-}
-function compute1v1(a, b, outcome) {
-  const ea = expectedScore(a.rating, b.rating);
-  const eb = 1 - ea;
-  let sa;
-  let sb;
-  if (outcome === "a_wins") {
-    sa = 1;
-    sb = 0;
-  } else if (outcome === "b_wins") {
-    sa = 0;
-    sb = 1;
-  } else {
-    sa = 0.5;
-    sb = 0.5;
-  }
-  const ka = effectiveK(a.gamesPlayed, a.performance);
-  const kb = effectiveK(b.gamesPlayed, b.performance);
-  return {
-    deltaA: Math.round(ka * (sa - ea)),
-    deltaB: Math.round(kb * (sb - eb))
-  };
-}
-function computeFFA(players) {
-  const n = players.length;
-  if (n < 2) return new Map(players.map((p) => [p.playerId, 0]));
-  const kDivisor = n - 1;
-  const deltas = /* @__PURE__ */ new Map();
-  for (const p of players) {
-    const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
-    let sum = 0;
-    for (const q of players) {
-      if (q.playerId === p.playerId) continue;
-      const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
-      const ep = expectedScore(p.rating, q.rating);
-      sum += kp * (score - ep);
-    }
-    deltas.set(p.playerId, Math.round(sum));
-  }
-  return deltas;
-}
-function computeTeam(teams, winnerTeamIndex) {
-  const deltas = /* @__PURE__ */ new Map();
-  if (teams.length !== 2) {
-    for (const team of teams) {
-      for (const p of team) deltas.set(p.playerId, 0);
-    }
-    return deltas;
-  }
-  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
-  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
-  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
-  const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
-  const winner = teams[winnerTeamIndex];
-  const loser = teams[loserTeamIndex];
-  const winnerAvg = {
-    rating: avgRating(winner),
-    gamesPlayed: avgGamesPlayed(winner),
-    performance: avgPerformance(winner)
-  };
-  const loserAvg = {
-    rating: avgRating(loser),
-    gamesPlayed: avgGamesPlayed(loser),
-    performance: avgPerformance(loser)
-  };
-  const { deltaA, deltaB } = compute1v1(winnerAvg, loserAvg, "a_wins");
-  for (const p of winner) deltas.set(p.playerId, deltaA);
-  for (const p of loser) deltas.set(p.playerId, deltaB);
-  return deltas;
-}
-function applySoftReset(rating) {
-  const pulled = Math.round(INITIAL_HIDDEN_RATING + (rating - INITIAL_HIDDEN_RATING) / 2);
-  return Math.min(pulled, SOFT_RESET_ANCHOR);
-}
-function detectRatingMode(placements) {
-  if (placements.some((p) => p.teamId)) return "team";
-  if (placements.length === 2) return "solo";
-  return "ffa";
-}
-function computeRatingDeltas(mode, placements, ratings) {
-  var _a, _b;
-  if (mode === "solo") {
-    const [a, b] = placements;
-    const ra = ratings.get(a.playerId);
-    const rb = ratings.get(b.playerId);
-    const outcome = a.place < b.place ? "a_wins" : b.place < a.place ? "b_wins" : "draw";
-    const { deltaA, deltaB } = compute1v1(
-      { rating: ra.rating, gamesPlayed: ra.gamesPlayed, performance: (_a = a.performance) != null ? _a : 0 },
-      { rating: rb.rating, gamesPlayed: rb.gamesPlayed, performance: (_b = b.performance) != null ? _b : 0 },
-      outcome
-    );
-    return /* @__PURE__ */ new Map([
-      [a.playerId, deltaA],
-      [b.playerId, deltaB]
-    ]);
-  }
-  if (mode === "ffa") {
-    return computeFFA(
-      placements.map((p) => {
-        var _a2;
-        const r = ratings.get(p.playerId);
-        return {
-          playerId: p.playerId,
-          rating: r.rating,
-          gamesPlayed: r.gamesPlayed,
-          performance: (_a2 = p.performance) != null ? _a2 : 0,
-          place: p.place
-        };
-      })
-    );
-  }
-  const teamMap = /* @__PURE__ */ new Map();
-  for (const p of placements) {
-    const tid = p.teamId;
-    if (!teamMap.has(tid)) teamMap.set(tid, []);
-    teamMap.get(tid).push(p);
-  }
-  const teamEntries = Array.from(teamMap.entries());
-  const winnerTeamPlace = Math.min(
-    ...teamEntries.map(([, members]) => Math.min(...members.map((m) => m.place)))
-  );
-  const winnerTeamIdx = teamEntries.findIndex(
-    ([, members]) => Math.min(...members.map((m) => m.place)) === winnerTeamPlace
-  );
-  const teams = teamEntries.map(
-    ([, members]) => members.map((m) => {
-      var _a2;
-      const r = ratings.get(m.playerId);
-      return {
-        playerId: m.playerId,
-        rating: r.rating,
-        gamesPlayed: r.gamesPlayed,
-        performance: (_a2 = m.performance) != null ? _a2 : 0
-      };
-    })
-  );
-  return computeTeam(teams, winnerTeamIdx);
+// src/announcement.ts
+var ANNOUNCEMENT_MAX_LENGTH = 300;
+function rpcAdminAnnounce(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (!text) throw runtimeError(INVALID_ARGUMENT, "text is required");
+  if (text.length > ANNOUNCEMENT_MAX_LENGTH)
+    throw runtimeError(INVALID_ARGUMENT, `text is over ${ANNOUNCEMENT_MAX_LENGTH} characters`);
+  nk.notificationSendAll("announcement", { text }, NotifyCode.ANNOUNCEMENT, false);
+  logger.info("Announcement sent (%d characters)", text.length);
+  return JSON.stringify({ ok: true });
 }
 
 // src/rating/metrics.ts
@@ -7672,13 +8176,13 @@ function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
     throw runtimeError(INVALID_ARGUMENT, `Send 1 to ${IMPORT_BATCH_LIMIT} players per call`);
   const valid = [];
   let skipped = 0;
-  for (const hash of hashes) {
-    const boards = players[hash].boards;
-    if (!HASH_PATTERN.test(hash) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
+  for (const hash2 of hashes) {
+    const boards = players[hash2].boards;
+    if (!HASH_PATTERN.test(hash2) || !Array.isArray(boards) || !boards.every(isLegacyBoard)) {
       skipped++;
       continue;
     }
-    valid.push({ hash, boards: boards.map(bareBoard) });
+    valid.push({ hash: hash2, boards: boards.map(bareBoard) });
   }
   const claimed = new Set(
     nk.storageRead(valid.map((p) => ({ collection: LEGACY_RATINGS_COLLECTION, key: p.hash, userId: SYSTEM_USER_ID }))).filter((o) => o.value.claimedBy).map((o) => o.key)
@@ -7695,8 +8199,8 @@ function rpcLegacyRatingsImport(ctx, logger, nk, payload) {
   logger.info("Legacy ratings import: %d written, %d already claimed, %d skipped", writes.length, claimed.size, skipped);
   return JSON.stringify({ imported: writes.length, alreadyClaimed: claimed.size, skipped });
 }
-function claimLegacyRatings(nk, logger, userId, username, hash, now) {
-  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash, userId: SYSTEM_USER_ID }]);
+function claimLegacyRatings(nk, logger, userId, username, hash2, now) {
+  const [parked] = nk.storageRead([{ collection: LEGACY_RATINGS_COLLECTION, key: hash2, userId: SYSTEM_USER_ID }]);
   const legacy = parked == null ? void 0 : parked.value;
   if (!parked || !legacy || legacy.claimedBy) return 0;
   const boards = legacy.boards.map(bareBoard);
@@ -7721,7 +8225,7 @@ function claimLegacyRatings(nk, logger, userId, username, hash, now) {
   }));
   writes.push({
     collection: LEGACY_RATINGS_COLLECTION,
-    key: hash,
+    key: hash2,
     userId: SYSTEM_USER_ID,
     value: __spreadProps(__spreadValues({}, legacy), { claimedBy: userId, claimedAt: now }),
     permissionRead: 0,
@@ -7749,10 +8253,10 @@ function claimLegacyRatings(nk, logger, userId, username, hash, now) {
 function claimLegacyRatingsAtLogin(ctx, logger, nk) {
   try {
     if (!ctx.userId) return;
-    const hash = steamIdHashOf(nk, ctx.userId);
-    if (!hash) return;
+    const hash2 = steamIdHashOf(nk, ctx.userId);
+    if (!hash2) return;
     const username = nk.accountGetId(ctx.userId).user.username;
-    claimLegacyRatings(nk, logger, ctx.userId, username, hash, Date.now());
+    claimLegacyRatings(nk, logger, ctx.userId, username, hash2, Date.now());
   } catch (e) {
     logger.error("Legacy rating claim failed: %v", e);
   }
@@ -7864,16 +8368,16 @@ function moveRawDeviceAccount(nk, logger, rawId, hashedId) {
   logger.info("Moved the Device login of %s to its hash", userId);
 }
 function refuseBannedNetwork(ctx, nk) {
-  const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));
-  if (hash !== null && isNetworkBanned(nk, hash))
+  const hash2 = clientNetworkHash(ctx, nk, settingsOf(ctx));
+  if (hash2 !== null && isNetworkBanned(nk, hash2))
     throw runtimeError(PERMISSION_DENIED, NETWORK_BAN_MESSAGE);
 }
 function afterAuthenticateCustom(ctx, logger, nk, _session, _request) {
   claimLegacyRatingsAtLogin(ctx, logger, nk);
   try {
-    const hash = clientNetworkHash(ctx, nk, settingsOf(ctx));
-    if (hash !== null && ctx.userId)
-      recordNetworkLogin(nk, ctx.userId, hash, Date.now());
+    const hash2 = clientNetworkHash(ctx, nk, settingsOf(ctx));
+    if (hash2 !== null && ctx.userId)
+      recordNetworkLogin(nk, ctx.userId, hash2, Date.now());
   } catch (e) {
     logger.error("Recording the login network failed: %v", e);
   }
@@ -7882,6 +8386,71 @@ function beforeSessionRefresh(ctx, logger, nk, data) {
   refuseBannedNetwork(ctx, nk);
   return data;
 }
+
+// src/actions/run_save.ts
+var RUN_SAVE_PART_KEY = "mpapi_run_save_part";
+var MAX_RUN_SAVE_PART_BYTES = 12 * 1024;
+var MAX_RUN_SAVE_PARTS = 16;
+var MAX_ID_LENGTH = 64;
+var HASH_PATTERN2 = /^[0-9a-f]{64}$/i;
+function isPlainObject3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isCount2(value, max) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= max;
+}
+function isNonNegativeInt(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+var runSavePart = {
+  key: RUN_SAVE_PART_KEY,
+  reduce(lobby, ctx, params) {
+    var _a, _b, _c;
+    if (!lobby.game.started) return { reject: "not_in_game" };
+    if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
+    if (!isPlainObject3(params) || typeof params.id !== "string" || params.id.length === 0 || params.id.length > MAX_ID_LENGTH || !isCount2(params.count, MAX_RUN_SAVE_PARTS) || !isNonNegativeInt(params.index) || params.index >= params.count || !isNonNegativeInt(params.pos) || typeof params.hash !== "string" || !HASH_PATTERN2.test(params.hash) || typeof params.data !== "string" || params.data.length > MAX_RUN_SAVE_PART_BYTES)
+      return { reject: "bad_params" };
+    if (typeof params.run === "string" && params.run !== lobby.game.started.runId)
+      return { game: lobby.game, params: null, to: "none" };
+    const game = lobby.game;
+    const held = (_a = game.runSavePending) == null ? void 0 : _a[ctx.from];
+    const same = held && held.id === params.id && held.count === params.count && held.pos === params.pos && held.hash === params.hash;
+    const pending = same ? __spreadProps(__spreadValues({}, held), { parts: __spreadValues({}, held.parts) }) : {
+      id: params.id,
+      count: params.count,
+      pos: params.pos,
+      hash: params.hash,
+      parts: {}
+    };
+    pending.parts[String(params.index)] = params.data;
+    const rest = __spreadValues({}, (_b = game.runSavePending) != null ? _b : {});
+    if (Object.keys(pending.parts).length < pending.count) {
+      return {
+        game: __spreadProps(__spreadValues({}, game), { runSavePending: __spreadProps(__spreadValues({}, rest), { [ctx.from]: pending }) }),
+        params: null,
+        to: "none"
+      };
+    }
+    delete rest[ctx.from];
+    let data = "";
+    for (let i = 0; i < pending.count; i++) data += pending.parts[String(i)];
+    const save = {
+      id: pending.id,
+      pos: pending.pos,
+      hash: pending.hash,
+      data,
+      at: ctx.now
+    };
+    return {
+      game: __spreadProps(__spreadValues({}, game), {
+        runSaves: __spreadProps(__spreadValues({}, (_c = game.runSaves) != null ? _c : {}), { [ctx.from]: save }),
+        runSavePending: rest
+      }),
+      params: null,
+      to: "none"
+    };
+  }
+};
 
 // src/actions/results.ts
 function parsePlacements(value, participants) {
@@ -7977,7 +8546,7 @@ function finishGame(lobby, now, override) {
   );
   const status = game.contest ? "contested" : override ? override.status : reconciled.status;
   const placements = status === "abandoned" ? [] : reconciled.placements;
-  const run = __spreadValues({
+  const run = __spreadValues(__spreadValues({
     runId: started.runId,
     code: lobby.code,
     modId: lobby.modId,
@@ -7994,7 +8563,7 @@ function finishGame(lobby, now, override) {
     rankedMode: lobby.rankedMode,
     gameMode: lobby.gameMode,
     lobbyType: lobby.rankedMode || lobby.allowedIds ? "public" : "private"
-  }, game.contest ? { contest: game.contest } : {});
+  }, game.contest ? { contest: game.contest } : {}), game.presence && game.presence.length > 0 ? { presence: game.presence } : {});
   const seated = {};
   for (const p of lobby.players) seated[p.id] = true;
   const lateResultTo = game.resultWasPending && status !== "abandoned" ? started.players.filter((p) => !seated[p.id]).map((p) => p.id) : [];
@@ -8034,13 +8603,13 @@ function settle(lobby, now) {
 // src/actions/registry.ts
 var MAX_OPTIONS_BYTES = 4 * 1024;
 var MIN_GAME_PLAYERS = 2;
-function isPlainObject3(value) {
+function isPlainObject4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 var ready = {
   key: "mpapi_ready",
   reduce(lobby, ctx, params) {
-    if (!isPlainObject3(params) || typeof params.ready !== "boolean")
+    if (!isPlainObject4(params) || typeof params.ready !== "boolean")
       return { reject: "bad_params" };
     if (lobby.game.started) return { reject: "in_game" };
     const readyMap = __spreadValues({}, lobby.game.ready);
@@ -8078,7 +8647,7 @@ function newGame(lobby, ctx, stake, options) {
 var startGame = {
   key: "mpapi_start_game",
   reduce(lobby, ctx, params) {
-    const p = isPlainObject3(params) ? params : {};
+    const p = isPlainObject4(params) ? params : {};
     if (p.stake !== void 0 && typeof p.stake !== "number")
       return { reject: "bad_params" };
     if (p.minPlayers !== void 0 && (typeof p.minPlayers !== "number" || p.minPlayers % 1 !== 0))
@@ -8112,7 +8681,7 @@ var startGame = {
       options
     );
     return {
-      game: __spreadProps(__spreadValues({}, emptyGame()), { started }),
+      game: __spreadProps(__spreadValues({}, emptyGame()), { started, presence: startingPresence(started) }),
       params: startedParams(started)
     };
   }
@@ -8129,7 +8698,7 @@ var restartGame = {
     });
     const started = newGame(finished.lobby, ctx, current.stake, current.options);
     return {
-      game: __spreadProps(__spreadValues({}, emptyGame()), { started, setup: setupForRestart(lobby.game) }),
+      game: __spreadProps(__spreadValues({}, emptyGame()), { started, setup: setupForRestart(lobby.game), presence: startingPresence(started) }),
       params: startedParams(started),
       out: finished.out
     };
@@ -8152,10 +8721,6 @@ var abandonGame = {
     };
   }
 };
-function isParticipant(lobby, userId) {
-  const started = lobby.game.started;
-  return !!started && started.players.some((p) => p.id === userId);
-}
 var reportResult = {
   key: "mpapi_report_result",
   reduce(lobby, ctx, params) {
@@ -8163,7 +8728,7 @@ var reportResult = {
     if (!started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
     const placements = parsePlacements(
-      isPlainObject3(params) ? params.placements : null,
+      isPlainObject4(params) ? params.placements : null,
       started.players
     );
     if (!placements) return { reject: "bad_params" };
@@ -8184,7 +8749,7 @@ var setResultPending = {
     const started = lobby.game.started;
     if (!started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
-    if (!isPlainObject3(params) || typeof params.pending !== "boolean")
+    if (!isPlainObject4(params) || typeof params.pending !== "boolean")
       return { reject: "bad_params" };
     const game = __spreadProps(__spreadValues({}, lobby.game), {
       resultPending: params.pending,
@@ -8201,7 +8766,7 @@ var contest = {
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
     if (!lobby.rankedMode && !lobby.gameMode) return { reject: "not_matchmade" };
     if (lobby.game.contest) return { reject: "already_contested" };
-    const input = isPlainObject3(params) ? params : {};
+    const input = isPlainObject4(params) ? params : {};
     const others = started.players.filter((p) => p.id !== ctx.from);
     let against;
     if (input.opponentId === void 0 || input.opponentId === null) {
@@ -8216,7 +8781,18 @@ var contest = {
     const contested = { by: ctx.from, against, at: ctx.now };
     return {
       game: __spreadProps(__spreadValues({}, lobby.game), { contest: contested }),
-      params: { playerId: ctx.from, against }
+      params: { playerId: ctx.from, against },
+      out: [
+        {
+          kind: "contest",
+          runId: started.runId,
+          code: lobby.code,
+          by: ctx.from,
+          against,
+          at: ctx.now,
+          lobbyKind: lobbyKindOf(lobby)
+        }
+      ]
     };
   }
 };
@@ -8224,7 +8800,8 @@ var MAX_LOG_EVENTS = 2e4;
 var MAX_LOG_BYTES = 1024 * 1024;
 var MAX_OPCODE_LENGTH = 64;
 function appendLogEvent(lobby, from, now, params) {
-  if (!isPlainObject3(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
+  var _a;
+  if (!isPlainObject4(params) || typeof params.t !== "number" || typeof params.opcode !== "string" || params.opcode.length === 0 || params.opcode.length > MAX_OPCODE_LENGTH)
     return { reject: "bad_params" };
   const started = lobby.game.started;
   if (!started) return { reject: "not_in_game" };
@@ -8235,23 +8812,41 @@ function appendLogEvent(lobby, from, now, params) {
   const size = line.length;
   const game = lobby.game;
   const log = game.logs[from] || { lines: [], bytes: 0, truncated: false };
+  const numbered = typeof params.seq === "number" && Number.isInteger(params.seq) && params.seq > 0;
+  const seq = numbered ? params.seq : 0;
+  const held = logHeldOf(log);
+  if (numbered && seq <= held) return { game, relayed: null };
+  if (numbered && seq > held + 1) {
+    const ahead = Math.max((_a = log.ahead) != null ? _a : 0, seq);
+    return {
+      game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [from]: __spreadProps(__spreadValues({}, log), { seq: held, ahead }) }) }),
+      relayed: null
+    };
+  }
+  const counted = numbered ? { seq } : {};
   if (log.truncated || log.lines.length >= MAX_LOG_EVENTS || log.bytes + size > MAX_LOG_BYTES) {
-    const truncated = __spreadProps(__spreadValues({}, log), { truncated: true });
+    const truncated = __spreadProps(__spreadValues(__spreadValues({}, log), counted), { truncated: true });
     return {
       game: __spreadProps(__spreadValues({}, game), { logs: __spreadProps(__spreadValues({}, game.logs), { [from]: truncated }) }),
       relayed: null
     };
   }
-  const grown = {
+  const grown = __spreadProps(__spreadValues(__spreadValues({}, log), counted), {
     lines: log.lines.concat([line]),
     bytes: log.bytes + size,
     truncated: false
-  };
+  });
   const stamped = started.raceStartedAt === void 0 ? __spreadProps(__spreadValues({}, started), { raceStartedAt: now }) : started;
   return {
     game: __spreadProps(__spreadValues({}, game), { started: stamped, logs: __spreadProps(__spreadValues({}, game.logs), { [from]: grown }) }),
     relayed: { playerId: from, t: params.t, opcode: params.opcode, args }
   };
+}
+function ackOf(game, from, events) {
+  const numbered = events.some((e) => isPlainObject4(e) && typeof e.seq === "number");
+  if (!numbered) return void 0;
+  const log = game.logs[from];
+  return { got: logHeldOf(log) };
 }
 var logEvent = {
   key: "mpapi_log_event",
@@ -8263,7 +8858,8 @@ var logEvent = {
     return {
       game: appended.game,
       params: appended.relayed,
-      to: appended.relayed ? "others" : "none"
+      to: appended.relayed ? "others" : "none",
+      ack: ackOf(appended.game, ctx.from, [params])
     };
   }
 };
@@ -8273,7 +8869,7 @@ var logEvents = {
   reduce(lobby, ctx, params) {
     if (!lobby.game.started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
-    if (!isPlainObject3(params) || !Array.isArray(params.events) || params.events.length === 0 || params.events.length > MAX_LOG_BATCH)
+    if (!isPlainObject4(params) || !Array.isArray(params.events) || params.events.length === 0 || params.events.length > MAX_LOG_BATCH)
       return { reject: "bad_params" };
     let current = lobby;
     const relayed2 = [];
@@ -8283,13 +8879,15 @@ var logEvents = {
       current = __spreadProps(__spreadValues({}, current), { game: appended.game });
       if (appended.relayed) relayed2.push(appended.relayed);
     }
-    if (relayed2.length === 0) return { game: current.game, params: null, to: "none" };
+    const ack = ackOf(current.game, ctx.from, params.events);
+    if (relayed2.length === 0) return { game: current.game, params: null, to: "none", ack };
     const last = relayed2[relayed2.length - 1];
     return {
       game: current.game,
       params: __spreadProps(__spreadValues({}, last), { count: relayed2.length }),
       to: "others",
-      spectate: relayed2
+      spectate: relayed2,
+      ack
     };
   }
 };
@@ -8302,7 +8900,8 @@ var REGISTRY = {
   [setResultPending.key]: setResultPending,
   [contest.key]: contest,
   [logEvent.key]: logEvent,
-  [logEvents.key]: logEvents
+  [logEvents.key]: logEvents,
+  [runSavePart.key]: runSavePart
 };
 for (const setupAction of SETUP_ACTIONS) REGISTRY[setupAction.key] = setupAction;
 var LOG_EVENT_KEY = logEvent.key;
@@ -8353,8 +8952,8 @@ function answerGroupSignal(lobby, signal2, switches, now) {
     case "group_members":
       return unchanged(lobby, homeFactsOf(lobby));
     case "group_status": {
-      const view = viewOf(lobby);
-      return unchanged(lobby, view && view.partyId === signal2.partyId ? view : null);
+      const view2 = viewOf(lobby);
+      return unchanged(lobby, view2 && view2.partyId === signal2.partyId ? view2 : null);
     }
     case "group_open":
       return answered(
@@ -8437,6 +9036,384 @@ function senderRefusal(lobby, from, key, params) {
   return claimed === from ? null : { kind: "not_self", key: ruled, from, hostId, claimed };
 }
 
+// src/lobby/draft_support.ts
+function seededRng(id) {
+  let rng = 1;
+  for (let i = 0; i < id.length; i++)
+    rng = (rng * 31 + id.charCodeAt(i)) % 2147483647;
+  return rng;
+}
+function nextRng(rng) {
+  return rng * 16807 % 2147483647;
+}
+function rejectStep(lobby, from, action2, reason) {
+  return {
+    lobby,
+    out: [
+      {
+        kind: "send",
+        op: ServerOp.ACTION_REJECTED,
+        to: [from],
+        payload: { action: action2, reason }
+      }
+    ]
+  };
+}
+function paramsObject(input) {
+  return input && typeof input === "object" && !Array.isArray(input) ? input : {};
+}
+
+// src/lobby/almanac.ts
+var ALMANAC_RULESET = "ruleset_mp_almanac";
+var ALMANAC_RANKED_MODE = "pvp_ranked_almanac";
+var DECK_ANTES = {
+  b_red: 2,
+  b_blue: 2,
+  b_yellow: 2,
+  b_green: 2,
+  b_black: 3,
+  b_magic: 2,
+  b_nebula: 2,
+  b_ghost: 3,
+  b_abandoned: 3,
+  b_checkered: 3,
+  b_zodiac: 2,
+  b_painted: 3,
+  b_anaglyph: 2,
+  b_erratic: 2,
+  b_mp_violet: 2,
+  b_mp_indigo: 5,
+  b_mp_orange: 2,
+  b_mp_oracle: 5,
+  b_mp_gradient: 5,
+  b_mp_heidelberg: 7,
+  b_mp_echodeck: 7
+};
+var MILESTONES2 = [2, 3, 5, 7];
+var DECK_PICK_MS = 6e4;
+function isAlmanac(lobby) {
+  return lobby.modId === PVP_MOD_ID && (lobby.rankedMode === ALMANAC_RANKED_MODE || !lobby.rankedMode && !lobby.gameMode && (lobby.metadata.ruleset === ALMANAC_RULESET || lobby.metadata.deck === "Almanac"));
+}
+function offerMessage(lobby, offer, player, now) {
+  return {
+    kind: "send",
+    op: ServerOp.ACTION,
+    to: [player],
+    payload: {
+      cid: "",
+      action: "pvp_almanac_offer",
+      from: lobby.hostId,
+      to: "*",
+      params: {
+        id: offer.id,
+        ante: offer.ante,
+        choices: offer.choices,
+        picked: offer.picks[player],
+        ms_left: offer.deadline === void 0 ? void 0 : Math.max(0, offer.deadline - now)
+      }
+    }
+  };
+}
+function almanacAction(lobby, from, key, input, now) {
+  var _a;
+  if (!["pvp_almanac_open", "pvp_almanac_pick", "pvp_almanac_offer"].includes(key))
+    return null;
+  const refuse3 = (reason) => rejectStep(lobby, from, key, reason);
+  if (key === "pvp_almanac_offer") return refuse3("server_only");
+  const started = lobby.game.started;
+  if (!isAlmanac(lobby) || !started || started.players.length !== 2 || !started.players.some((p) => p.id === from))
+    return refuse3("unavailable");
+  if (lobby.players.length > 2) return refuse3("too_many_players");
+  if (lobby.players.length !== 2) return refuse3("unavailable");
+  const params = paramsObject(input);
+  const ante = params.ante;
+  if (typeof ante !== "number" || !MILESTONES2.includes(ante))
+    return refuse3("bad_ante");
+  const players = started.players.map((p) => p.id).sort();
+  const current = ((_a = lobby.almanac) == null ? void 0 : _a.run) === started.runId ? lobby.almanac : {
+    run: started.runId,
+    players,
+    acquired: { [players[0]]: [], [players[1]]: [] },
+    offers: {}
+  };
+  const existing = current.offers[ante];
+  if (key === "pvp_almanac_open") {
+    if (existing) return { lobby, out: [offerMessage(lobby, existing, from, now)] };
+    const previous = MILESTONES2[MILESTONES2.indexOf(ante) - 1];
+    if (previous && !players.every((p) => {
+      var _a2;
+      return !!((_a2 = current.offers[previous]) == null ? void 0 : _a2.picks[p]);
+    }))
+      return refuse3("previous_pending");
+    const pool = Object.keys(DECK_ANTES).filter(
+      (deck) => DECK_ANTES[deck] <= ante && players.every((p) => !current.acquired[p].includes(deck))
+    ).sort();
+    const id = `${started.runId}:decks:${ante}`;
+    let rng = seededRng(id);
+    const choices = [];
+    while (choices.length < 3 && pool.length > 0) {
+      rng = nextRng(rng);
+      choices.push(pool.splice(rng % pool.length, 1)[0]);
+    }
+    const offer2 = {
+      id,
+      ante,
+      choices,
+      picks: {},
+      deadline: now + DECK_PICK_MS
+    };
+    const next2 = __spreadProps(__spreadValues({}, lobby), {
+      almanac: __spreadProps(__spreadValues({}, current), { offers: __spreadProps(__spreadValues({}, current.offers), { [ante]: offer2 }) })
+    });
+    return { lobby: next2, out: [offerMessage(next2, offer2, from, now)] };
+  }
+  if (!existing || params.id !== existing.id) return refuse3("stale_offer");
+  if (existing.deadline !== void 0 && now >= existing.deadline)
+    return almanacTick(lobby, now);
+  if (existing.picks[from]) return { lobby, out: [offerMessage(lobby, existing, from, now)] };
+  if (typeof params.deck !== "string" || !existing.choices.includes(params.deck))
+    return refuse3("not_offered");
+  const offer = __spreadProps(__spreadValues({}, existing), {
+    picks: __spreadProps(__spreadValues({}, existing.picks), { [from]: params.deck })
+  });
+  const state = __spreadProps(__spreadValues({}, current), {
+    offers: __spreadProps(__spreadValues({}, current.offers), { [ante]: offer }),
+    acquired: __spreadProps(__spreadValues({}, current.acquired), {
+      [from]: [...current.acquired[from], params.deck]
+    })
+  });
+  const next = __spreadProps(__spreadValues({}, lobby), { almanac: state });
+  return { lobby: next, out: [offerMessage(next, offer, from, now)] };
+}
+function almanacTick(lobby, now) {
+  const current = lobby.almanac;
+  const started = lobby.game.started;
+  if (!current || lobby.closed || !started || current.run !== started.runId || current.players.some((id) => !lobby.players.some((p) => p.id === id)))
+    return { lobby, out: [] };
+  const offers = __spreadValues({}, current.offers);
+  const acquired = __spreadValues({}, current.acquired);
+  const expired = [];
+  for (const key of Object.keys(offers)) {
+    const offer = offers[key];
+    if (offer.deadline === void 0 || now < offer.deadline || current.players.every((id) => !!offer.picks[id]))
+      continue;
+    const picks = __spreadValues({}, offer.picks);
+    for (const id of current.players) {
+      if (picks[id] || offer.choices.length === 0) continue;
+      const rolled = offer.choices[nextRng(seededRng(`${offer.id}:${id}`)) % offer.choices.length];
+      picks[id] = rolled;
+      acquired[id] = [...acquired[id], rolled];
+    }
+    offers[key] = __spreadProps(__spreadValues({}, offer), { picks });
+    expired.push(offers[key]);
+  }
+  if (expired.length === 0) return { lobby, out: [] };
+  const next = __spreadProps(__spreadValues({}, lobby), { almanac: __spreadProps(__spreadValues({}, current), { offers, acquired }) });
+  return {
+    lobby: next,
+    out: expired.flatMap(
+      (offer) => current.players.map((id) => offerMessage(next, offer, id, now))
+    )
+  };
+}
+
+// src/lobby/shared_rules.ts
+var RULE_ANTES = {
+  manacle: 3,
+  psychic: 3,
+  house: 3,
+  club: 3,
+  goad: 3,
+  window: 3,
+  head: 3,
+  glass_cannon: 3,
+  tooth: 3,
+  arm: 3,
+  leaf: 4,
+  hook: 5,
+  plant: 5,
+  water: 5
+};
+function message(lobby, key, params, to) {
+  return {
+    kind: "send",
+    op: ServerOp.ACTION,
+    to,
+    // These are host-referee protocol messages generated by the server.
+    // Client attempts to emit offers are rejected by sharedRulesAction.
+    payload: { cid: "", action: key, from: lobby.hostId, to: "*", params }
+  };
+}
+function roll(state, count2) {
+  state.rng = nextRng(state.rng);
+  return state.rng % count2;
+}
+function eligible(ante) {
+  return Object.keys(RULE_ANTES).filter((key) => RULE_ANTES[key] <= ante).sort();
+}
+function view(lobby, state, id, now) {
+  if (state.rules) {
+    return message(
+      lobby,
+      "pvp_start_blind",
+      {
+        first_player: state.firstPlayer,
+        round_id: state.roundId,
+        starting_hands: state.startingHands,
+        shared_rules: { id: state.id, ante: state.ante, rules: state.rules }
+      },
+      [id]
+    );
+  }
+  return message(
+    lobby,
+    "pvp_rules_offer",
+    {
+      id: state.id,
+      ante: state.ante,
+      choices: state.offers[id],
+      locked: !!state.picks[id],
+      ms_left: Math.max(0, state.deadline - now)
+    },
+    [id]
+  );
+}
+function resolve(state) {
+  for (const id of state.players) {
+    if (!state.picks[id]) {
+      const offer = state.offers[id];
+      state.picks[id] = offer[roll(state, offer.length)];
+    }
+  }
+  const first = state.picks[state.players[0]];
+  let second = state.picks[state.players[1]];
+  if (first === second) {
+    const pool = eligible(state.ante).filter((key) => key !== first);
+    second = pool[roll(state, pool.length)];
+  }
+  state.rules = [first, second];
+}
+function sharedRulesTick(lobby, now) {
+  var _a;
+  const current = lobby.sharedRules;
+  if (!current || current.rules || lobby.closed || current.players.some(
+    (id) => !lobby.players.some((player) => player.id === id)
+  ) || current.run !== ((_a = lobby.game.started) == null ? void 0 : _a.runId) || now < current.deadline)
+    return { lobby, out: [] };
+  const state = __spreadProps(__spreadValues({}, current), { picks: __spreadValues({}, current.picks) });
+  resolve(state);
+  const next = __spreadProps(__spreadValues({}, lobby), { sharedRules: state });
+  return {
+    lobby: next,
+    out: state.players.map((id) => view(next, state, id, now))
+  };
+}
+function sharedRulesEnabled(lobby) {
+  return lobby.modId === PVP_MOD_ID && (isAlmanac(lobby) || !lobby.rankedMode && !lobby.gameMode && lobby.metadata.shared_pvp_rules === true);
+}
+function startBlindRefusal(lobby, key, params) {
+  var _a;
+  if (key !== "pvp_start_blind" || !sharedRulesEnabled(lobby)) return null;
+  if ("shared_rules" in paramsObject(params)) return "rules_required";
+  const started = lobby.game.started;
+  if (started && ((_a = lobby.sharedRules) == null ? void 0 : _a.run) === started.runId)
+    return "rules_required";
+  return null;
+}
+function sharedRulesAction(lobby, from, key, input, now) {
+  var _a, _b;
+  if (![
+    "pvp_rules_open",
+    "pvp_rules_pick",
+    "pvp_rules_sync",
+    "pvp_rules_offer"
+  ].includes(key))
+    return null;
+  const refuse3 = (reason) => rejectStep(lobby, from, key, reason);
+  if (key === "pvp_rules_offer") return refuse3("server_only");
+  const started = lobby.game.started;
+  if (!started || !sharedRulesEnabled(lobby) || started.players.length !== 2 || !started.players.some((player) => player.id === from))
+    return refuse3("unavailable");
+  if (lobby.players.length > 2) return refuse3("too_many_players");
+  if (lobby.players.length !== 2) return refuse3("unavailable");
+  const params = paramsObject(input);
+  const current = ((_a = lobby.sharedRules) == null ? void 0 : _a.run) === started.runId ? lobby.sharedRules : void 0;
+  if (key === "pvp_rules_open") {
+    if (from !== lobby.hostId) return refuse3("not_host");
+    const ante = params.ante;
+    if (typeof ante !== "number" || !Number.isInteger(ante) || ante < 3 || typeof params.first_player !== "string" || !started.players.some((player) => player.id === params.first_player))
+      return refuse3("bad_params");
+    const roundId = typeof params.round_id === "string" && params.round_id.length > 0 ? params.round_id : void 0;
+    if (isAlmanac(lobby) && !roundId) return refuse3("bad_round");
+    const id = `${started.runId}:${roundId || ante}`;
+    if (current && (ante < current.ante || ((_b = current.retiredIds) == null ? void 0 : _b.includes(id))))
+      return refuse3("stale_encounter");
+    if (current && id === current.id) {
+      return {
+        lobby,
+        out: current.players.map((id2) => view(lobby, current, id2, now))
+      };
+    }
+    if (current && ante === current.ante && !roundId)
+      return refuse3("stale_encounter");
+    if (current && !current.rules) return refuse3("draft_in_progress");
+    const players = started.players.map((player) => player.id).sort();
+    const rng = seededRng(id);
+    const startingHands = {};
+    if (params.starting_hands && typeof params.starting_hands === "object") {
+      for (const player of players) {
+        const hands = params.starting_hands[player];
+        if (typeof hands === "number" && Number.isFinite(hands))
+          startingHands[player] = hands;
+      }
+    }
+    const state2 = {
+      run: started.runId,
+      id,
+      ante,
+      firstPlayer: params.first_player,
+      roundId,
+      retiredIds: current ? [...current.retiredIds || [], current.id] : [],
+      startingHands,
+      players,
+      offers: {},
+      picks: {},
+      rng: Math.max(1, rng),
+      deadline: now + 1e4
+    };
+    for (const player of players) {
+      const pool = eligible(ante);
+      state2.offers[player] = [];
+      for (let i = 0; i < 4; i++)
+        state2.offers[player].push(pool.splice(roll(state2, pool.length), 1)[0]);
+    }
+    const next2 = __spreadProps(__spreadValues({}, lobby), { sharedRules: state2 });
+    return {
+      lobby: next2,
+      out: players.map((player) => view(next2, state2, player, now))
+    };
+  }
+  if (!current)
+    return key === "pvp_rules_sync" ? { lobby, out: [] } : refuse3("no_draft");
+  if (key === "pvp_rules_sync") {
+    const ticked = sharedRulesTick(lobby, now);
+    if (ticked.out.length) return ticked;
+    return { lobby, out: [view(lobby, current, from, now)] };
+  }
+  if (params.id !== current.id) return refuse3("stale_encounter");
+  if (now >= current.deadline) return sharedRulesTick(lobby, now);
+  if (current.rules || current.picks[from]) return refuse3("already_locked");
+  if (typeof params.rule !== "string" || !current.offers[from].includes(params.rule))
+    return refuse3("not_offered");
+  const state = __spreadProps(__spreadValues({}, current), { picks: __spreadProps(__spreadValues({}, current.picks), { [from]: params.rule }) });
+  if (state.players.every((id) => !!state.picks[id])) resolve(state);
+  const next = __spreadProps(__spreadValues({}, lobby), { sharedRules: state });
+  return {
+    lobby: next,
+    out: state.rules ? state.players.map((id) => view(next, state, id, now)) : [view(next, state, from, now)]
+  };
+}
+
 // src/lobby/relay.ts
 var ACTION_KEY_PATTERN = /^[a-z0-9_]{1,64}$/;
 var MAX_PARAMS_BYTES = 16 * 1024;
@@ -8510,27 +9487,39 @@ function relayAction(lobby, senderId, data, ctx) {
   const cid = stringField(data, "cid").slice(0, MAX_CID_LENGTH);
   const key = stringField(data, "action");
   const to = stringField(data, "to");
-  const refuse2 = (reason) => ({
+  const refuse3 = (reason) => ({
     lobby,
     out: [reject(senderId, { cid, action: key, reason })],
     refused: { key, reason }
   });
   if (!findPlayer(lobby, senderId)) return { lobby, out: [], refused: { key, reason: "no_seat" } };
-  if (!ACTION_KEY_PATTERN.test(key)) return refuse2("bad_action");
+  if (!ACTION_KEY_PATTERN.test(key)) return refuse3("bad_action");
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
-    return refuse2("too_large");
+    return refuse3("too_large");
   const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params));
-  if (!budgeted) return refuse2("rate_limited");
+  if (!budgeted) return refuse3("rate_limited");
+  const almanac = almanacAction(budgeted, senderId, key, params, ctx.now);
+  if (almanac) return almanac;
+  const sharedRules = sharedRulesAction(
+    budgeted,
+    senderId,
+    key,
+    params,
+    ctx.now
+  );
+  if (sharedRules) return sharedRules;
+  const rulesRequired = startBlindRefusal(budgeted, key, params);
+  if (rulesRequired) return refuse3(rulesRequired);
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
-    if (!authoritative) return refuse2("not_authoritative");
+    if (!authoritative) return refuse3("not_authoritative");
     const result = authoritative.reduce(
       budgeted,
       __spreadProps(__spreadValues({}, ctx), { from: senderId }),
       params
     );
-    if ("reject" in result) return refuse2(result.reject);
+    if ("reject" in result) return refuse3(result.reject);
     const next = __spreadProps(__spreadValues({}, budgeted), { game: result.game });
     const out = [];
     const audience = result.to || "all";
@@ -8553,7 +9542,7 @@ function relayAction(lobby, senderId, data, ctx) {
       out.push({
         kind: "send",
         op: ServerOp.ACTION,
-        payload: { cid, action: key, from: SERVER_TARGET, to: BROADCAST_TARGET, params: { ack: true } },
+        payload: { cid, action: key, from: SERVER_TARGET, to: BROADCAST_TARGET, params: __spreadValues({ ack: true }, result.ack) },
         to: [senderId]
       });
     if (result.out) out.push(...result.out);
@@ -8564,7 +9553,7 @@ function relayAction(lobby, senderId, data, ctx) {
     const settled = settle(next, ctx.now);
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
-  if (authoritative) return refuse2("authoritative_only");
+  if (authoritative) return refuse3("authoritative_only");
   const dropped = senderRefusal(budgeted, senderId, key, params);
   if (dropped)
     return {
@@ -8578,7 +9567,7 @@ function relayAction(lobby, senderId, data, ctx) {
   } else if (findPlayer(budgeted, to)) {
     targets = [to];
   } else {
-    return refuse2("unknown_target");
+    return refuse3("unknown_target");
   }
   const envelope = {
     cid,
@@ -8669,20 +9658,43 @@ function lateResultContent(run, playerId) {
     rating: run.ratings && run.ratings[playerId] || null
   };
 }
+function tellResult(nk, userId, kind, code, subject, content) {
+  sendNotification(nk, userId, kind, content);
+  notify(nk, userId, code, subject, __spreadValues({}, content), false);
+}
 function sendLateResults(nk, run, playerIds) {
   for (const playerId of playerIds) {
-    notify(nk, playerId, NotifyCode.RESULT_LATE, "result_late", __spreadValues({}, lateResultContent(run, playerId)), false);
+    const content = lateResultContent(run, playerId);
+    tellResult(
+      nk,
+      playerId,
+      NotificationKind.RESULT_LATE,
+      NotifyCode.RESULT_LATE,
+      "result_late",
+      content
+    );
   }
 }
 function rankedResultContent(run, playerId) {
   const first = run.placements.filter((p) => p.place === 1);
-  return __spreadProps(__spreadValues({}, lateResultContent(run, playerId)), { tied: first.length > 1, players: run.players.length });
+  return __spreadProps(__spreadValues({}, lateResultContent(run, playerId)), {
+    tied: first.length > 1,
+    players: run.players.length
+  });
 }
 function sendRankedResults(nk, run) {
   if (!run.rankedMode) return;
   for (const player of run.players) {
     if (!run.ratings || !run.ratings[player.id]) continue;
-    notify(nk, player.id, NotifyCode.RESULT_RANKED, "result_ranked", __spreadValues({}, rankedResultContent(run, player.id)), false);
+    const content = rankedResultContent(run, player.id);
+    tellResult(
+      nk,
+      player.id,
+      NotificationKind.RESULT_RANKED,
+      NotifyCode.RESULT_RANKED,
+      "result_ranked",
+      content
+    );
   }
 }
 
@@ -8706,12 +9718,12 @@ function messageOf(refusal) {
   }
 }
 function rejoinRejectMessage(refusal) {
-  const view = {
+  const view2 = {
     reason: refusal.reason,
     mods: refusal.reason === "mods_not_allowed" ? refusal.mods : [],
     message: messageOf(refusal)
   };
-  return REJOIN_REFUSED_PREFIX + JSON.stringify(view);
+  return REJOIN_REFUSED_PREFIX + JSON.stringify(view2);
 }
 
 // src/lobby/match.ts
@@ -8849,6 +9861,21 @@ function runEffect(ctx, logger, nk, dispatcher, lobby, presences, effect) {
       }
       return;
     }
+    case "contest":
+      try {
+        enqueue(nk, {
+          kind: "contest",
+          at: effect.at,
+          runId: effect.runId,
+          code: effect.code,
+          by: effect.by,
+          against: effect.against,
+          lobbyKind: effect.lobbyKind
+        });
+      } catch (e) {
+        logger.warn("Lobby %s: could not record the contest of run %s: %v", lobby.code, effect.runId, e);
+      }
+      return;
     case "forfeited":
       try {
         recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at, lobbyKind: effect.lobbyKind });
@@ -8972,6 +9999,7 @@ function parseMods(raw) {
   }
 }
 function joinInfoOf(nk, settings, presence, meta) {
+  var _a;
   const sentMods = parseMods(meta.mods);
   const standing = standingFor(nk, settings, presence.userId, Date.now()).standing;
   const report = readModReport(nk, presence.userId);
@@ -8980,7 +10008,7 @@ function joinInfoOf(nk, settings, presence, meta) {
   const joker = stored ? selectableOrDefault(stored.profile.preferredJoker, holdingsOf(nk, presence.userId, stored.profile.privileges)) : DEFAULT_AVATAR;
   if (stored && stored.profile.nakamaLogin) {
     return {
-      displayName: displayNameOf(stored.profile),
+      displayName: shownNameOf(nk, presence.userId, stored.profile),
       preferredJoker: joker,
       mods: sentMods !== null ? sentMods : stored.profile.mods,
       standing,
@@ -8988,7 +10016,7 @@ function joinInfoOf(nk, settings, presence, meta) {
     };
   }
   return {
-    displayName: meta.displayName || presence.username,
+    displayName: (_a = banNameFor(nk, presence.userId)) != null ? _a : meta.displayName || presence.username,
     preferredJoker: joker,
     mods: sentMods,
     standing,
@@ -9123,10 +10151,10 @@ function lobbyMatchLeave(ctx, logger, nk, dispatcher, tickNumber, state, presenc
   }
   return current ? { state: current } : null;
 }
-function parseMessage(nk, message) {
-  if (message.data.byteLength > MAX_MESSAGE_BYTES) return null;
+function parseMessage(nk, message2) {
+  if (message2.data.byteLength > MAX_MESSAGE_BYTES) return null;
   try {
-    const data = JSON.parse(nk.binaryToString(message.data));
+    const data = JSON.parse(nk.binaryToString(message2.data));
     if (Array.isArray(data)) return data.length === 0 ? {} : null;
     return typeof data === "object" && data !== null ? data : null;
   } catch (e) {
@@ -9162,6 +10190,14 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
         senderId,
         data.state === void 0 ? null : data.state
       );
+    case ClientOp.SPECTATE_VIEW:
+      return typeof data.playerId === "string" ? spectateRunOf(
+        lobby,
+        senderId,
+        data.playerId,
+        (input) => nk.sha256Hash(input),
+        data.fromStart === true
+      ) : null;
     case ClientOp.CATCHING_UP:
       return setCatchingUp(lobby, senderId, data.catchingUp === true, Date.now());
     default:
@@ -9171,22 +10207,22 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
 function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages) {
   if (state.stopping || state.lobby.closed) return null;
   let current = state;
-  for (const message of messages) {
+  for (const message2 of messages) {
     if (!current) break;
-    const data = parseMessage(nk, message);
+    const data = parseMessage(nk, message2);
     const step = data && stepForMessage(
       nk,
       current.lobby,
-      message.sender.userId,
-      message.opCode,
+      message2.sender.userId,
+      message2.opCode,
       data
     );
     if (!step) {
       logger.warn(
         "Lobby %s: dropped op %d from %s",
         current.lobby.code,
-        message.opCode,
-        message.sender.userId
+        message2.opCode,
+        message2.sender.userId
       );
       continue;
     }
@@ -9195,7 +10231,7 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
         "Lobby %s: refused %s from %s (%s)",
         current.lobby.code,
         step.refused.key,
-        message.sender.userId,
+        message2.sender.userId,
         step.refused.reason
       );
     }
@@ -9217,13 +10253,31 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
   const now = Date.now();
   const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now));
   if (!ticked) return null;
-  const setupTicked = apply(
+  const rulesTicked = apply(
     ctx,
     logger,
     nk,
     dispatcher,
     ticked,
-    setupTick(ticked.lobby, now, Math.random)
+    sharedRulesTick(ticked.lobby, now)
+  );
+  if (!rulesTicked) return null;
+  const decksTicked = apply(
+    ctx,
+    logger,
+    nk,
+    dispatcher,
+    rulesTicked,
+    almanacTick(rulesTicked.lobby, now)
+  );
+  if (!decksTicked) return null;
+  const setupTicked = apply(
+    ctx,
+    logger,
+    nk,
+    dispatcher,
+    decksTicked,
+    setupTick(decksTicked.lobby, now, Math.random)
   );
   if (!setupTicked) return null;
   const settled = apply(
@@ -9252,7 +10306,16 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer2.reply };
   }
   if (signal2.type === "get_active") {
-    return { state, data: JSON.stringify(activeRunOf(state.lobby, signal2.userId)) };
+    return {
+      state,
+      data: JSON.stringify(
+        activeRunOf(
+          state.lobby,
+          signal2.userId,
+          (input) => nk.sha256Hash(input)
+        )
+      )
+    };
   }
   if (signal2.type === "chat_check") {
     const check = chatCheck(state.lobby, signal2.userId, Date.now());
@@ -9365,13 +10428,21 @@ function verdictOf(value) {
   const record = value;
   return record.verdict === "allow" || record.verdict === "reject" ? record : null;
 }
+function guardOf(body) {
+  if (typeof body.guardScore !== "number" || typeof body.guardSafety !== "string" || typeof body.guardContextUsed !== "boolean")
+    return {};
+  return { guard: { safety: body.guardSafety, score: body.guardScore, contextUsed: body.guardContextUsed } };
+}
 function decideModerationOutcome(attempt) {
   const body = attempt && attempt.status === 200 ? verdictOf(attempt.body) : null;
   if (!body) return { allowed: false, reason: "unavailable" };
-  if (body.verdict === "allow") return { allowed: true, review: body.band === REVIEW_BAND };
+  if (body.verdict === "allow") return __spreadValues(__spreadValues({
+    allowed: true,
+    review: body.band === REVIEW_BAND
+  }, typeof body.band === "string" ? { band: body.band } : {}), guardOf(body));
   const band = typeof body.band === "string" ? body.band : void 0;
   if (band === "guard_unavailable") return { allowed: false, reason: "unavailable" };
-  return { allowed: false, reason: "moderated", band };
+  return __spreadValues({ allowed: false, reason: "moderated", band }, guardOf(body));
 }
 var DEFAULT_TIMEOUT_MS = 3e3;
 var MODERATION_SERVICE_URL = "http://moderation-lb:8001";
@@ -9401,7 +10472,7 @@ function callModeration(nk, logger, env, request) {
   }
 }
 
-// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
+// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
 var import_index = __toESM(require_dist(), 1);
 var DataSet = import_index.default.DataSet;
 var ParserError = import_index.default.ParserError;
@@ -9434,22 +10505,22 @@ var skipNonAlphabeticTransformer = import_index.default.skipNonAlphabeticTransfo
 var toAsciiLowerCaseTransformer = import_index.default.toAsciiLowerCaseTransformer;
 
 // src/chat/filter.ts
-function normalizeForAllowlist(message) {
-  const trimmed = message.trim();
+function normalizeForAllowlist(message2) {
+  const trimmed = message2.trim();
   if (trimmed === "") return null;
   const lower = trimmed.toLowerCase();
   if (/^[.!?]+$/.test(lower)) return lower;
   if (lower.endsWith(".") || lower.endsWith("!") || lower.endsWith("?")) return lower.slice(0, -1);
   return lower;
 }
-function isAllowlisted(message, allowlist) {
-  const key = normalizeForAllowlist(message);
+function isAllowlisted(message2, allowlist) {
+  const key = normalizeForAllowlist(message2);
   return key !== null && allowlist.indexOf(key) !== -1;
 }
 var matcher = null;
-function obscenityMatches(message) {
+function obscenityMatches(message2) {
   if (!matcher) matcher = new RegExpMatcher(__spreadValues(__spreadValues({}, englishDataset.build()), englishRecommendedTransformers));
-  return matcher.getAllMatches(message).map((m) => {
+  return matcher.getAllMatches(message2).map((m) => {
     const metadata = englishDataset.getPayloadWithPhraseMetadata(m).phraseMetadata;
     return { word: metadata && metadata.originalWord || "", startIndex: m.startIndex, endIndex: m.endIndex };
   });
@@ -9478,14 +10549,14 @@ function rpcChatEnable(ctx, logger, nk, payload) {
     },
     ctx.username
   );
-  return JSON.stringify({ enabled: true, player: playerView(userId, profile) });
+  return JSON.stringify({ enabled: true, player: playerView(nk, userId, profile) });
 }
 function rpcChatSend(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
-  const message = parsePayload(payload).message;
-  if (typeof message !== "string" || !message.trim())
+  const message2 = parsePayload(payload).message;
+  if (typeof message2 !== "string" || !message2.trim())
     throw runtimeError(INVALID_ARGUMENT, "Message is empty");
-  if (message.length > MAX_MESSAGE_LENGTH)
+  if (message2.length > MAX_MESSAGE_LENGTH)
     throw runtimeError(INVALID_ARGUMENT, `Message is over ${MAX_MESSAGE_LENGTH} characters`);
   const config = readConfig(nk);
   if (!config.chatEnabled) throw runtimeError(UNAVAILABLE, "Chat is turned off");
@@ -9509,46 +10580,55 @@ function rpcChatSend(ctx, logger, nk, payload) {
     lobbyId: lobbyIdOf(current.matchId),
     lobbyKind: lobbyKindOfLabel(match ? match.label : null)
   };
-  let flag2 = null;
-  if (!isAllowlisted(message, config.chatAllowlist)) {
+  let flagged = false;
+  let verdict = null;
+  if (!isAllowlisted(message2, config.chatAllowlist)) {
     if (settingsOf(ctx).moderationRemote) {
       const outcome = decideModerationOutcome(
         callModeration(nk, logger, ctx.env, {
           playerId: userId,
           lobbyCode: check.code,
-          message,
+          message: message2,
           context: check.context
         })
       );
       if (!outcome.allowed) {
         if (outcome.reason === "moderated") {
-          logChat(nk, logger, lobby, userId, message, { source: "remote", band: outcome.band || "unknown" });
+          logChat(nk, logger, lobby, userId, message2, true, __spreadValues({
+            source: "remote",
+            band: outcome.band || "unknown"
+          }, guardFields(outcome.guard)));
           throw runtimeError(PERMISSION_DENIED, "Message blocked by moderation");
         }
         throw runtimeError(UNAVAILABLE, "Chat is unavailable right now");
       }
-      if (outcome.review) flag2 = { source: "remote", band: REVIEW_BAND };
+      flagged = outcome.review;
+      if (outcome.review) verdict = __spreadValues({ source: "remote", band: REVIEW_BAND }, guardFields(outcome.guard));
+      else if (outcome.guard) verdict = __spreadValues({ source: "remote", band: outcome.band || "unknown" }, guardFields(outcome.guard));
     } else {
-      const matches = obscenityMatches(message);
+      const matches = obscenityMatches(message2);
       if (matches.length > 0) {
-        logChat(nk, logger, lobby, userId, message, { source: "local", matches });
+        logChat(nk, logger, lobby, userId, message2, true, { source: "local", matches });
         throw runtimeError(PERMISSION_DENIED, "Message blocked by moderation");
       }
     }
   }
   nk.matchSignal(
     current.matchId,
-    JSON.stringify({ type: "chat_post", userId, text: message })
+    JSON.stringify({ type: "chat_post", userId, text: message2 })
   );
-  logChat(nk, logger, lobby, userId, message, flag2);
-  return JSON.stringify({ text: message });
+  logChat(nk, logger, lobby, userId, message2, flagged, verdict);
+  return JSON.stringify({ text: message2 });
 }
-function logChat(nk, logger, lobby, userId, message, flag2) {
+function guardFields(guard) {
+  return guard ? { guardSafety: guard.safety, guardScore: guard.score, guardContextUsed: guard.contextUsed } : {};
+}
+function logChat(nk, logger, lobby, userId, message2, flagged, verdict) {
   try {
     enqueue(nk, {
       kind: "chat",
       at: Date.now(),
-      line: __spreadProps(__spreadValues({}, lobby), { userId, message, flagged: flag2 !== null, verdict: flag2 })
+      line: __spreadProps(__spreadValues({}, lobby), { userId, message: message2, flagged, verdict })
     });
   } catch (e) {
     logger.error("Could not queue a chat line for the API: %v", e);
@@ -9561,8 +10641,8 @@ function field2(obj, camel, snake) {
   const o = obj;
   return o[camel] !== void 0 ? o[camel] : o[snake];
 }
-function partyIdOf(message) {
-  const id = field2(message, "partyId", "party_id");
+function partyIdOf(message2) {
+  const id = field2(message2, "partyId", "party_id");
   return typeof id === "string" ? id : "";
 }
 function refuse(refusal) {
@@ -9648,9 +10728,9 @@ function afterPartyMatchmakerAdd(ctx, logger, nk, output, input) {
   );
 }
 function beforePartyMatchmakerRemove(ctx, logger, nk, envelope) {
-  const remove2 = field2(envelope, "partyMatchmakerRemove", "party_matchmaker_remove");
-  const partyId = partyIdOf(remove2);
-  const ticket = field2(remove2, "ticket", "ticket");
+  const remove3 = field2(envelope, "partyMatchmakerRemove", "party_matchmaker_remove");
+  const partyId = partyIdOf(remove3);
+  const ticket = field2(remove3, "ticket", "ticket");
   if (!partyId || typeof ticket !== "string") return envelope;
   const found = statusOf(nk, partyId);
   if (!found) return envelope;
@@ -9690,8 +10770,8 @@ function relayed(reply) {
   const parsed = JSON.parse(reply);
   return parsed && parsed.refused ? refusedReply(parsed.refused) : reply;
 }
-function signal(nk, matchId, message) {
-  return nk.matchSignal(matchId, JSON.stringify(message));
+function signal(nk, matchId, message2) {
+  return nk.matchSignal(matchId, JSON.stringify(message2));
 }
 function rpcGroupQueueOpen(ctx, logger, nk, payload) {
   const userId = requireUser(ctx);
@@ -9936,7 +11016,7 @@ function rpcAdminRunsExpired(ctx, logger, nk, payload) {
 var USER_ID_PATTERN4 = /^[0-9a-f-]{36}$/;
 var MODE_PATTERN2 = /^[A-Za-z0-9_:.-]{1,64}$/;
 var MAX_ENTRIES = 1e3;
-function isCount2(value) {
+function isCount3(value) {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 function isSeasonBest(value) {
@@ -9949,7 +11029,7 @@ function recordOf3(value) {
   if (typeof value !== "object" || Array.isArray(value)) return void 0;
   const r = value;
   if (typeof r.rating !== "number" || !Number.isFinite(r.rating)) return void 0;
-  if (!isCount2(r.wins) || !isCount2(r.losses) || !isCount2(r.gamesPlayed) || !isCount2(r.lastMatchAt)) return void 0;
+  if (!isCount3(r.wins) || !isCount3(r.losses) || !isCount3(r.gamesPlayed) || !isCount3(r.lastMatchAt)) return void 0;
   if (!isSeasonBest(r.seasonBest)) return void 0;
   return {
     rating: r.rating,
@@ -9999,24 +11079,437 @@ function rpcAdminRatingsSet(ctx, logger, nk, payload) {
   if (cleared.length > 0) {
     nk.storageDelete(cleared.map((e) => ({ collection: RATINGS_COLLECTION, key, userId: e.userId })));
   }
-  nk.leaderboardCreate(key, true, "desc", "set", null, { modId: request.modId, mode: request.mode });
-  for (const e of request.entries) {
-    const record = e.record;
-    if (record && record.gamesPlayed >= PLACEMENT_GAMES) {
-      nk.leaderboardRecordWrite(key, e.userId, e.name, record.rating, record.wins, {
-        losses: record.losses,
-        gamesPlayed: record.gamesPlayed,
-        seasonBest: record.seasonBest
-      }, "set");
-    } else {
-      try {
-        nk.leaderboardRecordDelete(key, e.userId);
-      } catch (err2) {
-      }
-    }
-  }
+  for (const e of request.entries)
+    syncLeaderboardEntry(nk, logger, key, { modId: request.modId, mode: request.mode }, e.userId, e.name, e.record);
   logger.info("Ratings on %s set by the API: %d written, %d cleared", key, written.length, cleared.length);
   return JSON.stringify({ written: written.length, cleared: cleared.length });
+}
+
+// src/notification/result_change.ts
+function outcomeOf2(placements, playerId) {
+  const own = placements.find((p) => p.playerId === playerId);
+  if (!own) return null;
+  const places = placements.map((p) => p.place);
+  const best = Math.min(...places);
+  if (own.place !== best) return "loss";
+  return Math.max(...places) === best && placements.length > 1 ? "draw" : "win";
+}
+function knownOutcome(before, playerId, contesters) {
+  var _a;
+  const told = (_a = before.told) == null ? void 0 : _a[playerId];
+  if (told) return told;
+  if (before.voided) return "void";
+  if (before.status === "contested") return null;
+  if (contesters.length > 0) return null;
+  return outcomeOf2(before.placements, playerId);
+}
+function outcomeAfter(after, playerId) {
+  return after.voided ? "void" : outcomeOf2(after.placements, playerId);
+}
+function planResultNotifications(before, after, decidesContest, contesters = []) {
+  const sends = [];
+  const told = __spreadValues({}, before.told);
+  const standing = decidesContest ? contesters : [];
+  const contest2 = decidesContest ? before.contest : void 0;
+  const contestDecided = !!contest2 || standing.length > 0;
+  for (const player of before.players) {
+    const now = outcomeAfter(after, player.id);
+    if (!now) continue;
+    if (now === knownOutcome(before, player.id, standing)) continue;
+    told[player.id] = now;
+    if (now === "void") {
+      sends.push({
+        userId: player.id,
+        kind: NotificationKind.RESULT_VOIDED,
+        params: {}
+      });
+    } else if (contestDecided) {
+      sends.push({
+        userId: player.id,
+        kind: NotificationKind.CONTEST_DECIDED,
+        params: {
+          role: standing.includes(player.id) || (contest2 == null ? void 0 : contest2.by) === player.id ? "contester" : "opponent",
+          outcome: now
+        }
+      });
+    } else {
+      sends.push({
+        userId: player.id,
+        kind: NotificationKind.RESULT_CHANGED,
+        params: { outcome: now }
+      });
+    }
+  }
+  return { sends, told };
+}
+
+// src/rating/match_edit.ts
+var refuse2 = (refusal) => ({
+  ok: false,
+  refusal
+});
+function winners(placements) {
+  if (placements.length === 0) return /* @__PURE__ */ new Set();
+  const best = Math.min(...placements.map((p) => p.place));
+  return new Set(
+    placements.filter((p) => p.place === best).map((p) => p.playerId)
+  );
+}
+function planMatchEdit(run, current, edit) {
+  var _b, _c, _d, _e;
+  if (edit.placements === null && run.voided)
+    return refuse2({ kind: "unchanged" });
+  if (edit.placements !== null && run.voided) return refuse2({ kind: "voided" });
+  const rated = run.rankedMode !== void 0 && edit.season !== null;
+  const hadRatings = hasRatings(run);
+  let next = run;
+  let places = {};
+  if (edit.placements !== null) {
+    const overturn = overturnRun(run, edit.placements, edit.now);
+    if (overturn.ok) {
+      next = overturn.run;
+      places = overturn.places;
+    } else if (overturn.refusal.kind === "unchanged" && !hadRatings && rated && run.placements.length >= 2) {
+    } else {
+      return refuse2(
+        overturn.refusal.kind === "unchanged" ? { kind: "unchanged" } : { kind: "players_differ" }
+      );
+    }
+  }
+  const empty = {
+    ok: true,
+    places,
+    myRunRatings: {},
+    changes: {},
+    records: {}
+  };
+  if (edit.placements === null) {
+    const _a = run, { ratings: _taken } = _a, rest = __objRest(_a, ["ratings"]);
+    next = __spreadProps(__spreadValues({}, rest), { voided: { at: edit.now } });
+    if (!rated || !hadRatings)
+      return __spreadProps(__spreadValues({}, empty), { run: next, myRunRatings: nulls(run) });
+  } else if (!rated || !hadRatings && (run.status === "abandoned" || run.status === "restarted" || next.placements.length < 2)) {
+    return __spreadProps(__spreadValues({}, empty), { run: next });
+  }
+  const ids = run.players.map((p) => p.id);
+  const oldWon = winners(run.placements);
+  const newWon = winners(next.placements);
+  const befores = {};
+  const oldDeltas = {};
+  for (const id of ids) {
+    const record = current[id];
+    const old = (_b = run.ratings) == null ? void 0 : _b[id];
+    if (hadRatings) {
+      if (!old || old.delta === null || old.newRating === null)
+        return refuse2({ kind: "old_change_unknown", playerId: id });
+      befores[id] = {
+        rating: old.newRating - old.delta,
+        gamesPlayed: old.gamesPlayed - 1
+      };
+      oldDeltas[id] = old.delta;
+      if (!record) return refuse2({ kind: "record_missing", playerId: id });
+    } else {
+      const base = record != null ? record : newRating();
+      befores[id] = { rating: base.rating, gamesPlayed: base.gamesPlayed };
+      oldDeltas[id] = null;
+    }
+  }
+  let newDeltas = null;
+  if (edit.placements !== null) {
+    const entries = next.placements.map((p) => ({
+      playerId: p.playerId,
+      place: p.place,
+      performance: p.performance
+    }));
+    const ratings2 = new Map(ids.map((id) => [id, befores[id]]));
+    newDeltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings2);
+  }
+  const changes = {};
+  const records = {};
+  const ratings = {};
+  for (const id of ids) {
+    const before = befores[id];
+    const stored = (_c = current[id]) != null ? _c : newRating();
+    const oldDelta = oldDeltas[id];
+    const wasWon = hadRatings && oldWon.has(id);
+    let change;
+    if (newDeltas === null) {
+      change = {
+        oldDelta,
+        newDelta: null,
+        rating: -oldDelta,
+        wins: wasWon ? -1 : 0,
+        losses: wasWon ? 0 : -1,
+        gamesPlayed: -1
+      };
+    } else {
+      const after = Math.max(
+        RATING_FLOOR,
+        before.rating + ((_d = newDeltas.get(id)) != null ? _d : 0)
+      );
+      const newDelta = after - before.rating;
+      const won = newWon.has(id);
+      const gamesPlayed = before.gamesPlayed + 1;
+      const placing = gamesPlayed < PLACEMENT_GAMES;
+      change = {
+        oldDelta,
+        newDelta,
+        rating: newDelta - (oldDelta != null ? oldDelta : 0),
+        wins: (won ? 1 : 0) - (wasWon ? 1 : 0),
+        losses: (won ? 0 : 1) - (hadRatings && !wasWon ? 1 : 0),
+        gamesPlayed: hadRatings ? 0 : 1
+      };
+      const old = (_e = run.ratings) == null ? void 0 : _e[id];
+      ratings[id] = hadRatings ? __spreadProps(__spreadValues({}, old), { delta: newDelta, newRating: after }) : {
+        delta: placing ? null : newDelta,
+        newRating: placing ? null : after,
+        isPlacement: placing,
+        justPlaced: !placing && before.gamesPlayed < PLACEMENT_GAMES,
+        gamesPlayed
+      };
+    }
+    const record = __spreadProps(__spreadValues({}, stored), {
+      rating: Math.max(RATING_FLOOR, stored.rating + change.rating),
+      wins: stored.wins + change.wins,
+      losses: stored.losses + change.losses,
+      gamesPlayed: stored.gamesPlayed + change.gamesPlayed,
+      lastMatchAt: change.gamesPlayed > 0 ? Math.max(stored.lastMatchAt, run.endedAt) : stored.lastMatchAt
+    });
+    if (record.wins < 0 || record.losses < 0 || record.gamesPlayed < 0)
+      return refuse2({ kind: "record_too_small", playerId: id });
+    changes[id] = change;
+    records[id] = record;
+  }
+  if (newDeltas === null)
+    return __spreadProps(__spreadValues({}, empty), {
+      run: __spreadProps(__spreadValues({}, next), { ratingChanges: changes }),
+      myRunRatings: nulls(run),
+      changes,
+      records
+    });
+  return __spreadProps(__spreadValues({}, empty), {
+    run: __spreadProps(__spreadValues({}, next), { ratings, ratingChanges: changes }),
+    myRunRatings: ratings,
+    changes,
+    records
+  });
+}
+function hasRatings(run) {
+  return run.ratings !== void 0 && Object.keys(run.ratings).length > 0;
+}
+function nulls(run) {
+  const out = {};
+  for (const p of run.players) out[p.id] = null;
+  return out;
+}
+var WRITE_ATTEMPTS4 = 3;
+var REFUSAL_TEXT = {
+  players_differ: "placements must place exactly the run's players",
+  unchanged: "That is already the recorded result",
+  voided: "The game is voided",
+  old_change_unknown: "a player's rating change in this game was not stored (placement games)",
+  record_missing: "a player's rating record is missing",
+  record_too_small: "a player's rating record cannot hold the change"
+};
+function rpcAdminMatchEdit(ctx, logger, nk, payload) {
+  var _a, _b, _c;
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const voiding = input.void === true;
+  const placements = voiding ? null : parseResultPlacements(input.placements);
+  if (!voiding && !placements)
+    throw runtimeError(
+      INVALID_ARGUMENT,
+      "placements must be a list of {playerId, place}"
+    );
+  const decidesContest = input.decidesContest === true;
+  const contesters = Array.isArray(input.contesters) ? input.contesters.filter((id) => typeof id === "string") : [];
+  const silent = input.silent === true;
+  const season = input.season;
+  if (season !== void 0 && (typeof season !== "number" || !Number.isInteger(season) || season < 1))
+    throw runtimeError(INVALID_ARGUMENT, "season must be a positive integer");
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS4; attempt++) {
+    const run = readRun(nk, input.runId);
+    const ids = run.players.map((p) => p.id);
+    const board = run.rankedMode !== void 0 && typeof season === "number" ? boardId(run.modId, run.rankedMode, season) : null;
+    const stored = {};
+    const versions = {};
+    if (board) {
+      const base = hasRatings(run) ? null : loadRatings(
+        nk,
+        run.modId,
+        run.rankedMode,
+        ids,
+        run.endedAt,
+        season
+      );
+      for (const object of nk.storageRead(
+        ids.map((id) => ({
+          collection: RATINGS_COLLECTION,
+          key: board,
+          userId: id
+        }))
+      )) {
+        stored[object.userId] = object.value;
+        versions[object.userId] = object.version;
+      }
+      if (base) {
+        for (const id of ids)
+          if (base.current[id]) stored[id] = base.current[id];
+      }
+    }
+    const plan = planMatchEdit(run, stored, {
+      placements,
+      season: typeof season === "number" ? season : null,
+      now: Date.now()
+    });
+    if (!plan.ok) {
+      if (plan.refusal.kind === "unchanged") {
+        const told2 = planResultNotifications(run, run, decidesContest, contesters);
+        if (told2.sends.length > 0) {
+          nk.storageWrite([
+            {
+              collection: RUNS_COLLECTION,
+              key: run.runId,
+              userId: SYSTEM_USER_ID,
+              value: __spreadProps(__spreadValues({}, run), { told: told2.told }),
+              permissionRead: 2,
+              permissionWrite: 0
+            }
+          ]);
+          if (!silent)
+            for (const send of told2.sends)
+              sendNotification(nk, send.userId, send.kind, send.params);
+        }
+        return JSON.stringify({
+          run,
+          changes: (_a = run.ratingChanges) != null ? _a : {},
+          applied: false
+        });
+      }
+      throw runtimeError(INVALID_ARGUMENT, REFUSAL_TEXT[plan.refusal.kind]);
+    }
+    const told = planResultNotifications(run, plan.run, decidesContest, contesters);
+    const storedRun = __spreadProps(__spreadValues({}, plan.run), { told: told.told });
+    const key = myRunKey(run);
+    const pointers = nk.storageRead(
+      ids.map((id) => ({ collection: MY_RUNS_COLLECTION, key, userId: id }))
+    );
+    const writes = [
+      {
+        collection: RUNS_COLLECTION,
+        key: run.runId,
+        userId: SYSTEM_USER_ID,
+        value: storedRun,
+        permissionRead: 2,
+        permissionWrite: 0
+      }
+    ];
+    for (const pointer of pointers) {
+      const value = __spreadValues({}, pointer.value);
+      if (plan.places[pointer.userId] !== void 0)
+        value.place = plan.places[pointer.userId];
+      if (pointer.userId in plan.myRunRatings)
+        value.rating = plan.myRunRatings[pointer.userId];
+      writes.push({
+        collection: MY_RUNS_COLLECTION,
+        key,
+        userId: pointer.userId,
+        value,
+        permissionRead: 1,
+        permissionWrite: 0
+      });
+    }
+    for (const id of Object.keys(plan.records)) {
+      writes.push({
+        collection: RATINGS_COLLECTION,
+        key: board,
+        userId: id,
+        value: plan.records[id],
+        permissionRead: 2,
+        permissionWrite: 0,
+        version: versions[id] || "*"
+      });
+    }
+    try {
+      nk.storageWrite(writes);
+    } catch (e) {
+      logger.warn(
+        "Match edit for run %s conflicted (attempt %d): %v",
+        run.runId,
+        attempt + 1,
+        e
+      );
+      continue;
+    }
+    if (board) {
+      for (const id of Object.keys(plan.records)) {
+        const name = (_c = (_b = run.players.find((p) => p.id === id)) == null ? void 0 : _b.displayName) != null ? _c : "";
+        syncLeaderboardEntry(
+          nk,
+          logger,
+          board,
+          { modId: run.modId, mode: run.rankedMode },
+          id,
+          name,
+          plan.records[id]
+        );
+      }
+    }
+    if (!silent)
+      for (const send of told.sends)
+        sendNotification(nk, send.userId, send.kind, send.params);
+    logger.info(
+      "Run %s %s by staff",
+      run.runId,
+      voiding ? "voided" : "result set"
+    );
+    return JSON.stringify({
+      run: plan.run,
+      changes: plan.changes,
+      applied: true
+    });
+  }
+  throw runtimeError(
+    INVALID_ARGUMENT,
+    "The ratings changed while editing; try again"
+  );
+}
+
+// src/notification/report_action.ts
+function rpcAdminReportAction(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const userId = parsePayload(payload).userId;
+  if (typeof userId !== "string" || userId === "")
+    throw runtimeError(INVALID_ARGUMENT, "userId is required");
+  sendNotification(nk, userId, NotificationKind.REPORT_ACTION, {});
+  return "{}";
+}
+
+// src/notification/tell_voided.ts
+function rpcAdminRunTellVoided(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const run = readRun(nk, parsePayload(payload).runId);
+  const plan = planResultNotifications(
+    run,
+    __spreadProps(__spreadValues({}, run), { voided: { at: Date.now() } }),
+    false
+  );
+  if (plan.sends.length > 0) {
+    nk.storageWrite([
+      {
+        collection: RUNS_COLLECTION,
+        key: run.runId,
+        userId: SYSTEM_USER_ID,
+        value: __spreadProps(__spreadValues({}, run), { told: plan.told }),
+        permissionRead: 2,
+        permissionWrite: 0
+      }
+    ]);
+    for (const send of plan.sends)
+      sendNotification(nk, send.userId, send.kind, send.params);
+  }
+  return JSON.stringify({ told: plan.sends.length });
 }
 
 // src/rating/replay.ts
@@ -10251,6 +11744,121 @@ function rpcAdminRatingsSeasonClear(ctx, logger, nk, payload) {
   return JSON.stringify({ cleared: found.length, cursor });
 }
 
+// src/notification/season_end.ts
+var SEASON_END_COLLECTION = "season_end_notified";
+var USER_ID_PATTERN5 = /^[0-9a-f-]{36}$/;
+var MAX_PLAYERS2 = 500;
+var MAX_BOARDS = 50;
+function parseBoards(value) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_BOARDS)
+    return void 0;
+  const boards = [];
+  for (const b of value) {
+    if (typeof b !== "object" || b === null) return void 0;
+    const { name, place, rating } = b;
+    if (typeof name !== "string" || name === "" || typeof place !== "number" || !Number.isInteger(place) || place < 1 || typeof rating !== "number" || !Number.isFinite(rating))
+      return void 0;
+    boards.push({ name, place, rating: Math.round(rating) });
+  }
+  return boards;
+}
+function rpcAdminSeasonEndNotify(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const season = input.season;
+  if (typeof season !== "number" || !Number.isInteger(season) || season < 1)
+    throw runtimeError(INVALID_ARGUMENT, "season must be a positive integer");
+  const name = typeof input.name === "string" && input.name !== "" ? input.name : `Season ${season}`;
+  if (!Array.isArray(input.players) || input.players.length > MAX_PLAYERS2)
+    throw runtimeError(INVALID_ARGUMENT, "players must be a list of up to 500");
+  const key = String(season);
+  let notified = 0;
+  let skipped = 0;
+  for (const p of input.players) {
+    const userId = p == null ? void 0 : p.userId;
+    const boards = parseBoards(p == null ? void 0 : p.boards);
+    if (typeof userId !== "string" || !USER_ID_PATTERN5.test(userId) || !boards)
+      throw runtimeError(INVALID_ARGUMENT, "Invalid player entry");
+    const done = nk.storageRead([
+      { collection: SEASON_END_COLLECTION, key, userId }
+    ]);
+    if (done.length > 0) {
+      skipped++;
+      continue;
+    }
+    const params = { season, name, boards };
+    sendNotification(nk, userId, NotificationKind.SEASON_END, params);
+    nk.storageWrite([
+      {
+        collection: SEASON_END_COLLECTION,
+        key,
+        userId,
+        value: { at: Date.now() },
+        permissionRead: 0,
+        permissionWrite: 0
+      }
+    ]);
+    notified++;
+  }
+  logger.info("Season %d end told to %d players (%d skipped)", season, notified, skipped);
+  return JSON.stringify({ notified, skipped });
+}
+
+// src/notification/punishment.ts
+var PUNISHMENT_NOTIFIED_COLLECTION = "punishment_notified";
+var USER_ID_PATTERN6 = /^[0-9a-f-]{36}$/;
+var BAN_KINDS = ["chat", "queue", "account", "username"];
+var TARGETS = [...BAN_KINDS, "warning", "network"];
+var MAX_KEY_LENGTH = 100;
+function parseAppeal(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const { accepted, target, result } = value;
+  if (typeof accepted !== "boolean") return void 0;
+  if (typeof target !== "string" || !TARGETS.includes(target)) return void 0;
+  if (!accepted) return { accepted, target, result: null };
+  if (result !== "lifted" && result !== "shortened") return void 0;
+  return { accepted, target, result };
+}
+function parseEnded(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const { ban } = value;
+  if (typeof ban !== "string" || !BAN_KINDS.includes(ban)) return void 0;
+  return { ban };
+}
+function rpcAdminPunishmentNotify(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const { userId, kind, key } = input;
+  if (typeof userId !== "string" || !USER_ID_PATTERN6.test(userId))
+    throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
+  if (typeof key !== "string" || key === "" || key.length > MAX_KEY_LENGTH)
+    throw runtimeError(INVALID_ARGUMENT, "Invalid key");
+  if (kind !== NotificationKind.APPEAL_DECIDED && kind !== NotificationKind.PUNISHMENT_ENDED)
+    throw runtimeError(INVALID_ARGUMENT, "Invalid kind");
+  const appeal = kind === NotificationKind.APPEAL_DECIDED ? parseAppeal(input.params) : void 0;
+  const ended = kind === NotificationKind.PUNISHMENT_ENDED ? parseEnded(input.params) : void 0;
+  if (!appeal && !ended) throw runtimeError(INVALID_ARGUMENT, "Invalid params");
+  const recordKey2 = `${kind}:${key}`;
+  const done = nk.storageRead([
+    { collection: PUNISHMENT_NOTIFIED_COLLECTION, key: recordKey2, userId }
+  ]);
+  if (done.length > 0) return JSON.stringify({ sent: false });
+  if (appeal) sendNotification(nk, userId, NotificationKind.APPEAL_DECIDED, appeal);
+  else sendNotification(nk, userId, NotificationKind.PUNISHMENT_ENDED, ended);
+  nk.storageWrite([
+    {
+      collection: PUNISHMENT_NOTIFIED_COLLECTION,
+      key: recordKey2,
+      userId,
+      value: { at: Date.now() },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+  logger.info("Told %s of %s %s", userId, kind, key);
+  return JSON.stringify({ sent: true });
+}
+
 // src/standing/seed.ts
 var EXTRA_SEED_ENV = "QUEUE_ALLOWED_MOD_IDS_EXTRA";
 function seedAllowedModIdsExtra(nk, logger, env) {
@@ -10350,7 +11958,7 @@ function anonymizeMirror(nk, userId, anonymousId) {
   const deletes = [];
   for (const o of listAll(nk, SYSTEM_USER_ID, MIRROR_COLLECTION)) {
     const entry = o.value;
-    const owner = entry.kind === "chat" ? entry.line.userId : entry.kind === "run" ? null : entry.userId;
+    const owner = entry.kind === "chat" ? entry.line.userId : entry.kind === "run" ? null : entry.kind === "contest" ? entry.by === userId || entry.against === userId ? userId : null : entry.userId;
     if (owner !== userId) continue;
     const own = entry.kind === "notice" || entry.kind === "chat" && !entry.line.flagged;
     if (own) {
@@ -10435,12 +12043,12 @@ function anonymizeBanIndex(nk, userId, anonymousId, keep) {
   );
 }
 function deleteLegacyRatings(nk, userId) {
-  const hash = steamIdHashOf(nk, userId);
-  if (!hash) return;
+  const hash2 = steamIdHashOf(nk, userId);
+  if (!hash2) return;
   const [parked] = nk.storageRead([
     {
       collection: LEGACY_RATINGS_COLLECTION,
-      key: hash,
+      key: hash2,
       userId: SYSTEM_USER_ID
     }
   ]);
@@ -10449,7 +12057,7 @@ function deleteLegacyRatings(nk, userId) {
   nk.storageDelete([
     {
       collection: LEGACY_RATINGS_COLLECTION,
-      key: hash,
+      key: hash2,
       userId: SYSTEM_USER_ID
     }
   ]);
@@ -10471,28 +12079,28 @@ var DISCORD_INDEX_COLLECTION = "discord_index";
 var USER_ID3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 var HASH = /^[A-Za-z0-9_-]{8,128}$/;
 var MAX_NAME = 64;
-function indexKey(hash) {
-  return { collection: DISCORD_INDEX_COLLECTION, key: hash, userId: SYSTEM_USER_ID };
+function indexKey(hash2) {
+  return { collection: DISCORD_INDEX_COLLECTION, key: hash2, userId: SYSTEM_USER_ID };
 }
-function discordOwner(nk, hash) {
-  const objects = nk.storageRead([indexKey(hash)]);
+function discordOwner(nk, hash2) {
+  const objects = nk.storageRead([indexKey(hash2)]);
   return objects.length > 0 ? String(objects[0].value.userId) : null;
 }
-function claimDiscord(nk, userId, hash) {
-  const owner = discordOwner(nk, hash);
+function claimDiscord(nk, userId, hash2) {
+  const owner = discordOwner(nk, hash2);
   if (owner === userId) return;
   if (owner !== null) throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
   try {
-    nk.storageWrite([__spreadProps(__spreadValues({}, indexKey(hash)), { value: { userId }, version: "*", permissionRead: 0, permissionWrite: 0 })]);
+    nk.storageWrite([__spreadProps(__spreadValues({}, indexKey(hash2)), { value: { userId }, version: "*", permissionRead: 0, permissionWrite: 0 })]);
   } catch (e) {
     throw runtimeError(ALREADY_EXISTS, "Discord account already linked to another player");
   }
 }
-function releaseDiscord(nk, userId, hash) {
-  if (hash && discordOwner(nk, hash) === userId) nk.storageDelete([indexKey(hash)]);
+function releaseDiscord(nk, userId, hash2) {
+  if (hash2 && discordOwner(nk, hash2) === userId) nk.storageDelete([indexKey(hash2)]);
 }
-function withDiscord(profile, hash, username) {
-  return __spreadProps(__spreadValues({}, profile), { discordIdHash: hash, discordUsername: username });
+function withDiscord(profile, hash2, username) {
+  return __spreadProps(__spreadValues({}, profile), { discordIdHash: hash2, discordUsername: username });
 }
 function withoutDiscord(profile) {
   return __spreadProps(__spreadValues({}, profile), { discordIdHash: null, discordUsername: null, useDiscordName: false });
@@ -10519,7 +12127,7 @@ function rpcDiscordUnlink(ctx, logger, nk, payload) {
   releaseDiscord(nk, userId, previous);
   profileChanged(nk, userId, profile);
   callExpress(nk, logger, ctx.env, "/discord/unlinked", { nakamaUserId: userId });
-  return JSON.stringify({ player: playerView(userId, profile) });
+  return JSON.stringify({ player: playerView(nk, userId, profile) });
 }
 function rpcAdminDiscordSet(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -10539,7 +12147,7 @@ function rpcAdminDiscordSet(ctx, logger, nk, payload) {
   profileChanged(nk, userId, profile);
   recordMilestone(nk, logger, userId, "discordLinked", profile.privileges);
   logger.info("Linked Discord to %s", userId);
-  return JSON.stringify({ player: playerView(userId, profile) });
+  return JSON.stringify({ player: playerView(nk, userId, profile) });
 }
 
 // src/player/admin.ts
@@ -10628,7 +12236,7 @@ function rpcAdminProfileSet(ctx, logger, nk, payload) {
   if (edit.discord === null) releaseDiscord(nk, userId, previousDiscord);
   profileChanged(nk, userId, profile);
   logger.info("Profile of %s updated by the API: %v", userId, JSON.stringify(Object.keys(edit)));
-  return JSON.stringify({ player: playerView(userId, profile) });
+  return JSON.stringify({ player: playerView(nk, userId, profile) });
 }
 function rpcAdminAccountDelete(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -10660,6 +12268,45 @@ function refuseClientAccountDelete(ctx, logger, nk) {
   throw runtimeError(PERMISSION_DENIED, "Delete your account on the website (your profile page)");
 }
 
+// src/notification/contest_withdrawn.ts
+function rpcAdminContestWithdrawn(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  if (typeof input.contesterId !== "string" || input.contesterId === "")
+    throw runtimeError(INVALID_ARGUMENT, "contesterId is required");
+  const run = readRun(nk, input.runId);
+  let told = 0;
+  for (const player of run.players) {
+    if (player.id === input.contesterId) continue;
+    const outcome = outcomeOf2(run.placements, player.id);
+    if (!outcome) continue;
+    sendNotification(nk, player.id, NotificationKind.CONTEST_WITHDRAWN, {
+      runId: run.runId,
+      outcome
+    });
+    told++;
+  }
+  return JSON.stringify({ told });
+}
+
+// src/notification/rpc.ts
+var MAX_IDS = 100;
+function rpcNotificationsPending(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  return JSON.stringify({ notifications: listNotifications(nk, userId) });
+}
+function rpcNotificationsRead(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const ids = parsePayload(payload).ids;
+  if (!Array.isArray(ids) || ids.length > MAX_IDS || ids.some((id) => typeof id !== "string"))
+    throw runtimeError(
+      INVALID_ARGUMENT,
+      "Missing or invalid ids (array of strings)"
+    );
+  markNotificationsRead(nk, userId, ids);
+  return "{}";
+}
+
 // src/moderation/report.ts
 var REPORT_TYPES = ["cheating", "chat_abuse", "griefing", "inappropriate_username", "other"];
 var MAX_REPORT_MESSAGE = 500;
@@ -10668,12 +12315,12 @@ var REPORT_WINDOW_MS = 10 * 6e4;
 var LIMIT_COLLECTION2 = "moderation";
 var LIMIT_KEY2 = "report_times";
 function parseReport(data) {
-  const { reportedUserId, type, message } = data;
+  const { reportedUserId, type, message: message2 } = data;
   if (typeof reportedUserId !== "string" || !reportedUserId) return "Missing or invalid reportedUserId";
   if (typeof type !== "string" || REPORT_TYPES.indexOf(type) === -1) return "Invalid report type";
-  if (message !== void 0 && message !== null && (typeof message !== "string" || message.length > MAX_REPORT_MESSAGE))
+  if (message2 !== void 0 && message2 !== null && (typeof message2 !== "string" || message2.length > MAX_REPORT_MESSAGE))
     return `Invalid message (max ${MAX_REPORT_MESSAGE} characters)`;
-  return { reportedUserId, type, message: typeof message === "string" && message ? message : void 0 };
+  return { reportedUserId, type, message: typeof message2 === "string" && message2 ? message2 : void 0 };
 }
 function reportTimesAfter(times, now) {
   const recent = times.filter((t) => now - t < REPORT_WINDOW_MS);
@@ -10735,12 +12382,82 @@ function rpcReportSubmit(ctx, logger, nk, payload) {
   return JSON.stringify({ ok: true, reportId: reply.body.reportId });
 }
 
+// src/player/web_login.ts
+var MAX_PATH = 200;
+function rpcWebLoginLink(ctx, logger, nk, payload) {
+  const userId = requireUser(ctx);
+  const { path } = parsePayload(payload);
+  if (typeof path !== "string" || path.length > MAX_PATH || path.charAt(0) !== "/" || path.charAt(1) === "/")
+    throw runtimeError(INVALID_ARGUMENT, "Missing or invalid path");
+  const reply = callExpress(nk, logger, ctx.env, "/web-login/link", { nakamaUserId: userId, path });
+  const url = reply && reply.status === 200 ? reply.body.url : null;
+  if (typeof url !== "string") throw runtimeError(UNAVAILABLE, "Website login is unavailable right now");
+  return JSON.stringify({ url });
+}
+
+// src/matchmaking/ranked_close.ts
+var RANKED_PREFIX2 = "ranked:";
+var DEFAULT_REASON = "Ranked is closed for a server update";
+var MATCH_LIST_LIMIT2 = 1e4;
+function rpcAdminRankedQueueCancel(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const input = parsePayload(payload);
+  const reason = typeof input.reason === "string" && input.reason ? input.reason : DEFAULT_REASON;
+  let cancelled = 0;
+  for (const { userId, record } of liveQueuedPlayers(nk, null, Date.now())) {
+    if (record.gameMode.indexOf(RANKED_PREFIX2) !== 0) continue;
+    notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
+      modId: record.modId,
+      mode: record.gameMode.slice(RANKED_PREFIX2.length),
+      reason,
+      requeue: false
+    });
+    clearMatched(nk, record.modId, record.gameMode, [userId]);
+    cancelled++;
+  }
+  logger.info("Ranked queue cancelled: %d ticket(s)", cancelled);
+  return JSON.stringify({ cancelled });
+}
+function rpcAdminRankedLive(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  let running = 0;
+  for (const m of nk.matchList(MATCH_LIST_LIMIT2, true, null, null, null, "+label.started:T")) {
+    try {
+      const label = JSON.parse(m.label || "{}");
+      if (label.started === true && typeof label.mode === "string" && label.mode.indexOf(RANKED_PREFIX2) === 0) running++;
+    } catch (e) {
+    }
+  }
+  return JSON.stringify({ running });
+}
+
 // src/moderation/network_admin.ts
 var IP_HASH_PURGE_MAX = 500;
 function rpcAdminNetworkBans(ctx, logger, nk, payload) {
   requireServer(ctx);
   const userId = requireUserId2(nk, parsePayload(payload));
   return JSON.stringify({ networkBans: networkBansFor(nk, userId) });
+}
+function rpcAdminPlayerNetworks(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const userId = requireUserId2(nk, parsePayload(payload));
+  const hashes = readIpHashes(nk, userId);
+  const networks = Object.keys(hashes).map((hash2) => ({
+    hash: hash2,
+    lastSeen: hashes[hash2]
+  }));
+  return JSON.stringify({ networks });
+}
+function rpcAdminNetworkCheck(ctx, logger, nk, payload) {
+  requireServer(ctx);
+  const ip = parsePayload(payload).ip;
+  if (typeof ip !== "string" || !ip)
+    throw runtimeError(INVALID_ARGUMENT, "ip is required");
+  const salt = ctx.env.IP_HASH_SALT;
+  if (!settingsOf(ctx).networkBans || !salt) return JSON.stringify({ banned: false, banIds: [] });
+  const hash2 = networkHash((input) => nk.sha256Hash(input), salt, ip);
+  const banIds = hash2 === null ? [] : networkBanIdsOn(nk, hash2);
+  return JSON.stringify({ banned: banIds.length > 0, banIds });
 }
 function rpcAdminNetworkBanLift(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -10804,8 +12521,11 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("account_standing", rpcAccountStanding);
   initializer.registerRpc("avatar_catalog", rpcAvatarCatalog);
   initializer.registerRpc("mute_set", rpcMuteSet);
+  initializer.registerRpc("notifications_pending", rpcNotificationsPending);
+  initializer.registerRpc("notifications_read", rpcNotificationsRead);
   initializer.registerRpc("discord_link_start", rpcDiscordLinkStart);
   initializer.registerRpc("discord_unlink", rpcDiscordUnlink);
+  initializer.registerRpc("web_login_link", rpcWebLoginLink);
   initializer.registerRpc("chat_enable", rpcChatEnable);
   initializer.registerRpc("chat_send", rpcChatSend);
   initializer.registerRpc("report_submit", rpcReportSubmit);
@@ -10825,12 +12545,16 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("leaderboard_get", rpcLeaderboardGet);
   initializer.registerRpc("admin_ping", rpcAdminPing);
   initializer.registerRpc("admin_notify", rpcAdminNotify);
+  initializer.registerRpc("admin_announce", rpcAdminAnnounce);
+  initializer.registerRpc("admin_contest_withdrawn", rpcAdminContestWithdrawn);
   initializer.registerRpc("admin_config_set", rpcAdminConfigSet);
   initializer.registerRpc("admin_ban_apply", rpcAdminBanApply);
   initializer.registerRpc("admin_ban_lift", rpcAdminBanLift);
   initializer.registerRpc("admin_ban_index_forget", rpcAdminBanIndexForget);
   initializer.registerRpc("admin_network_bans", rpcAdminNetworkBans);
   initializer.registerRpc("admin_network_ban_lift", rpcAdminNetworkBanLift);
+  initializer.registerRpc("admin_network_check", rpcAdminNetworkCheck);
+  initializer.registerRpc("admin_player_networks", rpcAdminPlayerNetworks);
   initializer.registerRpc("admin_ip_hashes_purge", rpcAdminIpHashesPurge);
   initializer.registerRpc("admin_lobby_list", rpcAdminLobbyList);
   initializer.registerRpc("admin_lobby_get", rpcAdminLobbyGet);
@@ -10840,6 +12564,8 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_discord_set", rpcAdminDiscordSet);
   initializer.registerRpc("admin_integrity_set", rpcAdminIntegritySet);
   initializer.registerRpc("admin_queue_cancel", rpcAdminQueueCancel);
+  initializer.registerRpc("admin_ranked_queue_cancel", rpcAdminRankedQueueCancel);
+  initializer.registerRpc("admin_ranked_live", rpcAdminRankedLive);
   initializer.registerRpc("admin_mirror_pull", rpcAdminMirrorPull);
   initializer.registerRpc("admin_mirror_ack", rpcAdminMirrorAck);
   initializer.registerRpc("admin_profile_set", rpcAdminProfileSet);
@@ -10857,8 +12583,13 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("admin_ratings_season_export", rpcAdminRatingsSeasonExport);
   initializer.registerRpc("admin_ratings_board_export", rpcAdminRatingsBoardExport);
   initializer.registerRpc("admin_ratings_season_clear", rpcAdminRatingsSeasonClear);
+  initializer.registerRpc("admin_season_end_notify", rpcAdminSeasonEndNotify);
+  initializer.registerRpc("admin_punishment_notify", rpcAdminPunishmentNotify);
   initializer.registerRpc("admin_run_get", rpcAdminRunGet);
   initializer.registerRpc("admin_run_set_result", rpcAdminRunSetResult);
+  initializer.registerRpc("admin_match_edit", rpcAdminMatchEdit);
+  initializer.registerRpc("admin_run_tell_voided", rpcAdminRunTellVoided);
+  initializer.registerRpc("admin_report_action", rpcAdminReportAction);
   logger.info("BMP lobby module loaded");
 }
 !InitModule && InitModule.bind(null);

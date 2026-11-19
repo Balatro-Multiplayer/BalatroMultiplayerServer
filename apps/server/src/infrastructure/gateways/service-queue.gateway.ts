@@ -1,4 +1,5 @@
-import { and, asc, count, countDistinct, desc, eq, gt, ilike, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, count, countDistinct, desc, eq, gt, ilike, inArray, isNull, lte, notInArray, or, sql } from 'drizzle-orm'
+import { AUTOMATIC_TYPES, PLAYER_MADE_TYPES, type QueueLane } from '../../features/service-queue/lanes.js'
 import { priorityOf } from '../../features/service-queue/priority.js'
 import {
 	ITEM_TYPES,
@@ -8,6 +9,7 @@ import {
 	contextOf,
 	isItemType,
 } from '../../features/service-queue/types.js'
+import { staffNamesOf } from './ban.gateway.js'
 import type { DbExecutor } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { playerBans, playerWarnings, players, reports, serviceQueueItemEvents, serviceQueueItems } from '../db/schema.js'
@@ -136,11 +138,17 @@ export interface ListFilters {
 	page: number
 	limit: number
 	itemType?: ServiceQueueItemType
+	// The main tab or the automatic tab; unset lists both.
+	lane?: QueueLane
 	status: QueueStatusFilter
 	// A player id, or part of a player's name.
 	subject?: string
 	// Only items this player holds a live claim on.
 	claimedBy?: string
+	// Leaves out items someone other than this player holds a live claim on.
+	hideClaimedFrom?: string
+	// Only items of these types; unset lists every type.
+	itemTypes?: readonly ServiceQueueItemType[]
 	// Only items created at least this long ago.
 	olderThanMs?: number
 	sort: QueueSort
@@ -153,6 +161,36 @@ export interface QueueListRow extends ServiceQueueItemRecord {
 }
 
 const escapeLike = (text: string) => text.replace(/[%_\\]/g, (c) => `\\${c}`)
+
+// An item nobody else holds: no claim, a lapsed one, or the viewer's own.
+function notClaimedByOthers(playerId: string, now: Date) {
+	return or(
+		isNull(serviceQueueItems.claimedUntil),
+		lte(serviceQueueItems.claimedUntil, now),
+		sql`split_part(${serviceQueueItems.claimedBy}, ':', 2) = ${playerId}`,
+	)
+}
+
+// Open main-lane items other staff hold a live claim on; the rail only counts them.
+export async function countClaimedByOthers(
+	playerId: string,
+	now: Date,
+	itemTypes: readonly ServiceQueueItemType[] = ITEM_TYPES,
+): Promise<number> {
+	const [row] = await db
+		.select({ n: count() })
+		.from(serviceQueueItems)
+		.where(
+			and(
+				eq(serviceQueueItems.status, 'open'),
+				notInArray(serviceQueueItems.itemType, [...AUTOMATIC_TYPES]),
+				inArray(serviceQueueItems.itemType, [...itemTypes]),
+				gt(serviceQueueItems.claimedUntil, now),
+				sql`split_part(${serviceQueueItems.claimedBy}, ':', 2) <> ${playerId}`,
+			),
+		)
+	return Number(row?.n ?? 0)
+}
 
 export async function listServiceQueueItems(opts: ListFilters): Promise<{ items: QueueListRow[]; total: number }> {
 	const offset = (opts.page - 1) * opts.limit
@@ -169,6 +207,9 @@ export async function listServiceQueueItems(opts: ListFilters): Promise<{ items:
 		: undefined
 	const conditions = [
 		opts.itemType ? eq(serviceQueueItems.itemType, opts.itemType) : undefined,
+		opts.itemTypes ? inArray(serviceQueueItems.itemType, [...opts.itemTypes]) : undefined,
+		opts.lane === 'main' ? notInArray(serviceQueueItems.itemType, [...AUTOMATIC_TYPES]) : undefined,
+		opts.lane === 'automatic' ? inArray(serviceQueueItems.itemType, [...AUTOMATIC_TYPES]) : undefined,
 		opts.status !== 'all' ? eq(serviceQueueItems.status, opts.status) : undefined,
 		subjectMatch,
 		opts.claimedBy
@@ -177,6 +218,7 @@ export async function listServiceQueueItems(opts: ListFilters): Promise<{ items:
 					gt(serviceQueueItems.claimedUntil, opts.now),
 				)
 			: undefined,
+		opts.hideClaimedFrom ? notClaimedByOthers(opts.hideClaimedFrom, opts.now) : undefined,
 		opts.olderThanMs !== undefined
 			? lte(serviceQueueItems.createdAt, new Date(opts.now.getTime() - opts.olderThanMs))
 			: undefined,
@@ -187,10 +229,13 @@ export async function listServiceQueueItems(opts: ListFilters): Promise<{ items:
 
 	const order =
 		opts.sort === 'priority'
-			? [sql`${serviceQueueItems.priority} DESC NULLS LAST`, asc(serviceQueueItems.createdAt)]
+			? [
+					// Items players made come first, then the rest by priority.
+					sql`CASE WHEN ${inArray(serviceQueueItems.itemType, [...PLAYER_MADE_TYPES])} THEN 0 ELSE 1 END`,
+					sql`${serviceQueueItems.priority} DESC NULLS LAST`, asc(serviceQueueItems.createdAt)]
 			: [desc(serviceQueueItems.createdAt)]
 	const rows = await db
-		.select({ item: serviceQueueItems, subjectName: players.steamName })
+		.select({ item: serviceQueueItems, subjectName: players.steamName, subjectId: players.id, subjectNakama: players.nakamaUserId })
 		.from(serviceQueueItems)
 		.leftJoin(players, sql`${players.id}::text = ${serviceQueueItems.subjectPlayerId}`)
 		.where(where)
@@ -200,14 +245,82 @@ export async function listServiceQueueItems(opts: ListFilters): Promise<{ items:
 
 	const subjects = [...new Set(rows.map((r) => r.item.subjectPlayerId).filter((s): s is string => !!s))]
 	const openCounts = await openItemCounts(subjects)
+	const staffNames = await staffNamesOf(
+		rows.flatMap((r) => (r.subjectId && r.subjectName !== null ? [{ id: r.subjectId, nakamaUserId: r.subjectNakama, steamName: r.subjectName }] : [])),
+	)
 	return {
 		items: rows.map((r) => ({
 			...r.item,
-			subjectName: r.subjectName ?? null,
+			subjectName: (r.subjectId ? staffNames.get(r.subjectId) : null) ?? r.subjectName ?? null,
 			subjectOpenItems: r.item.subjectPlayerId ? (openCounts.get(r.item.subjectPlayerId) ?? 0) : 0,
 		})),
 		total,
 	}
+}
+
+export interface AutomaticGroup {
+	playerId: string
+	playerName: string | null
+	openItems: number
+	latestItem: { id: number; itemType: string; summary: string; createdAt: Date }
+}
+
+// One row per player with open automatic items, most items first.
+export async function listAutomaticGroups(): Promise<AutomaticGroup[]> {
+	const open = and(
+		inArray(serviceQueueItems.itemType, [...AUTOMATIC_TYPES]),
+		eq(serviceQueueItems.status, 'open'),
+		sql`${serviceQueueItems.subjectPlayerId} IS NOT NULL`,
+	)
+	const counts = await db
+		.select({ playerId: serviceQueueItems.subjectPlayerId, n: count() })
+		.from(serviceQueueItems)
+		.where(open)
+		.groupBy(serviceQueueItems.subjectPlayerId)
+		.orderBy(desc(count()), asc(serviceQueueItems.subjectPlayerId))
+	if (counts.length === 0) return []
+	const ids = counts.map((c) => c.playerId as string)
+	const latest = await db
+		.selectDistinctOn([serviceQueueItems.subjectPlayerId])
+		.from(serviceQueueItems)
+		.where(and(open, inArray(serviceQueueItems.subjectPlayerId, ids)))
+		.orderBy(serviceQueueItems.subjectPlayerId, desc(serviceQueueItems.createdAt), desc(serviceQueueItems.id))
+	const latestOf = new Map(latest.map((i) => [i.subjectPlayerId as string, i]))
+	const names = await staffNamesOf(
+		(
+			await db
+				.select({ id: players.id, name: players.steamName, nakamaUserId: players.nakamaUserId })
+				.from(players)
+				.where(inArray(sql`${players.id}::text`, ids))
+		).map((p) => ({ id: p.id, nakamaUserId: p.nakamaUserId, steamName: p.name })),
+	)
+	return counts.flatMap((c) => {
+		const item = latestOf.get(c.playerId as string)
+		if (!item) return []
+		return [
+			{
+				playerId: c.playerId as string,
+				playerName: names.get(c.playerId as string) ?? null,
+				openItems: Number(c.n),
+				latestItem: { id: item.id, itemType: item.itemType, summary: item.summary, createdAt: item.createdAt },
+			},
+		]
+	})
+}
+
+export async function openAutomaticItemIds(playerId: string): Promise<number[]> {
+	const rows = await db
+		.select({ id: serviceQueueItems.id })
+		.from(serviceQueueItems)
+		.where(
+			and(
+				eq(serviceQueueItems.subjectPlayerId, playerId),
+				inArray(serviceQueueItems.itemType, [...AUTOMATIC_TYPES]),
+				eq(serviceQueueItems.status, 'open'),
+			),
+		)
+		.orderBy(asc(serviceQueueItems.id))
+	return rows.map((r) => r.id)
 }
 
 async function openItemCounts(subjects: string[]): Promise<Map<string, number>> {
@@ -240,11 +353,13 @@ export async function actorNames(actors: readonly (string | null)[]): Promise<Re
 }
 
 // Open items per type, for the tab counts.
-export async function openCountsByType(): Promise<Record<ServiceQueueItemType, number>> {
+export async function openCountsByType(
+	itemTypes: readonly ServiceQueueItemType[] = ITEM_TYPES,
+): Promise<Record<ServiceQueueItemType, number>> {
 	const rows = await db
 		.select({ itemType: serviceQueueItems.itemType, n: count() })
 		.from(serviceQueueItems)
-		.where(eq(serviceQueueItems.status, 'open'))
+		.where(and(eq(serviceQueueItems.status, 'open'), inArray(serviceQueueItems.itemType, [...itemTypes])))
 		.groupBy(serviceQueueItems.itemType)
 	const counts = Object.fromEntries(ITEM_TYPES.map((t) => [t, 0])) as Record<ServiceQueueItemType, number>
 	for (const row of rows ?? []) if (isItemType(row.itemType)) counts[row.itemType] = Number(row.n)
@@ -439,4 +554,49 @@ export async function viewedSince(itemId: number, actor: string, since: Date): P
 		)
 		.limit(1)
 	return !!row
+}
+
+// A website Contest joins the match's one queue item, opening it when none exists.
+// An item closed only because its Contests were all withdrawn opens again.
+export async function joinContestItem(input: {
+	runId: string
+	contesterId: string
+	summary: string
+	lobbyKind: 'ranked' | 'casual'
+	now: Date
+}): Promise<void> {
+	const contest = { contesterId: input.contesterId, againstId: null }
+	const made = await enqueueServiceQueueItem({
+		itemType: 'contest',
+		sourceId: input.runId,
+		subjectPlayerId: null,
+		summary: input.summary,
+		context: { lobbyKind: input.lobbyKind, contest },
+	})
+	if (made) return
+	const item = await findServiceQueueItem('contest', input.runId)
+	if (!item || item.status !== 'resolved' || item.resolutionAction !== 'withdrawn') return
+	await db.transaction(async (tx) => {
+		const reopened = await markServiceQueueItemReopened(tx, item.id, input.now)
+		if (!reopened) return
+		await tx
+			.update(serviceQueueItems)
+			.set({ context: { ...(item.context as object), contest } })
+			.where(eq(serviceQueueItems.id, item.id))
+		await recordItemEvent(tx, { itemId: item.id, kind: 'reopened', actor: `player:${input.contesterId}` })
+	})
+}
+
+// Points the item at another Contest, after the one it named was withdrawn.
+export async function repointContestItem(
+	exec: DbExecutor,
+	itemId: number,
+	contest: { contesterId: string; againstId: string | null },
+): Promise<void> {
+	const [item] = await exec.select({ context: serviceQueueItems.context }).from(serviceQueueItems).where(eq(serviceQueueItems.id, itemId))
+	if (!item) return
+	await exec
+		.update(serviceQueueItems)
+		.set({ context: { ...(item.context as object), contest } })
+		.where(eq(serviceQueueItems.id, itemId))
 }

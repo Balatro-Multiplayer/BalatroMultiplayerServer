@@ -4,20 +4,22 @@ import { and, eq, isNotNull } from 'drizzle-orm'
 import { db } from '../../infrastructure/db/index.js'
 import type { DbTransaction } from '../../infrastructure/db/executor.js'
 import { matchRunLogs, matchmakingMatches } from '../../infrastructure/db/schema.js'
-import { setMatchResult, voidMatch } from '../../infrastructure/db/void-match.js'
 import { getBanById, insertBan, liftBan } from '../../infrastructure/gateways/ban.gateway.js'
 import {
 	getForfeitReconciliationFlag,
 	setForfeitFlagStatus,
 } from '../../infrastructure/gateways/forfeit-reconciliation.gateway.js'
+import { saveChatLabels } from '../../infrastructure/gateways/flagged-chat.gateway.js'
 import { getMatchConflict, setMatchConflictStatus } from '../../infrastructure/gateways/match-conflict.gateway.js'
-import { findNakamaUserIds, findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
-import { getReportById, setReportStatus } from '../../infrastructure/gateways/report.gateway.js'
+import { listContestsOfRun } from '../../infrastructure/gateways/contest.gateway.js'
+import { findPlayerById } from '../../infrastructure/gateways/player.gateway.js'
+import { clearReporterTold, getReportById, markReporterTold, setReportStatus } from '../../infrastructure/gateways/report.gateway.js'
 import {
 	type ServiceQueueItemRecord,
 	claimItem,
 	getServiceQueueItemById,
 	markServiceQueueItemReopened,
+	openAutomaticItemIds,
 	markServiceQueueItemResolved,
 	recordItemEvent,
 	releaseItem,
@@ -25,20 +27,28 @@ import {
 	rescoreSubject,
 	touchServiceQueueItem,
 } from '../../infrastructure/gateways/service-queue.gateway.js'
+import { recordStaffAction } from '../../infrastructure/gateways/staff-log.gateway.js'
+import { insertStrike, ladderStateOf } from '../../infrastructure/gateways/strike.gateway.js'
 import { insertWarning } from '../../infrastructure/gateways/warning.gateway.js'
 import { callNakamaRpc } from '../../infrastructure/nakama/admin-client.js'
-import { banInNakama, liftBanInNakama, nakamaUserIdOf } from '../../infrastructure/nakama/moderation-sync.js'
+import {
+	banInNakama,
+	liftBanInNakama,
+	notifyWarnedInNakama,
+	tellReportActionInNakama,
+} from '../../infrastructure/nakama/moderation-sync.js'
+import { matchEditorFor } from '../ratings/match-edit.deps.js'
+import type { MatchEditSummary } from '../ratings/match-edit.service.js'
+import { dismissAutomaticItems, dismissListedAutomaticItems as dismissListedItems } from './automatic.js'
+import { tellReporterOnce } from './report-action-notice.js'
 import { decideClaim, decideRelease } from './claim.js'
 import { type DispatcherDeps, type GameRef, type QueueItem, createDispatcher } from './dispatcher.js'
-import { type Placement, samePlaces } from './overturn.js'
+import type { Placement } from './overturn.js'
 import { type QueueResult, refuse } from './refusals.js'
-import { numericSourceId, parseAntiCheatSourceId } from '../../shared/service-queue/source-ids.js'
+import { numericSourceId, parseAntiCheatSourceId, parseStaffReportSourceId } from '../../shared/service-queue/source-ids.js'
 import { type StaffRole, actorOf, contextOf } from './types.js'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-// NotifyCode.WARNED in nakama/src/notify.ts.
-const NOTIFY_WARNED = 109
 
 // The run an item is about: a conflict's or forfeit flag's match id (the run
 // id), a contest's source id (the run id), or an anti-cheat item's run.
@@ -54,6 +64,8 @@ async function runIdOf(item: QueueItem): Promise<string | null> {
 		case 'anti_cheat':
 			// Rows from before migration 0054 held the bare run id.
 			return parseAntiCheatSourceId(item.sourceId)?.runId ?? item.sourceId
+		case 'staff_report':
+			return parseStaffReportSourceId(item.sourceId)?.runId ?? null
 		default:
 			return null
 	}
@@ -61,7 +73,10 @@ async function runIdOf(item: QueueItem): Promise<string | null> {
 
 export async function gameOf(item: QueueItem): Promise<GameRef | null> {
 	const runId = await runIdOf(item)
-	if (!runId) return null
+	return runId ? gameOfRun(runId) : null
+}
+
+export async function gameOfRun(runId: string): Promise<GameRef> {
 	const [match] = await db
 		.select({ gameMode: matchmakingMatches.gameMode })
 		.from(matchmakingMatches)
@@ -70,28 +85,39 @@ export async function gameOf(item: QueueItem): Promise<GameRef | null> {
 	return { runId, matchmade: !!match, ranked: !!match && match.gameMode.startsWith('ranked:') }
 }
 
-// Nakama's result for the run, pushed first (Nakama owns run records), then
-// the matchmade record and its ratings.
+const editMatch = matchEditorFor()
+
+// A decided Contest tells each player: the ones whose Contests stand (in the
+// game or on the website) as contesters, the rest as opponents.
+async function editMatchOf(game: GameRef, request: Parameters<typeof editMatch>[1]) {
+	if (!game.decidesContest || !UUID.test(game.runId)) return editMatch(game, request)
+	const standing = (await listContestsOfRun(game.runId)).filter((c) => c.withdrawnAt === null)
+	return editMatch({ ...game, contesterIds: standing.map((c) => c.contesterId) }, request)
+}
+
+// The new result for the run: one edit that moves only its players' ratings
+// (Nakama first, then the match row and rating rows).
 async function overturnGame(
 	game: GameRef,
 	placements: (Placement & { rated?: boolean })[],
-): Promise<{ kind: 'applied'; rerated: boolean } | { kind: 'failed'; reason: string }> {
-	const nakamaIds = await findNakamaUserIds(placements.map((p) => p.playerId))
-	if (placements.some((p) => !nakamaIds.has(p.playerId)))
-		return { kind: 'failed', reason: 'a player in that result has no Nakama account' }
-	const nakamaPlacements = placements.map((p) => ({ playerId: nakamaIds.get(p.playerId) as string, place: p.place }))
-	const set = await callNakamaRpc('admin_run_set_result', { runId: game.runId, placements: nakamaPlacements })
-	if (!set.ok) {
-		// Already the result (a retried overturn) is success.
-		const current = await callNakamaRpc<{ run: { placements: Placement[] } }>('admin_run_get', { runId: game.runId })
-		if (!current.ok || !samePlaces(current.value.run.placements, nakamaPlacements))
-			return { kind: 'failed', reason: `admin_run_set_result ${set.error}` }
+	// The caller tells the players itself (a withdrawn Contest).
+	options: { silent?: boolean } = {},
+): Promise<{ kind: 'applied'; rerated: boolean; edit?: MatchEditSummary } | { kind: 'failed'; reason: string }> {
+	const outcome = await editMatchOf(game, {
+		kind: 'result',
+		placements: placements.map(({ playerId, place }) => ({ playerId, place })),
+		...(options.silent ? { silent: true } : {}),
+	})
+	switch (outcome.kind) {
+		case 'edited':
+			return { kind: 'applied', rerated: outcome.rerated, edit: outcome.summary }
+		case 'not_found':
+			return { kind: 'failed', reason: 'the matchmade record is gone' }
+		case 'not_resolved':
+			return { kind: 'failed', reason: `the match is ${outcome.status}, not resolved` }
+		case 'failed':
+			return outcome
 	}
-	if (!game.matchmade) return { kind: 'applied', rerated: false }
-	const outcome = await setMatchResult(game.runId, placements)
-	if (outcome.kind === 'failed') return { kind: 'failed', reason: outcome.reason }
-	if (outcome.kind === 'not_found') return { kind: 'failed', reason: 'the matchmade record is gone' }
-	return { kind: 'applied', rerated: outcome.rerated }
 }
 
 const deps: DispatcherDeps<DbTransaction> = {
@@ -149,10 +175,10 @@ const deps: DispatcherDeps<DbTransaction> = {
 		return new Set(rows.map((r) => r.playerId))
 	},
 	async voidGame(game) {
-		const outcome = await voidMatch(game.runId)
+		const outcome = await editMatchOf(game, { kind: 'void' })
 		switch (outcome.kind) {
-			case 'voided':
-				return { kind: 'voided', rerated: outcome.ranked }
+			case 'edited':
+				return { kind: 'voided', rerated: outcome.rerated, edit: outcome.summary }
 			case 'not_resolved':
 				return outcome
 			case 'failed':
@@ -160,6 +186,10 @@ const deps: DispatcherDeps<DbTransaction> = {
 			case 'not_found':
 				return { kind: 'failed', reason: 'the matchmade record is gone' }
 		}
+	},
+	async tellContestVoided(game) {
+		const result = await callNakamaRpc('admin_run_tell_voided', { runId: game.runId })
+		return result.ok
 	},
 	overturnGame,
 
@@ -186,21 +216,26 @@ const deps: DispatcherDeps<DbTransaction> = {
 	insertBan: (tx, ban) => insertBan(ban, tx),
 	liftBan: (tx, playerId, banId, liftedBy) => liftBan(playerId, banId, liftedBy, tx),
 	insertWarning: (tx, warning) => insertWarning(tx, warning),
+	ladderStateOf,
+	insertStrike: (tx, strike) => insertStrike(tx, strike),
+	async saveChatLabels(tx, item, label, decidedAt) {
+		const row = await getServiceQueueItemById(item.id, tx)
+		if (row) await saveChatLabels(tx, row, label, decidedAt)
+	},
+	recordStaffAction: (tx, entry) => recordStaffAction(tx, entry),
 
 	banInNakama: (ban) => banInNakama(ban),
 	liftBanInNakama: (playerId, banId) => liftBanInNakama(playerId, banId),
-	async notifyWarned(playerId, payload) {
-		const userId = await nakamaUserIdOf(playerId)
-		if (!userId) return false
-		const result = await callNakamaRpc('admin_notify', {
-			userId,
-			code: NOTIFY_WARNED,
-			subject: 'warned',
-			content: payload,
-			persistent: true,
-		})
-		if (!result.ok) console.warn(`[service-queue] Warning for ${playerId} not sent: ${result.error}`)
-		return result.ok
+	notifyWarned: (playerId, payload) => notifyWarnedInNakama(playerId, payload),
+	async tellReporterOfAction(item) {
+		const id = numericSourceId(item.sourceId)
+		const report = id === null ? null : await getReportById(id)
+		if (id === null || !report) return false
+		return tellReporterOnce(
+			{ takeMark: (rid) => markReporterTold(rid, new Date()), giveMarkBack: clearReporterTold, send: tellReportActionInNakama },
+			id,
+			report.reporterId,
+		)
 	},
 	async rescore(item, playerIds) {
 		try {
@@ -214,6 +249,20 @@ const deps: DispatcherDeps<DbTransaction> = {
 }
 
 export const serviceQueueDispatcher = createDispatcher(deps)
+
+// What a withdrawn Contest's forfeit reads and sets on the match.
+export const matchResultDeps = {
+	participantsOf: deps.participantsOf,
+	originalResultOf: deps.originalResultOf,
+	flaggedPlayersOf: deps.flaggedPlayersOf,
+	forfeitGame: async (game: GameRef, placements: (Placement & { rated?: boolean })[]) => {
+		const result = await overturnGame(game, placements, { silent: true })
+		return result.kind === 'applied' ? ({ ok: true } as const) : ({ ok: false, reason: result.reason } as const)
+	},
+}
+
+// Moves an item's source row (report, conflict, forfeit flag) along with the item.
+export const setSourceStatusOf = deps.setSourceStatus
 
 // ---------------------------------------------------------------------------
 // Claims
@@ -265,3 +314,35 @@ export async function release(
 	})
 	return { ok: true, value: released ?? item }
 }
+
+// Dismisses all of a player's open automatic items with one reason.
+export const dismissAutomaticItemsOf = (playerId: string, staff: { playerId: string; role: StaffRole }, reason: string) =>
+	dismissAutomaticItems(
+		{
+			openItemIds: openAutomaticItemIds,
+			async run(itemId, action, who, body) {
+				const result = await serviceQueueDispatcher.run(itemId, action, who, body)
+				return result.ok ? { ok: true } : { ok: false, code: result.refusal.code }
+			},
+		},
+		playerId,
+		staff,
+		reason,
+	)
+
+// Dismisses the listed automatic items with one note, each through the normal action path.
+export const dismissListedAutomaticItems = (itemIds: readonly number[], staff: { playerId: string; role: StaffRole }, reason: string) =>
+	dismissListedItems(
+		{
+			async itemTypeOf(itemId) {
+				return (await getServiceQueueItemById(itemId))?.itemType ?? null
+			},
+			async run(itemId, action, who, body) {
+				const result = await serviceQueueDispatcher.run(itemId, action, who, body)
+				return result.ok ? { ok: true } : { ok: false, code: result.refusal.code }
+			},
+		},
+		itemIds,
+		staff,
+		reason,
+	)

@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/table'
 import { apiFetch } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { LegacyGamesList } from './components/legacy-games-list'
 import { RunStatusBadge } from './components/status-badge'
 import type { MyRunsResponse } from './lib/types'
 
@@ -134,6 +135,8 @@ export default function MyMatchesPage() {
           </Button>
         </div>
       )}
+
+      <LegacyGamesList />
     </div>
   )
 }

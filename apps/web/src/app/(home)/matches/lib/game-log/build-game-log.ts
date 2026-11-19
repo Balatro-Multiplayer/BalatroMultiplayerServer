@@ -2,6 +2,7 @@ import { PVP_BLIND_KEY } from '@bmp/types'
 import type { ResolvedCard } from '../card-ref'
 import { isRawRef, resolveCardRef } from '../card-ref'
 import type { DecodedPlayerLog } from '../decode-player-logs'
+import { isStickerName } from '../joker-modifiers'
 import { findMatchInfo } from '../manifest'
 import { isPlainRecord } from '../plain-record'
 import { buildTimeline } from '../timeline'
@@ -78,27 +79,50 @@ function resolveAll(
   return refs.map(resolve).filter((r): r is Resolved => r !== null)
 }
 
+// Same joker key (editions ignored: a hit's copy can differ from the original).
+function sameJoker(a: ResolvedCard, b: ResolvedCard): boolean {
+  return (
+    a.type === 'other_card' && b.type === 'other_card' && a.ident === b.ident
+  )
+}
+
+function sameTags(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedB = [...b].sort()
+  return [...a].sort().every((tag, i) => tag === sortedB[i])
+}
+
 function isJoker(card: ResolvedCard): boolean {
   return (
     card.type === 'other_card' && (card.kind === 'Joker' || card.kind === 'j')
   )
 }
 
-// "j_blueprint|foil" -> a joker card; the mod records these as plain strings.
+// "j_blueprint|foil" or "j_joker|foil|eternal" -> a joker card; the mod records
+// these as plain strings.
 export function parseJokerTokens(tokens: unknown): ResolvedCard[] {
   if (!Array.isArray(tokens)) return []
   return tokens.flatMap((token): ResolvedCard[] => {
     if (typeof token !== 'string' || token === '') return []
-    const [key = '', edition] = token.split('|')
-    return [
-      {
-        type: 'other_card',
-        kind: 'Joker',
-        ident: key,
-        tags: edition ? [`ed:${edition}`] : [],
-      },
-    ]
+    const [key = '', ...mods] = token.split('|')
+    // Each extra part is a sticker or, failing that, the edition.
+    const tags = mods
+      .filter((m) => m !== '')
+      .map((m) =>
+        m.includes(':') ? m : isStickerName(m) ? `st:${m}` : `ed:${m}`
+      )
+    return [{ type: 'other_card', kind: 'Joker', ident: key, tags }]
   })
+}
+
+// "v_overstock_norm" -> a voucher card (final_vouchers records plain keys).
+export function parseVoucherTokens(tokens: unknown): ResolvedCard[] {
+  if (!Array.isArray(tokens)) return []
+  return tokens.flatMap((token): ResolvedCard[] =>
+    typeof token === 'string' && token !== ''
+      ? [{ type: 'other_card', kind: 'Voucher', ident: token, tags: [] }]
+      : []
+  )
 }
 
 const SUIT_NAME: Record<string, string> = {
@@ -229,6 +253,20 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
   rounds.push(current)
 
   let jokers: Resolved[] = []
+  // Jokers a Wraith/Ankh/Invisible hit added have no card ref in the log, so
+  // they get negative ids that no real ref can collide with.
+  let syntheticId = 0
+  // The owned jokers the last play recorded, kept up to date with the buys and
+  // sells after it. Jokers can also appear or vanish through effects (Ankh,
+  // Invisible Joker, Gros Michel, ...) that no buy/sell event covers, so
+  // when a play recorded them, that snapshot is the truth the shop events are
+  // applied to rather than the reconstruction from shop events alone.
+  let snapshotJokers: ResolvedCard[] | null = null
+  // The jokers the run's last line recorded (final_jokers): exact, so it wins.
+  let loggedFinalJokers: ResolvedCard[] | null = null
+  // Likewise the vouchers held at the end; otherwise those bought are shown.
+  let loggedFinalVouchers: ResolvedCard[] | null = null
+  let snapshotAdjusted = false
   const vouchers: ResolvedCard[] = []
   let seed: string | null = null
   let deck: string | null = null
@@ -318,6 +356,10 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
           opcode === 'play' && (Array.isArray(a[2]) || isPlainRecord(a[2]))
             ? parseJokerTokens(a[2])
             : null
+        if (jokerSnapshot) {
+          snapshotJokers = jokerSnapshot
+          snapshotAdjusted = false
+        }
         if (opcode === 'play') current.handsPlayed++
         else current.discards++
         push({
@@ -379,6 +421,14 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
 
       case 'deck_snapshot':
         finalDeck = parseDeckTokens(a[0])
+        break
+
+      case 'final_vouchers':
+        loggedFinalVouchers = parseVoucherTokens(a[0])
+        break
+
+      case 'final_jokers':
+        loggedFinalJokers = parseJokerTokens(a[0])
         break
 
       case 'leave_shop':
@@ -445,6 +495,35 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
         break
       }
 
+      case 'joker_hit': {
+        const source = a[0]
+        if (
+          source !== 'wraith' &&
+          source !== 'judgement' &&
+          source !== 'soul' &&
+          source !== 'riffraff' &&
+          source !== 'ankh' &&
+          source !== 'invisible'
+        ) {
+          break
+        }
+        const created = parseJokerTokens(a[1])
+        const destroyed = parseJokerTokens(a[2])
+        // Keep the reconstructed lineup in step: drop what Ankh destroyed
+        // (first match by joker), add what the hit created.
+        for (const gone of destroyed) {
+          const at = jokers.findIndex((j) => sameJoker(j.card, gone))
+          if (at !== -1) jokers = jokers.filter((_, i) => i !== at)
+          removeFromSnapshot(gone)
+        }
+        for (const card of created) {
+          jokers.push({ id: --syntheticId, card })
+          addToSnapshot(card)
+        }
+        push({ type: 'joker_hit', t, source, created, destroyed })
+        break
+      }
+
       case 'idol_roll': {
         let idol: GameEvent | null = null
         if (Array.isArray(args)) {
@@ -488,6 +567,28 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
         }
     }
 
+    function addToSnapshot(card: ResolvedCard) {
+      if (!snapshotJokers) return
+      snapshotJokers = [...snapshotJokers, card]
+      snapshotAdjusted = true
+    }
+
+    function removeFromSnapshot(card: ResolvedCard) {
+      if (!snapshotJokers || card.type !== 'other_card') return
+      // Remove the exact copy (same edition and stickers) when there is one:
+      // two copies of a joker can differ only by a label.
+      const sameIdent = (j: ResolvedCard) =>
+        j.type === 'other_card' && j.ident === card.ident
+      const exact = snapshotJokers.findIndex(
+        (j) =>
+          sameIdent(j) && j.type === 'other_card' && sameTags(j.tags, card.tags)
+      )
+      const at = exact !== -1 ? exact : snapshotJokers.findIndex(sameIdent)
+      if (at === -1) return
+      snapshotJokers = snapshotJokers.filter((_, i) => i !== at)
+      snapshotAdjusted = true
+    }
+
     function handleShop(initial: ShopAction) {
       let action = initial
       let card: ResolvedCard | null = null
@@ -511,10 +612,21 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
         } else if (action !== 'sell') {
           cost = followingSpend()
         }
-        if (r && action === 'buy' && isJoker(r.card)) jokers.push(r)
+        if (r && action === 'buy' && isJoker(r.card)) {
+          jokers.push(r)
+          addToSnapshot(r.card)
+        }
         if (r && action === 'voucher') vouchers.push(r.card)
         if (r && action === 'sell' && area === AREA_JOKERS) {
-          jokers = jokers.filter((j) => j.id !== r.id)
+          // A joker a hit created has no ref until it is first mentioned, so
+          // its sale arrives with a new id: match it by joker instead.
+          const at = jokers.findIndex((j) => j.id === r.id)
+          const sold =
+            at !== -1
+              ? at
+              : jokers.findIndex((j) => j.id < 0 && sameJoker(j.card, r.card))
+          if (sold !== -1) jokers = jokers.filter((_, i) => i !== sold)
+          if (isJoker(r.card)) removeFromSnapshot(r.card)
         }
       } else if (action === 'use' || action === 'pack_pick') {
         const r = resolve(a[2])
@@ -529,7 +641,10 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
           cost = followingSpend()
         }
         targets = resolveAll(a[3], resolve).map((x) => x.card)
-        if (r && action === 'pack_pick' && isJoker(r.card)) jokers.push(r)
+        if (r && action === 'pack_pick' && isJoker(r.card)) {
+          jokers.push(r)
+          addToSnapshot(r.card)
+        }
       } else if (action === 'pack_skip') {
         resolveAll(a[0], resolve)
       } else if (action === 'reroll') {
@@ -582,13 +697,18 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
     rounds: rounds
       .filter((r) => r.entry !== 'setup' || r.events.length > 0)
       .map(({ lastScore: _ignored, ...round }) => round),
-    finalJokers: jokers.map((j) => j.card),
+    finalJokers:
+      loggedFinalJokers ?? snapshotJokers ?? jokers.map((j) => j.card),
     finalDeck,
-    vouchers,
+    vouchers: loggedFinalVouchers ?? vouchers,
     livesLost,
     rerolls,
     itemizedPurchases,
-    reconstructed: sawBlind,
+    reconstructed: loggedFinalJokers
+      ? false
+      : snapshotJokers
+        ? snapshotAdjusted
+        : sawBlind,
   }
 }
 

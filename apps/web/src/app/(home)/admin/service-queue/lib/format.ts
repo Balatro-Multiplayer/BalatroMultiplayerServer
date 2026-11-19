@@ -2,6 +2,7 @@
 import type {
   ActionEffects,
   ActionKey,
+  DismissLabel,
   Duration,
   ItemDetail,
   ItemEventKind,
@@ -19,19 +20,23 @@ export const TYPE_LABELS: Record<ItemType, string> = {
   contest: 'Contest',
   anti_cheat: 'Anti-cheat',
   integrity: 'Integrity',
+  appeal: 'Appeal',
+  staff_report: 'Staff report',
 }
 
 // The tab strip's order and wording.
 export const TYPE_TABS: { type: ItemType | null; label: string }[] = [
-  { type: null, label: 'All' },
+  { type: null, label: 'Main' },
   { type: 'report', label: 'Reports' },
   { type: 'flagged_chat', label: 'Chat' },
-  { type: 'match_conflict', label: 'Match results' },
+  { type: 'match_conflict', label: 'Results' },
   { type: 'forfeit_reconciliation', label: 'Forfeits' },
   { type: 'contest', label: 'Contests' },
-  { type: 'anti_cheat', label: 'Anti-cheat' },
-  { type: 'integrity', label: 'Integrity' },
+  { type: 'appeal', label: 'Appeals' },
 ]
+
+// Items the server raises on its own; they have the Automatic tab.
+export const AUTOMATIC_TYPES: readonly ItemType[] = ['anti_cheat', 'integrity']
 
 export const ACTION_LABELS: Record<ActionKey, string> = {
   dismiss: 'Dismiss',
@@ -40,11 +45,30 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   chat_mute: 'Chat mute',
   queue_ban: 'Queue ban',
   account_ban: 'Account ban',
+  username_ban: 'Username ban',
   void: 'Void match',
   overturn: 'Overturn',
   reopen: 'Reopen',
   unban: 'Lift ban',
   note: 'Add note',
+}
+
+// The 2 dismiss buttons of a flagged chat item, and what each one saves as the
+// training label of the item's messages.
+export const DISMISS_LABEL_TEXT: Record<
+  DismissLabel,
+  { button: string; consequence: string }
+> = {
+  not_harmful: {
+    button: 'Not harmful',
+    consequence:
+      'Closes the item. The guard was wrong: each flagged message is saved as not harmful.',
+  },
+  harmful_no_action: {
+    button: 'Harmful, no action',
+    consequence:
+      'Closes the item with no punishment. Each flagged message is saved as harmful.',
+  },
 }
 
 // What a confirmed action does, in the confirm dialog.
@@ -57,6 +81,8 @@ export const ACTION_CONSEQUENCES: Record<ActionKey, string> = {
     'Keeps the player out of matchmaking right away and closes the item.',
   account_ban:
     'Bans the account right away: the player is disconnected and cannot log in.',
+  username_ban:
+    'Hides the player name right away: everyone sees a Ban name until an admin lifts it. Closes the item.',
   void: 'Voids the match: it no longer counts, and ranked players are re-rated.',
   overturn:
     "Replaces the recorded result with the chosen player's report; ranked players are re-rated.",
@@ -98,6 +124,7 @@ export const EVENT_LABELS: Record<ItemEventKind, string> = {
   acted: 'acted',
   noted: 'noted',
   reopened: 'reopened',
+  withdrawn: 'withdrawn by the player',
 }
 
 export const REPORT_TYPE_LABELS: Record<string, string> = {
@@ -109,6 +136,7 @@ export const REPORT_TYPE_LABELS: Record<string, string> = {
 }
 
 const REFUSAL_TEXT: Record<RefusalCode, string> = {
+  withdrawn: 'Withdrawn by the player.',
   not_found: 'That item no longer exists.',
   unknown_action: 'Unknown action.',
   invalid_body: 'Something in the form is missing or invalid.',
@@ -240,45 +268,3 @@ export function playerNamesOf(detail: ItemDetail): Map<string, string> {
 
 export const nameOf = (names: Map<string, string>, id: string | null) =>
   id ? (names.get(id) ?? shortId(id)) : '—'
-
-// Ready-made notes per action; the first matching list is offered.
-export const NOTE_TEMPLATES: Partial<Record<ActionKey, string[]>> = {
-  dismiss: [
-    'No violation found.',
-    'False positive.',
-    'Duplicate of an item already handled.',
-  ],
-  resolve: [
-    'Handled outside the queue.',
-    'Accepted the recorded result.',
-    'Talked to the player.',
-  ],
-  warn: ['First offence.', 'Borderline; warning only.'],
-  chat_mute: [
-    'Abusive chat.',
-    'Repeated after a warning.',
-    'Slurs in lobby chat.',
-  ],
-  queue_ban: [
-    'Repeated griefing.',
-    'Lied about a match result.',
-    'Anti-cheat flag confirmed from the replay.',
-  ],
-  account_ban: ['Cheating confirmed from the replay.', 'Ban evasion.'],
-  void: [
-    'Run log altered; result cannot stand.',
-    'Forfeit was a server-side disconnect.',
-  ],
-  overturn: ["Replay shows the other player's report is correct."],
-  reopen: ['Reopened for a second look.', 'New evidence.'],
-  unban: ['Issued in error.', 'Appeal accepted.'],
-  note: ['Waiting for the replay.', 'Asked the player for details.'],
-}
-
-// Ready-made warning messages the player sees in game.
-export const WARNING_TEMPLATES: string[] = [
-  'Please keep lobby chat respectful. Further abuse will lead to a mute.',
-  'Please report match results honestly. Repeated false reports lead to a queue ban.',
-  'Leaving or stalling games ruins them for others. Further griefing will lead to a queue ban.',
-  'Your run was flagged by anti-cheat. Modified clients are not allowed in matchmaking.',
-]

@@ -24,6 +24,8 @@ import { clearMatched } from '../matchmaking/queue'
 import { hasPlayerAnswer, releaseGroups } from './group_queue'
 import { answerGroupSignal, isGroupSignal } from './group_signals'
 import { type RelayStep, action } from './relay'
+import { almanacTick } from './almanac'
+import { sharedRulesTick } from './shared_rules'
 import { catchUpLimitMsFor } from './catch_up'
 import {
 	DEFAULT_GRACE_MS,
@@ -47,7 +49,7 @@ import {
 	setPlayerInfo,
 	tick,
 } from './state'
-import { displayNameOf, readProfile } from '../player/profile'
+import { banNameFor, readProfile, shownNameOf } from '../player/profile'
 import { applyRatings } from '../rating/apply'
 import { logBounds } from '../rating/metrics'
 import { currentSeason } from '../rating/season'
@@ -59,6 +61,7 @@ import {
 	isSpectator,
 	removeSpectator,
 	spectateRejection,
+	spectateRunOf,
 } from './spectate'
 import { recordRun } from '../achievements/record'
 import { sendLateResults, sendRankedResults } from './late_result'
@@ -290,6 +293,21 @@ function runEffect(
 			}
 			return
 		}
+		case 'contest':
+			try {
+				enqueue(nk, {
+					kind: 'contest',
+					at: effect.at,
+					runId: effect.runId,
+					code: effect.code,
+					by: effect.by,
+					against: effect.against,
+					lobbyKind: effect.lobbyKind,
+				})
+			} catch (e) {
+				logger.warn('Lobby %s: could not record the contest of run %s: %v', lobby.code, effect.runId, e)
+			}
+			return
 		case 'forfeited':
 			try {
 				recordForfeit(nk, effect.userId, { runId: effect.runId, code: effect.code, at: effect.at, lobbyKind: effect.lobbyKind })
@@ -453,7 +471,7 @@ export function joinInfoOf(
 		: DEFAULT_AVATAR
 	if (stored && stored.profile.nakamaLogin) {
 		return {
-			displayName: displayNameOf(stored.profile),
+			displayName: shownNameOf(nk, presence.userId, stored.profile),
 			preferredJoker: joker,
 			mods: sentMods !== null ? sentMods : stored.profile.mods,
 			standing,
@@ -461,7 +479,7 @@ export function joinInfoOf(
 		}
 	}
 	return {
-		displayName: meta.displayName || presence.username,
+		displayName: banNameFor(nk, presence.userId) ?? (meta.displayName || presence.username),
 		preferredJoker: joker,
 		mods: sentMods,
 		standing,
@@ -700,6 +718,16 @@ function stepForMessage(
 				senderId,
 				data.state === undefined ? null : data.state,
 			)
+		case ClientOp.SPECTATE_VIEW:
+			return typeof data.playerId === 'string'
+				? spectateRunOf(
+						lobby,
+						senderId,
+						data.playerId,
+						(input) => nk.sha256Hash(input),
+						data.fromStart === true,
+					)
+				: null
 		case ClientOp.CATCHING_UP:
 			return setCatchingUp(lobby, senderId, data.catchingUp === true, Date.now())
 		default:
@@ -771,13 +799,31 @@ export function lobbyMatchLoop(
 	const now = Date.now()
 	const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now))
 	if (!ticked) return null
-	const setupTicked = apply(
+	const rulesTicked = apply(
 		ctx,
 		logger,
 		nk,
 		dispatcher,
 		ticked,
-		setupTick(ticked.lobby, now, Math.random),
+		sharedRulesTick(ticked.lobby, now),
+	)
+	if (!rulesTicked) return null
+	const decksTicked = apply(
+		ctx,
+		logger,
+		nk,
+		dispatcher,
+		rulesTicked,
+		almanacTick(rulesTicked.lobby, now),
+	)
+	if (!decksTicked) return null
+	const setupTicked = apply(
+		ctx,
+		logger,
+		nk,
+		dispatcher,
+		decksTicked,
+		setupTick(decksTicked.lobby, now, Math.random),
 	)
 	if (!setupTicked) return null
 	const settled = apply(
@@ -815,7 +861,14 @@ export function lobbyMatchSignal(
 		return { state: next || { ...state, lobby: { ...state.lobby, closed: true } }, data: answer.reply }
 	}
 	if (signal.type === 'get_active') {
-		return { state, data: JSON.stringify(activeRunOf(state.lobby, signal.userId)) }
+		return {
+			state,
+			data: JSON.stringify(
+				activeRunOf(state.lobby, signal.userId, (input) =>
+					nk.sha256Hash(input),
+				),
+			),
+		}
 	}
 	if (signal.type === 'chat_check') {
 		const check = chatCheck(state.lobby, signal.userId, Date.now())

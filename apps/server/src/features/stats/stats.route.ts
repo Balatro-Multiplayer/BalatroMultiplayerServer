@@ -12,39 +12,29 @@ import {
 	players,
 	seasons,
 } from '../../infrastructure/db/schema.js'
+import { usernameBannedAmong } from '../../infrastructure/gateways/ban.gateway.js'
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
+import { countLeaderboard, leaderboardPage } from '../../infrastructure/gateways/stats.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
 import { createTtlCache } from '../../shared/utils/ttl-cache.js'
-import {
-	DECAY_FLOOR,
-	DECAY_INACTIVE_THRESHOLD_DAYS,
-	DECAY_RATE_PER_DAY,
-	PLACEMENT_GAMES,
-} from '../ratings/elo.js'
+import { shownNameOf } from '../../shared/players/shown-name.js'
+import { PLACEMENT_GAMES } from '../ratings/elo.js'
+import { effectiveRating } from '../ratings/effective-rating.js'
 import { createOnlinePlayers } from './online-players.js'
 import { createQueueStats } from './queue-counts.js'
 
-// Nakama decays an inactive rating when it next reads it and only stores the
-// result after the player's next game, so the mirrored rating is the
-// undecayed one. Apply the same decay here (rating/season.ts decayedRating).
-// Every query below reads matchmaking_ratings as `r`.
-const effectiveRating = sql.raw(`CASE
-	WHEN r.games_played >= ${PLACEMENT_GAMES}
-	 AND r.rating > ${DECAY_FLOOR}
-	 AND r.last_match_at < now() - interval '${DECAY_INACTIVE_THRESHOLD_DAYS} days'
-	THEN GREATEST(${DECAY_FLOOR}, r.rating - floor(extract(epoch FROM now() - r.last_match_at) / 86400 - ${DECAY_INACTIVE_THRESHOLD_DAYS})::int * ${DECAY_RATE_PER_DAY})
-	ELSE r.rating END`)
-
 // Legacy match total from the old www system (Seasons 1–6).
 // Unique players is not carried forward — account systems don't overlap.
-const LEGACY_MATCHES = 453_792
+const LEGACY_MATCHES = 664_900
 const LEGACY_UNIQUE_PLAYERS = 0
 
 const TOTALS_TTL_MS = 5 * 60 * 1000
 // Cached apart from the totals: the page polls them every 15 seconds.
 const ONLINE_PLAYERS_TTL_MS = 10 * 1000
 const QUEUE_STATS_TTL_MS = 10 * 1000
+// The Leaderboards page orders its tabs by these counts.
+const BOARD_COUNTS_TTL_MS = 10 * 60 * 1000
 
 export interface StatsRouterDeps {
 	fetchMetrics: FetchMetrics
@@ -66,6 +56,15 @@ export function createStatsRouter({
 			uniquePlayers: LEGACY_UNIQUE_PLAYERS + counts.players,
 		}
 	}, TOTALS_TTL_MS)
+	const getBoardCounts = createTtlCache(async () => {
+		const { season, boards } = await statsRepository.countBoardEntries()
+		const counts: Record<string, Record<string, number>> = {}
+		for (const board of boards) {
+			counts[board.modId] ??= {}
+			counts[board.modId][board.gameMode] = board.entries
+		}
+		return { season, counts }
+	}, BOARD_COUNTS_TTL_MS)
 	const getOnlinePlayers = createOnlinePlayers(
 		fetchMetrics,
 		ONLINE_PLAYERS_TTL_MS,
@@ -116,51 +115,21 @@ export function createStatsRouter({
 				typeof req.query.search === 'string' ? req.query.search.trim() : ''
 			const term = search ? `%${search}%` : null
 
-			const totalRes = await db.execute(sql`
-			SELECT count(*)::int AS total
-			FROM matchmaking_ratings r
-			JOIN players p ON p.id = r.player_id
-			WHERE r.mod_id = ${modId} AND r.game_mode = ${gameMode} AND r.season = ${seasonId}
-			  AND r.games_played >= ${PLACEMENT_GAMES}
-			  ${term ? sql`AND (p.steam_name ILIKE ${term} OR p.discord_username ILIKE ${term})` : sql``}
-		`)
-			const total = Number(
-				(totalRes.rows[0] as { total: number } | undefined)?.total ?? 0,
-			)
-
-			const rowsRes = await db.execute(sql`
-			SELECT rank, player_id, display_name, rating, wins, losses, games_played, season_best, season_best_text
-			FROM (
-				SELECT
-					r.player_id,
-					CASE WHEN p.use_discord_name AND p.discord_username IS NOT NULL
-					     THEN p.discord_username ELSE p.steam_name END AS display_name,
-					p.steam_name, p.discord_username,
-					${effectiveRating} AS rating, r.wins, r.losses, r.games_played, r.season_best, r.season_best_text,
-					ROW_NUMBER() OVER (ORDER BY ${effectiveRating} DESC, r.wins DESC, r.player_id ASC) AS rank
-				FROM matchmaking_ratings r
-				JOIN players p ON p.id = r.player_id
-				WHERE r.mod_id = ${modId} AND r.game_mode = ${gameMode} AND r.season = ${seasonId}
-				  AND r.games_played >= ${PLACEMENT_GAMES}
-			) ranked
-			${term ? sql`WHERE (ranked.steam_name ILIKE ${term} OR ranked.discord_username ILIKE ${term})` : sql``}
-			ORDER BY rank
-			LIMIT ${pageSize} OFFSET ${offset}
-		`)
-
-			const entries = rowsRes.rows.map((row) => {
-				const r = row as Record<string, unknown>
-				return {
-					rank: Number(r.rank),
-					playerId: r.player_id as string,
-					displayName: r.display_name as string,
-					rating: Number(r.rating),
-					wins: Number(r.wins),
-					losses: Number(r.losses),
-					gamesPlayed: Number(r.games_played),
-					seasonBest: seasonBestOut({ seasonBest: r.season_best, seasonBestText: (r.season_best_text as string | null) ?? null }),
-				}
-			})
+			const query = { modId, gameMode, seasonId, term }
+			const [total, rows] = await Promise.all([
+				countLeaderboard(query),
+				leaderboardPage(query, pageSize, offset),
+			])
+			const entries = rows.map((r) => ({
+				rank: r.rank,
+				playerId: r.playerId,
+				displayName: r.displayName,
+				rating: r.rating,
+				wins: r.wins,
+				losses: r.losses,
+				gamesPlayed: r.gamesPlayed,
+				seasonBest: seasonBestOut({ seasonBest: r.seasonBest, seasonBestText: r.seasonBestText }),
+			}))
 
 			res.json({
 				season: seasonId,
@@ -172,6 +141,14 @@ export function createStatsRouter({
 				totalPages: Math.max(1, Math.ceil(total / pageSize)),
 				entries,
 			})
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	router.get('/leaderboard-counts', async (_req, res, next) => {
+		try {
+			res.json(await getBoardCounts(Date.now()))
 		} catch (err) {
 			next(err)
 		}
@@ -220,6 +197,7 @@ export function createStatsRouter({
 			const [player] = await db
 				.select({
 					id: players.id,
+					nakamaUserId: players.nakamaUserId,
 					steamName: players.steamName,
 					discordUsername: players.discordUsername,
 					useDiscordName: players.useDiscordName,
@@ -231,6 +209,8 @@ export function createStatsRouter({
 				.limit(1)
 
 			if (!player) throw new AppError('Player not found', 404)
+			const banned = (await usernameBannedAmong([player.id])).has(player.id)
+			const shown = shownNameOf(player, banned)
 
 			const board = and(
 				eq(matchmakingRatings.modId, modId),
@@ -271,11 +251,8 @@ export function createStatsRouter({
 
 			res.json({
 				playerId: player.id,
-				displayName:
-					player.useDiscordName && player.discordUsername
-						? player.discordUsername
-						: player.steamName,
-				steamName: player.steamName,
+				displayName: shown,
+				steamName: banned ? shown : player.steamName,
 				preferredJoker: player.preferredJoker,
 				createdAt: player.createdAt,
 				season: seasonId,

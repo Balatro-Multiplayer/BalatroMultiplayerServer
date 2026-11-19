@@ -1,3 +1,4 @@
+import type { Ladder } from '../../players/lib/strikes'
 // The service queue's API shapes, as apps/server's webadmin/service-queue
 // route sends them (Q-api.md). Closed unions mirror the server's
 // features/service-queue/types.ts.
@@ -10,6 +11,8 @@ export const ITEM_TYPES = [
   'contest',
   'anti_cheat',
   'integrity',
+  'appeal',
+  'staff_report',
 ] as const
 export type ItemType = (typeof ITEM_TYPES)[number]
 export const isItemType = (value: unknown): value is ItemType =>
@@ -28,6 +31,7 @@ export type ActionKey =
   | 'chat_mute'
   | 'queue_ban'
   | 'account_ban'
+  | 'username_ban'
   | 'void'
   | 'overturn'
   | 'reopen'
@@ -50,6 +54,7 @@ export type ItemEventKind =
   | 'acted'
   | 'noted'
   | 'reopened'
+  | 'withdrawn'
 
 export interface QueueItem {
   id: number
@@ -93,6 +98,8 @@ export interface QueueList {
   limit: number
   pages: number
   counts: Record<ItemType, number>
+  // Open items other staff hold a claim on; the rail does not list them.
+  claimedByOthers: number
 }
 
 export interface AllowedAction {
@@ -220,7 +227,8 @@ export interface ChatLine {
   isFlaggedLine?: boolean
 }
 
-export type LogCheck = 'match' | 'mismatch' | 'unavailable' | string
+// 'incomplete': the stored log has a gap, so its check code was not compared.
+export type LogCheck = 'match' | 'mismatch' | 'unavailable' | 'incomplete' | string
 
 // Nakama's admin_run_get: player ids in here are Nakama user ids.
 export interface NakamaRunView {
@@ -241,6 +249,7 @@ export interface NakamaRunView {
     lobbyType?: string
     flags?: Record<string, string>
     logChecks?: Record<string, LogCheck>
+    logGaps?: Record<string, number>
     overturned?: unknown
   }
   logs: Record<
@@ -250,6 +259,7 @@ export interface NakamaRunView {
       truncated: boolean
       carbonHash: string | null
       check: LogCheck
+      gaps?: number
     }
   >
 }
@@ -281,6 +291,7 @@ export interface ReportEvidence {
     status: string
     message: string | null
     additionalDetail: string | null
+    withdrawnAt: string | null
     createdAt: string
   }
   reporter: MiniCard
@@ -298,26 +309,36 @@ export interface ReportEvidence {
   }[]
 }
 
+// The 2 dismiss buttons of a flagged chat item (the server's flagged-chat.ts).
+export type DismissLabel = 'not_harmful' | 'harmful_no_action'
+
 export type ChatVerdict =
   | { source: 'local'; matches: string[] }
   | { source: 'remote'; band: string }
 
-export interface FlaggedChatEvidence {
-  message: {
-    id: number
-    playerId: string
-    message: string
-    matches: unknown
-    flaggedAt: string
-  }
+export interface FlaggedChatMessage {
+  id: number
+  message: string
+  flaggedAt: string
+  sentAt: string
   verdict: ChatVerdict
-  source: {
-    lobbyCode: string | null
-    lobbyId: string | null
-    sentAt: string
-    chatLogId: number
-  } | null
-  context: ChatLine[]
+  // The guard's score and the moderation band; null for a message the guard
+  // did not judge (older lines, the word list).
+  guardScore: number | null
+  band: string | null
+  contextUsed: boolean | null
+}
+
+export interface ConversationLine extends ChatLine {
+  // The flagged message this line is, when it is one of the player's flagged ones.
+  flaggedMessageId: number | null
+}
+
+export interface FlaggedChatEvidence {
+  playerId: string
+  messages: FlaggedChatMessage[]
+  source: { lobbyCode: string | null; lobbyId: string | null } | null
+  conversation: ConversationLine[]
   otherFlags: {
     id: number
     message: string
@@ -400,6 +421,16 @@ export interface ContestEvidence {
   } | null
   // The result reported before the contest, which a dismiss rates.
   recorded: (Placement & { rated?: boolean })[] | null
+  // Every Contest on the run: from the game or the website.
+  contests: {
+    id: number
+    kind: string
+    contesterId: string
+    reason: string | null
+    detail: string | null
+    createdAt: string
+    withdrawn: boolean
+  }[]
   players: ContestPlayer[]
   run: NakamaRunView | null
   replay: ReplayView | null
@@ -490,6 +521,48 @@ export type TypedEvidence =
   | { itemType: 'contest'; evidence: ContestEvidence | null }
   | { itemType: 'anti_cheat'; evidence: AntiCheatEvidence | null }
   | { itemType: 'integrity'; evidence: IntegrityEvidence | null }
+  | { itemType: 'appeal'; evidence: AppealEvidence | null }
+  | { itemType: 'staff_report'; evidence: StaffReportEvidence | null }
+
+export interface StaffReportEvidence {
+  runId: string
+  reporterId: string
+  note: string
+}
+
+export interface AppealEvidence {
+  appeal: {
+    id: string
+    message: string
+    status: 'open' | 'denied' | 'granted'
+    createdAt: string
+    decisionReason: string | null
+    decidedAt: string | null
+    outcome: 'lift' | 'shorten' | null
+  }
+  target: 'ban' | 'warning' | 'network'
+  punishment: {
+    id: string
+    type: string
+    reason: string | null
+    issuedBy: string
+    issuedByName: string | null
+    expiresAt: string | null
+    liftedAt: string | null
+  } | null
+  earlier: {
+    status: 'open' | 'denied' | 'granted'
+    message: string
+    decisionReason: string | null
+    createdAt: string
+    decidedAt: string | null
+  }[]
+}
+
+export interface AppealDecisions {
+  deny: boolean
+  grant: boolean
+}
 
 export interface ItemDetail {
   item: QueueItem
@@ -499,6 +572,7 @@ export interface ItemDetail {
   role: StaffRole
   claim: Claim | null
   targets: Target[]
+  appealDecisions?: AppealDecisions
 }
 
 export interface ItemEvent {
@@ -535,20 +609,47 @@ export interface ActionResult {
 
 // What an action sends, per action (the server's command.ts).
 export type ActionBody =
-  | { action: 'dismiss' | 'resolve' | 'void' | 'reopen'; note?: string }
-  | { action: 'warn'; message: string; targetPlayerId?: string; note?: string }
   | {
-      action: 'chat_mute' | 'queue_ban' | 'account_ban'
-      duration: Duration
-      reason?: string
+      action: 'resolve' | 'void' | 'reopen'
+      reason: string
+      note?: string
+    }
+  | {
+      action: 'dismiss'
+      reason: string
+      note?: string
+      dismissLabel?: DismissLabel
+    }
+  | {
+      action: 'warn'
+      reason: string
+      message: string
+      targetPlayerId?: string
+      note?: string
+      ladder?: Ladder
+      deviationReason?: string
+    }
+  | {
+      action: 'username_ban'
+      reason: string
       targetPlayerId?: string
       note?: string
     }
-  | { action: 'overturn'; toReportOf: string; note?: string }
-  | { action: 'unban'; banId: string; note?: string }
+  | {
+      action: 'chat_mute' | 'queue_ban' | 'account_ban'
+      duration: Duration
+      reason: string
+      targetPlayerId?: string
+      note?: string
+      ladder?: Ladder
+      deviationReason?: string
+    }
+  | { action: 'overturn'; reason: string; toReportOf: string; note?: string }
+  | { action: 'unban'; reason: string; banId: string; note?: string }
   | { action: 'note'; note: string }
 
 export type RefusalCode =
+  | 'withdrawn'
   | 'not_found'
   | 'unknown_action'
   | 'invalid_body'

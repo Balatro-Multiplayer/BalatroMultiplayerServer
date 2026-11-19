@@ -19,15 +19,20 @@ import {
   playerNamesOf,
   TYPE_LABELS,
 } from '../lib/format'
+import { takeKeepClaim } from '../lib/claim-keep'
 import type { ItemDetail } from '../lib/types'
-import { ActionBar } from './action-bar'
+import { CLAIM_RENEW_MS } from '../lib/use-claim-renewal'
+import {
+  isWithdrawn,
+  OPEN_ITEM_REFRESH_MS,
+  WITHDRAWN_TEXT,
+} from '../lib/withdrawn'
 import { ItemEvidence } from './evidence/item-evidence'
 import { Empty } from './evidence/shared'
 import { HistoryTimeline } from './history-timeline'
+import { ItemProvider } from './item-link'
+import { QueueDecisionBar } from './queue-decision-bar'
 import { SubjectCard } from './subject-card'
-
-// A claim lasts 15 minutes server-side; renew well before it runs out.
-const CLAIM_RENEW_MS = 10 * 60_000
 
 // Claims an open item while it's on screen and releases it after. Returns
 // who holds it, and a way for an admin to take it over.
@@ -52,12 +57,16 @@ function useClaim(itemId: number, isOpen: boolean) {
     const renew = setInterval(() => void claim(), CLAIM_RENEW_MS)
     // Only our own claim is released; someone else's is left alone.
     const release = () => void releaseItem(itemId).catch(() => {})
+    // A player or match link keeps the claim: staff come back to this item.
+    const releaseUnlessKept = () => {
+      if (!takeKeepClaim(itemId)) release()
+    }
     // Closing the tab or navigating away skips React cleanup.
     window.addEventListener('pagehide', release)
     return () => {
       clearInterval(renew)
       window.removeEventListener('pagehide', release)
-      release()
+      releaseUnlessKept()
     }
   }, [itemId, isOpen, claim])
 
@@ -129,6 +138,14 @@ function Header({ detail }: { detail: ItemDetail }) {
         </span>
       </div>
       <h2 className='font-semibold text-lg'>{item.summary}</h2>
+      {isWithdrawn(item) && (
+        <p
+          className='rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 font-semibold text-sm'
+          data-testid='withdrawn-banner'
+        >
+          {WITHDRAWN_TEXT}. The item is closed with no action.
+        </p>
+      )}
       {item.resolutionNotes && (
         <p className='text-muted-foreground text-sm'>
           Resolution note: {item.resolutionNotes}
@@ -143,11 +160,17 @@ export function InvestigationPanel({
   now,
   onOpenItem,
   onShowAllItems,
+  onSkip,
+  onClosed,
+  onUndone,
 }: {
   itemId: number
   now: number
   onOpenItem: (id: number) => void
   onShowAllItems: (playerId: string) => void
+  onSkip: () => void
+  onClosed: () => void
+  onUndone: () => void
 }) {
   const [showHistory, setShowHistory] = useState(false)
   const {
@@ -157,6 +180,8 @@ export function InvestigationPanel({
   } = useQuery({
     queryKey: queueKeys.detail(itemId),
     queryFn: () => getItem(itemId),
+    refetchInterval: (query) =>
+      query.state.data?.item.status === 'open' ? OPEN_ITEM_REFRESH_MS : false,
   })
   const { outcome, takeOver } = useClaim(itemId, detail?.item.status === 'open')
   const names = useMemo(
@@ -173,40 +198,48 @@ export function InvestigationPanel({
     )
 
   return (
-    <div className='flex min-h-full flex-col' data-testid='investigation-panel'>
-      <div className='flex-1 space-y-3 p-3'>
-        <Header detail={detail} />
-        <ClaimBanner
-          outcome={outcome}
-          isAdmin={detail.role === 'admin'}
-          onTakeOver={() => void takeOver()}
-          now={now}
-        />
-        <div>
-          <Button
-            size='sm'
-            variant='ghost'
-            onClick={() => setShowHistory((s) => !s)}
-          >
-            {showHistory ? 'Hide history' : 'History'}
-          </Button>
-          {showHistory && <HistoryTimeline itemId={itemId} />}
-        </div>
-        {detail.subject && (
-          <SubjectCard
-            card={detail.subject}
+    <ItemProvider value={itemId}>
+      <div
+        className='flex min-h-0 flex-1 flex-col'
+        data-testid='investigation-panel'
+      >
+        <div className='min-h-0 flex-1 space-y-4 overflow-y-auto p-4'>
+          <Header detail={detail} />
+          <ClaimBanner
+            outcome={outcome}
+            isAdmin={detail.role === 'admin'}
+            onTakeOver={() => void takeOver()}
             now={now}
-            onOpenItem={onOpenItem}
-            onShowAllItems={onShowAllItems}
           />
-        )}
-        <ItemEvidence detail={detail} names={names} />
+          <div>
+            <Button
+              size='sm'
+              variant='ghost'
+              onClick={() => setShowHistory((s) => !s)}
+            >
+              {showHistory ? 'Hide history' : 'History'}
+            </Button>
+            {showHistory && <HistoryTimeline itemId={itemId} />}
+          </div>
+          {detail.subject && (
+            <SubjectCard
+              card={detail.subject}
+              now={now}
+              onOpenItem={onOpenItem}
+              onShowAllItems={onShowAllItems}
+            />
+          )}
+          <ItemEvidence detail={detail} names={names} />
+        </div>
+        <QueueDecisionBar
+          detail={detail}
+          names={names}
+          heldByOther={outcome?.kind === 'held'}
+          onSent={onClosed}
+          onUndo={onUndone}
+          onSkip={onSkip}
+        />
       </div>
-      <ActionBar
-        detail={detail}
-        names={names}
-        heldByOther={outcome?.kind === 'held'}
-      />
-    </div>
+    </ItemProvider>
   )
 }
