@@ -55,6 +55,11 @@ bot needs neither the database URL nor `PLAYER_ID_SALT`.
 Safety:
 
 - A failed or partial standings read aborts the sweep before any change.
+- While a void or result change rebuilds the board, the API answers 503
+  (`board-lock.ts`), so the bot never reads it half built. The sweep aborts
+  and the next one runs as usual.
+- All places in a sweep come from one top-50 list (the first request's), so a
+  match mid-sweep can't give two members #1.
 - An unknown board is refused by the API (400) rather than read as empty.
 - Role changes go one role at a time (`PUT`/`DELETE
   /guilds/{guild}/members/{user}/roles/{role}`). It never sends a member's
@@ -98,12 +103,16 @@ Safety:
 | `DISCORD_BOT_API_KEY` | yes | Shared with the API (`apps/server/.env`). |
 | `DISCORD_ROLE_STONE` … `_GLASS` | yes | Rating role ids. |
 | `DISCORD_ROLE_FOIL`, `_HOLOGRAPHIC`, `_POLYCHROME`, `_NEGATIVE` | yes | Leaderboard role ids. |
-| `SYNC_INTERVAL_MINUTES` | no | Default 10. |
+| `SYNC_INTERVAL_MINUTES` | no | Default 10, at most 1440 (a day). |
 | `DRY_RUN` | no | Default on. `false` or `0` applies changes. |
 | `BMP_API_URL` | no | Default `http://api:8788` (set by compose). |
 
 Any required value missing or malformed: the bot logs one
 `[discord-bot] disabled: …` line and exits 0 (compose leaves it stopped).
+The same goes for setup mistakes Discord reports at startup: a wrong token,
+Server Members Intent off, the bot not in the server or invited without
+`applications.commands`. Fix it, then start the bot again. Other startup
+errors (network, Discord down) exit 1 and compose restarts it.
 
 ## Dry run, then go live
 

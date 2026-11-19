@@ -94,12 +94,15 @@ describe('loadConfig', () => {
 		expect(result.config.apiUrl).toBe('http://localhost:8788')
 	})
 
-	it('rejects an interval under a minute', () => {
-		expect(
-			loadConfig({ ...fullEnv(), SYNC_INTERVAL_MINUTES: '0' }, LADDERS),
-		).toEqual({
-			ok: false,
-			problems: ['invalid SYNC_INTERVAL_MINUTES'],
-		})
-	})
+	it.each(['0', '1441', '60000'])(
+		'rejects SYNC_INTERVAL_MINUTES=%s (under a minute or over a day)',
+		(value) => {
+			expect(
+				loadConfig({ ...fullEnv(), SYNC_INTERVAL_MINUTES: value }, LADDERS),
+			).toEqual({
+				ok: false,
+				problems: ['invalid SYNC_INTERVAL_MINUTES'],
+			})
+		},
+	)
 })

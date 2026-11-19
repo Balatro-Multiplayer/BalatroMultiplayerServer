@@ -8,6 +8,7 @@ import {
 	type StandingsDeps,
 	createStandingsService,
 } from '../../features/discord-bot/standings.service.js'
+import { BoardRebuildingError } from '../../infrastructure/db/board-lock.js'
 import { errorHandler } from '../../middleware/errorHandler.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 
@@ -88,11 +89,12 @@ describe('/internal/discord-bot', () => {
 		expect(standings).not.toHaveBeenCalled()
 	})
 
-	it('answers 503 with no active season', async () => {
+	it.each([
+		['no active season', new NoActiveSeasonError('No active season')],
+		['the board being rebuilt', new BoardRebuildingError()],
+	])('answers 503 for %s', async (_, error) => {
 		env.DISCORD_BOT_API_KEY = KEY
-		const standings = vi
-			.fn()
-			.mockRejectedValue(new NoActiveSeasonError('No active season'))
+		const standings = vi.fn().mockRejectedValue(error)
 		const res = await request(appWith(standings))
 			.post('/internal/discord-bot/standings')
 			.set('X-BMP-Internal-Key', KEY)
@@ -102,7 +104,7 @@ describe('/internal/discord-bot', () => {
 
 	it('passes a valid request through', async () => {
 		env.DISCORD_BOT_API_KEY = KEY
-		const answer = { season: 2, previousSeason: 1, players: {} }
+		const answer = { season: 2, previousSeason: 1, players: {}, top: [] }
 		const standings = vi.fn().mockResolvedValue(answer)
 		const res = await request(appWith(standings))
 			.post('/internal/discord-bot/standings')
@@ -143,6 +145,7 @@ describe('standings service', () => {
 				{ playerId: 'p-someone', rank: 1 },
 				{ playerId: 'p-alice', rank: 2 },
 			],
+			readingStableBoard: (_board, read) => read(),
 			...over,
 		}
 	}
@@ -159,11 +162,20 @@ describe('standings service', () => {
 			previousSeason: 1,
 			players: {
 				[ALICE]: {
+					playerId: 'p-alice',
 					current: { gamesPlayed: 30, rating: 1300, rank: 2 },
 					previous: { gamesPlayed: 50, rating: 1250 },
 				},
-				[BOB]: { current: null, previous: { gamesPlayed: 12, rating: 760 } },
+				[BOB]: {
+					playerId: 'p-bob',
+					current: null,
+					previous: { gamesPlayed: 12, rating: 760 },
+				},
 			},
+			top: [
+				{ playerId: 'p-someone', rank: 1 },
+				{ playerId: 'p-alice', rank: 2 },
+			],
 		})
 	})
 
@@ -188,8 +200,29 @@ describe('standings service', () => {
 			discordIds: [BOB],
 		})
 		expect(answer.previousSeason).toBeNull()
-		expect(answer.players[BOB]).toEqual({ current: null, previous: null })
+		expect(answer.players[BOB]).toEqual({
+			playerId: 'p-bob',
+			current: null,
+			previous: null,
+		})
+		expect(answer.top).toEqual([])
 		expect(boardRatings).toHaveBeenCalledTimes(1)
+	})
+
+	it('reads the board only while no rebuild can start', async () => {
+		const boardRatings = vi.fn().mockResolvedValue(new Map())
+		const service = createStandingsService(
+			deps({
+				boardRatings,
+				readingStableBoard: async () => {
+					throw new BoardRebuildingError()
+				},
+			}),
+		)
+		await expect(
+			service.standings({ ...BOARD, topN: 50, discordIds: [ALICE] }),
+		).rejects.toBeInstanceOf(BoardRebuildingError)
+		expect(boardRatings).not.toHaveBeenCalled()
 	})
 
 	it('throws without an active season', async () => {

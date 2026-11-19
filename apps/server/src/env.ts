@@ -40,10 +40,7 @@ function requiredInProduction(key: string, defaultValue: string): string {
 
 const SERVER = (() => {
 	const result = serverSettings(process.env)
-	if (!result.ok)
-		throw new Error(
-			`Refusing to start: ${serverKindErrorMessage(result.error)}`,
-		)
+	if (!result.ok) throw new Error(`Refusing to start: ${serverKindErrorMessage(result.error)}`)
 	return result.value
 })()
 

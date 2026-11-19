@@ -1,12 +1,16 @@
 import { boardName } from '@bmp/types'
 import { Router } from 'express'
 import { env } from '../../env.js'
+import {
+	BoardRebuildingError,
+	readingStableBoard,
+} from '../../infrastructure/db/board-lock.js'
 import * as standingsGateway from '../../infrastructure/gateways/discord-standings.gateway.js'
 import { getCurrentSeason } from '../../infrastructure/gateways/rating.gateway.js'
 import { leaderboardPage } from '../../infrastructure/gateways/stats.gateway.js'
+import { requireSharedKey } from '../../middleware/require-shared-key.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
-import { requireSharedKey } from '../nakama/internal.route.js'
 import {
 	NoActiveSeasonError,
 	type StandingsService,
@@ -34,6 +38,7 @@ function defaultStandingsService(): StandingsService {
 				playerId: r.playerId,
 				rank: r.rank,
 			})),
+		readingStableBoard,
 	})
 }
 
@@ -64,7 +69,11 @@ export function createDiscordBotRouter(
 				throw new AppError('Bad discordIds', 400)
 			res.json(await service.standings({ modId, gameMode, topN, discordIds }))
 		} catch (err) {
-			if (err instanceof NoActiveSeasonError) {
+			// Both pass: the bot changes nothing and tries again on its next run.
+			if (
+				err instanceof NoActiveSeasonError ||
+				err instanceof BoardRebuildingError
+			) {
 				next(new AppError(err.message, 503))
 				return
 			}

@@ -13,6 +13,8 @@ export interface CurrentStanding extends BoardRating {
 }
 
 export interface MemberStanding {
+	/** The player linked to this Discord account. */
+	playerId: string
 	/** This season's row on the board; null = no games yet. */
 	current: CurrentStanding | null
 	/** Last season's final row on the same board; null = no games then. */
@@ -24,6 +26,12 @@ export interface StandingsAnswer {
 	previousSeason: number | null
 	/** Keyed by Discord id. A missing id has no linked player. */
 	players: Record<string, MemberStanding>
+	/**
+	 * The first `topN` places, in order (empty for topN 0). A bot that reads
+	 * its members over several requests ranks them all from one request's
+	 * list, so a match between two requests can't give two members #1.
+	 */
+	top: { playerId: string; rank: number }[]
 }
 
 export interface StandingsRequest {
@@ -47,6 +55,14 @@ export interface StandingsDeps {
 		board: BoardSeason,
 		n: number,
 	): Promise<{ playerId: string; rank: number }[]>
+	/**
+	 * Runs board reads while no rebuild (a void) can start; throws
+	 * BoardRebuildingError if one is running. See board-lock.ts.
+	 */
+	readingStableBoard<T>(
+		board: { modId: string; gameMode: string },
+		read: () => Promise<T>,
+	): Promise<T>
 }
 
 export class NoActiveSeasonError extends Error {}
@@ -76,27 +92,34 @@ export function createStandingsService(deps: StandingsDeps) {
 				gameMode: req.gameMode,
 				seasonId: season,
 			}
-			const [current, previous, top] = await Promise.all([
-				deps.boardRatings(board, playerIds),
-				previousSeason === null
-					? Promise.resolve(new Map<string, BoardRating>())
-					: deps.boardRatings(
-							{ ...board, seasonId: previousSeason },
-							playerIds,
-						),
-				req.topN > 0 ? deps.topOfBoard(board, req.topN) : Promise.resolve([]),
-			])
+			const [current, previous, top] = await deps.readingStableBoard(
+				board,
+				() =>
+					Promise.all([
+						deps.boardRatings(board, playerIds),
+						previousSeason === null
+							? Promise.resolve(new Map<string, BoardRating>())
+							: deps.boardRatings(
+									{ ...board, seasonId: previousSeason },
+									playerIds,
+								),
+						req.topN > 0
+							? deps.topOfBoard(board, req.topN)
+							: Promise.resolve([]),
+					]),
+			)
 			const rankOf = new Map(top.map((t) => [t.playerId, t.rank]))
 
 			const players: Record<string, MemberStanding> = {}
 			for (const [discordId, playerId] of playerOf) {
 				const now = current.get(playerId)
 				players[discordId] = {
+					playerId,
 					current: now ? { ...now, rank: rankOf.get(playerId) ?? null } : null,
 					previous: previous.get(playerId) ?? null,
 				}
 			}
-			return { season, previousSeason, players }
+			return { season, previousSeason, players, top }
 		},
 	}
 }

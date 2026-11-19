@@ -6,11 +6,17 @@ import type { MemberStanding } from './rank-logic.js'
 
 export const IDS_PER_REQUEST = 1000
 
+export interface LinkedStanding extends MemberStanding {
+	playerId: string
+}
+
 export interface StandingsAnswer {
 	season: number
 	previousSeason: number | null
 	/** Keyed by Discord id. A missing id has no linked player. */
-	players: Record<string, MemberStanding>
+	players: Record<string, LinkedStanding>
+	/** The first `topN` places, in order. */
+	top: { playerId: string; rank: number }[]
 }
 
 export interface StandingsRequest {
@@ -47,7 +53,8 @@ export function createStandingsClient(
 		if (
 			typeof body?.season !== 'number' ||
 			typeof body.players !== 'object' ||
-			body.players === null
+			body.players === null ||
+			!Array.isArray(body.top)
 		)
 			throw new Error('standings request failed: malformed answer')
 		return body

@@ -20,6 +20,7 @@ export type ConfigResult =
 	| { ok: false; problems: string[] }
 
 const SNOWFLAKE = /^\d{17,20}$/
+export const MAX_SYNC_MINUTES = 24 * 60
 
 export function roleEnvName(role: string): string {
 	return `DISCORD_ROLE_${role.toUpperCase()}`
@@ -55,8 +56,10 @@ export function loadConfig(
 		seen.set(id, role)
 	}
 
+	// At most a day: setInterval can't wait longer than about 24.8 days and
+	// fires at once instead, so a huge value would sweep nonstop.
 	const minutes = Number(env.SYNC_INTERVAL_MINUTES?.trim() || '10')
-	if (!Number.isFinite(minutes) || minutes < 1)
+	if (!Number.isFinite(minutes) || minutes < 1 || minutes > MAX_SYNC_MINUTES)
 		invalid.push('SYNC_INTERVAL_MINUTES')
 
 	// On unless set to false: the first real sweep strips roles from many

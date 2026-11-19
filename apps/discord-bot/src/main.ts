@@ -10,6 +10,7 @@ import { SYNC_COMMAND, guildPort, rolePlacementProblems } from './discord.js'
 import { loadConfig } from './env.js'
 import { LADDERS } from './ladders.js'
 import { createStandingsClient } from './standings-client.js'
+import { closeCodeProblem, setupProblem } from './startup.js'
 import { type SweepSummary, formatSummary, runSweep } from './sweep.js'
 
 const loaded = loadConfig(process.env, LADDERS)
@@ -61,6 +62,32 @@ function scheduledSweep() {
 	)
 }
 
+// A setup mistake exits 0, so compose leaves the bot stopped rather than
+// restarting it into the same error (startup.ts). Anything else exits 1.
+function stopAfterStartupError(err: unknown): never {
+	const message = (err as Error)?.message ?? String(err)
+	const problem = setupProblem(err)
+	if (problem) {
+		console.error(
+			`[discord-bot] disabled: ${problem} (${message}). Fix it, then start the bot again.`,
+		)
+		process.exit(0)
+	}
+	console.error(`[discord-bot] startup failed: ${message}`)
+	process.exit(1)
+}
+
+// discord.js stops reconnecting after these close codes but doesn't fail
+// login, so without this the bot would sit idle.
+client.on(Events.ShardDisconnect, (event) => {
+	const problem = closeCodeProblem(event.code)
+	if (!problem) return
+	console.error(
+		`[discord-bot] disabled: ${problem} (gateway close ${event.code}). Fix it, then start the bot again.`,
+	)
+	process.exit(0)
+})
+
 client.once(Events.ClientReady, async (ready) => {
 	try {
 		const guild = await client.guilds.fetch(config.guildId)
@@ -80,10 +107,7 @@ client.once(Events.ClientReady, async (ready) => {
 			`[discord-bot] ready as ${ready.user.username} in ${guild.name}; sweeping every ${config.syncIntervalMs / 60_000} min${config.dryRun ? ' [dry-run]' : ''}`,
 		)
 	} catch (err) {
-		console.error(
-			`[discord-bot] startup failed: ${(err as Error)?.message ?? err}`,
-		)
-		process.exit(1)
+		stopAfterStartupError(err)
 	}
 	scheduledSweep()
 	setInterval(scheduledSweep, config.syncIntervalMs)
@@ -135,4 +159,4 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 	})
 }
 
-await client.login(config.token)
+await client.login(config.token).catch(stopAfterStartupError)

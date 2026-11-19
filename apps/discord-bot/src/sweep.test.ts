@@ -30,13 +30,27 @@ function fakeGuild(members: GuildMemberInfo[]) {
 	return { guild, calls }
 }
 
+// Like the API: player ids are `p-<discord id>`, and the top list (only when
+// asked for) holds every player given a rank.
 function standingsOf(players: Record<string, MemberStanding>): FetchStandings {
 	return async (req) => ({
 		season: 3,
 		previousSeason: 2,
 		players: Object.fromEntries(
-			Object.entries(players).filter(([id]) => req.discordIds.includes(id)),
+			Object.entries(players)
+				.filter(([id]) => req.discordIds.includes(id))
+				.map(([id, standing]) => [id, { ...standing, playerId: `p-${id}` }]),
 		),
+		top:
+			req.topN > 0
+				? Object.entries(players)
+						.filter(([, s]) => s.current?.rank != null)
+						.map(([id, s]) => ({
+							playerId: `p-${id}`,
+							rank: s.current?.rank as number,
+						}))
+						.sort((a, b) => a.rank - b.rank)
+				: [],
 	})
 }
 
@@ -141,6 +155,7 @@ describe('runSweep', () => {
 			season: season++,
 			previousSeason: 2,
 			players: {},
+			top: [],
 		})
 		await expect(
 			runSweep({ ...base, guild, dryRun: false, fetchStandings }),
@@ -148,7 +163,7 @@ describe('runSweep', () => {
 		expect(calls).toEqual([])
 	})
 
-	it('asks for at most 1000 ids per request and the top 50', async () => {
+	it('asks for at most 1000 ids per request and the top 50 once', async () => {
 		const members = Array.from({ length: 2500 }, (_, i) => ({
 			id: `m${i}`,
 			name: `m${i}`,
@@ -165,6 +180,44 @@ describe('runSweep', () => {
 			gameMode: 'ranked:pvp_ranked_expanded',
 			topN: 50,
 		})
+		expect(fetchStandings.mock.calls.map(([r]) => r.topN)).toEqual([50, 0, 0])
+	})
+
+	it("ranks every member from the first request's top list", async () => {
+		// m1000 is in the second request. A match between the requests moved
+		// them to #1, but the first request's list still has m0 there.
+		const members = Array.from({ length: 1001 }, (_, i) => ({
+			id: `m${i}`,
+			name: `m${i}`,
+			roleIds: [] as string[],
+		}))
+		const { guild, calls } = fakeGuild(members)
+		const fetchStandings: FetchStandings = async (req) => {
+			const first = req.discordIds.includes('m0')
+			const id = first ? 'm0' : 'm1000'
+			return {
+				season: 3,
+				previousSeason: 2,
+				players: {
+					[id]: {
+						playerId: `p-${id}`,
+						current: { gamesPlayed: 40, rating: 1300, rank: 1 },
+						previous: null,
+					},
+				},
+				top: first
+					? [
+							{ playerId: 'p-m0', rank: 1 },
+							{ playerId: 'p-m1000', rank: 2 },
+						]
+					: [],
+			}
+		}
+		await runSweep({ ...base, guild, dryRun: false, fetchStandings })
+		expect(calls.filter((c) => c.endsWith('r-negative'))).toEqual([
+			'+m0:r-negative',
+		])
+		expect(calls).toContain('+m1000:r-polychrome')
 	})
 
 	it('changes 5 members at a time with a pause between batches', async () => {

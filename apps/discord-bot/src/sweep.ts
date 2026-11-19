@@ -1,12 +1,15 @@
 import { type Ladder, topNeeded } from './ladders.js'
 import {
-	type MemberStanding,
 	type RoleChanges,
 	type Seasons,
 	planRoleChanges,
 	rolesForLadder,
 } from './rank-logic.js'
-import { type FetchStandings, IDS_PER_REQUEST } from './standings-client.js'
+import {
+	type FetchStandings,
+	IDS_PER_REQUEST,
+	type LinkedStanding,
+} from './standings-client.js'
 
 // One full pass over the guild: read every member, ask the API for their
 // standings, work out each member's managed roles and apply the difference.
@@ -74,34 +77,40 @@ const defaultSleep = (ms: number) =>
  * Every ladder's standings for these members, keyed by ladder then Discord id.
  * Throws if any request fails: a pass with missing data would strip roles
  * from members it simply didn't hear about.
+ *
+ * Places come from the first request's top list alone, for every member: a
+ * match finishing between two requests would otherwise rank members from two
+ * board states (two #1s). Later requests skip the top (topN 0).
  */
 async function loadStandings(
 	fetchStandings: FetchStandings,
 	ladders: Ladder[],
 	memberIds: string[],
 ): Promise<
-	Map<Ladder, { seasons: Seasons; players: Map<string, MemberStanding> }>
+	Map<Ladder, { seasons: Seasons; players: Map<string, LinkedStanding> }>
 > {
 	const out = new Map<
 		Ladder,
-		{ seasons: Seasons; players: Map<string, MemberStanding> }
+		{ seasons: Seasons; players: Map<string, LinkedStanding> }
 	>()
 	for (const ladder of ladders) {
-		const players = new Map<string, MemberStanding>()
+		const players = new Map<string, LinkedStanding>()
 		let seasons: Seasons | null = null
+		let rankOf: Map<string, number> | null = null
 		for (const ids of chunk(memberIds, IDS_PER_REQUEST)) {
 			const answer = await fetchStandings({
 				modId: ladder.modId,
 				gameMode: ladder.gameMode,
-				topN: topNeeded(ladder),
+				topN: rankOf ? 0 : topNeeded(ladder),
 				discordIds: ids,
 			})
 			// A season rolled over between two requests: start the pass again later.
 			if (seasons && seasons.current !== answer.season)
 				throw new Error('season changed during the sweep')
 			seasons = { current: answer.season, previous: answer.previousSeason }
+			rankOf ??= new Map(answer.top.map((t) => [t.playerId, t.rank]))
 			for (const [id, standing] of Object.entries(answer.players))
-				players.set(id, standing)
+				players.set(id, withRank(standing, rankOf))
 		}
 		out.set(ladder, {
 			seasons: seasons ?? { current: 0, previous: null },
@@ -109,6 +118,20 @@ async function loadStandings(
 		})
 	}
 	return out
+}
+
+function withRank(
+	standing: LinkedStanding,
+	rankOf: Map<string, number>,
+): LinkedStanding {
+	if (!standing.current) return standing
+	return {
+		...standing,
+		current: {
+			...standing.current,
+			rank: rankOf.get(standing.playerId) ?? null,
+		},
+	}
 }
 
 export async function runSweep(opts: SweepOptions): Promise<SweepSummary> {
