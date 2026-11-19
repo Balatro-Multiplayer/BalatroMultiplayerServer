@@ -159,7 +159,17 @@ export interface PulledContest {
 	lobbyKind: GameKind
 }
 
-export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice | PulledContest
+// A timed ban's clock started in Nakama (nakama moderation/enforce.ts): the end
+// to store on the ban.
+export interface PulledBanStarted {
+	key: string
+	kind: 'ban_started'
+	at: number
+	banId: string
+	expiresAt: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice | PulledContest | PulledBanStarted
 
 export interface MirrorPlayer {
 	steamIdHash: string | null
@@ -622,6 +632,7 @@ export interface MirrorDeps {
 		storeForfeit(row: ForfeitRow, lobbyKind: GameKind | null): Promise<void>
 		storeNoticeAcceptance(row: NoticeAcceptanceRow): Promise<void>
 		storeContest(row: ContestRow): Promise<void>
+		storeBanStarted(banId: string, expiresAt: Date): Promise<void>
 	}
 }
 
@@ -698,6 +709,8 @@ export function createMirrorService(deps: MirrorDeps) {
 					const contesterId = ids.get(entry.by)
 					const againstId = ids.get(entry.against)
 					if (contesterId && againstId) await store.storeContest(contestRowOf(entry, contesterId, againstId))
+				} else if (entry.kind === 'ban_started') {
+					await store.storeBanStarted(entry.banId, new Date(entry.expiresAt))
 				} else if (entry.kind === 'notice') {
 					const playerId = ids.get(entry.userId)
 					if (playerId)

@@ -17,7 +17,10 @@ export interface BanRecord {
 	id: string
 	playerId: string
 	banType: BanType
+	// Null for a permanent ban, or a timed ban whose clock has not started.
 	expiresAt: Date | null
+	// The length of a timed ban (set while expiresAt is null: it has not started).
+	durationMs: number | null
 	issuedBy: string
 	issuedAt: Date
 	reason: string
@@ -128,6 +131,7 @@ export async function insertBan(data: {
 	playerId: string
 	banType: BanType
 	expiresAt: Date | null
+	durationMs?: number | null
 	issuedBy: string
 	reason: string
 }, exec: DbExecutor = db): Promise<BanRecord> {
@@ -137,6 +141,7 @@ export async function insertBan(data: {
 			playerId: data.playerId,
 			banType: data.banType,
 			expiresAt: data.expiresAt,
+			durationMs: data.durationMs ?? null,
 			issuedBy: data.issuedBy,
 			reason: data.reason,
 		})
@@ -204,4 +209,17 @@ export async function markBanEndNotified(banId: string, exec: DbExecutor = db): 
 		.update(playerBans)
 		.set({ endNotifiedAt: new Date() })
 		.where(and(eq(playerBans.id, banId), isNull(playerBans.endNotifiedAt)))
+}
+
+/**
+ * Records the end of a timed ban whose clock Nakama started. Only a ban with a
+ * length and no end changes, so a repeated report is harmless.
+ */
+export async function startBanClock(banId: string, expiresAt: Date, exec: DbExecutor = db): Promise<boolean> {
+	const rows = await exec
+		.update(playerBans)
+		.set({ expiresAt })
+		.where(and(eq(playerBans.id, banId), isNull(playerBans.expiresAt), isNotNull(playerBans.durationMs)))
+		.returning({ id: playerBans.id })
+	return rows.length > 0
 }

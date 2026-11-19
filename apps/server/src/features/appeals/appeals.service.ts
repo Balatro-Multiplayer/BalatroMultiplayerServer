@@ -24,6 +24,8 @@ export interface PunishmentRef {
 	issuedBy: string
 	reason: string
 	expiresAt: Date | null
+	// The length of a timed ban whose clock has not started (expiresAt is null).
+	durationMs?: number | null
 	liftedAt: Date | null
 }
 
@@ -222,7 +224,9 @@ export function createAppealService<Tx>(deps: AppealDeps<Tx>) {
 			if (punishment.banType === 'username')
 				return refuse({ code: 'invalid_body', field: 'outcome', message: 'a username ban can only be lifted' })
 			const duration = body.duration
-			const end = isBanDuration(duration) ? shortenedEnd(duration, punishment.expiresAt, now) : { ok: false as const }
+			// A ban whose clock has not started would end its length from now.
+			const currentEnd = punishment.durationMs && !punishment.expiresAt ? new Date(now.getTime() + punishment.durationMs) : punishment.expiresAt
+			const end = isBanDuration(duration) ? shortenedEnd(duration, currentEnd, now) : { ok: false as const }
 			if (!end.ok)
 				return refuse({
 					code: 'invalid_body',

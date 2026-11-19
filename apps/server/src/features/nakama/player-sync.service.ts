@@ -27,6 +27,8 @@ export interface SyncedBan {
 	banId: string
 	type: BanRecord['banType']
 	expiresAt: number | null
+	// A timed ban whose clock has not started: Nakama starts it at this login.
+	durationMs: number | null
 	reason: string
 }
 
@@ -48,6 +50,7 @@ export function syncedBanOf(ban: BanRecord): SyncedBan {
 		banId: ban.id,
 		type: ban.banType,
 		expiresAt: ban.expiresAt ? ban.expiresAt.getTime() : null,
+		durationMs: ban.expiresAt ? null : (ban.durationMs ?? null),
 		reason: ban.reason,
 	}
 }

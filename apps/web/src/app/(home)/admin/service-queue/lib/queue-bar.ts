@@ -53,10 +53,12 @@ export function barActionsOf(detail: ItemDetail): BarAction[] {
     const d = detail.appealDecisions
     const evidence = detail.evidence as {
       target?: string
-      punishment?: { expiresAt: string | null } | null
+      punishment?: { expiresAt: string | null; durationMs?: number | null } | null
     } | null
     const canShorten =
-      evidence?.target === 'ban' && evidence.punishment?.expiresAt != null
+      evidence?.target === 'ban' &&
+      (evidence.punishment?.expiresAt != null ||
+        (evidence.punishment?.durationMs ?? null) !== null)
     const modes: AppealMode[] = [
       ...(d?.deny ? (['deny'] as const) : []),
       ...(d?.grant ? (['lift'] as const) : []),

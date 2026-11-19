@@ -483,6 +483,7 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'id',
 		'ban_type',
 		'expires_at',
+		'duration_ms',
 		'issued_at',
 		'reason',
 		'lifted_at',

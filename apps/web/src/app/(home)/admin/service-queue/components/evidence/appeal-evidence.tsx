@@ -1,5 +1,6 @@
 'use client'
 
+import { banEndText } from '@/lib/ban-end'
 import { Badge } from '@/components/ui/badge'
 import { formatTime } from '../../lib/format'
 import type { AppealEvidence as Evidence } from '../../lib/types'
@@ -48,8 +49,8 @@ export function AppealEvidence({ evidence }: { evidence: Evidence }) {
               ['Issued by', punishment.issuedByName ?? punishment.issuedBy],
               [
                 'Ends',
-                punishment.expiresAt
-                  ? formatTime(punishment.expiresAt)
+                punishment.expiresAt || punishment.durationMs
+                  ? banEndText(punishment, formatTime)
                   : 'Permanent',
               ],
               [

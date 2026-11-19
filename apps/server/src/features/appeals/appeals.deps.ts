@@ -64,7 +64,12 @@ const deps: AppealDeps<DbTransaction> = {
 		return lifted ? { ...punishment, liftedAt: new Date() } : null
 	},
 	async shortenBan(tx, punishment, expiresAt) {
-		return (await setBanEnd(tx, punishment.id, expiresAt)) ? { ...punishment, expiresAt } : null
+		const now = new Date()
+		if (!(await setBanEnd(tx, punishment.id, expiresAt, now))) return null
+		// Not started: the new length stays with no end.
+		return punishment.durationMs && !punishment.expiresAt
+			? { ...punishment, durationMs: Math.round((expiresAt.getTime() - now.getTime()) / 60_000) * 60_000 }
+			: { ...punishment, expiresAt }
 	},
 	recordEvent: (tx, event) => recordItemEvent(tx, event),
 	recordStaffAction: (tx, entry) => recordStaffAction(tx, entry),
@@ -75,6 +80,7 @@ const deps: AppealDeps<DbTransaction> = {
 			playerId: ban.playerId,
 			banType: ban.banType!,
 			expiresAt: ban.expiresAt,
+			durationMs: ban.durationMs ?? null,
 			issuedBy: ban.issuedBy,
 			issuedAt: new Date(),
 			reason: ban.reason,

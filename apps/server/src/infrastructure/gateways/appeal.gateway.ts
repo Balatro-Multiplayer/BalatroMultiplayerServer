@@ -61,6 +61,7 @@ export async function findPunishmentRef(id: string): Promise<PunishmentRef | nul
 			issuedBy: ban.issuedBy,
 			reason: ban.reason,
 			expiresAt: ban.expiresAt,
+			durationMs: ban.durationMs,
 			liftedAt: ban.liftedAt,
 		}
 	const [warning] = await db.select().from(playerWarnings).where(eq(playerWarnings.id, id)).limit(1)
@@ -87,11 +88,15 @@ export async function liftWarning(exec: DbExecutor, id: string, liftedBy: string
 	return rows.length > 0
 }
 
-// A new, earlier end for a ban that has not been lifted.
-export async function setBanEnd(exec: DbExecutor, id: string, expiresAt: Date): Promise<boolean> {
+// A new, earlier end for a ban that has not been lifted. A timed ban whose
+// clock has not started gets a shorter length instead, and its end is set when
+// the player is told.
+export async function setBanEnd(exec: DbExecutor, id: string, expiresAt: Date, now: Date = new Date()): Promise<boolean> {
+	const [ban] = await exec.select({ expiresAt: playerBans.expiresAt, durationMs: playerBans.durationMs }).from(playerBans).where(eq(playerBans.id, id)).limit(1)
+	const notStarted = !!ban && ban.expiresAt === null && ban.durationMs !== null
 	const rows = await exec
 		.update(playerBans)
-		.set({ expiresAt })
+		.set(notStarted ? { durationMs: Math.max(60_000, Math.round((expiresAt.getTime() - now.getTime()) / 60_000) * 60_000) } : { expiresAt })
 		.where(and(eq(playerBans.id, id), isNull(playerBans.liftedAt)))
 		.returning({ id: playerBans.id })
 	return rows.length > 0

@@ -85,6 +85,7 @@ vi.mock('../infrastructure/gateways/ban.gateway.js', () => ({
 	liftBan: vi.fn().mockResolvedValue(null),
 	listEndedBansToTell: vi.fn().mockResolvedValue([]),
 	markBanEndNotified: vi.fn().mockResolvedValue(undefined),
+	startBanClock: vi.fn().mockResolvedValue(true),
 	usernameBannedSql: { sql: 'false' },
 	usernameBannedAmong: vi.fn().mockResolvedValue(new Set()),
 	banNameWhileBanned: vi.fn().mockResolvedValue(null),

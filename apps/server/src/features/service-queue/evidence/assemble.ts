@@ -629,6 +629,7 @@ async function appealEvidence(item: ServiceQueueItemRecord) {
 					issuedBy: punishment.issuedBy,
 					issuedByName: names[punishment.issuedBy] ?? null,
 					expiresAt: punishment.expiresAt,
+					durationMs: punishment.durationMs ?? null,
 					liftedAt: punishment.liftedAt,
 				}
 			: null,

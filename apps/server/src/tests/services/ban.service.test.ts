@@ -31,7 +31,7 @@ describe('issueBan', () => {
 
 	it('records the ban and has Nakama enforce it', async () => {
 		await expect(issueBan(params)).resolves.toBe(record)
-		expect(insertBan).toHaveBeenCalledWith(params)
+		expect(insertBan).toHaveBeenCalledWith({ ...params, durationMs: null })
 		expect(banInNakama).toHaveBeenCalledWith(record)
 	})
 
@@ -41,5 +41,18 @@ describe('issueBan', () => {
 		await expect(issueBan(params)).resolves.toBe(record)
 		expect(err).toHaveBeenCalled()
 		err.mockRestore()
+	})
+
+	it('keeps the length of a timed chat ban and leaves its end open until the player is told', async () => {
+		vi.mocked(insertBan).mockClear()
+		const day = 24 * 60 * 60 * 1000
+		await issueBan({ ...params, banType: 'chat', expiresAt: new Date(Date.now() + day) })
+		expect(insertBan).toHaveBeenCalledWith(expect.objectContaining({ banType: 'chat', expiresAt: null, durationMs: day }))
+	})
+
+	it('leaves a permanent chat ban without a length', async () => {
+		vi.mocked(insertBan).mockClear()
+		await issueBan({ ...params, banType: 'chat', expiresAt: null })
+		expect(insertBan).toHaveBeenCalledWith(expect.objectContaining({ expiresAt: null, durationMs: null }))
 	})
 })

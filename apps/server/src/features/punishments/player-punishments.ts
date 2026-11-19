@@ -4,6 +4,7 @@ import type { BanRecord } from '../../infrastructure/gateways/ban.gateway.js'
 import type { WarningRecord } from '../../infrastructure/gateways/warning.gateway.js'
 import { type AppealFacts, APPEAL_COOLDOWN_MS, canSubmitAppeal } from '../appeals/appeal-rules.js'
 import type { AppealRow } from '../appeals/appeals.service.js'
+import { banStartsOnLogin } from '../webadmin/ban-clock.js'
 
 export type PunishmentType = 'warning' | 'chat_ban' | 'queue_ban' | 'account_ban' | 'username_ban'
 
@@ -17,6 +18,9 @@ export interface PlayerPunishment {
 	startsAt: string
 	endsAt: string | null
 	permanent: boolean
+	// A timed ban the player has not been told of yet: endsAt is null until
+	// their next login starts the clock.
+	startsOnLogin: boolean
 	status: PunishmentStatus
 	reason: string
 	// The latest appeal of this punishment, and whether another may be made now.
@@ -76,9 +80,11 @@ function fromBan(ban: BanRecord, now: Date): Plain {
 	return {
 		id: ban.id,
 		type: BAN_TYPE[ban.banType],
-		startsAt: ban.issuedAt.toISOString(),
+		// A started timed ban counts from when the player was told.
+		startsAt: (ban.expiresAt && ban.durationMs ? new Date(ban.expiresAt.getTime() - ban.durationMs) : ban.issuedAt).toISOString(),
 		endsAt: ban.expiresAt?.toISOString() ?? null,
-		permanent: ban.expiresAt === null,
+		permanent: ban.expiresAt === null && ban.durationMs == null,
+		startsOnLogin: banStartsOnLogin({ expiresAt: ban.expiresAt, durationMs: ban.durationMs ?? null }),
 		status: ban.liftedAt ? 'lifted' : ended ? 'ended' : 'active',
 		reason: ban.reason,
 	}
@@ -91,6 +97,7 @@ function fromWarning(warning: WarningRecord): Plain {
 		startsAt: warning.issuedAt.toISOString(),
 		endsAt: null,
 		permanent: false,
+		startsOnLogin: false,
 		status: warning.liftedAt ? 'lifted' : 'active',
 		reason: warning.message,
 	}

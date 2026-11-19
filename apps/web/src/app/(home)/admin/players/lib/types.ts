@@ -21,6 +21,8 @@ export interface PageBan {
   id: string
   banType: BanType
   expiresAt: string | null
+  // The length of a timed ban; its end is set when the player is first told.
+  durationMs?: number | null
   issuedAt: string
   issuedByName: string | null
   reason: string

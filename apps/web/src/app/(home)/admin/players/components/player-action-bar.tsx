@@ -1,5 +1,6 @@
 'use client'
 
+import { banEndText } from '@/lib/ban-end'
 import { useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -50,7 +51,7 @@ export function liftTargetsOf(
       .filter((b) => isActiveBan(b, now))
       .map((b) => ({
         target: { kind: 'ban', id: b.id } as LiftTarget,
-        label: `${b.banType} ban, ${b.expiresAt ? `until ${formatTime(b.expiresAt)}` : 'permanent'}`,
+        label: `${b.banType} ban, ${b.expiresAt ? `until ${formatTime(b.expiresAt)}` : banEndText(b, formatTime)}`,
       })),
     ...page.punishments.warnings
       .filter((w) => !w.liftedAt)

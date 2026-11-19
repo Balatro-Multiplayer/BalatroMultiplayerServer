@@ -15,6 +15,7 @@ const ban = {
 	playerId: 'p1',
 	banType: 'account' as const,
 	expiresAt: new Date(5000),
+	durationMs: null,
 	issuedBy: 'admin:x',
 	issuedAt: new Date(0),
 	reason: 'cheating',
@@ -46,8 +47,14 @@ describe('moderation reaching Nakama', () => {
 		expect(await banInNakama(ban)).toBe(true)
 		expect(rpcCall()).toEqual({
 			rpc: 'admin_ban_apply',
-			body: { userId: NAKAMA_ID, type: 'account', banId: 'ban-1', expiresAt: 5000, reason: 'cheating' },
+			body: { userId: NAKAMA_ID, type: 'account', banId: 'ban-1', expiresAt: 5000, durationMs: null, reason: 'cheating' },
 		})
+	})
+
+	it('sends the length of a timed ban whose clock has not started, with no end', async () => {
+		vi.mocked(playerGateway.findPlayerById).mockResolvedValueOnce({ nakamaUserId: NAKAMA_ID } as any)
+		await banInNakama({ ...ban, banType: 'chat', expiresAt: null, durationMs: 86_400_000 })
+		expect(rpcCall().body).toMatchObject({ type: 'chat', expiresAt: null, durationMs: 86_400_000 })
 	})
 
 	it('skips players without a Nakama account, and Nakama being off', async () => {

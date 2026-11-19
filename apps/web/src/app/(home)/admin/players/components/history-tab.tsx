@@ -1,5 +1,6 @@
 'use client'
 
+import { banEndText } from '@/lib/ban-end'
 import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -46,7 +47,7 @@ function Entry({
             <p className='text-muted-foreground text-xs'>
               Given by {ban.issuedByName ?? 'unknown'} on{' '}
               {formatTime(ban.issuedAt)}, until{' '}
-              {ban.expiresAt ? formatTime(ban.expiresAt) : 'permanent'}
+              {banEndText(ban, formatTime)}
             </p>
             {ban.liftedAt && (
               <p className='text-muted-foreground text-xs'>
