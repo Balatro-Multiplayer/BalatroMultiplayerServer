@@ -55,14 +55,16 @@ export function gameModeKey(modeId: string): string {
 
 /**
  * The name shown for a season: its own name, the same one its pill shows.
- * Falls back to "Season N" for a season with no name or one not loaded yet.
+ * Falls back to "Season N" for a season with no name, a blank name, or one
+ * not loaded yet.
  */
 export function seasonLabel(
   seasons: readonly { id: number; name: string | null }[],
   seasonId: number | null
 ): string {
   if (seasonId === null) return 'Season …'
-  return seasons.find((s) => s.id === seasonId)?.name ?? `Season ${seasonId}`
+  const name = seasons.find((s) => s.id === seasonId)?.name?.trim()
+  return name || `Season ${seasonId}`
 }
 
 /** Format ms as m:ss.mmm (speedrun completion time). */
