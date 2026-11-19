@@ -1,6 +1,6 @@
 'use client'
 
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -58,12 +58,15 @@ function niceMax(value: number): number {
 
 // Pointer x relative to the box holding the chart (the tooltip's offset
 // parent), whatever the chart's horizontal scroll.
-function pointerPos(e: { clientX: number; currentTarget: Element }): {
+function pointerPos(
+  e: { clientX: number; currentTarget?: Element },
+  target: Element | undefined = e.currentTarget
+): {
   x: number
   flip: boolean
 } {
-  const rect = e.currentTarget
-    .closest('svg')
+  const rect = target
+    ?.closest('svg')
     ?.parentElement?.parentElement?.getBoundingClientRect()
   const x = e.clientX - (rect?.left ?? 0)
   // Past the middle the tooltip opens to the left of the pointer.
@@ -133,6 +136,17 @@ function SpendingGraph({
     flip: boolean
   } | null>(null)
 
+  // A tap outside the chart closes the details, since touch has no mouse-leave.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!hover) return
+    const close = (e: Event) => {
+      if (!rootRef.current?.contains(e.target as Node)) setHover(null)
+    }
+    document.addEventListener('touchstart', close)
+    return () => document.removeEventListener('touchstart', close)
+  }, [hover])
+
   const count = Math.max(1, series.length)
   const top = niceMax(
     Math.max(0, ...series.flatMap((s) => s.points.map((p) => p.total)))
@@ -153,7 +167,7 @@ function SpendingGraph({
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(top * f))
 
   return (
-    <div className='relative'>
+    <div className='relative' ref={rootRef}>
       {hover && (
         <ChartTooltip
           left={hover.x}
@@ -295,20 +309,27 @@ function SpendingGraph({
             </g>
           ))}
 
-          {antes.map((ante, k) => (
-            // biome-ignore lint/a11y/noStaticElementInteractions: pointer-only detail; the same numbers are printed under each ante
-            <rect
-              key={`hit-${ante}`}
-              x={LEFT + k * colW}
-              y={0}
-              width={colW}
-              height={height}
-              fill='transparent'
-              onMouseEnter={(e) => setHover({ k, ...pointerPos(e) })}
-              onMouseMove={(e) => setHover({ k, ...pointerPos(e) })}
-              onMouseLeave={() => setHover(null)}
-            />
-          ))}
+          {antes.map((ante, k) => {
+            return (
+              // biome-ignore lint/a11y/noStaticElementInteractions: hover and touch detail; the same numbers are printed under each ante
+              <rect
+                key={`hit-${ante}`}
+                x={LEFT + k * colW}
+                y={0}
+                width={colW}
+                height={height}
+                fill='transparent'
+                onMouseEnter={(e) => setHover({ k, ...pointerPos(e) })}
+                onMouseMove={(e) => setHover({ k, ...pointerPos(e) })}
+                onMouseLeave={() => setHover(null)}
+                onTouchStart={(e) => {
+                  const touch = e.touches[0]
+                  if (touch)
+                    setHover({ k, ...pointerPos(touch, e.currentTarget) })
+                }}
+              />
+            )
+          })}
         </svg>
       </div>
     </div>
