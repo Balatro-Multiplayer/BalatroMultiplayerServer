@@ -353,6 +353,25 @@ describe('final jokers', () => {
     expect(log.players[0]?.reconstructed).toBe(false)
   })
 
+  test('sell the copy with the same edition, not the first copy', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [
+          11,
+          'play',
+          [[1], [[-1, 'pc', 'Hearts', 'King']], ['j_joker|foil', 'j_joker']],
+        ],
+        [12, 'sell', [4, 0, joker(1, 'j_joker')]],
+      ]),
+    ])
+    expect(
+      log.players[0]?.finalJokers.map((j) =>
+        j.type === 'other_card' ? `${j.ident}:${j.tags.join()}` : ''
+      )
+    ).toEqual(['j_joker:ed:foil'])
+  })
+
   test('apply shop changes after the last play to the snapshot', () => {
     const log = buildGameLog([
       player('a', [
