@@ -32,6 +32,7 @@ export const STAFF_ACTIONS = [
 	'season_activate',
 	'season_end',
 	'mod_pin',
+	'announcement',
 	'custom_mod_create',
 	'custom_mod_update',
 	'custom_mod_delete',
@@ -60,11 +61,16 @@ export type StaffAction = (typeof STAFF_ACTIONS)[number]
 export const isStaffAction = (value: unknown): value is StaffAction =>
 	typeof value === 'string' && (STAFF_ACTIONS as readonly string[]).includes(value)
 
+// The actor for actions a machine takes with the deploy token (ADR 0012): no
+// player row, so the nil id, and a role no person holds.
+export const DEPLOY_ROLE = 'deploy'
+export const DEPLOY_ACTOR_ID = '00000000-0000-0000-0000-000000000000'
+
 export type LoggedRole = 'moderator' | 'admin'
 
 // One staff action: who did it, to whom, on which queue item, and why.
 export interface StaffActionEntry {
-	staff: { playerId: string; role: LoggedRole }
+	staff: { playerId: string; role: LoggedRole | typeof DEPLOY_ROLE }
 	action: StaffAction
 	reason: string
 	// The player the action is about (a ban's target, a role's holder).

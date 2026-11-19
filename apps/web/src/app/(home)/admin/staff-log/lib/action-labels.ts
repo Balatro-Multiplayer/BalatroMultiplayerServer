@@ -29,6 +29,7 @@ export const STAFF_ACTION_LABELS: Record<string, string> = {
   season_activate: 'Activate season',
   season_end: 'End season',
   mod_pin: 'Change ranked mod pin',
+  announcement: 'Send announcement',
   custom_mod_create: 'Create custom mod',
   custom_mod_update: 'Edit custom mod',
   custom_mod_delete: 'Delete custom mod',

@@ -159,6 +159,13 @@ declare namespace nkruntime {
 			senderId: string,
 			persistent: boolean,
 		): void
+		// To every user; a non-persistent one reaches only live sessions.
+		notificationSendAll(
+			subject: string,
+			content: { [key: string]: unknown },
+			code: number,
+			persistent: boolean,
+		): void
 	}
 
 	interface Account {

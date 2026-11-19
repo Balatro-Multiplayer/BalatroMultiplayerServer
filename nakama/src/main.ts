@@ -20,6 +20,7 @@ import {
 	rpcAdminPing,
 	rpcAdminPlayerGet,
 } from './admin'
+import { rpcAdminAnnounce } from './announcement'
 import {
 	afterAuthenticateCustom,
 	beforeAuthenticateCustom,
@@ -96,6 +97,7 @@ import {
 	rpcLauncherChallengeAnswer,
 	rpcLauncherSessionStart,
 } from './integrity'
+import { rpcAdminRankedLive, rpcAdminRankedQueueCancel } from './matchmaking/ranked_close'
 import { checkServerKind } from './server_kind'
 import { requireIpHashSalt } from './moderation/network'
 import {
@@ -184,6 +186,7 @@ function InitModule(
 	// Server to server only (http key); see admin.ts.
 	initializer.registerRpc('admin_ping', rpcAdminPing)
 	initializer.registerRpc('admin_notify', rpcAdminNotify)
+	initializer.registerRpc('admin_announce', rpcAdminAnnounce)
 	initializer.registerRpc('admin_contest_withdrawn', rpcAdminContestWithdrawn)
 	initializer.registerRpc('admin_config_set', rpcAdminConfigSet)
 	initializer.registerRpc('admin_ban_apply', rpcAdminBanApply)
@@ -202,6 +205,8 @@ function InitModule(
 	initializer.registerRpc('admin_discord_set', rpcAdminDiscordSet)
 	initializer.registerRpc('admin_integrity_set', rpcAdminIntegritySet)
 	initializer.registerRpc('admin_queue_cancel', rpcAdminQueueCancel)
+	initializer.registerRpc('admin_ranked_queue_cancel', rpcAdminRankedQueueCancel)
+	initializer.registerRpc('admin_ranked_live', rpcAdminRankedLive)
 	initializer.registerRpc('admin_mirror_pull', rpcAdminMirrorPull)
 	initializer.registerRpc('admin_mirror_ack', rpcAdminMirrorAck)
 	initializer.registerRpc('admin_profile_set', rpcAdminProfileSet)
