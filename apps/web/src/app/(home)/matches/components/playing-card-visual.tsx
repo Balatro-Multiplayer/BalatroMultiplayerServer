@@ -47,7 +47,9 @@ const ENHANCEMENT_POSITION: Record<string, { x: number; y: number }> = {
   m_gold: { x: 6, y: 0 },
 }
 
-const SEAL_POSITION: Record<string, { x: number; y: number }> = {
+const BASE_CARD_POSITION = { x: 1, y: 0 }
+
+const SEAL_POSITION:Record<string, { x: number; y: number }> = {
   Gold: { x: 2, y: 0 },
   Purple: { x: 4, y: 4 },
   Red: { x: 5, y: 4 },
@@ -70,6 +72,9 @@ export interface PlayingCardVisualProps {
   enhancement?: string | null
   edition?: string | null
   seal?: string | null
+  /** Rendered width in px; the card keeps its proportions. Defaults to the
+   * atlas's native 71px (the deck viewer). */
+  width?: number
 }
 
 export function PlayingCardVisual({
@@ -78,6 +83,7 @@ export function PlayingCardVisual({
   enhancement,
   edition,
   seal,
+  width = CARD_WIDTH,
 }: PlayingCardVisualProps) {
   const suitRow = SUIT_ROW[suit]
   const valueColumn = VALUE_COLUMN[value]
@@ -99,11 +105,13 @@ export function PlayingCardVisual({
   } else if (suitRow !== undefined && valueColumn !== undefined) {
     layers.push("url('/atlases/8BitDeck.png')")
     positions.push(spriteOffset(valueColumn, suitRow))
-    const enhancementPos = enhancement ? ENHANCEMENT_POSITION[enhancement] : undefined
-    if (enhancementPos) {
-      layers.push("url('/atlases/Enhancers.png')")
-      positions.push(spriteOffset(enhancementPos.x, enhancementPos.y))
-    }
+    // A card with no (or an unknown) enhancement still needs the plain card
+    // backdrop, which is the Enhancers atlas's base cell.
+    const enhancementPos =
+      (enhancement ? ENHANCEMENT_POSITION[enhancement] : undefined) ??
+      BASE_CARD_POSITION
+    layers.push("url('/atlases/Enhancers.png')")
+    positions.push(spriteOffset(enhancementPos.x, enhancementPos.y))
   }
 
   const style: CSSProperties = {
@@ -118,7 +126,8 @@ export function PlayingCardVisual({
 
   const sealPos = seal && seal in SEAL_POSITION ? SEAL_POSITION[seal] : null
 
-  return (
+  const scale = width / CARD_WIDTH
+  const card = (
     <div className='relative overflow-hidden rounded-sm' style={style}>
       {sealPos && (
         <div
@@ -131,6 +140,20 @@ export function PlayingCardVisual({
           }}
         />
       )}
+    </div>
+  )
+  if (scale === 1) return card
+
+  // Scale the finished card (edition and seal layers included) rather than
+  // re-deriving every sprite offset.
+  return (
+    <div
+      className='shrink-0'
+      style={{ width: CARD_WIDTH * scale, height: CARD_HEIGHT * scale }}
+    >
+      <div style={{ transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+        {card}
+      </div>
     </div>
   )
 }
