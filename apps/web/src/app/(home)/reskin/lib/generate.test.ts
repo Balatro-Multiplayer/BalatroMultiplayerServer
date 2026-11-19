@@ -270,7 +270,8 @@ test('default card background exports independently of enhancements and named fa
       }
     }
     const imported = await importPack(
-      new File([new Uint8Array(result.bytes)], 'background.zip')
+      new File([new Uint8Array(result.bytes)], 'background.zip'),
+      catalog
     )
     assert.deepEqual(imported.objects['Enhanced/c_base']?.sprites, [background])
     assert.deepEqual(imported.deckSkins, deckSkins)
