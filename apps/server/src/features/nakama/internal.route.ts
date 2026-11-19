@@ -1,5 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
-import { Router, type NextFunction, type Request, type Response } from 'express'
+import { type NextFunction, type Request, type Response, Router } from 'express'
 import { env } from '../../env.js'
 import * as banGateway from '../../infrastructure/gateways/ban.gateway.js'
 import * as muteGateway from '../../infrastructure/gateways/mute.gateway.js'
@@ -8,41 +8,65 @@ import * as reportGateway from '../../infrastructure/gateways/report.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { getDiscordAuthUrl } from '../auth/discord.js'
 import { generateLinkState } from '../auth/link-state.js'
-import { discordLinkService } from './discord-link.js'
-import { isWebPagePath, webLoginLinks } from './web-login-link.js'
-import type { DiscordLinkService } from './discord-link.service.js'
 import type { LauncherIntegrityService } from '../launcher-integrity/launcher-integrity.service.js'
+import { discordLinkService } from './discord-link.js'
+import type { DiscordLinkService } from './discord-link.service.js'
 import { nakamaIntegrityService } from './integrity.js'
-import { createPlayerSyncService, type PlayerSyncService } from './player-sync.service.js'
-import { createReportRelayService, parseNakamaReport, type ReportRelayService } from './report-relay.service.js'
+import {
+	type PlayerSyncService,
+	createPlayerSyncService,
+} from './player-sync.service.js'
+import {
+	type ReportRelayService,
+	createReportRelayService,
+	parseNakamaReport,
+} from './report-relay.service.js'
+import { isWebPagePath, webLoginLinks } from './web-login-link.js'
+
+// Guards a router with a shared key sent as X-BMP-Internal-Key. With no key
+// configured every request is refused. `getKey` is read per request.
+export function requireSharedKey(getKey: () => string) {
+	return (req: Request, res: Response, next: NextFunction) => {
+		const key = getKey()
+		const sent = req.headers['x-bmp-internal-key']
+		if (!key || typeof sent !== 'string') {
+			res.status(401).json({ error: 'Missing internal key' })
+			return
+		}
+		const expected = Buffer.from(key)
+		const actual = Buffer.from(sent)
+		if (
+			expected.length !== actual.length ||
+			!timingSafeEqual(expected, actual)
+		) {
+			res.status(403).json({ error: 'Bad internal key' })
+			return
+		}
+		next()
+	}
+}
 
 // Routes only Nakama calls (nakama/src/express.ts), guarded by the shared
-// INTERNAL_API_KEY. With no key configured every request is refused.
-export function requireInternalKey(req: Request, res: Response, next: NextFunction) {
-	const sent = req.headers['x-bmp-internal-key']
-	if (!env.INTERNAL_API_KEY || typeof sent !== 'string') {
-		res.status(401).json({ error: 'Missing internal key' })
-		return
-	}
-	const expected = Buffer.from(env.INTERNAL_API_KEY)
-	const actual = Buffer.from(sent)
-	if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-		res.status(403).json({ error: 'Bad internal key' })
-		return
-	}
-	next()
-}
+// INTERNAL_API_KEY.
+export const requireInternalKey = requireSharedKey(() => env.INTERNAL_API_KEY)
 
 const STEAM_ID_HASH = /^[0-9a-f]{64}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const MAX_RESOLVE = 500
 
 function defaultSyncService(): PlayerSyncService {
-	return createPlayerSyncService({ players: playerGateway, bans: banGateway, mutes: muteGateway })
+	return createPlayerSyncService({
+		players: playerGateway,
+		bans: banGateway,
+		mutes: muteGateway,
+	})
 }
 
 function defaultReportService(): ReportRelayService {
-	return createReportRelayService({ players: playerGateway, reports: reportGateway })
+	return createReportRelayService({
+		players: playerGateway,
+		reports: reportGateway,
+	})
 }
 
 export function createInternalNakamaRouter(
@@ -64,10 +88,14 @@ export function createInternalNakamaRouter(
 	router.post('/player-sync', async (req, res, next) => {
 		try {
 			const { steamIdHash, nakamaUserId, steamName } = req.body ?? {}
-			if (typeof steamIdHash !== 'string' || !STEAM_ID_HASH.test(steamIdHash)) throw new AppError('Bad steamIdHash', 400)
-			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
+			if (typeof steamIdHash !== 'string' || !STEAM_ID_HASH.test(steamIdHash))
+				throw new AppError('Bad steamIdHash', 400)
+			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId))
+				throw new AppError('Bad nakamaUserId', 400)
 			const name = typeof steamName === 'string' ? steamName.slice(0, 64) : ''
-			res.json(await sync.syncPlayer({ steamIdHash, nakamaUserId, steamName: name }))
+			res.json(
+				await sync.syncPlayer({ steamIdHash, nakamaUserId, steamName: name }),
+			)
 		} catch (err) {
 			next(err)
 		}
@@ -78,7 +106,11 @@ export function createInternalNakamaRouter(
 	router.post('/resolve-players', async (req, res, next) => {
 		try {
 			const ids = req.body?.playerIds
-			if (!Array.isArray(ids) || ids.length > MAX_RESOLVE || !ids.every((id) => typeof id === 'string'))
+			if (
+				!Array.isArray(ids) ||
+				ids.length > MAX_RESOLVE ||
+				!ids.every((id) => typeof id === 'string')
+			)
 				throw new AppError('Bad playerIds', 400)
 			const found = await playerGateway.findNakamaUserIds(ids)
 			res.json({ resolved: Object.fromEntries(found) })
@@ -92,8 +124,11 @@ export function createInternalNakamaRouter(
 	router.post('/discord/link-url', (req, res, next) => {
 		try {
 			const nakamaUserId = req.body?.nakamaUserId
-			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
-			res.json({ url: getDiscordAuthUrl(generateLinkState('', 'game', nakamaUserId)) })
+			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId))
+				throw new AppError('Bad nakamaUserId', 400)
+			res.json({
+				url: getDiscordAuthUrl(generateLinkState('', 'game', nakamaUserId)),
+			})
 		} catch (err) {
 			next(err)
 		}
@@ -107,7 +142,9 @@ export function createInternalNakamaRouter(
 			const path = req.body?.path
 			if (!isWebPagePath(path)) throw new AppError('Bad path', 400)
 			const code = webLoginLinks.mint(nakamaUserId, path)
-			res.json({ url: `${env.WEB_BASE_URL.replace(/\/$/, '')}/auth/link?code=${code}` })
+			res.json({
+				url: `${env.WEB_BASE_URL.replace(/\/$/, '')}/auth/link?code=${code}`,
+			})
 		} catch (err) {
 			next(err)
 		}
@@ -117,7 +154,8 @@ export function createInternalNakamaRouter(
 	router.post('/discord/unlinked', async (req, res, next) => {
 		try {
 			const nakamaUserId = req.body?.nakamaUserId
-			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
+			if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId))
+				throw new AppError('Bad nakamaUserId', 400)
 			await discordLink.unlinkNakamaDiscord(nakamaUserId)
 			res.json({ ok: true })
 		} catch (err) {
@@ -141,7 +179,9 @@ export function createInternalNakamaRouter(
 	// through admin_integrity_set, which must not wait on Nakama's own call
 	// here to return.
 	const background = (what: string, work: Promise<void>) =>
-		work.catch((err) => console.error(`[launcher-integrity] ${what} failed:`, err))
+		work.catch((err) =>
+			console.error(`[launcher-integrity] ${what} failed:`, err),
+		)
 
 	// {nakamaUserId}: the player's socket is open; start challenging it.
 	router.post('/integrity/session-start', (req, res, next) => {
@@ -159,7 +199,14 @@ export function createInternalNakamaRouter(
 		try {
 			const userId = nakamaUserIdOf(req.body)
 			const { challengeId, response, refused } = req.body
-			void background('Challenge answer', integrity.handleChallengeResponse(userId, { challengeId, response, refused }))
+			void background(
+				'Challenge answer',
+				integrity.handleChallengeResponse(userId, {
+					challengeId,
+					response,
+					refused,
+				}),
+			)
 			res.status(202).json({ ok: true })
 		} catch (err) {
 			next(err)
@@ -171,7 +218,11 @@ export function createInternalNakamaRouter(
 	router.post('/integrity/ranked-readiness', (req, res, next) => {
 		try {
 			const userId = nakamaUserIdOf(req.body)
-			if (integrity.isEnabled()) void background('Ranked readiness', integrity.issueRankedReadinessChallenge(userId))
+			if (integrity.isEnabled())
+				void background(
+					'Ranked readiness',
+					integrity.issueRankedReadinessChallenge(userId),
+				)
 			res.status(202).json({ ok: true })
 		} catch (err) {
 			next(err)
@@ -182,7 +233,9 @@ export function createInternalNakamaRouter(
 }
 
 function nakamaUserIdOf(body: unknown): string {
-	const nakamaUserId = (body as { nakamaUserId?: unknown } | undefined)?.nakamaUserId
-	if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId)) throw new AppError('Bad nakamaUserId', 400)
+	const nakamaUserId = (body as { nakamaUserId?: unknown } | undefined)
+		?.nakamaUserId
+	if (typeof nakamaUserId !== 'string' || !UUID.test(nakamaUserId))
+		throw new AppError('Bad nakamaUserId', 400)
 	return nakamaUserId
 }
