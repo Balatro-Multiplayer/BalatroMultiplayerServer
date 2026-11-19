@@ -1,7 +1,9 @@
 // PvP's simultaneous rule draft. Private picks live only in match state;
 // never in public metadata/snapshots. The host requests a draft after ready-up,
 // but the server owns its deadline, timeout rolls, resolution and recovery.
+import { PVP_MOD_ID } from '../standing/pvp_version'
 import { isAlmanac } from './almanac'
+import { nextRng, paramsObject, rejectStep, seededRng } from './draft_support'
 import { ServerOp } from './protocol'
 import type { Lobby, Outbound, Step } from './state'
 
@@ -57,7 +59,7 @@ function message(
 }
 
 function roll(state: SharedRules, count: number): number {
-	state.rng = (state.rng * 16807) % 2147483647
+	state.rng = nextRng(state.rng)
 	return state.rng % count
 }
 
@@ -138,6 +140,32 @@ export function sharedRulesTick(lobby: Lobby, now: number): Step {
 	}
 }
 
+export function sharedRulesEnabled(lobby: Lobby): boolean {
+	return (
+		lobby.modId === PVP_MOD_ID &&
+		(isAlmanac(lobby) ||
+			(!lobby.rankedMode &&
+				!lobby.gameMode &&
+				lobby.metadata.shared_pvp_rules === true))
+	)
+}
+
+// The server sends its own pvp_start_blind once a draft resolves. A host
+// client must not send one that carries shared rules, or one after a draft
+// began, or it would pick the rules itself. Null means the relay may go on.
+export function startBlindRefusal(
+	lobby: Lobby,
+	key: string,
+	params: unknown,
+): string | null {
+	if (key !== 'pvp_start_blind' || !sharedRulesEnabled(lobby)) return null
+	if ('shared_rules' in paramsObject(params)) return 'rules_required'
+	const started = lobby.game.started
+	if (started && lobby.sharedRules?.run === started.runId)
+		return 'rules_required'
+	return null
+}
+
 // null means an ordinary relayed action. Handles these keys before relay;
 // the request's destination cannot expose a pick to the other player.
 export function sharedRulesAction(
@@ -156,35 +184,19 @@ export function sharedRulesAction(
 		].includes(key)
 	)
 		return null
-	const refuse = (reason: string): Step => ({
-		lobby,
-		out: [
-			{
-				kind: 'send',
-				op: ServerOp.ACTION_REJECTED,
-				to: [from],
-				payload: { action: key, reason },
-			},
-		],
-	})
+	const refuse = (reason: string): Step => rejectStep(lobby, from, key, reason)
 	if (key === 'pvp_rules_offer') return refuse('server_only')
 	const started = lobby.game.started
 	if (
-		lobby.modId !== 'MultiplayerPvP' ||
 		!started ||
-		(!isAlmanac(lobby) &&
-			(lobby.rankedMode ||
-				lobby.gameMode ||
-				lobby.metadata.shared_pvp_rules !== true)) ||
+		!sharedRulesEnabled(lobby) ||
 		started.players.length !== 2 ||
-		lobby.players.length !== 2 ||
 		!started.players.some((player) => player.id === from)
 	)
 		return refuse('unavailable')
-	const params =
-		input && typeof input === 'object' && !Array.isArray(input)
-			? (input as { [key: string]: unknown })
-			: {}
+	if (lobby.players.length > 2) return refuse('too_many_players')
+	if (lobby.players.length !== 2) return refuse('unavailable')
+	const params = paramsObject(input)
 	const current =
 		lobby.sharedRules?.run === started.runId ? lobby.sharedRules : undefined
 	if (key === 'pvp_rules_open') {
@@ -216,9 +228,7 @@ export function sharedRulesAction(
 			return refuse('stale_encounter')
 		if (current && !current.rules) return refuse('draft_in_progress')
 		const players = started.players.map((player) => player.id).sort()
-		let rng = 1
-		for (let i = 0; i < id.length; i++)
-			rng = (rng * 31 + id.charCodeAt(i)) % 2147483647
+		const rng = seededRng(id)
 		const startingHands: { [id: string]: number } = {}
 		if (params.starting_hands && typeof params.starting_hands === 'object') {
 			for (const player of players) {

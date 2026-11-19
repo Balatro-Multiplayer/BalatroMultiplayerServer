@@ -295,3 +295,32 @@ describe('shared PvP rules through the real relay', () => {
 		).toEqual([])
 	})
 })
+
+describe('host pvp_start_blind in a drafted lobby', () => {
+	const refused = (step: Step) =>
+		step.out.some(
+			(out) =>
+				out.kind === 'send' &&
+				out.op === ServerOp.ACTION_REJECTED &&
+				(out.payload as { reason?: string }).reason === 'rules_required',
+		)
+	it('refuses a start that carries its own shared rules', () => {
+		const step = send(fixture(), 'a', 'pvp_start_blind', {
+			first_player: 'a',
+			shared_rules: { id: 'x', ante: 3, rules: ['manacle', 'psychic'] },
+		})
+		expect(refused(step)).toBe(true)
+	})
+	it('refuses a start after a draft began, but not before', () => {
+		expect(refused(send(fixture(), 'a', 'pvp_start_blind', { first_player: 'a' }))).toBe(false)
+		expect(refused(send(open().lobby, 'a', 'pvp_start_blind', { first_player: 'a' }))).toBe(true)
+	})
+	it('leaves other lobbies alone', () => {
+		const plain = { ...fixture(), metadata: { kind: 'private' } }
+		const step = send(plain, 'a', 'pvp_start_blind', {
+			first_player: 'a',
+			shared_rules: { rules: [] },
+		})
+		expect(refused(step)).toBe(false)
+	})
+})
