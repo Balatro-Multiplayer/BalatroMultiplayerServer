@@ -13,13 +13,44 @@ import {
 } from '@/components/ui/table'
 import type { GameLog, PlayerGameLog, RoundLog } from '../../lib/game-log/types'
 
-const COLORS = ['#37bd76', '#ffcf5c', '#6aa7ff', '#ff6b8b']
+// The viewer's own side is blue and the opponent red; any further players
+// (not expected in PvP) take the remaining colors.
+const SELF_COLOR = '#4d8dff'
+const OPPONENT_COLOR = '#ff5c5c'
+const EXTRA_COLORS = ['#ffcf5c', '#37bd76', '#b37dff']
+
+// Without a viewer in the match (a moderator, a spectator), the first player
+// stands in as the local side.
+// Assigned over everyone in the match, so a player keeps their color when the
+// chart is filtered to one side.
+function seriesColors(players: PlayerGameLog[], viewerId: string | null) {
+  const selfId = players.some((p) => p.playerId === viewerId)
+    ? viewerId
+    : players[0]?.playerId
+  const colors = new Map<string, string>()
+  let others = 0
+  for (const p of players) {
+    if (p.playerId === selfId) {
+      colors.set(p.playerId, SELF_COLOR)
+    } else {
+      colors.set(
+        p.playerId,
+        others === 0
+          ? OPPONENT_COLOR
+          : (EXTRA_COLORS[(others - 1) % EXTRA_COLORS.length] as string)
+      )
+      others++
+    }
+  }
+  return colors
+}
 
 const TOP = 24
 const PLOT_H = 280
 const LEFT = 68
 const RIGHT = 24
 const ROW = 17
+const MIN_WIDTH = 960
 const SLOT_SHORT = ['Small', 'Big', 'Boss'] as const
 
 interface AnteShop {
@@ -154,7 +185,11 @@ function SpendingGraph({
   // The chart stretches to the card; a game with very many antes stops
   // shrinking and scrolls sideways instead.
   const roomy = antes.length <= 12
-  const colW = roomy ? 104 : 84
+  // A short game spreads its few antes across a minimum width, so the
+  // chart does not render tiny and cramped.
+  const colW = roomy
+    ? Math.max(104, Math.floor((MIN_WIDTH - LEFT - RIGHT) / antes.length))
+    : 84
   const plotRight = LEFT + antes.length * colW
   const width = plotRight + RIGHT
   const axisY = TOP + PLOT_H
@@ -445,11 +480,14 @@ export function EconomyChart({
   log,
   players,
   playerLabel,
+  viewerId = null,
 }: {
   log: GameLog
   players: PlayerGameLog[]
   playerLabel: (playerId: string) => ReactNode
+  viewerId?: string | null
 }) {
+  const colors = seriesColors(log.players, viewerId)
   const [view, setView] = useState<'graph' | 'spreadsheet'>('graph')
 
   const antes = [
@@ -457,7 +495,7 @@ export function EconomyChart({
   ].sort((a, b) => a - b)
   if (antes.length === 0) return null
 
-  const series: Series[] = players.map((player, i) => {
+  const series: Series[] = players.map((player) => {
     let running = 0
     const points = antes.map((ante): AntePoint => {
       const shops = shopsOf(player).filter((r) => r.ante === ante)
@@ -473,7 +511,7 @@ export function EconomyChart({
     })
     return {
       player,
-      color: COLORS[i % COLORS.length] as string,
+      color: colors.get(player.playerId) as string,
       points,
       spent: running,
       rerolls: points.reduce((n, p) => n + p.rerolls, 0),

@@ -106,7 +106,7 @@ export function StaffMatchView({
   const now = Date.now()
 
   return (
-    <div className='container max-w-6xl space-y-6 py-8'>
+    <div className='container max-w-[110rem] space-y-6 py-8'>
       <div className='space-y-3'>
         {back ? (
           <Link

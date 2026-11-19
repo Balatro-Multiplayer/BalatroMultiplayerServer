@@ -262,14 +262,14 @@ function PlayerSummary({
     return (
       <div className='space-y-2 rounded-md border p-3'>
         <div className='flex flex-wrap items-center gap-2'>
-          <span className='font-medium text-sm'>{label}</span>
+          <span className='font-medium text-base'>{label}</span>
           {player.result && (
             <Badge variant={player.result === 'win' ? 'default' : 'secondary'}>
               {player.result}
             </Badge>
           )}
         </div>
-        <dl className='grid grid-cols-2 gap-x-4 gap-y-1 text-xs'>
+        <dl className='grid grid-cols-2 gap-x-4 gap-y-1.5 text-base'>
           <dt className='text-muted-foreground'>Lives lost</dt>
           <dd>{player.livesLost}</dd>
         </dl>
@@ -280,14 +280,14 @@ function PlayerSummary({
   return (
     <div className='space-y-2 rounded-md border p-3'>
       <div className='flex flex-wrap items-center gap-2'>
-        <span className='font-medium text-sm'>{label}</span>
+        <span className='font-medium text-base'>{label}</span>
         {player.result && (
           <Badge variant={player.result === 'win' ? 'default' : 'secondary'}>
             {player.result}
           </Badge>
         )}
       </div>
-      <dl className='grid grid-cols-2 gap-x-4 gap-y-1 text-xs'>
+      <dl className='grid grid-cols-2 gap-x-4 gap-y-1.5 text-base'>
         <dt className='text-muted-foreground'>Blinds reached</dt>
         <dd>
           {
@@ -305,7 +305,7 @@ function PlayerSummary({
       </dl>
       {player.finalJokers.length > 0 && (
         <div>
-          <p className='mb-1 text-muted-foreground text-xs'>
+          <p className='mb-1.5 text-muted-foreground text-sm'>
             Final jokers{player.reconstructed && ' (reconstructed)'}
           </p>
           <div className='flex flex-wrap gap-x-3 gap-y-1'>
@@ -319,7 +319,7 @@ function PlayerSummary({
       <DeckPanel cards={player.finalDeck} label={label} />
       {player.vouchers.length > 0 && (
         <div>
-          <p className='mb-1 text-muted-foreground text-xs'>Vouchers</p>
+          <p className='mb-1.5 text-muted-foreground text-sm'>Vouchers</p>
           <div className='flex flex-wrap gap-x-3 gap-y-1'>
             {player.vouchers.map((voucher, i) => (
               // biome-ignore lint/suspicious/noArrayIndexKey: ordered, static
@@ -335,10 +335,13 @@ function PlayerSummary({
 export function GameLogView({
   log,
   playerLabel,
+  viewerId = null,
   hiddenPlayerIds = NO_HIDDEN_SIDES,
 }: {
   log: GameLog
   playerLabel: (playerId: string) => ReactNode
+  /** The player looking at the page, if they were in the match. */
+  viewerId?: string | null
   /** Sides reduced to result, lives lost and PvP blind scores. */
   hiddenPlayerIds?: ReadonlySet<string>
 }) {
@@ -495,7 +498,12 @@ export function GameLogView({
         </Button>
       </div>
 
-      <EconomyChart log={log} players={visible} playerLabel={playerLabel} />
+      <EconomyChart
+        log={log}
+        players={visible}
+        playerLabel={playerLabel}
+        viewerId={viewerId}
+      />
 
       {roundIndexes.map((index) => {
         const first = detailPlayers

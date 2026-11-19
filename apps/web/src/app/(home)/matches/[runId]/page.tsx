@@ -130,7 +130,7 @@ export default function MatchPage() {
   }
 
   return (
-    <div className='container max-w-6xl space-y-6 py-8'>
+    <div className='container max-w-[110rem] space-y-6 py-8'>
       <div className='space-y-1'>
         <BackLink />
         <div className='flex flex-wrap items-center gap-3'>
@@ -175,6 +175,7 @@ export default function MatchPage() {
         <GameLogView
           log={gameLog}
           hiddenPlayerIds={hidden}
+          viewerId={viewerId}
           playerLabel={(id) => (
             <PlayerLabel
               playerId={id}
