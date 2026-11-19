@@ -16,7 +16,10 @@
  * mark the target match 'voided' (excluding it from replay), then replay
  * every remaining resolved match in that scope through the real
  * applyRatingTransaction, in original resultReportedAt order -- the same
- * Elo rules, just run standalone.
+ * Elo rules, just run standalone. The wipe and replay are one transaction,
+ * so readers (the website, the Discord rank-role bot) see the old board
+ * until the new one is complete, never one half built. While it runs, a
+ * mirrored write to the same board waits for it.
  *
  * Nakama owns live ratings, so the rebuilt scope is then written over
  * Nakama's copy of the board (admin_ratings_set). The replay uses the
@@ -36,7 +39,6 @@ import {
 	listScopeRatings,
 } from '../gateways/rating.gateway.js'
 import { callNakamaRpc } from '../nakama/admin-client.js'
-import { whileRebuildingBoard } from './board-lock.js'
 import { db, pool } from './index.js'
 import {
 	leaderboardCache,
@@ -205,66 +207,64 @@ export async function rebuildScope(
 		`[void-match] rebuilding ${modId}:${gameMode}, season ${season.id} "${season.name}" (for ${match.matchId})`,
 	)
 
-	// Readers that act on the board (the Discord bot) wait out the rebuild
-	// rather than see it half built (board-lock.ts).
-	const { before, after } = await whileRebuildingBoard(
-		{ modId, gameMode },
-		async () => {
-			const before = await listScopeRatings(modId, gameMode, season.id)
+	// One transaction: readers see the old board until the new one commits.
+	const { before, after } = await db.transaction(async (tx) => {
+		const before = await listScopeRatings(modId, gameMode, season.id, tx)
 
-			const delRatings = await db
-				.delete(matchmakingRatings)
-				.where(
-					and(
-						eq(matchmakingRatings.modId, modId),
-						eq(matchmakingRatings.gameMode, gameMode),
-						eq(matchmakingRatings.season, season.id),
-					),
-				)
-			const delBoard = await db
-				.delete(leaderboardCache)
-				.where(
-					and(
-						eq(leaderboardCache.modId, modId),
-						eq(leaderboardCache.gameMode, gameMode),
-						eq(leaderboardCache.season, season.id),
-					),
-				)
-			console.log(
-				`[void-match] cleared scope (${modId}:${gameMode}, season ${season.id}): ratings=${delRatings.rowCount} leaderboard=${delBoard.rowCount}`,
+		const delRatings = await tx
+			.delete(matchmakingRatings)
+			.where(
+				and(
+					eq(matchmakingRatings.modId, modId),
+					eq(matchmakingRatings.gameMode, gameMode),
+					eq(matchmakingRatings.season, season.id),
+				),
 			)
+		const delBoard = await tx
+			.delete(leaderboardCache)
+			.where(
+				and(
+					eq(leaderboardCache.modId, modId),
+					eq(leaderboardCache.gameMode, gameMode),
+					eq(leaderboardCache.season, season.id),
+				),
+			)
+		console.log(
+			`[void-match] cleared scope (${modId}:${gameMode}, season ${season.id}): ratings=${delRatings.rowCount} leaderboard=${delBoard.rowCount}`,
+		)
 
-			const scopedMatches = (
-				await db
-					.select()
-					.from(matchmakingMatches)
-					.where(
-						and(
-							eq(matchmakingMatches.status, 'resolved'),
-							eq(matchmakingMatches.modId, modId),
-							eq(matchmakingMatches.gameMode, gameMode),
-							gte(matchmakingMatches.resultReportedAt, season.startedAt),
-						),
-					)
-					.orderBy(asc(matchmakingMatches.resultReportedAt))
-			).filter((row) => resolvedInSeason(row.resultReportedAt, season))
+		const scopedMatches = (
+			await tx
+				.select()
+				.from(matchmakingMatches)
+				.where(
+					and(
+						eq(matchmakingMatches.status, 'resolved'),
+						eq(matchmakingMatches.modId, modId),
+						eq(matchmakingMatches.gameMode, gameMode),
+						gte(matchmakingMatches.resultReportedAt, season.startedAt),
+					),
+				)
+				.orderBy(asc(matchmakingMatches.resultReportedAt))
+		).filter((row) => resolvedInSeason(row.resultReportedAt, season))
 
-			let n = 0
-			for (const row of scopedMatches) {
-				const placements = replayPlacements(row.resultPlacements)
-				if (!placements) continue
-				const at = row.resultReportedAt ?? row.updatedAt
-				await applyRatingTransaction(row, season.id, placements, at)
-				n++
-			}
-			console.log(`[void-match] replayed ${n} of ${scopedMatches.length} resolved matches in scope`)
+		let n = 0
+		for (const row of scopedMatches) {
+			const placements = replayPlacements(row.resultPlacements)
+			if (!placements) continue
+			const at = row.resultReportedAt ?? row.updatedAt
+			await applyRatingTransaction(row, season.id, placements, at, tx)
+			n++
+		}
+		console.log(
+			`[void-match] replayed ${n} of ${scopedMatches.length} resolved matches in scope`,
+		)
 
-			return {
-				before,
-				after: await listScopeRatings(modId, gameMode, season.id),
-			}
-		},
-	)
+		return {
+			before,
+			after: await listScopeRatings(modId, gameMode, season.id, tx),
+		}
+	})
 
 	const entries = nakamaRatingEntries(before, after)
 	for (let i = 0; i < entries.length; i += RATINGS_SET_BATCH) {

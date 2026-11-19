@@ -12,6 +12,7 @@
 		"start": "node dist/main.js"
 	},
 	"dependencies": {
+		"@bmp/types": "workspace:*",
 		"discord.js": "^14.28.1"
 	},
 	"devDependencies": {

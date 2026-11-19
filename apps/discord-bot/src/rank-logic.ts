@@ -16,7 +16,7 @@ export interface CurrentStanding extends Standing {
 	rank: number | null
 }
 
-/** What the API knows about one linked member. Undefined = not linked. */
+/** One linked member's standing, with their place. Undefined = not linked. */
 export interface MemberStanding {
 	current: CurrentStanding | null
 	previous: Standing | null

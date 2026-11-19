@@ -31,27 +31,36 @@ function fakeGuild(members: GuildMemberInfo[]) {
 }
 
 // Like the API: player ids are `p-<discord id>`, and the top list (only when
-// asked for) holds every player given a rank.
+// asked for) puts each ranked player at their place (others fill the gaps).
 function standingsOf(players: Record<string, MemberStanding>): FetchStandings {
-	return async (req) => ({
-		season: 3,
-		previousSeason: 2,
-		players: Object.fromEntries(
-			Object.entries(players)
-				.filter(([id]) => req.discordIds.includes(id))
-				.map(([id, standing]) => [id, { ...standing, playerId: `p-${id}` }]),
-		),
-		top:
-			req.topN > 0
-				? Object.entries(players)
-						.filter(([, s]) => s.current?.rank != null)
-						.map(([id, s]) => ({
+	return async (req) => {
+		const top: string[] = []
+		for (const [id, s] of Object.entries(players))
+			if (s.current?.rank != null) top[s.current.rank - 1] = `p-${id}`
+		return {
+			season: 3,
+			previousSeason: 2,
+			players: Object.fromEntries(
+				Object.entries(players)
+					.filter(([id]) => req.discordIds.includes(id))
+					.map(([id, { current, previous }]) => [
+						id,
+						{
 							playerId: `p-${id}`,
-							rank: s.current?.rank as number,
-						}))
-						.sort((a, b) => a.rank - b.rank)
-				: [],
-	})
+							current: current && {
+								gamesPlayed: current.gamesPlayed,
+								rating: current.rating,
+							},
+							previous,
+						},
+					]),
+			),
+			top:
+				req.topN > 0
+					? Array.from(top, (p, i) => p ?? `p-someone-${i + 1}`)
+					: [],
+		}
+	}
 }
 
 const settled = (
@@ -201,16 +210,11 @@ describe('runSweep', () => {
 				players: {
 					[id]: {
 						playerId: `p-${id}`,
-						current: { gamesPlayed: 40, rating: 1300, rank: 1 },
+						current: { gamesPlayed: 40, rating: 1300 },
 						previous: null,
 					},
 				},
-				top: first
-					? [
-							{ playerId: 'p-m0', rank: 1 },
-							{ playerId: 'p-m1000', rank: 2 },
-						]
-					: [],
+				top: first ? ['p-m0', 'p-m1000'] : [],
 			}
 		}
 		await runSweep({ ...base, guild, dryRun: false, fetchStandings })

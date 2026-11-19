@@ -49,15 +49,17 @@ ending season's id so the fallback reads them.
 The bot never reads the database. It calls the API's
 `POST /internal/discord-bot/standings` (through the `api` alias, like Nakama)
 with `X-BMP-Internal-Key: DISCORD_BOT_API_KEY`. The API hashes the Discord ids
-with the salt used at link time and ranks with the public board's query, so the
-bot needs neither the database URL nor `PLAYER_ID_SALT`.
+with the salt used at link time and lists the top places in the public board's
+order, so the bot needs neither the database URL nor `PLAYER_ID_SALT`. The
+request and answer types are shared with the API (`@bmp/types`,
+`discord-bot.ts`).
 
 Safety:
 
 - A failed or partial standings read aborts the sweep before any change.
-- While a void or result change rebuilds the board, the API answers 503
-  (`board-lock.ts`), so the bot never reads it half built. The sweep aborts
-  and the next one runs as usual.
+- Each answer is read in one database snapshot, and a void or result change
+  rebuilds the board in one transaction, so the bot never sees a board half
+  built.
 - All places in a sweep come from one top-50 list (the first request's), so a
   match mid-sweep can't give two members #1.
 - An unknown board is refused by the API (400) rather than read as empty.
@@ -108,11 +110,14 @@ Safety:
 | `BMP_API_URL` | no | Default `http://api:8788` (set by compose). |
 
 Any required value missing or malformed: the bot logs one
-`[discord-bot] disabled: …` line and exits 0 (compose leaves it stopped).
+`[discord-bot] disabled: …` line and then does nothing until restarted.
 The same goes for setup mistakes Discord reports at startup: a wrong token,
 Server Members Intent off, the bot not in the server or invited without
-`applications.commands`. Fix it, then start the bot again. Other startup
-errors (network, Discord down) exit 1 and compose restarts it.
+`applications.commands`. Fix it, then `docker compose restart discord-bot`.
+It stays up rather than exiting because compose (`restart: unless-stopped`)
+would start it into the same error again and again, and many Discord logins
+a day can get the token reset. Other startup errors (network, Discord down)
+exit after 2 minutes and compose restarts the bot.
 
 ## Dry run, then go live
 

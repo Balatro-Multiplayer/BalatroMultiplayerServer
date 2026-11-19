@@ -8,7 +8,7 @@ import {
 	type StandingsDeps,
 	createStandingsService,
 } from '../../features/discord-bot/standings.service.js'
-import { BoardRebuildingError } from '../../infrastructure/db/board-lock.js'
+import type { BoardReads } from '../../infrastructure/gateways/discord-standings.gateway.js'
 import { errorHandler } from '../../middleware/errorHandler.js'
 import { hashProviderId } from '../../shared/utils/hash.js'
 
@@ -89,12 +89,11 @@ describe('/internal/discord-bot', () => {
 		expect(standings).not.toHaveBeenCalled()
 	})
 
-	it.each([
-		['no active season', new NoActiveSeasonError('No active season')],
-		['the board being rebuilt', new BoardRebuildingError()],
-	])('answers 503 for %s', async (_, error) => {
+	it('answers 503 between seasons', async () => {
 		env.DISCORD_BOT_API_KEY = KEY
-		const standings = vi.fn().mockRejectedValue(error)
+		const standings = vi
+			.fn()
+			.mockRejectedValue(new NoActiveSeasonError('No active season'))
 		const res = await request(appWith(standings))
 			.post('/internal/discord-bot/standings')
 			.set('X-BMP-Internal-Key', KEY)
@@ -134,6 +133,13 @@ describe('standings service', () => {
 						[hashProviderId(BOB), 'p-bob'],
 					].filter(([h]) => hashes.includes(h)) as [string, string][],
 				),
+			inBoardSnapshot: (read) => read(reads()),
+			...over,
+		}
+	}
+
+	function reads(over: Partial<BoardReads> = {}): BoardReads {
+		return {
 			boardRatings: async (board) =>
 				board.seasonId === 2
 					? new Map([['p-alice', { gamesPlayed: 30, rating: 1300 }]])
@@ -141,11 +147,7 @@ describe('standings service', () => {
 							['p-alice', { gamesPlayed: 50, rating: 1250 }],
 							['p-bob', { gamesPlayed: 12, rating: 760 }],
 						]),
-			topOfBoard: async () => [
-				{ playerId: 'p-someone', rank: 1 },
-				{ playerId: 'p-alice', rank: 2 },
-			],
-			readingStableBoard: (_board, read) => read(),
+			topPlayerIds: async () => ['p-someone', 'p-alice'],
 			...over,
 		}
 	}
@@ -163,7 +165,7 @@ describe('standings service', () => {
 			players: {
 				[ALICE]: {
 					playerId: 'p-alice',
-					current: { gamesPlayed: 30, rating: 1300, rank: 2 },
+					current: { gamesPlayed: 30, rating: 1300 },
 					previous: { gamesPlayed: 50, rating: 1250 },
 				},
 				[BOB]: {
@@ -172,27 +174,29 @@ describe('standings service', () => {
 					previous: { gamesPlayed: 12, rating: 760 },
 				},
 			},
-			top: [
-				{ playerId: 'p-someone', rank: 1 },
-				{ playerId: 'p-alice', rank: 2 },
-			],
+			top: ['p-someone', 'p-alice'],
 		})
 	})
 
 	it('reads the leaderboard on the current season and skips it for topN 0', async () => {
-		const topOfBoard = vi.fn().mockResolvedValue([])
-		const service = createStandingsService(deps({ topOfBoard }))
+		const topPlayerIds = vi.fn().mockResolvedValue([])
+		const service = createStandingsService(
+			deps({ inBoardSnapshot: (read) => read(reads({ topPlayerIds })) }),
+		)
 		await service.standings({ ...BOARD, topN: 50, discordIds: [ALICE] })
-		expect(topOfBoard).toHaveBeenCalledWith({ ...BOARD, seasonId: 2 }, 50)
-		topOfBoard.mockClear()
+		expect(topPlayerIds).toHaveBeenCalledWith({ ...BOARD, seasonId: 2 }, 50)
+		topPlayerIds.mockClear()
 		await service.standings({ ...BOARD, topN: 0, discordIds: [ALICE] })
-		expect(topOfBoard).not.toHaveBeenCalled()
+		expect(topPlayerIds).not.toHaveBeenCalled()
 	})
 
 	it('has no previous standings in the first season', async () => {
 		const boardRatings = vi.fn().mockResolvedValue(new Map())
 		const service = createStandingsService(
-			deps({ previousSeasonId: async () => null, boardRatings }),
+			deps({
+				previousSeasonId: async () => null,
+				inBoardSnapshot: (read) => read(reads({ boardRatings })),
+			}),
 		)
 		const answer = await service.standings({
 			...BOARD,
@@ -209,20 +213,29 @@ describe('standings service', () => {
 		expect(boardRatings).toHaveBeenCalledTimes(1)
 	})
 
-	it('reads the board only while no rebuild can start', async () => {
-		const boardRatings = vi.fn().mockResolvedValue(new Map())
+	it('does every board read inside one snapshot', async () => {
+		const order: string[] = []
 		const service = createStandingsService(
 			deps({
-				boardRatings,
-				readingStableBoard: async () => {
-					throw new BoardRebuildingError()
+				inBoardSnapshot: async (read) => {
+					order.push('open')
+					const out = await read({
+						boardRatings: async (board) => {
+							order.push(`ratings ${board.seasonId}`)
+							return new Map()
+						},
+						topPlayerIds: async () => {
+							order.push('top')
+							return []
+						},
+					})
+					order.push('close')
+					return out
 				},
 			}),
 		)
-		await expect(
-			service.standings({ ...BOARD, topN: 50, discordIds: [ALICE] }),
-		).rejects.toBeInstanceOf(BoardRebuildingError)
-		expect(boardRatings).not.toHaveBeenCalled()
+		await service.standings({ ...BOARD, topN: 50, discordIds: [ALICE] })
+		expect(order).toEqual(['open', 'ratings 2', 'ratings 1', 'top', 'close'])
 	})
 
 	it('throws without an active season', async () => {

@@ -1,21 +1,18 @@
+import type { DiscordBotRating } from '@bmp/types'
 import { desc, inArray, lt, sql } from 'drizzle-orm'
 import { effectiveRating } from '../../features/ratings/effective-rating.js'
+import { PLACEMENT_GAMES } from '../../features/ratings/elo.js'
 import { db } from '../db/index.js'
 import { players, seasons } from '../db/schema.js'
+import type { Tx } from './rating.gateway.js'
+import { leaderboardOrder } from './stats.gateway.js'
 
-// Reads for the Discord rank-role bot (features/discord-bot). The board order
-// itself comes from stats.gateway.ts leaderboardPage, the public board's query.
+// Reads for the Discord rank-role bot (features/discord-bot).
 
 export interface BoardSeason {
 	modId: string
 	gameMode: string
 	seasonId: number
-}
-
-export interface BoardRating {
-	gamesPlayed: number
-	/** The rating the board shows (effectiveRating: decay applied). */
-	rating: number
 }
 
 /** Player id per Discord id hash, for the hashes a player has linked. */
@@ -32,31 +29,70 @@ export async function playerIdsByDiscordIdHash(
 	return byHash
 }
 
-/** The players' rows on one board, keyed by player id. No row = no games. */
-export async function boardRatings(
-	board: BoardSeason,
-	playerIds: string[],
-): Promise<Map<string, BoardRating>> {
-	if (playerIds.length === 0) return new Map()
-	const res = await db.execute(sql`
-		SELECT r.player_id, r.games_played, ${effectiveRating} AS rating
-		FROM matchmaking_ratings r
-		WHERE r.mod_id = ${board.modId} AND r.game_mode = ${board.gameMode} AND r.season = ${board.seasonId}
-		  AND ${inArray(sql`r.player_id`, playerIds)}
-	`)
-	const byPlayer = new Map<string, BoardRating>()
-	for (const row of res.rows) {
-		const r = row as {
-			player_id: string
-			games_played: number | string
-			rating: number | string
-		}
-		byPlayer.set(r.player_id, {
-			gamesPlayed: Number(r.games_played),
-			rating: Number(r.rating),
-		})
+/** The board reads one answer needs, all in one snapshot. */
+export interface BoardReads {
+	/** The players' rows on one board, keyed by player id. No row = no games. */
+	boardRatings(
+		board: BoardSeason,
+		playerIds: string[],
+	): Promise<Map<string, DiscordBotRating>>
+	/** Player ids of the public board's first `n` places, in order. */
+	topPlayerIds(board: BoardSeason, n: number): Promise<string[]>
+}
+
+function boardReads(tx: Tx): BoardReads {
+	return {
+		async boardRatings(board, playerIds) {
+			if (playerIds.length === 0) return new Map()
+			const res = await tx.execute(sql`
+				SELECT r.player_id, r.games_played, ${effectiveRating} AS rating
+				FROM matchmaking_ratings r
+				WHERE r.mod_id = ${board.modId} AND r.game_mode = ${board.gameMode} AND r.season = ${board.seasonId}
+				  AND ${inArray(sql`r.player_id`, playerIds)}
+			`)
+			const byPlayer = new Map<string, DiscordBotRating>()
+			for (const row of res.rows) {
+				const r = row as {
+					player_id: string
+					games_played: number | string
+					rating: number | string
+				}
+				byPlayer.set(r.player_id, {
+					gamesPlayed: Number(r.games_played),
+					rating: Number(r.rating),
+				})
+			}
+			return byPlayer
+		},
+
+		// The rows and order of stats.gateway.ts leaderboardPage (the public
+		// board), without the names and stats it also reads.
+		async topPlayerIds(board, n) {
+			const res = await tx.execute(sql`
+				SELECT r.player_id
+				FROM matchmaking_ratings r
+				JOIN players p ON p.id = r.player_id
+				WHERE r.mod_id = ${board.modId} AND r.game_mode = ${board.gameMode} AND r.season = ${board.seasonId}
+				  AND r.games_played >= ${PLACEMENT_GAMES}
+				ORDER BY ${leaderboardOrder}
+				LIMIT ${n}
+			`)
+			return res.rows.map((row) => (row as { player_id: string }).player_id)
+		},
 	}
-	return byPlayer
+}
+
+/**
+ * Runs `read` in one read-only snapshot (REPEATABLE READ): every read sees
+ * the board as it was at the first one, whatever commits meanwhile.
+ */
+export function inBoardSnapshot<T>(
+	read: (reads: BoardReads) => Promise<T>,
+): Promise<T> {
+	return db.transaction((tx) => read(boardReads(tx)), {
+		isolationLevel: 'repeatable read',
+		accessMode: 'read only',
+	})
 }
 
 /** The season before `seasonId`, or null when it is the first. */

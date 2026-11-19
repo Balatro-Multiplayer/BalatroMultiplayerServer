@@ -17,6 +17,9 @@ importers:
 
   apps/discord-bot:
     dependencies:
+      '@bmp/types':
+        specifier: workspace:*
+        version: link:../../packages/types
       discord.js:
         specifier: ^14.28.1
         version: 14.28.1

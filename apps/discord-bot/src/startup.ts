@@ -1,7 +1,14 @@
-// Startup errors a restart can't fix. main.ts exits 0 on these, so compose's
-// `restart: on-failure` leaves the bot stopped instead of logging in to
-// Discord again and again (many logins a day can get the token reset).
-// Anything else (a network blip, Discord down) exits 1 and is restarted.
+// Startup errors a restart can't fix. On these main.ts logs once and stays
+// up doing nothing: compose (`restart: unless-stopped`) restarts the bot
+// whenever it exits, and logging in to Discord again and again can get the
+// token reset. Anything else (a network blip, Discord down) exits 1 after
+// STARTUP_RETRY_MS and is restarted.
+
+/**
+ * The pause before exiting on a startup error a restart may fix: at most
+ * about 700 logins a day, under Discord's 1000.
+ */
+export const STARTUP_RETRY_MS = 2 * 60_000
 
 /** What to fix, or null when a restart may help. */
 export function setupProblem(err: unknown): string | null {

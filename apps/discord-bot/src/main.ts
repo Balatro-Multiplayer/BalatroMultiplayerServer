@@ -10,16 +10,38 @@ import { SYNC_COMMAND, guildPort, rolePlacementProblems } from './discord.js'
 import { loadConfig } from './env.js'
 import { LADDERS } from './ladders.js'
 import { createStandingsClient } from './standings-client.js'
-import { closeCodeProblem, setupProblem } from './startup.js'
+import { STARTUP_RETRY_MS, closeCodeProblem, setupProblem } from './startup.js'
 import { type SweepSummary, formatSummary, runSweep } from './sweep.js'
 
-const loaded = loadConfig(process.env, LADDERS)
-if (!loaded.ok) {
-	// Not configured: stay off. Exit 0 so `restart: on-failure` leaves it off.
-	console.error(`[discord-bot] disabled: ${loaded.problems.join('; ')}`)
-	process.exit(0)
+// Registered first: as PID 1 in a container, Node ignores SIGTERM unless it
+// has a handler, and `docker stop` would wait for its timeout.
+let shutdown: () => Promise<unknown> = async () => {}
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+	process.on(signal, () => {
+		void shutdown().finally(() => process.exit(0))
+	})
 }
-const config = loaded.config
+
+let disabled = false
+
+// For a mistake a restart can't fix (startup.ts): log it once, then do
+// nothing until stopped. Compose restarts the bot whenever it exits, so
+// exiting would log in to Discord again and again.
+function stayDisabled(reason: string): Promise<never> {
+	if (!disabled) {
+		disabled = true
+		console.error(
+			`[discord-bot] disabled: ${reason}. Fix it, then restart the bot.`,
+		)
+		setInterval(() => {}, 2 ** 31 - 1) // keeps the process alive
+	}
+	return new Promise<never>(() => {})
+}
+
+const loaded = loadConfig(process.env, LADDERS)
+const config = loaded.ok
+	? loaded.config
+	: await stayDisabled(loaded.problems.join('; '))
 
 // A slash-command reply must be sent within 15 minutes of the command.
 const REPLY_WAIT_MS = 10 * 60_000
@@ -27,6 +49,7 @@ const REPLY_WAIT_MS = 10 * 60_000
 const client = new Client({
 	intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 })
+shutdown = () => client.destroy()
 const fetchStandings = createStandingsClient(config.apiUrl, config.apiKey)
 
 let running: Promise<SweepSummary> | null = null
@@ -62,30 +85,30 @@ function scheduledSweep() {
 	)
 }
 
-// A setup mistake exits 0, so compose leaves the bot stopped rather than
-// restarting it into the same error (startup.ts). Anything else exits 1.
-function stopAfterStartupError(err: unknown): never {
+// A setup mistake leaves the bot disabled (stayDisabled). Anything else (a
+// network blip, Discord down) exits 1 after a pause, and compose restarts it.
+function afterStartupError(err: unknown): void {
 	const message = (err as Error)?.message ?? String(err)
+	void client.destroy()
 	const problem = setupProblem(err)
 	if (problem) {
-		console.error(
-			`[discord-bot] disabled: ${problem} (${message}). Fix it, then start the bot again.`,
-		)
-		process.exit(0)
+		void stayDisabled(`${problem} (${message})`)
+		return
 	}
-	console.error(`[discord-bot] startup failed: ${message}`)
-	process.exit(1)
+	if (disabled) return
+	console.error(
+		`[discord-bot] startup failed: ${message}. Restarting in ${STARTUP_RETRY_MS / 60_000} min.`,
+	)
+	setTimeout(() => process.exit(1), STARTUP_RETRY_MS)
 }
 
 // discord.js stops reconnecting after these close codes but doesn't fail
-// login, so without this the bot would sit idle.
+// login, so without this the bot would sit there doing nothing, silently.
 client.on(Events.ShardDisconnect, (event) => {
 	const problem = closeCodeProblem(event.code)
 	if (!problem) return
-	console.error(
-		`[discord-bot] disabled: ${problem} (gateway close ${event.code}). Fix it, then start the bot again.`,
-	)
-	process.exit(0)
+	void client.destroy()
+	void stayDisabled(`${problem} (gateway close ${event.code})`)
 })
 
 client.once(Events.ClientReady, async (ready) => {
@@ -107,7 +130,8 @@ client.once(Events.ClientReady, async (ready) => {
 			`[discord-bot] ready as ${ready.user.username} in ${guild.name}; sweeping every ${config.syncIntervalMs / 60_000} min${config.dryRun ? ' [dry-run]' : ''}`,
 		)
 	} catch (err) {
-		stopAfterStartupError(err)
+		afterStartupError(err)
+		return
 	}
 	scheduledSweep()
 	setInterval(scheduledSweep, config.syncIntervalMs)
@@ -153,10 +177,4 @@ client.on(Events.Error, (err) =>
 	console.error('[discord-bot] client error:', err),
 )
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-	process.on(signal, () => {
-		void client.destroy().finally(() => process.exit(0))
-	})
-}
-
-await client.login(config.token).catch(stopAfterStartupError)
+await client.login(config.token).catch(afterStartupError)

@@ -1,15 +1,13 @@
+import type { DiscordBotMember } from '@bmp/types'
 import { type Ladder, topNeeded } from './ladders.js'
 import {
+	type MemberStanding,
 	type RoleChanges,
 	type Seasons,
 	planRoleChanges,
 	rolesForLadder,
 } from './rank-logic.js'
-import {
-	type FetchStandings,
-	IDS_PER_REQUEST,
-	type LinkedStanding,
-} from './standings-client.js'
+import { type FetchStandings, IDS_PER_REQUEST } from './standings-client.js'
 
 // One full pass over the guild: read every member, ask the API for their
 // standings, work out each member's managed roles and apply the difference.
@@ -87,14 +85,14 @@ async function loadStandings(
 	ladders: Ladder[],
 	memberIds: string[],
 ): Promise<
-	Map<Ladder, { seasons: Seasons; players: Map<string, LinkedStanding> }>
+	Map<Ladder, { seasons: Seasons; players: Map<string, MemberStanding> }>
 > {
 	const out = new Map<
 		Ladder,
-		{ seasons: Seasons; players: Map<string, LinkedStanding> }
+		{ seasons: Seasons; players: Map<string, MemberStanding> }
 	>()
 	for (const ladder of ladders) {
-		const players = new Map<string, LinkedStanding>()
+		const players = new Map<string, MemberStanding>()
 		let seasons: Seasons | null = null
 		let rankOf: Map<string, number> | null = null
 		for (const ids of chunk(memberIds, IDS_PER_REQUEST)) {
@@ -108,7 +106,7 @@ async function loadStandings(
 			if (seasons && seasons.current !== answer.season)
 				throw new Error('season changed during the sweep')
 			seasons = { current: answer.season, previous: answer.previousSeason }
-			rankOf ??= new Map(answer.top.map((t) => [t.playerId, t.rank]))
+			rankOf ??= new Map(answer.top.map((playerId, i) => [playerId, i + 1]))
 			for (const [id, standing] of Object.entries(answer.players))
 				players.set(id, withRank(standing, rankOf))
 		}
@@ -120,17 +118,17 @@ async function loadStandings(
 	return out
 }
 
+// The API's member with their place from `rankOf` (from one request's top).
 function withRank(
-	standing: LinkedStanding,
+	member: DiscordBotMember,
 	rankOf: Map<string, number>,
-): LinkedStanding {
-	if (!standing.current) return standing
+): MemberStanding {
 	return {
-		...standing,
-		current: {
-			...standing.current,
-			rank: rankOf.get(standing.playerId) ?? null,
+		current: member.current && {
+			...member.current,
+			rank: rankOf.get(member.playerId) ?? null,
 		},
+		previous: member.previous,
 	}
 }
 

@@ -29,6 +29,13 @@ export interface LeaderboardRow {
 	seasonBestText: string | null
 }
 
+/**
+ * The public board's order (rank 1 first). Shared with the Discord
+ * rank-role bot's top-N read, so its roles follow the order players see.
+ * Reads matchmaking_ratings as `r`.
+ */
+export const leaderboardOrder = sql`${effectiveRating} DESC, r.wins DESC, r.player_id ASC`
+
 /** How many players the board lists for the query. */
 export async function countLeaderboard(q: LeaderboardQuery): Promise<number> {
 	const res = await db.execute(sql`
@@ -61,7 +68,7 @@ export async function leaderboardPage(
 				p.steam_name, p.discord_username, p.use_discord_name, p.nakama_user_id,
 				${usernameBannedSql} AS username_banned,
 				${effectiveRating} AS rating, r.wins, r.losses, r.games_played, r.season_best, r.season_best_text,
-				ROW_NUMBER() OVER (ORDER BY ${effectiveRating} DESC, r.wins DESC, r.player_id ASC) AS rank
+				ROW_NUMBER() OVER (ORDER BY ${leaderboardOrder}) AS rank
 			FROM matchmaking_ratings r
 			JOIN players p ON p.id = r.player_id
 			WHERE r.mod_id = ${q.modId} AND r.game_mode = ${q.gameMode} AND r.season = ${q.seasonId}

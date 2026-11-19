@@ -1,30 +1,18 @@
-import type { MemberStanding } from './rank-logic.js'
+import {
+	DISCORD_BOT_MAX_IDS,
+	type DiscordBotStandingsAnswer,
+	type DiscordBotStandingsRequest,
+} from '@bmp/types'
 
 // The API's POST /internal/discord-bot/standings (apps/server
 // features/discord-bot). The API hashes the Discord ids with the salt used at
-// link time and ranks with the public leaderboard's own query.
+// link time and lists the top places in the public leaderboard's own order.
+// The shapes are shared with the API through @bmp/types.
 
-export const IDS_PER_REQUEST = 1000
+export const IDS_PER_REQUEST = DISCORD_BOT_MAX_IDS
 
-export interface LinkedStanding extends MemberStanding {
-	playerId: string
-}
-
-export interface StandingsAnswer {
-	season: number
-	previousSeason: number | null
-	/** Keyed by Discord id. A missing id has no linked player. */
-	players: Record<string, LinkedStanding>
-	/** The first `topN` places, in order. */
-	top: { playerId: string; rank: number }[]
-}
-
-export interface StandingsRequest {
-	modId: string
-	gameMode: string
-	topN: number
-	discordIds: string[]
-}
+export type StandingsAnswer = DiscordBotStandingsAnswer
+export type StandingsRequest = DiscordBotStandingsRequest
 
 export type FetchStandings = (req: StandingsRequest) => Promise<StandingsAnswer>
 

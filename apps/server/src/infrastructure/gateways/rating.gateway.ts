@@ -26,7 +26,7 @@ import {
 // gateway owns the seasons (Nakama reads the current one from the config
 // push) and the Express Elo replay that rebuilds a scope after a void.
 
-type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 export interface RatingRow {
 	rating: number
@@ -174,18 +174,21 @@ async function getOrCreateRating(
 	}
 }
 
-// Rates one resolved match, as of `at` (when its result was reported).
+// Rates one resolved match, as of `at` (when its result was reported), in
+// its own transaction, or in `tx` when given (a rebuild replays a whole
+// board in one).
 export async function applyRatingTransaction(
 	match: RatedMatch,
 	seasonId: number,
 	placements: PlacementEntry[],
 	at: Date,
+	tx?: Tx,
 ): Promise<
 	Array<{ playerId: string; newRating: number | null; gamesPlayed: number }>
 > {
 	const mode = detectRatingMode(placements)
 
-	return db.transaction(async (tx) => {
+	const rate = async (tx: Tx) => {
 		const ratingMap = new Map<string, RatingRow & { playerId: string }>()
 		for (const p of placements) {
 			const r = await getOrCreateRating(
@@ -244,7 +247,8 @@ export async function applyRatingTransaction(
 
 		await applySecondaryMetric(tx, match, seasonId, placements, at)
 		return updated
-	})
+	}
+	return tx ? rate(tx) : db.transaction(rate)
 }
 
 // Resolve, validate, and upsert each player's secondary personal-best for this match.
@@ -329,13 +333,15 @@ async function applySecondaryMetric(
 	}
 }
 
-// Every rating in one board, with the player's Nakama account and display name.
+// Every rating in one board, with the player's Nakama account and display
+// name. Read in `q` when given (a transaction).
 export async function listScopeRatings(
 	modId: string,
 	gameMode: string,
 	seasonId: number,
+	q: typeof db | Tx = db,
 ) {
-	return db
+	return q
 		.select({
 			playerId: matchmakingRatings.playerId,
 			nakamaUserId: players.nakamaUserId,
