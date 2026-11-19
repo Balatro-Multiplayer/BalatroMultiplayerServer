@@ -2,15 +2,16 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
-import { useMemo, useState } from 'react'
-import { Button } from '@/components/ui/button'
+import { useParams, useSearchParams } from 'next/navigation'
+import { useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { ApiError, apiFetch } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { ContestButton } from '../components/contest-button'
 import { GameLogView } from '../components/game-log/game-log-view'
-import { MatchTimeline } from '../components/match-timeline'
 import { PlayerLabel } from '../components/player-label'
+import { ShareButtons } from '../components/share-buttons'
+import { StaffMatchView } from '../components/staff-match-view'
 import { RunStatusBadge } from '../components/status-badge'
 import { decodePlayerLogs } from '../lib/decode-player-logs'
 import { buildGameLog } from '../lib/game-log/build-game-log'
@@ -32,49 +33,11 @@ function BackLink() {
   )
 }
 
-function ShareButtons({
-  runId,
-  shared,
-  busy,
-  onToggle,
-}: {
-  runId: string
-  shared: boolean
-  busy: boolean
-  onToggle: () => void
-}) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    await navigator.clipboard.writeText(
-      matchLink(window.location.origin, runId)
-    )
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-  return (
-    <div className='ml-auto flex items-center gap-2'>
-      {shared && (
-        <Button size='sm' variant='outline' onClick={copy}>
-          {copied ? 'Copied' : 'Copy link'}
-        </Button>
-      )}
-      <Button
-        size='sm'
-        variant={shared ? 'outline' : 'default'}
-        disabled={busy}
-        onClick={onToggle}
-      >
-        {shared ? 'Unshare' : 'Share'}
-      </Button>
-    </div>
-  )
-}
-
 export default function MatchPage() {
   const { pending, player } = useAuth()
   const runId = useParams().runId as string
   const queryClient = useQueryClient()
-  const [tab, setTab] = useState<'log' | 'timeline'>('log')
+  const fromItem = Number.parseInt(useSearchParams().get('item') ?? '', 10)
   const queryKey = ['match-replay', runId, player?.id ?? null]
 
   // No login needed: the API decides what this viewer may see.
@@ -128,10 +91,46 @@ export default function MatchPage() {
   const viewerId = data.viewer.playerId ?? null
   const share = shareControl(data)
   const isModerator = data.viewer.role === 'moderator'
-  const showTimeline = isModerator && tab === 'timeline'
+
+  const failureNotes =
+    failures.length > 0 ? (
+      <Card className='border-destructive/40'>
+        <CardContent className='space-y-1 pt-6 text-destructive text-sm'>
+          {failures.map((f) => (
+            <p key={f.playerId}>
+              Player {names.get(f.playerId) ?? f.playerId.slice(0, 8)}: {f.error}
+            </p>
+          ))}
+        </CardContent>
+      </Card>
+    ) : null
+
+  if (isModerator) {
+    return (
+      <StaffMatchView
+        runId={runId}
+        data={data}
+        gameLog={gameLog}
+        names={names}
+        hidden={hidden}
+        failureNotes={failureNotes}
+        fromItem={Number.isInteger(fromItem) ? fromItem : null}
+        shareSlot={
+          share && (
+            <ShareButtons
+              link={() => matchLink(window.location.origin, runId)}
+              shared={share.shared}
+              busy={shareMutation.isPending}
+              onToggle={() => shareMutation.mutate(!share.shared)}
+            />
+          )
+        }
+      />
+    )
+  }
 
   return (
-    <div className='container max-w-6xl space-y-6 py-8'>
+    <div className='container max-w-[110rem] space-y-6 py-8'>
       <div className='space-y-1'>
         <BackLink />
         <div className='flex flex-wrap items-center gap-3'>
@@ -139,7 +138,7 @@ export default function MatchPage() {
           <RunStatusBadge status={data.run.status} />
           {share && (
             <ShareButtons
-              runId={runId}
+              link={() => matchLink(window.location.origin, runId)}
               shared={share.shared}
               busy={shareMutation.isPending}
               onToggle={() => shareMutation.mutate(!share.shared)}
@@ -151,6 +150,7 @@ export default function MatchPage() {
           {data.run.lobbyCode && ` · Lobby ${data.run.lobbyCode}`} · Started{' '}
           {new Date(data.run.startedAt).toLocaleString()}
         </p>
+        {data.viewer.role === 'participant' && <ContestButton runId={runId} />}
         {share && (
           <p className='text-muted-foreground text-xs'>
             {share.shared
@@ -165,60 +165,25 @@ export default function MatchPage() {
         )}
       </div>
 
-      {isModerator && (
-        <div className='flex gap-2'>
-          <Button
-            size='sm'
-            variant={tab === 'log' ? 'default' : 'outline'}
-            onClick={() => setTab('log')}
-          >
-            Match log
-          </Button>
-          <Button
-            size='sm'
-            variant={tab === 'timeline' ? 'default' : 'outline'}
-            onClick={() => setTab('timeline')}
-          >
-            Event timeline
-          </Button>
-        </div>
-      )}
+      {failureNotes}
 
-      {showTimeline ? (
-        <MatchTimeline logs={data.logs} viewerId={viewerId} />
+      {gameLog.players.length === 0 ? (
+        <p className='text-muted-foreground text-sm'>
+          No player logs were recorded for this match.
+        </p>
       ) : (
-        <>
-          {failures.length > 0 && (
-            <Card className='border-destructive/40'>
-              <CardContent className='space-y-1 pt-6 text-destructive text-sm'>
-                {failures.map((f) => (
-                  <p key={f.playerId}>
-                    Player {names.get(f.playerId) ?? f.playerId.slice(0, 8)}:{' '}
-                    {f.error}
-                  </p>
-                ))}
-              </CardContent>
-            </Card>
-          )}
-
-          {gameLog.players.length === 0 ? (
-            <p className='text-muted-foreground text-sm'>
-              No player logs were recorded for this match.
-            </p>
-          ) : (
-            <GameLogView
-              log={gameLog}
-              hiddenPlayerIds={hidden}
-              playerLabel={(id) => (
-                <PlayerLabel
-                  playerId={id}
-                  displayName={names.get(id)}
-                  viewerId={viewerId}
-                />
-              )}
+        <GameLogView
+          log={gameLog}
+          hiddenPlayerIds={hidden}
+          viewerId={viewerId}
+          playerLabel={(id) => (
+            <PlayerLabel
+              playerId={id}
+              displayName={names.get(id)}
+              viewerId={viewerId}
             />
           )}
-        </>
+        />
       )}
     </div>
   )

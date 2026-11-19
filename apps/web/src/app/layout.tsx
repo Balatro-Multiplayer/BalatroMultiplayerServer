@@ -23,13 +23,27 @@ const m6x11 = localFont({
   variable: '--font-m6x11',
 })
 
+const inter = localFont({
+  src: './_assets/fonts/inter-latin-wght-normal.woff2',
+  display: 'swap',
+  variable: '--font-inter',
+  weight: '100 900',
+})
+
+const jetbrainsMono = localFont({
+  src: './_assets/fonts/jetbrains-mono-latin-wght-normal.woff2',
+  display: 'swap',
+  variable: '--font-jetbrains-mono',
+  weight: '100 800',
+})
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang='en'
-      className={`${m6x11.variable} dark`}
+      className={`${m6x11.variable} ${inter.variable} ${jetbrainsMono.variable} dark`}
       suppressHydrationWarning
     >
       <body>

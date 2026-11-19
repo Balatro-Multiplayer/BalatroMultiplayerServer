@@ -9,6 +9,7 @@ import {
   gameModeKey,
 } from '@/lib/leaderboards'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { BetaSeasonsSection } from '@/components/beta-seasons/profile-section'
 
 interface PlayerProfile {
   playerId: string
@@ -151,7 +152,7 @@ export default function PlayerPage() {
                         <StatRow label='Rating' value={Math.round(data.rating ?? 0).toString()} />
                         <StatRow label='W / L' value={`${data.wins ?? 0} / ${data.losses ?? 0}`} />
                         <StatRow label='Games' value={String(data.gamesPlayed ?? 0)} />
-                        {data.seasonBest != null && (
+                        {category.metricLabel && data.seasonBest != null && (
                           <StatRow
                             label={category.metricLabel}
                             value={formatMetric(category.metric, data.seasonBest)}
@@ -168,6 +169,8 @@ export default function PlayerPage() {
           </div>
         </div>
       ))}
+
+      <BetaSeasonsSection playerId={player.playerId} />
 
       {/* TODO(API): needs endpoint — GET /api/stats/players/:id/mmr-history */}
       <ComingSoon title='MMR Trend' desc='Rating history chart over the season.' />

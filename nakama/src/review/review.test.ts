@@ -5,6 +5,7 @@ import { fakeLogger, fakeNk, playerCtx, serverCtx } from '../testing/fake_nk'
 import { NotifyCode, isNotifyCode } from '../notify'
 import { lobbyKindOf, lobbyKindOfLabel, rankedContextOf } from './ranked'
 import { overturnRun, parseResultPlacements } from './result'
+import { rpcAdminRunTellVoided } from '../notification/tell_voided'
 import { rpcAdminRunGet, rpcAdminRunSetResult } from './rpc'
 
 const run = (over: Partial<RunRecord> = {}): RunRecord => ({
@@ -129,7 +130,7 @@ describe('admin run RPCs', () => {
 		const nk = stored()
 		const plain = JSON.parse(rpcAdminRunGet(serverCtx(), fakeLogger, nk, JSON.stringify({ runId: 'r1' })))
 		expect(plain.run.runId).toBe('r1')
-		expect(plain.logs.a).toEqual({ eventCount: 1, truncated: false, carbonHash: null, check: 'unavailable' })
+		expect(plain.logs.a).toEqual({ eventCount: 1, truncated: false, gaps: 0, carbonHash: null, check: 'unavailable' })
 		expect(plain.logs.a.events).toBeUndefined()
 		const full = JSON.parse(rpcAdminRunGet(serverCtx(), fakeLogger, nk, JSON.stringify({ runId: 'r1', events: true })))
 		expect(full.logs.a.events).toEqual([{ t: 1 }])
@@ -148,6 +149,19 @@ describe('admin run RPCs', () => {
 		])
 		const full = JSON.parse(rpcAdminRunGet(serverCtx(), fakeLogger, nk, JSON.stringify({ runId: 'r1', events: true })))
 		expect(full.logs.a.events).toEqual([{ t: 2 }])
+	})
+
+	it('admin_run_tell_voided tells each player once and leaves the run unvoided', () => {
+		const nk: any = fakeNk()
+		nk.storageWrite(runWrites(run({ status: 'contested', placements: [] }), {}, () => 'h'))
+		const call = () => JSON.parse(rpcAdminRunTellVoided(serverCtx(), fakeLogger, nk, JSON.stringify({ runId: 'r1' })))
+		expect(call().told).toBe(2)
+		expect(nk.notifications.map((n: any) => n.content.kind)).toEqual(['result_voided', 'result_voided'])
+		expect(call().told).toBe(0)
+		expect(nk.notifications).toHaveLength(2)
+		const stored = nk.storageRead([{ collection: RUNS_COLLECTION, key: 'r1', userId: SYSTEM_USER_ID }])[0].value
+		expect(stored.voided).toBeUndefined()
+		expect(() => rpcAdminRunTellVoided(playerCtx('a'), fakeLogger, nk, '{"runId":"r1"}')).toThrow(/server/)
 	})
 
 	it('admin_run_get refuses a player session and an unknown run', () => {

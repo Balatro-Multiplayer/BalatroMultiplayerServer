@@ -72,7 +72,7 @@ function StatCard({ label, value, color }: { label: string; value: number | null
   return (
     <Card>
       <CardContent className='pt-6 text-center'>
-        <div className={`text-4xl font-black ${color}`}>
+        <div className={`font-pixel text-4xl font-black ${color}`}>
           {value != null ? value.toLocaleString() : '-'}
         </div>
         <div className='mt-1.5 text-xs uppercase tracking-wider text-muted-foreground'>{label}</div>
@@ -117,16 +117,23 @@ function QueueStatsCard({
                     </tr>
                   </thead>
                   <tbody>
-                    {group.pillars.map((pillar) => {
-                      const pillarStats = counts ? pillarCounts(counts, pillar) : undefined
-                      return (
+                    {group.pillars
+                      .map((pillar) => ({
+                        pillar,
+                        pillarStats: counts ? pillarCounts(counts, pillar) : undefined,
+                      }))
+                      .sort(
+                        (a, b) =>
+                          (b.pillarStats?.inMatch ?? 0) - (a.pillarStats?.inMatch ?? 0) ||
+                          (b.pillarStats?.queued ?? 0) - (a.pillarStats?.queued ?? 0),
+                      )
+                      .map(({ pillar, pillarStats }) => (
                         <tr key={pillar.label} className='border-t border-border/50'>
                           <td className='py-1.5'>{pillar.label}</td>
                           <td className='py-1.5 text-right tabular-nums'>{pillarStats?.queued ?? '-'}</td>
                           <td className='py-1.5 text-right tabular-nums'>{pillarStats?.inMatch ?? '-'}</td>
                         </tr>
-                      )
-                    })}
+                      ))}
                   </tbody>
                 </table>
               </div>

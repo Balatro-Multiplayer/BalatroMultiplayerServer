@@ -22,6 +22,8 @@ import {
 	type SpectateEvent,
 } from './protocol'
 import { type SenderRefusal, senderRefusal } from './sender_guard'
+import { sharedRulesAction, startBlindRefusal } from './shared_rules'
+import { almanacAction } from './almanac'
 import { spectateEvent } from './spectate'
 import {
 	type Lobby,
@@ -168,6 +170,21 @@ function relayAction(
 	const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params))
 	if (!budgeted) return refuse('rate_limited')
 
+	const almanac = almanacAction(budgeted, senderId, key, params, ctx.now)
+	if (almanac) return almanac
+
+	const sharedRules = sharedRulesAction(
+		budgeted,
+		senderId,
+		key,
+		params,
+		ctx.now,
+	)
+	if (sharedRules) return sharedRules
+
+	const rulesRequired = startBlindRefusal(budgeted, key, params)
+	if (rulesRequired) return refuse(rulesRequired)
+
 	const authoritative = authoritativeAction(key)
 	if (to === SERVER_TARGET) {
 		if (!authoritative) return refuse('not_authoritative')
@@ -205,7 +222,7 @@ function relayAction(
 			out.push({
 				kind: 'send',
 				op: ServerOp.ACTION,
-				payload: { cid, action: key, from: SERVER_TARGET, to: BROADCAST_TARGET, params: { ack: true } },
+				payload: { cid, action: key, from: SERVER_TARGET, to: BROADCAST_TARGET, params: { ack: true, ...result.ack } },
 				to: [senderId],
 			})
 		if (result.out) out.push(...result.out)

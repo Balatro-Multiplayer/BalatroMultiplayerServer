@@ -1,5 +1,6 @@
 import { test } from 'bun:test'
 import assert from 'node:assert/strict'
+import catalogData from '../data/catalog.json'
 import {
   deckSkinSpriteCount,
   migrateDeckSkins,
@@ -8,9 +9,10 @@ import {
   validateDeckSkins,
 } from './deckSkins'
 import { importPack } from './importProject'
-import { emptyProject, type PlayingCardSkin } from './types'
+import { type Catalog, emptyProject, type PlayingCardSkin } from './types'
 import { createZip, zipText } from './zip'
 
+const catalog = catalogData as Catalog
 const image = 'data:image/png;base64,c3ludGhldGlj'
 
 test('single-sheet migration is immutable, idempotent, and preserves unrelated edits', () => {
@@ -40,7 +42,8 @@ test('schema 2 and 3 ZIPs migrate to editable named skins without losing object 
       { name: 'reskin.project.json', data: zipText(JSON.stringify(project)) },
     ])
     const result = await importPack(
-      new File([new Uint8Array(bytes)], 'old.zip')
+      new File([new Uint8Array(bytes)], 'old.zip'),
+      catalog
     )
     assert.equal(result.schema, 4)
     assert.deepEqual(result.deckSkins, [
@@ -97,7 +100,7 @@ test('malformed skin lists and non-string contrast images are rejected on import
       },
     ])
     await assert.rejects(
-      importPack(new File([new Uint8Array(bytes)], 'invalid.zip')),
+      importPack(new File([new Uint8Array(bytes)], 'invalid.zip'), catalog),
       /card skins|card skin|valid IDs/
     )
   }

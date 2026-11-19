@@ -8,16 +8,19 @@ import { settingsOf, type ServerSettings } from '../server_kind'
 export interface FakeNk {
 	objects: Map<string, { value: any; version: number }>
 	notifications: { userId: string; subject: string; content: any; code: number; persistent: boolean }[]
+	broadcasts: { subject: string; content: any; code: number; persistent: boolean }[]
 	http: { url: string; method: string; headers: any; body: string }[]
 	[key: string]: any
 }
 
 export function fakeNk(overrides: { [key: string]: unknown } = {}): FakeNk {
 	const objects = new Map<string, { value: any; version: number }>()
+	let uuidCounter = 0
 	const k = (c: string, u: string, key: string) => `${c}/${u}/${key}`
 	const nk: FakeNk = {
 		objects,
 		notifications: [],
+		broadcasts: [],
 		http: [],
 		storageRead: (reads: any[]) =>
 			reads.flatMap((r) => {
@@ -51,8 +54,12 @@ export function fakeNk(overrides: { [key: string]: unknown } = {}): FakeNk {
 				.slice(0, limit || undefined),
 			cursor: '',
 		}),
+		uuidv4: () => `id-${++uuidCounter}`,
 		notificationSend: (userId: string, subject: string, content: any, code: number, _sender: string, persistent: boolean) => {
 			nk.notifications.push({ userId, subject, content, code, persistent })
+		},
+		notificationSendAll: (subject: string, content: any, code: number, persistent: boolean) => {
+			nk.broadcasts.push({ subject, content, code, persistent })
 		},
 		httpRequest: (url: string, method: string, headers: any, body: string) => {
 			nk.http.push({ url, method, headers, body })

@@ -10,27 +10,80 @@ import {
 	avatarsFor,
 	setNakamaAvatar,
 } from '../../infrastructure/nakama/avatar-sync.js'
+import { listAppealsOf } from '../../infrastructure/gateways/appeal.gateway.js'
+import { banNameWhileBanned, listBans } from '../../infrastructure/gateways/ban.gateway.js'
+import { listWarnings } from '../../infrastructure/gateways/warning.gateway.js'
+import { networkBanIdsAt } from '../../infrastructure/nakama/moderation-sync.js'
 import {
 	editNakamaProfile,
 	linkNakamaDiscord,
 } from '../../infrastructure/nakama/profile-sync.js'
 import { authenticate } from '../../middleware/authenticate.js'
 import { AppError } from '../../shared/utils/errors.js'
+import { isOwner } from '../../shared/utils/require-owner.js'
+import { effectivePrivileges } from '../../shared/utils/staff-role.js'
 import { getSession, removeSession } from '../../state/index.js'
 import type { PlayerSession } from '../../state/index.js'
+import type { SubmitRefusal } from '../appeals/appeals.service.js'
+import { appealService } from '../appeals/appeals.deps.js'
+import { appealStateOf, buildPunishmentList } from '../punishments/player-punishments.js'
 import { discordLinkService } from '../nakama/discord-link.js'
+import { webLoginLinks } from '../nakama/web-login-link.js'
 import type { AuthService } from './auth.service.js'
 import { getDiscordAuthUrl, validateDiscordCode } from './discord.js'
 import { signTosPendingToken, verifyTosPendingToken } from './jwt.js'
 import { generateLinkState, verifyLinkState } from './link-state.js'
-import { isOwner } from '../../shared/utils/require-owner.js'
 import {
 	getSteamOpenIdUrl,
 	getSteamPlayerName,
 	validateSteamOpenIdResponse,
 } from './steam.js'
 
-function playerPayload(session: PlayerSession) {
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function appealRefusalHttp(refusal: SubmitRefusal): { status: number; body: Record<string, unknown> } {
+	switch (refusal.code) {
+		case 'invalid_message':
+			return { status: 400, body: { error: refusal.message, code: refusal.code } }
+		case 'not_found':
+			return { status: 404, body: { error: 'Punishment not found', code: refusal.code } }
+		case 'not_blocked':
+			return { status: 409, body: { error: 'No network ban blocks you', code: refusal.code } }
+		case 'already_lifted':
+			return { status: 409, body: { error: 'That punishment is already lifted', code: refusal.code } }
+		case 'open':
+			return { status: 409, body: { error: 'You already have an open appeal', code: refusal.code } }
+		case 'granted':
+			return { status: 409, body: { error: 'That appeal was granted', code: refusal.code } }
+		case 'cooling_down':
+			return {
+				status: 409,
+				body: { error: 'You can appeal again later', code: refusal.code, availableAt: refusal.availableAt.toISOString() },
+			}
+	}
+}
+
+// Under a username ban the player sees the Ban name for every name of theirs.
+// usernameBanned lets the page say why.
+function withBanName<T extends { steamName: string; displayName: string; discordUsername: string | null }>(
+	player: T,
+	banName: string | null,
+): T & { usernameBanned: boolean } {
+	if (!banName) return { ...player, usernameBanned: false }
+	return {
+		...player,
+		steamName: banName,
+		displayName: banName,
+		discordUsername: player.discordUsername ? banName : null,
+		usernameBanned: true,
+	}
+}
+
+async function playerPayload(session: PlayerSession) {
+	return withBanName(plainPlayerPayload(session), await banNameWhileBanned(session.playerId))
+}
+
+function plainPlayerPayload(session: PlayerSession) {
 	return {
 		id: session.playerId,
 		steamName: session.steamName,
@@ -39,8 +92,8 @@ function playerPayload(session: PlayerSession) {
 		preferredJoker: session.preferredJoker,
 		discordLinked: session.discordIdHash != null,
 		discordUsername: session.discordUsername ?? null,
-		privileges: session.privileges,
-		isOwner: isOwner(session.playerId, session.privileges),
+		privileges: effectivePrivileges(session.playerId, session.privileges),
+		isOwner: isOwner(session.playerId),
 		chatEnabled: session.chatEnabled,
 		chatBlocked: session.chatBlocked,
 	}
@@ -137,20 +190,109 @@ export function createAuthRouter(service: AuthService): Router {
 		}
 	})
 
+	// {code} -> {token, path} or {tosToken, path}: the game's one-time login
+	// link (features/nakama/web-login-link.ts). The code works once.
+	router.post('/link-login', async (req, res, next) => {
+		try {
+			const code = req.body?.code
+			const target = typeof code === 'string' ? webLoginLinks.consume(code) : null
+			const login = target ? await service.authenticateNakamaUser(target.nakamaUserId) : null
+			if (!target || !login) {
+				res.status(401).json({ error: 'This login link has expired or was already used', code: 'link_invalid' })
+				return
+			}
+			const gate = tosGate(login.session)
+			if (gate) {
+				res.json({ tosToken: gate.token, path: target.path })
+				return
+			}
+			res.json({ token: login.token, path: target.path })
+		} catch (err) {
+			next(err)
+		}
+	})
+
 	router.get('/me', authenticate, async (req, res, next) => {
 		try {
 			const jwt = req.player!
 			const dbPlayer = await findPlayerById(jwt.playerId)
+			res.json(
+				withBanName(
+					{
+						id: jwt.playerId,
+						steamName: jwt.steamName,
+						displayName: jwt.displayName ?? jwt.steamName,
+						useDiscordName: jwt.useDiscordName ?? false,
+						preferredJoker: jwt.preferredJoker ?? null,
+						discordLinked: jwt.discordIdHash != null,
+						discordUsername: jwt.discordUsername ?? null,
+						privileges: effectivePrivileges(
+							jwt.playerId,
+							dbPlayer?.privileges ?? [],
+						),
+						isOwner: isOwner(jwt.playerId),
+					},
+					await banNameWhileBanned(jwt.playerId),
+				),
+			)
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// The account page's punishment list, with each punishment's appeal. It works
+	// for a banned account (plain `authenticate`), and shows a network ban that
+	// the player's address is under, without naming the account that caused it.
+	router.get('/punishments', authenticate, async (req, res, next) => {
+		try {
+			const playerId = req.player!.playerId
+			const [bans, warnings, networkBanIds, appeals] = await Promise.all([
+				listBans(playerId),
+				listWarnings(playerId, 200),
+				networkBanIdsAt(req.ip ?? ''),
+				listAppealsOf(playerId),
+			])
+			const now = new Date()
+			const networkBanned = networkBanIds.length > 0
 			res.json({
-				id: jwt.playerId,
-				steamName: jwt.steamName,
-				displayName: jwt.displayName ?? jwt.steamName,
-				useDiscordName: jwt.useDiscordName ?? false,
-				preferredJoker: jwt.preferredJoker ?? null,
-				discordLinked: jwt.discordIdHash != null,
-				discordUsername: jwt.discordUsername ?? null,
-				privileges: dbPlayer?.privileges ?? [],
-				isOwner: isOwner(jwt.playerId, dbPlayer?.privileges ?? []),
+				punishments: buildPunishmentList(bans, warnings, now, appeals),
+				networkBanned,
+				networkAppeal: networkBanned
+					? appealStateOf(
+							appeals.filter((a) => a.targetKind === 'network_ban'),
+							now,
+						)
+					: null,
+			})
+		} catch (err) {
+			next(err)
+		}
+	})
+
+	// A player appeals one punishment, or (no punishmentId) the network ban that
+	// blocks them. Works for a banned account.
+	router.post('/appeals', authenticate, async (req, res, next) => {
+		try {
+			const { punishmentId, message } = (req.body ?? {}) as { punishmentId?: unknown; message?: unknown }
+			if (typeof message !== 'string') throw new AppError('message must be text', 400)
+			if (punishmentId !== undefined && punishmentId !== null && (typeof punishmentId !== 'string' || !UUID.test(punishmentId))) {
+				res.status(404).json({ error: 'Punishment not found', code: 'not_found' })
+				return
+			}
+			const playerId = req.player!.playerId
+			const result = await appealService.submit({
+				playerId,
+				punishmentId: typeof punishmentId === 'string' ? punishmentId : null,
+				message,
+				networkBanIds: typeof punishmentId === 'string' ? [] : await networkBanIdsAt(req.ip ?? ''),
+			})
+			if (!result.ok) {
+				const { status, body } = appealRefusalHttp(result.refusal)
+				res.status(status).json(body)
+				return
+			}
+			res.status(201).json({
+				appeal: appealStateOf([result.value], new Date()).appeal,
 			})
 		} catch (err) {
 			next(err)
@@ -180,7 +322,7 @@ export function createAuthRouter(service: AuthService): Router {
 
 			res.json({
 				token,
-				player: playerPayload(session),
+				player: await playerPayload(session),
 			})
 		} catch (err) {
 			next(err)
@@ -263,7 +405,7 @@ export function createAuthRouter(service: AuthService): Router {
 
 			res.json({
 				token,
-				player: playerPayload(session),
+				player: await playerPayload(session),
 			})
 		} catch (err) {
 			next(err)
@@ -286,7 +428,7 @@ export function createAuthRouter(service: AuthService): Router {
 
 			res.json({
 				token,
-				player: playerPayload(session),
+				player: await playerPayload(session),
 			})
 		} catch (err) {
 			next(err)
@@ -311,7 +453,7 @@ export function createAuthRouter(service: AuthService): Router {
 
 				res.json({
 					token,
-					player: playerPayload(session),
+					player: await playerPayload(session),
 				})
 			} catch (err) {
 				next(err)
@@ -327,7 +469,7 @@ export function createAuthRouter(service: AuthService): Router {
 			if (session.chatBlocked)
 				throw new AppError('Chat access is permanently restricted', 403)
 			if (session.chatEnabled) {
-				res.json({ player: playerPayload(session) })
+				res.json({ player: await playerPayload(session) })
 				return
 			}
 
@@ -335,7 +477,7 @@ export function createAuthRouter(service: AuthService): Router {
 			session.chatEnabled = true
 			session.chatBlocked = false
 
-			res.json({ player: playerPayload(session) })
+			res.json({ player: await playerPayload(session) })
 		} catch (err) {
 			next(err)
 		}
@@ -374,7 +516,7 @@ export function createAuthRouter(service: AuthService): Router {
 
 			res.json({
 				token,
-				player: playerPayload(session),
+				player: await playerPayload(session),
 			})
 		} catch (err) {
 			next(err)

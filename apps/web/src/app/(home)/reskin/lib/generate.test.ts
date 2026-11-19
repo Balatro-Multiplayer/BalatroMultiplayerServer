@@ -132,7 +132,8 @@ test('playing-card sheet exports a private named deck skin with all four rows, n
     assert.ok(!files.has(`assets/${scale}x/cards_2.png`))
   }
   const imported = await importPack(
-    new File([new Uint8Array(result.bytes)], 'pack.zip')
+    new File([new Uint8Array(result.bytes)], 'pack.zip'),
+    catalog
   )
   assert.deepEqual(imported.sheets, {})
   assert.deepEqual(imported.deckSkins, [{ id: 'legacy', name, low: deck }])
@@ -172,7 +173,8 @@ test('multiple named skins export independent low/high palettes and preserve IDs
   }
   assert.ok(!manifest.includes('raw = true'))
   const imported = await importPack(
-    new File([new Uint8Array(result.bytes)], 'pack.zip')
+    new File([new Uint8Array(result.bytes)], 'pack.zip'),
+    catalog
   )
   assert.deepEqual(imported.deckSkins, skins)
   assert.equal(imported.options.displayName, 'My Mod')
@@ -201,7 +203,8 @@ test('draft skins are saved but not registered and identical contrast sheets sha
   assert.ok(files.has('assets/1x/deck_same_lc.png'))
   assert.ok(!files.has('assets/1x/deck_same_hc.png'))
   const imported = await importPack(
-    new File([new Uint8Array(result.bytes)], 'pack.zip')
+    new File([new Uint8Array(result.bytes)], 'pack.zip'),
+    catalog
   )
   assert.deepEqual(imported.deckSkins, skins)
 })
@@ -253,7 +256,8 @@ test('overlay-only edits export no vanilla or replacement background, and surviv
     draws: [[overlay, 0, 0, 142, 190]],
   })
   const imported = await importPack(
-    new File([new Uint8Array(result.bytes)], 'pack.zip')
+    new File([new Uint8Array(result.bytes)], 'pack.zip'),
+    catalog
   )
   assert.deepEqual(imported.objects['Joker/j_caino'], {
     sprites: [],
@@ -291,7 +295,8 @@ test('hiding an overlay packs an explicitly transparent cell and roundtrips the 
   assert.deepEqual(atlas(files, 'cat_Joker_soul').draws, [])
   assert.deepEqual(atlas(files, 'cat_Joker_soul', 2).draws, [])
   const imported = await importPack(
-    new File([new Uint8Array(result.bytes)], 'pack.zip')
+    new File([new Uint8Array(result.bytes)], 'pack.zip'),
+    catalog
   )
   assert.equal(imported.objects['Joker/j_caino']?.hideSoul, true)
 })

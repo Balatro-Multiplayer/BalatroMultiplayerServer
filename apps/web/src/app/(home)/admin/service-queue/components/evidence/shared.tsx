@@ -1,13 +1,13 @@
 'use client'
 
 import { DownloadIcon, ExternalLinkIcon } from 'lucide-react'
-import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { downloadReplay } from '../../lib/api'
+import { ItemLink } from '../item-link'
 import { formatTime, nameOf } from '../../lib/format'
 import type {
   ChatLine,
@@ -63,7 +63,18 @@ const CHECK_VARIANT: Record<string, 'secondary' | 'destructive' | 'outline'> = {
 
 export function CheckBadge({ check }: { check: LogCheck | null | undefined }) {
   if (!check) return <Badge variant='outline'>no check</Badge>
-  return <Badge variant={CHECK_VARIANT[check] ?? 'outline'}>log {check}</Badge>
+  return (
+    <Badge
+      variant={CHECK_VARIANT[check] ?? 'outline'}
+      title={
+        check === 'incomplete'
+          ? 'The stored log has missing events, so its check code was not compared.'
+          : undefined
+      }
+    >
+      log {check}
+    </Badge>
+  )
 }
 
 export function Placements({
@@ -95,9 +106,9 @@ export function ReplayLinks({ runId }: { runId: string | null | undefined }) {
   return (
     <div className='flex flex-wrap gap-2'>
       <Button asChild size='sm' variant='outline'>
-        <Link href={`/matches/${runId}`} target='_blank'>
+        <ItemLink to={{ match: runId }}>
           <ExternalLinkIcon /> Open replay
-        </Link>
+        </ItemLink>
       </Button>
       <Button
         size='sm'

@@ -87,7 +87,7 @@ export function reportsAgainstOf(rows: readonly ReportSummaryRow[]) {
 }
 
 // The resolution actions that count as the reported player being sanctioned.
-export const SANCTIONING_ACTIONS = ['warn', 'chat_mute', 'queue_ban', 'account_ban'] as const
+export const SANCTIONING_ACTIONS = ['warn', 'chat_mute', 'queue_ban', 'account_ban', 'username_ban'] as const
 
 export function reportsFiledOf(rows: readonly { resolutionAction: string | null }[]) {
 	return {
@@ -177,12 +177,12 @@ export function explainFlag(reason: string | null, hands: number, elapsedMs: num
 	if (reason === 'hash_mismatch')
 		return {
 			reason,
-			text: "The replay log's checksum does not match the events it carries: the log was altered or is incomplete.",
+			text: "The replay log is complete, but its checksum does not match the events it carries: the log was altered. A log with missing events is shown as incomplete, not as a mismatch.",
 		}
 	if (reason === 'unverified_log')
 		return {
 			reason,
-			text: 'In a ranked game, the replay log is missing, cut off or has no checksum, so the season best it claims could not be checked.',
+			text: 'In a ranked game, the replay log is missing, cut off, has missing events or has no checksum, so the season best it claims could not be checked.',
 		}
 	if (reason === 'elapsed_time_gate') {
 		const minimumMs = hands * MIN_MS_PER_HAND

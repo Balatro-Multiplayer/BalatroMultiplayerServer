@@ -249,4 +249,233 @@ describe('buildGameLog with a reduced side', () => {
     expect(log.pvp[0]?.scores).toEqual({ a: '500', b: '300' })
     expect(log.pvp[0]?.winnerId).toBe('a')
   })
+  test('uses listed final jokers and vouchers over the reconstruction', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [20, 'buy', [4, 0, joker(1, 'j_joker'), 4]],
+        [30, 'final_jokers', [['j_blueprint|foil', 'j_dusk']]],
+        [31, 'final_vouchers', [['v_overstock_norm']]],
+      ]),
+      player('b', [...opening, [20, 'buy', [4, 0, joker(1, 'j_joker'), 4]]]),
+    ])
+    const [a, b] = log.players
+    expect(
+      a?.finalJokers.map((j) => j.type === 'other_card' && j.ident)
+    ).toEqual(['j_blueprint', 'j_dusk'])
+    expect(a?.finalJokers[0]?.tags).toEqual(['ed:foil'])
+    expect(a?.reconstructed).toBe(false)
+    expect(a?.vouchers).toEqual([
+      {
+        type: 'other_card',
+        kind: 'Voucher',
+        ident: 'v_overstock_norm',
+        tags: [],
+      },
+    ])
+    expect(
+      b?.finalJokers.map((j) => j.type === 'other_card' && j.ident)
+    ).toEqual(['j_joker'])
+  })
+})
+
+describe('buildGameLog joker hits', () => {
+  const hits = (log: ReturnType<typeof buildGameLog>) =>
+    (log.players[0]?.rounds ?? [])
+      .flatMap((r) => r.events)
+      .flatMap((e) => (e.type === 'joker_hit' ? [e] : []))
+  const ident = (c: { type: string; ident?: string }) =>
+    c.type === 'other_card' ? c.ident : ''
+
+  test('shows what Wraith created, Ankh copied and destroyed, and a sold Invisible duplicated', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [11, 'joker_hit', ['wraith', ['j_blueprint|foil'], []]],
+        [12, 'joker_hit', ['ankh', ['j_joker'], ['j_blueprint|foil', 'j_x']]],
+        [13, 'joker_hit', ['invisible', ['j_joker'], []]],
+        [14, 'joker_hit', ['judgement', ['j_common'], []]],
+        [15, 'joker_hit', ['soul', ['j_legend'], []]],
+        [16, 'joker_hit', ['riffraff', ['j_c1', 'j_c2|foil'], []]],
+      ]),
+    ])
+    const found = hits(log)
+    expect(found.map((h) => h.source)).toEqual([
+      'wraith',
+      'ankh',
+      'invisible',
+      'judgement',
+      'soul',
+      'riffraff',
+    ])
+    expect(found[0]?.created.map(ident)).toEqual(['j_blueprint'])
+    expect(found[1]?.created.map(ident)).toEqual(['j_joker'])
+    expect(found[1]?.destroyed.map(ident)).toEqual(['j_blueprint', 'j_x'])
+    expect(found[3]?.created.map(ident)).toEqual(['j_common'])
+    expect(found[4]?.created.map(ident)).toEqual(['j_legend'])
+    expect(found[5]?.created.map(ident)).toEqual(['j_c1', 'j_c2'])
+  })
+
+  test('keeps the reconstructed lineup in step with hits', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [11, 'buy' as string, [4, 1, [-1, 'Joker', 'j_a'], 4]],
+        [12, 'joker_hit', ['wraith', ['j_rare'], []]],
+        [13, 'joker_hit', ['ankh', ['j_rare'], ['j_a']]],
+        // The Wraith joker is sold later; its ref is new, so it matches by key.
+        [14, 'sell', [4, 1, [-9, 'Joker', 'j_rare']]],
+      ]),
+    ])
+    const left = (log.players[0]?.finalJokers ?? []).map(ident)
+    expect(left).toEqual(['j_rare'])
+  })
+
+  test('applies hits to the last play snapshot', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [11, 'buy', [4, 0, joker(1, 'j_joker'), 2]],
+        [12, 'play', [[1], [[-1, 'pc', 'Hearts', 'King']], ['j_joker']]],
+        [13, 'joker_hit', ['ankh', ['j_joker'], ['j_joker']]],
+        [14, 'joker_hit', ['wraith', ['j_rare'], []]],
+      ]),
+    ])
+    expect(
+      (log.players[0]?.finalJokers ?? []).map((j) =>
+        j.type === 'other_card' ? j.ident : ''
+      )
+    ).toEqual(['j_joker', 'j_rare'])
+  })
+
+  test('ignores a hit from an unknown source', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [11, 'joker_hit', ['mystery', ['j_x'], []]],
+      ]),
+    ])
+    expect(hits(log)).toHaveLength(0)
+  })
+})
+
+describe('final jokers', () => {
+  test('use the last play snapshot, not only buys and sells', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [11, 'buy', [4, 0, joker(1, 'j_joker'), 2]],
+        [12, 'buy', [4, 0, joker(2, 'j_ankh'), 2]],
+        // Ankh destroyed the joker and copied the other; the log has no event.
+        [13, 'play', [[1], [[-1, 'pc', 'Hearts', 'King']], ['j_ankh|foil']]],
+      ]),
+    ])
+    expect(
+      log.players[0]?.finalJokers.map((j) =>
+        j.type === 'other_card' ? `${j.ident}:${j.tags.join()}` : ''
+      )
+    ).toEqual(['j_ankh:ed:foil'])
+    expect(log.players[0]?.reconstructed).toBe(false)
+  })
+
+  test('sell the copy with the same edition, not the first copy', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [
+          11,
+          'play',
+          [[1], [[-1, 'pc', 'Hearts', 'King']], ['j_joker|foil', 'j_joker']],
+        ],
+        [12, 'sell', [4, 0, joker(1, 'j_joker')]],
+      ]),
+    ])
+    expect(
+      log.players[0]?.finalJokers.map((j) =>
+        j.type === 'other_card' ? `${j.ident}:${j.tags.join()}` : ''
+      )
+    ).toEqual(['j_joker:ed:foil'])
+  })
+
+  test('apply shop changes after the last play to the snapshot', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [
+          11,
+          'play',
+          [[1], [[-1, 'pc', 'Hearts', 'King']], ['j_joker', 'j_joker']],
+        ],
+        [12, 'sell', [4, 0, joker(1, 'j_joker')]],
+        [13, 'buy', [4, 0, joker(2, 'j_blueprint'), 5]],
+      ]),
+    ])
+    expect(
+      log.players[0]?.finalJokers.map((j) =>
+        j.type === 'other_card' ? j.ident : ''
+      )
+    ).toEqual(['j_joker', 'j_blueprint'])
+    expect(log.players[0]?.reconstructed).toBe(true)
+  })
+
+  test('prefer the final_jokers line the run recorded', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [11, 'play', [[1], [[-1, 'pc', 'Hearts', 'King']], ['j_joker']]],
+        [12, 'final_jokers', [['j_ankh|negative', 'j_joker|eternal']]],
+      ]),
+    ])
+    const p = log.players[0]
+    expect(
+      p?.finalJokers.map((j) =>
+        j.type === 'other_card' ? `${j.ident}:${j.tags.join()}` : ''
+      )
+    ).toEqual(['j_ankh:ed:negative', 'j_joker:st:eternal'])
+    expect(p?.reconstructed).toBe(false)
+  })
+
+  test('read stickers from a snapshot token', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [
+          11,
+          'play',
+          [
+            [1],
+            [[-1, 'pc', 'Hearts', 'King']],
+            ['j_joker|foil|eternal|st:rental'],
+          ],
+        ],
+      ]),
+    ])
+    const j = log.players[0]?.finalJokers[0]
+    expect(j?.type === 'other_card' && j.tags).toEqual([
+      'ed:foil',
+      'st:eternal',
+      'st:rental',
+    ])
+  })
+})
+
+describe('final vouchers', () => {
+  test('use the final_vouchers line over the vouchers bought', () => {
+    const log = buildGameLog([
+      player('a', [
+        [10, 'select_blind', 0],
+        [11, 'voucher', [5, 0, [-1, 'Voucher', 'v_hone'], 10]],
+        [12, 'final_vouchers', [['v_hone', 'v_overstock_norm']]],
+      ]),
+    ])
+    expect(
+      log.players[0]?.vouchers.map((v) =>
+        v.type === 'other_card' ? v.ident : ''
+      )
+    ).toEqual(['v_hone', 'v_overstock_norm'])
+  })
 })

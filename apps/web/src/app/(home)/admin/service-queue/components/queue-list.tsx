@@ -3,6 +3,7 @@
 import {
   AlertTriangleIcon,
   FlagIcon,
+  GavelIcon,
   type LucideIcon,
   MessageSquareWarningIcon,
   ScaleIcon,
@@ -13,19 +14,11 @@ import {
 import { useEffect, useRef } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { ListFilters } from '../lib/api'
 import {
+  AUTOMATIC_TYPES,
   ageText,
   minutesLeft,
   type PriorityBand,
@@ -33,13 +26,8 @@ import {
   TYPE_LABELS,
   TYPE_TABS,
 } from '../lib/format'
-import type {
-  ItemType,
-  QueueList as List,
-  ListedItem,
-  QueueSort,
-  StatusFilter,
-} from '../lib/types'
+import type { ItemType, QueueList as List, ListedItem } from '../lib/types'
+import { DismissShown } from './dismiss-shown'
 
 const TYPE_ICONS: Record<ItemType, LucideIcon> = {
   report: FlagIcon,
@@ -49,6 +37,8 @@ const TYPE_ICONS: Record<ItemType, LucideIcon> = {
   contest: SwordsIcon,
   anti_cheat: ShieldAlertIcon,
   integrity: AlertTriangleIcon,
+  appeal: GavelIcon,
+  staff_report: FlagIcon,
 }
 
 const PRIORITY_DOT: Record<PriorityBand, string> = {
@@ -56,13 +46,6 @@ const PRIORITY_DOT: Record<PriorityBand, string> = {
   medium: 'bg-amber-400',
   low: 'bg-slate-500',
 }
-
-const AGE_FILTERS: { hours: number; label: string }[] = [
-  { hours: 0, label: 'Any age' },
-  { hours: 1, label: 'Older than 1h' },
-  { hours: 24, label: 'Older than 1 day' },
-  { hours: 24 * 7, label: 'Older than 7 days' },
-]
 
 const isTyping = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
@@ -94,12 +77,15 @@ function useRowKeys(
 function Row({
   item,
   selected,
+  waiting,
   cursor,
   now,
   onOpen,
 }: {
   item: ListedItem
   selected: boolean
+  // Its action is sent in a few seconds.
+  waiting: boolean
   cursor: boolean
   now: number
   onOpen: () => void
@@ -119,6 +105,7 @@ function Row({
       className={cn(
         'flex w-full items-start gap-2 border-border border-b px-3 py-2 text-left text-sm hover:bg-accent/50',
         selected && 'bg-accent',
+        waiting && 'line-through opacity-50',
         cursor && 'ring-1 ring-ring ring-inset'
       )}
     >
@@ -170,16 +157,22 @@ export function QueueList({
   list,
   isLoading,
   selectedId,
+  waitingId,
   cursor,
   setCursor,
   now,
   onOpen,
+  automaticTab,
+  setAutomaticTab,
 }: {
+  automaticTab: boolean
+  setAutomaticTab: (on: boolean) => void
   filters: ListFilters
   setFilters: (patch: Partial<ListFilters>) => void
   list: List | undefined
   isLoading: boolean
   selectedId: number | null
+  waitingId: number | null
   cursor: number
   setCursor: (i: number) => void
   now: number
@@ -187,19 +180,22 @@ export function QueueList({
 }) {
   const items = list?.items ?? []
   useRowKeys(items, cursor, setCursor, onOpen)
+  const automaticOpen = list
+    ? AUTOMATIC_TYPES.reduce((n, type) => n + list.counts[type], 0)
+    : 0
   const totalOpen = list
-    ? Object.values(list.counts).reduce((a, b) => a + b, 0)
+    ? Object.values(list.counts).reduce((a, b) => a + b, 0) - automaticOpen
     : 0
 
   return (
     <div className='flex min-h-0 flex-col'>
       <div
-        className='flex flex-wrap gap-1 border-border border-b p-2'
+        className='flex flex-wrap gap-1.5 border-border border-b p-3'
         role='tablist'
       >
         {TYPE_TABS.map((tab) => {
           const count = tab.type ? list?.counts[tab.type] : totalOpen
-          const active = filters.itemType === tab.type
+          const active = !automaticTab && filters.itemType === tab.type
           return (
             <Button
               key={tab.label}
@@ -208,7 +204,10 @@ export function QueueList({
               data-tab={tab.type ?? 'all'}
               size='sm'
               variant={active ? 'default' : 'ghost'}
-              onClick={() => setFilters({ itemType: tab.type, page: 1 })}
+              onClick={() => {
+                setAutomaticTab(false)
+                setFilters({ itemType: tab.type, page: 1 })
+              }}
             >
               {tab.label}
               {count !== undefined && (
@@ -219,71 +218,40 @@ export function QueueList({
             </Button>
           )
         })}
+        <Button
+          role='tab'
+          aria-selected={automaticTab}
+          data-tab='automatic'
+          size='sm'
+          variant={automaticTab ? 'default' : 'ghost'}
+          onClick={() => setAutomaticTab(true)}
+        >
+          Automatic
+          {list && (
+            <Badge variant={automaticTab ? 'secondary' : 'outline'}>
+              {automaticOpen}
+            </Badge>
+          )}
+        </Button>
       </div>
 
-      <div className='flex flex-wrap items-center gap-2 border-border border-b p-2'>
-        <Select
-          value={filters.status}
-          onValueChange={(v) =>
-            setFilters({ status: v as StatusFilter, page: 1 })
-          }
-        >
-          <SelectTrigger className='w-28' size='sm' aria-label='Status'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='open'>Open</SelectItem>
-            <SelectItem value='resolved'>Resolved</SelectItem>
-            <SelectItem value='all'>All</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={filters.sort}
-          onValueChange={(v) => setFilters({ sort: v as QueueSort, page: 1 })}
-        >
-          <SelectTrigger className='w-28' size='sm' aria-label='Sort'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='priority'>Priority</SelectItem>
-            <SelectItem value='age'>Newest</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={String(filters.olderThanHours)}
-          onValueChange={(v) =>
-            setFilters({ olderThanHours: Number(v), page: 1 })
-          }
-        >
-          <SelectTrigger className='w-36' size='sm' aria-label='Age'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {AGE_FILTERS.map((a) => (
-              <SelectItem key={a.hours} value={String(a.hours)}>
-                {a.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className='border-border border-b p-2'>
         <Input
-          className='h-8 w-40 flex-1'
-          placeholder='Subject name or id'
+          className='h-8'
+          placeholder='Find a player by name or id'
           value={filters.subject}
           onChange={(e) => setFilters({ subject: e.target.value, page: 1 })}
         />
-        <Label className='flex items-center gap-1 text-xs'>
-          <Checkbox
-            checked={filters.claimedByMe}
-            onCheckedChange={(c) =>
-              setFilters({ claimedByMe: c === true, page: 1 })
-            }
-          />
-          Claimed by me
-        </Label>
       </div>
 
-      <div className='min-h-0 flex-1 overflow-y-auto' data-testid='queue-rows'>
+      {automaticTab && (
+        <DismissShown itemIds={items.map((i) => i.id)} />
+      )}
+
+      <div
+        className='min-h-0 flex-1 overflow-y-auto'
+        data-testid='queue-rows'
+      >
         {isLoading ? (
           <p className='p-3 text-muted-foreground text-sm'>Loading…</p>
         ) : items.length === 0 ? (
@@ -294,6 +262,7 @@ export function QueueList({
               key={item.id}
               item={item}
               selected={item.id === selectedId}
+              waiting={item.id === waitingId}
               cursor={i === cursor}
               now={now}
               onOpen={() => {

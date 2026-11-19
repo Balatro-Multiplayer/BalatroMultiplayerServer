@@ -2,7 +2,13 @@
 
 import { migrateDeckSkins, validateDeckSkins } from './deckSkins'
 import { PROJECT_FILE_NAME } from './generate'
-import { emptyProject, type ObjectEdit, type ProjectState } from './types'
+import { importRankedBundle, looksLikeRankedBundle } from './importRanked'
+import {
+  type Catalog,
+  emptyProject,
+  type ObjectEdit,
+  type ProjectState,
+} from './types'
 import { readZip, unzipText } from './zip'
 
 /** Preserve older still edits and migrate the original single card sheet. */
@@ -19,7 +25,11 @@ function upgradeProject(p: ProjectState): ProjectState {
   return upgraded
 }
 
-export async function importPack(file: File): Promise<ProjectState> {
+export async function importPack(
+  file: File,
+  catalog: Catalog,
+  onWarning?: (message: string) => void
+): Promise<ProjectState> {
   const buf = new Uint8Array(await file.arrayBuffer())
   const files = readZip(buf)
 
@@ -32,6 +42,16 @@ export async function importPack(file: File): Promise<ProjectState> {
       // merge over defaults so packs missing fields still load
       return upgradeProject({ ...emptyProject(), ...parsed, schema: 4 })
     }
+  }
+
+  // A Ranked bundle ("Export for Ranked") has no project file; read it directly.
+  if (looksLikeRankedBundle(files)) {
+    return importRankedBundle(
+      files,
+      catalog,
+      file.name.replace(/\.zip$/i, ''),
+      onWarning
+    )
   }
 
   throw new Error(

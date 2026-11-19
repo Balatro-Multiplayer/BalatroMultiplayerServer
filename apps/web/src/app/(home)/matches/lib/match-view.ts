@@ -41,3 +41,8 @@ export function withOwnSideShared(
 export function matchLink(origin: string, runId: string): string {
   return `${origin}/matches/${runId}`
 }
+
+/** The match view of a game from the legacy website's uploaded logs. */
+export function legacyMatchPath(id: number | string): string {
+  return `/matches/legacy/${id}`
+}
