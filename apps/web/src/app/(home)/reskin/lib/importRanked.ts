@@ -8,7 +8,14 @@
 // Only the final art is recovered (no uncropped source, edge or fit settings).
 
 import { posFor } from './atlasOverrides'
-import { RANKED_SHEETS } from './generateRanked'
+import {
+  CARDS_FILE,
+  CARDS_SIZE,
+  CHIPS_FILE,
+  RANKED_SHEETS,
+  SHOP_SIGN,
+  SHOP_SIGN_FILE,
+} from './generateRanked'
 import { loadImage } from './image'
 import {
   type Catalog,
@@ -205,6 +212,67 @@ export async function importRankedBundle(
         edit.render = {}
       }
       project.objects[objId(cat.id, o.key)] = edit
+      importedAny = true
+    }
+  }
+
+  // Sheets that are not per-object categories (see generateRanked.ts).
+  const readSheet = async (file: string, w: number, h: number) => {
+    let scale = 1
+    let bytes = files.get(`assets/1x/${file}.png`)
+    if (!bytes) {
+      scale = 2
+      bytes = files.get(`assets/2x/${file}.png`)
+    }
+    if (!bytes) return null
+    if (bytes.length > MAX_PNG || !isPng(bytes))
+      throw new Error(`${file}.png is not a valid PNG within the size limit.`)
+    const img = await decodePng(bytes)
+    if (img.naturalWidth !== w * scale || img.naturalHeight !== h * scale)
+      throw new Error(
+        `${file}.png must be exactly ${w * scale}x${h * scale} (it is ${img.naturalWidth}x${img.naturalHeight}).`
+      )
+    return { img, scale }
+  }
+
+  const chipSheet = catalog.spriteSheets.find((s) => s.id === 'chips')
+  if (chipSheet) {
+    const cols = chipSheet.cols ?? 1
+    const rows = chipSheet.rows ?? 1
+    const sheet = await readSheet(CHIPS_FILE, cols * chipSheet.px, rows * chipSheet.py)
+    if (sheet) {
+      const only = keysBySheet.get(CHIPS_FILE)
+      const edits: Record<number, string> = {}
+      chipSheet.cells.forEach((cell, index) => {
+        if (!cell.key || (only && !only.has(cell.key))) return
+        const url = cutCell(sheet.img, sheet.scale, index % cols, Math.floor(index / cols), chipSheet.px, chipSheet.py)
+        if (url) edits[index] = url
+      })
+      if (Object.keys(edits).length > 0) {
+        project.sheets.chips = edits
+        importedAny = true
+      }
+    }
+  }
+
+  const faces = await readSheet(CARDS_FILE, CARDS_SIZE.w, CARDS_SIZE.h)
+  if (faces) {
+    const url = cutCell(faces.img, faces.scale, 0, 0, CARDS_SIZE.w, CARDS_SIZE.h)
+    if (url) {
+      project.sheets.playing_cards = { 0: url }
+      importedAny = true
+    }
+  }
+
+  const sign = await readSheet(SHOP_SIGN_FILE, SHOP_SIGN.px * SHOP_SIGN.frames, SHOP_SIGN.py)
+  if (sign) {
+    const edits: Record<number, string> = {}
+    for (let f = 0; f < SHOP_SIGN.frames; f++) {
+      const url = cutCell(sign.img, sign.scale, f, 0, SHOP_SIGN.px, SHOP_SIGN.py)
+      if (url) edits[f] = url
+    }
+    if (Object.keys(edits).length > 0) {
+      project.sheets.shop_sign = edits
       importedAny = true
     }
   }

@@ -9,7 +9,7 @@
 // mod's main.lua: the launcher rejects any PNG whose size differs from vanilla.
 
 import { posFor } from './atlasOverrides'
-import { composeAtlas, type PlacedCell } from './image'
+import { composeAtlas, composeWhole, type PlacedCell } from './image'
 import { nestEdits } from './luaSerialize'
 import { type Catalog, objId, type ProjectState } from './types'
 import { createZip, type ZipEntry, zipText } from './zip'
@@ -36,6 +36,16 @@ export const RANKED_SHEETS: Record<string, RankedSheet> = {
   Tag: { file: 'tags', cols: 6, rows: 5 },
   Blind: { file: 'blinds', cols: 21, rows: 31 },
 }
+
+// Sheets that are not per-object categories. Keep in sync with FORMAT.md.
+//  - stakes: the stake chips, a partial sheet (reskin.json keys), via Malverk.
+//  - cards: playing card faces, one whole sheet (vanilla 8BitDeck.png).
+//  - shopsign: the shop sign animation strip (vanilla ShopSignAnimation.png).
+export const CHIPS_FILE = 'stakes'
+export const CARDS_FILE = 'cards'
+export const CARDS_SIZE = { w: 923, h: 380 } as const // 13x4 cells of 71x95
+export const SHOP_SIGN_FILE = 'shopsign'
+export const SHOP_SIGN = { px: 113, py: 57, frames: 4 } as const
 
 const LANG = /^[A-Za-z0-9_-]+$/
 
@@ -95,6 +105,82 @@ export async function generateRankedBundle(
     sheetCfg[spec.file] = { keys }
   }
 
+  // --- sheets that are not per-object categories (see WHOLE_SHEETS) ----------
+  // Stake chips: a partial sheet like the object categories (keys restrict it).
+  const chips = project.sheets.chips
+  const chipSheet = catalog.spriteSheets.find((s) => s.id === 'chips')
+  if (chips && chipSheet && Object.keys(chips).length > 0) {
+    const cols = chipSheet.cols ?? 1
+    const cells: PlacedCell[] = []
+    const keys: string[] = []
+    for (const [idxStr, dataUrl] of Object.entries(chips)) {
+      const index = Number(idxStr)
+      const key = chipSheet.cells[index]?.key
+      if (!key) continue
+      cells.push({ col: index % cols, row: Math.floor(index / cols), dataUrl })
+      keys.push(key)
+    }
+    if (keys.length > 0) {
+      for (const scale of [1, 2] as const) {
+        entries.push({
+          name: `assets/${scale}x/${CHIPS_FILE}.png`,
+          data: await composeAtlas({
+            cols,
+            rows: chipSheet.rows ?? 1,
+            px: chipSheet.px,
+            py: chipSheet.py,
+            scale,
+            cells,
+          }),
+        })
+      }
+      sheetCfg[CHIPS_FILE] = { keys }
+    }
+  }
+
+  // Playing card faces: one whole 13x4 image, replaced as a whole by the mod.
+  const faces = project.sheets.playing_cards?.[0]
+  if (faces) {
+    for (const scale of [1, 2] as const) {
+      entries.push({
+        name: `assets/${scale}x/${CARDS_FILE}.png`,
+        data: await composeWhole({
+          width: CARDS_SIZE.w * scale,
+          height: CARDS_SIZE.h * scale,
+          dataUrl: faces,
+        }),
+      })
+    }
+  }
+
+  // Shop sign: a strip of SHOP_SIGN.frames frames. The animation needs every
+  // frame, so a missing one repeats the last edited frame.
+  const sign = project.sheets.shop_sign
+  if (sign && Object.keys(sign).length > 0) {
+    const cells: PlacedCell[] = []
+    let last: string | undefined
+    for (let f = 0; f < SHOP_SIGN.frames; f++) {
+      const url = sign[f] ?? last
+      if (url) {
+        last = url
+        cells.push({ col: f, row: 0, dataUrl: url })
+      }
+    }
+    for (const scale of [1, 2] as const) {
+      entries.push({
+        name: `assets/${scale}x/${SHOP_SIGN_FILE}.png`,
+        data: await composeAtlas({
+          cols: SHOP_SIGN.frames,
+          rows: 1,
+          px: SHOP_SIGN.px,
+          py: SHOP_SIGN.py,
+          scale,
+          cells,
+        }),
+      })
+    }
+  }
+
   // --- localization: plain nested JSON (the mod merges it as data) -----------
   for (const [lang, edits] of Object.entries(project.loc)) {
     if (!edits || Object.keys(edits).length === 0) continue
@@ -126,9 +212,10 @@ export async function generateRankedBundle(
     warnings.push(`${skipped.shader} default shader(s) were left out (not supported in Ranked bundles).`)
   if (skipped.gif > 0)
     warnings.push(`${skipped.gif} animated GIF(s) were exported as their first frame only.`)
-  const sheetEdits = Object.values(project.sheets).some((s) => Object.keys(s).length > 0)
-  if (sheetEdits)
-    warnings.push('Playing card, chip and shop sign sheets were left out (not supported in Ranked bundles).')
+  if (project.sheets.playing_cards?.[0])
+    warnings.push(
+      'Playing card faces replace the whole 13x4 sheet: any cell you did not edit comes out blank.'
+    )
   if (project.options.icon) warnings.push('The mod-list icon was left out (the bundle is not a mod).')
 
   const safeName =
