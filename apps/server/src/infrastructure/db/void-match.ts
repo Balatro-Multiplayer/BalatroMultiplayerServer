@@ -276,7 +276,9 @@ export async function rebuildScope(
 	})
 	// After the commit, under the board lock again: the writes that waited on
 	// the rebuild get the lock first, so they have committed by now and Nakama
-	// isn't handed a board without them (but see the known gap above).
+	// isn't handed a board without them (but see the known gap above). A game
+	// Nakama rates while the push runs is still overwritten, as before: no
+	// lock here can stop Nakama, and admin_ratings_set has no compare-and-set.
 	const after = await db.transaction(async (tx) => {
 		await lockBoardForRewrite(tx, board)
 		return listScopeRatings(modId, gameMode, season.id, tx)
