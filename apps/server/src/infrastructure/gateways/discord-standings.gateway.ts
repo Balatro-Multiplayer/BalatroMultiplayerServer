@@ -2,9 +2,9 @@ import type { DiscordBotRating } from '@bmp/types'
 import { desc, inArray, lt, sql } from 'drizzle-orm'
 import { effectiveRating } from '../../features/ratings/effective-rating.js'
 import { PLACEMENT_GAMES } from '../../features/ratings/elo.js'
+import type { DbTransaction } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { players, seasons } from '../db/schema.js'
-import type { Tx } from './rating.gateway.js'
 import { leaderboardOrder } from './stats.gateway.js'
 
 // Reads for the Discord rank-role bot (features/discord-bot).
@@ -40,7 +40,7 @@ export interface BoardReads {
 	topPlayerIds(board: BoardSeason, n: number): Promise<string[]>
 }
 
-function boardReads(tx: Tx): BoardReads {
+function boardReads(tx: DbTransaction): BoardReads {
 	return {
 		async boardRatings(board, playerIds) {
 			if (playerIds.length === 0) return new Map()
