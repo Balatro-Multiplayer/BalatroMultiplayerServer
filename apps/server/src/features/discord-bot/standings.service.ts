@@ -98,7 +98,9 @@ export function createStandingsService(deps: StandingsDeps) {
 			req: DiscordBotChangesRequest,
 		): Promise<DiscordBotChangesAnswer> {
 			// Taken before the reads, so a write committing during them is
-			// still after the next call's `since`.
+			// still after the next call's `since`. The API's clock against the
+			// DB's clock_timestamp() stamps: one host, one clock
+			// (docker-compose.yml runs both).
 			const cursor = new Date(deps.now().getTime() - CHANGES_OVERLAP_MS)
 			const season = await currentSeason()
 			const board = {
