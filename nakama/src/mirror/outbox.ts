@@ -31,6 +31,9 @@ export type MirrorEntry =
 	  }
 	// A player accepted the Notice (player/session.ts rpcTosAccept); at is when.
 	| { kind: 'notice'; at: number; userId: string; version: number }
+	// A timed ban's clock started (moderation/enforce.ts startPendingBans): the
+	// API stores its end. Nakama holds the clock; Postgres only records it.
+	| { kind: 'ban_started'; at: number; banId: string; expiresAt: number }
 	// A player contested the started game (mpapi_contest); the run is not over yet.
 	| {
 			kind: 'contest'
@@ -153,7 +156,15 @@ export interface PulledContest {
 	lobbyKind: LobbyKind
 }
 
-export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice | PulledContest
+export interface PulledBanStarted {
+	key: string
+	kind: 'ban_started'
+	at: number
+	banId: string
+	expiresAt: number
+}
+
+export type PulledEntry = PulledRun | PulledChat | PulledForfeit | PulledNotice | PulledContest | PulledBanStarted
 
 function expandRun(nk: nkruntime.Nakama, key: string, entry: Extract<MirrorEntry, { kind: 'run' }>): PulledRun | null {
 	const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }])
@@ -220,6 +231,8 @@ export function pullEntries(
 			entries.push({ key: object.key, kind: 'chat', at: entry.at, line: entry.line })
 		} else if (entry.kind === 'forfeit' || entry.kind === 'notice') {
 			userIds[entry.userId] = true
+			entries.push({ key: object.key, ...entry })
+		} else if (entry.kind === 'ban_started') {
 			entries.push({ key: object.key, ...entry })
 		} else if (entry.kind === 'contest') {
 			userIds[entry.by] = true

@@ -119,9 +119,24 @@ function readU16(b: Uint8Array, o: number) {
   return b[o]! | (b[o + 1]! << 8)
 }
 
-/** Read a STORE-method ZIP into a name->bytes map. Deflated entries are skipped. */
+/** Read a STORE-method ZIP into a name->bytes map. Deflated entries are skipped; ZIP64 and duplicate names are refused. */
 export function readZip(buf: Uint8Array): Map<string, Uint8Array> {
+  return readZipChecked(buf).files
+}
+
+export const ZIP_MAX_ENTRIES = 2000
+export const ZIP_MAX_TOTAL = 512 * 1024 * 1024
+
+/** Like readZip, but also reports skipped (compressed) and symlink entries, and enforces entry/size caps. */
+export function readZipChecked(buf: Uint8Array): {
+  files: Map<string, Uint8Array>
+  unsupported: number
+  symlinks: number
+} {
   const out = new Map<string, Uint8Array>()
+  let unsupported = 0
+  let symlinks = 0
+  let total = 0
   // locate EOCD by scanning backwards for its signature
   let eocd = -1
   for (let i = buf.length - 22; i >= 0; i--) {
@@ -134,9 +149,20 @@ export function readZip(buf: Uint8Array): Map<string, Uint8Array> {
 
   const count = readU16(buf, eocd + 10)
   let p = readU32(buf, eocd + 16) // central directory offset
+  // ZIP64 keeps the real counts and offsets in records this reader does not parse,
+  // so reading it as a plain ZIP would use wrong offsets.
+  const zip64Locator = eocd >= 20 && readU32(buf, eocd - 20) === 0x07064b50
+  if (zip64Locator || count === 0xffff || p === 0xffffffff)
+    throw new Error('ZIP64 archives are not supported.')
+  if (count > ZIP_MAX_ENTRIES) throw new Error('This ZIP has too many entries.')
+  const seen = new Set<string>()
 
   for (let i = 0; i < count; i++) {
     if (readU32(buf, p) !== 0x02014b50) break
+    const madeByHost = buf[p + 5]!
+    const unixMode = readU32(buf, p + 38) >>> 16
+    const isSymlink = madeByHost === 3 && (unixMode & 0xf000) === 0xa000
+    const uncompSize = readU32(buf, p + 24)
     const method = readU16(buf, p + 10)
     const compSize = readU32(buf, p + 20)
     const nameLen = readU16(buf, p + 28)
@@ -144,17 +170,27 @@ export function readZip(buf: Uint8Array): Map<string, Uint8Array> {
     const commentLen = readU16(buf, p + 32)
     const localOff = readU32(buf, p + 42)
     const name = dec.decode(buf.subarray(p + 46, p + 46 + nameLen))
+    if (compSize === 0xffffffff || uncompSize === 0xffffffff || localOff === 0xffffffff)
+      throw new Error('ZIP64 archives are not supported.')
+    // Two entries with one name would let the later one silently replace the earlier.
+    if (seen.has(name)) throw new Error(`This ZIP has two entries named ${name}.`)
+    seen.add(name)
 
     // jump to local header to find the data start
     const lhNameLen = readU16(buf, localOff + 26)
     const lhExtraLen = readU16(buf, localOff + 28)
     const dataStart = localOff + 30 + lhNameLen + lhExtraLen
-    if (method === 0) {
+    if (isSymlink) symlinks++
+    else if (method === 0) {
+      if (dataStart + compSize > buf.length) throw new Error('Corrupt ZIP entry.')
+      // Count the bytes actually read, not the size the archive claims.
+      total += compSize
+      if (total > ZIP_MAX_TOTAL) throw new Error('This ZIP is too large when uncompressed.')
       out.set(name, buf.subarray(dataStart, dataStart + compSize))
-    }
+    } else unsupported++
     p += 46 + nameLen + extraLen + commentLen
   }
-  return out
+  return { files: out, unsupported, symlinks }
 }
 
 export const zipText = (s: string) => enc.encode(s)

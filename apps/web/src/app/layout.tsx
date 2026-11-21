@@ -1,9 +1,9 @@
 import '@/styles/globals.css'
-import { RootProvider } from 'fumadocs-ui/provider/next'
 import type { Metadata } from 'next'
 import localFont from 'next/font/local'
 import { NuqsAdapter } from 'nuqs/adapters/next/app'
 import { BalatroBackground } from '@/components/balatro-background'
+import { FumadocsProvider } from '@/components/fumadocs-provider'
 import { QueryProvider } from '@/components/query-provider'
 import { Toaster } from '@/components/ui/sonner'
 
@@ -52,9 +52,7 @@ export default function RootLayout({
           <Toaster />
           <QueryProvider>
             <NuqsAdapter>
-              {/* Dark-only site: disable next-themes so the hardcoded `dark`
-                  class on <html> always wins (no theme switching). */}
-              <RootProvider theme={{ enabled: false }}>{children}</RootProvider>
+              <FumadocsProvider>{children}</FumadocsProvider>
             </NuqsAdapter>
           </QueryProvider>
         </div>

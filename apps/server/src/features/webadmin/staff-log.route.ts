@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { listStaffLog } from '../../infrastructure/gateways/staff-log.gateway.js'
+import { listStaffLog, ratingChangesOfEntry } from '../../infrastructure/gateways/staff-log.gateway.js'
 import { type StaffAction, isStaffAction } from '../../shared/staff-log/actions.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { MAX_PAGE, queryInt } from '../../shared/utils/query-int.js'
@@ -52,6 +52,21 @@ router.get('/staff-log', async (req, res, next) => {
 			limit,
 		})
 		res.json({ entries, total, page, limit, pages: Math.ceil(total / limit) })
+	} catch (err) {
+		next(err)
+	}
+})
+
+// A Season replay apply's per-player rating changes, which the list leaves out.
+router.get('/staff-log/:id/rating-changes', async (req, res, next) => {
+	try {
+		const staff = await staffOf(req)
+		if (!staff || staff.role !== 'admin') throw new AppError('Forbidden', 403)
+		const id = Number(req.params.id)
+		if (!Number.isSafeInteger(id) || id < 1) throw new AppError('Invalid entry id', 400)
+		const changes = await ratingChangesOfEntry(id)
+		if (!changes) throw new AppError('This entry has no rating changes', 404)
+		res.json({ changes })
 	} catch (err) {
 		next(err)
 	}

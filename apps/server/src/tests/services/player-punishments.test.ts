@@ -27,6 +27,7 @@ describe('buildPunishmentList', () => {
 				startsAt: day(-1).toISOString(),
 				endsAt: day(7).toISOString(),
 				permanent: false,
+				startsOnLogin: false,
 				status: 'active',
 				reason: 'Spam',
 				appeal: null,
@@ -40,6 +41,16 @@ describe('buildPunishmentList', () => {
 	it('marks a ban with no end as permanent', () => {
 		const [p] = buildPunishmentList([ban({ banType: 'account', expiresAt: null }) as any], [], NOW)
 		expect(p).toMatchObject({ type: 'account_ban', endsAt: null, permanent: true, status: 'active' })
+	})
+
+	it('says a timed ban starts at the next login until the clock has started', () => {
+		const [p] = buildPunishmentList([ban({ expiresAt: null, durationMs: 86_400_000 }) as any], [], NOW)
+		expect(p).toMatchObject({ endsAt: null, permanent: false, startsOnLogin: true, status: 'active' })
+	})
+
+	it('shows the real start and end of a ban once its clock has started', () => {
+		const [p] = buildPunishmentList([ban({ expiresAt: day(1), durationMs: 86_400_000 }) as any], [], NOW)
+		expect(p).toMatchObject({ startsAt: NOW.toISOString(), endsAt: day(1).toISOString(), startsOnLogin: false })
 	})
 
 	it('marks an ended ban and a lifted ban', () => {

@@ -1,5 +1,6 @@
 'use client'
 
+import { banEndText } from '@/lib/ban-end'
 import {
   DecisionBar,
   useDecisionBar,
@@ -286,7 +287,7 @@ export function QueueDecisionBar({
               options={bans.map((b) => ({
                 value: b.id,
                 label: `${b.banType} · ${
-                  b.expiresAt ? `until ${formatTime(b.expiresAt)}` : 'permanent'
+                  b.expiresAt ? `until ${formatTime(b.expiresAt)}` : banEndText(b, formatTime)
                 }`,
               }))}
             />

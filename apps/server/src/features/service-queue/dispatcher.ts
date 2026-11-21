@@ -8,6 +8,7 @@
 import type { MatchEditSummary } from '../ratings/match-edit.service.js'
 import { heldByOther } from './claim.js'
 import { type QueueCommand, type SanctionCommand, banTypeOf, parseCommand, presetOf } from './command.js'
+import { clockedBan } from '../webadmin/ban-clock.js'
 import { expiresAtOf } from './durations.js'
 import { type ChatLabel, type DismissLabel, labelOfAction } from './flagged-chat.js'
 import { type OverturnPlan, type Placement, planContestOverturn, planOverturn, ratedPlacements } from './overturn.js'
@@ -52,6 +53,8 @@ export interface BanRow {
 	playerId: string
 	banType: 'chat' | 'queue' | 'account' | 'username'
 	expiresAt: Date | null
+	// The length of a timed ban; its end is set when the player is first told.
+	durationMs: number | null
 	reason: string
 	issuedBy: string
 	issuedAt: Date
@@ -106,7 +109,7 @@ export interface DispatcherDeps<Tx> {
 	): Promise<void>
 	insertBan(
 		tx: Tx,
-		ban: { playerId: string; banType: BanRow['banType']; expiresAt: Date | null; issuedBy: string; reason: string },
+		ban: { playerId: string; banType: BanRow['banType']; expiresAt: Date | null; durationMs: number | null; issuedBy: string; reason: string },
 	): Promise<BanRow>
 	liftBan(tx: Tx, playerId: string, banId: string, liftedBy: string): Promise<BanRow | null>
 	// The staff log write (shared/staff-log/actions.ts), in the action's transaction.
@@ -445,7 +448,8 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 		const target = await targetFor(item, command.targetPlayerId)
 		const banType = banTypeOf(command)
 		const duration = command.action === 'username_ban' ? 'permanent' : command.duration
-		const expiresAt = expiresAtOf(duration, now)
+		// A timed ban keeps its length; its end is set when the player is told.
+		const { expiresAt, durationMs } = clockedBan(banType, expiresAtOf(duration, now), now)
 		// An account ban and a username ban are on no ladder.
 		const strike =
 			command.action === 'account_ban' || command.action === 'username_ban'
@@ -464,6 +468,7 @@ export function createDispatcher<Tx>(deps: DispatcherDeps<Tx>) {
 				playerId: target.playerId,
 				banType,
 				expiresAt,
+				durationMs,
 				issuedBy: actor,
 				reason: command.reason,
 			})

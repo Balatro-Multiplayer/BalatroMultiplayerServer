@@ -57,9 +57,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
 ));
 var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js
 var require_Char = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Char.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.isHighSurrogate = isHighSurrogate;
@@ -107,9 +107,9 @@ var require_Char = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js
 var require_BuiltinStrategies = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/BuiltinStrategies.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.keepStartCensorStrategy = keepStartCensorStrategy2;
@@ -171,9 +171,9 @@ var require_BuiltinStrategies = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js
 var require_Interval = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/Interval.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareIntervals = compareIntervals;
@@ -191,9 +191,9 @@ var require_Interval = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js
 var require_MatchPayload = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/MatchPayload.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.compareMatchByPositionAndId = compareMatchByPositionAndId2;
@@ -207,9 +207,9 @@ var require_MatchPayload = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js
 var require_TextCensor = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/censor/TextCensor.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TextCensor = void 0;
@@ -300,9 +300,9 @@ var require_TextCensor = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js
 var require_BlacklistedTerm = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/BlacklistedTerm.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.assignIncrementingIds = assignIncrementingIds2;
@@ -313,9 +313,9 @@ var require_BlacklistedTerm = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js
 var require_DataSet = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/dataset/DataSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.PhraseBuilder = exports.DataSet = void 0;
@@ -482,17 +482,17 @@ var require_DataSet = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js
 var require_Matcher = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/Matcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js
 var require_Nodes = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Nodes.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.SyntaxKind = void 0;
@@ -506,9 +506,9 @@ var require_Nodes = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js
 var require_Util = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Util.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.potentiallyMatchesEmptyString = potentiallyMatchesEmptyString;
@@ -549,9 +549,9 @@ var require_Util = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js
 var require_TransformerSet = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/TransformerSet.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.TransformerSet = void 0;
@@ -591,9 +591,9 @@ var require_TransformerSet = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js
 var require_CharacterIterator = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/util/CharacterIterator.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CharacterIterator = void 0;
@@ -656,9 +656,9 @@ var require_CharacterIterator = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js
 var require_IntervalCollection = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/IntervalCollection.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.IntervalCollection = void 0;
@@ -700,9 +700,9 @@ var require_IntervalCollection = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js
 var require_RegExpMatcher = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/matcher/regexp/RegExpMatcher.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.RegExpMatcher = void 0;
@@ -878,9 +878,9 @@ var require_RegExpMatcher = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js
 var require_ParserError = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/ParserError.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.ParserError = void 0;
@@ -905,9 +905,9 @@ var require_ParserError = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js
 var require_Parser = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Parser.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.Parser = void 0;
@@ -1099,9 +1099,9 @@ var require_Parser = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js
 var require_Pattern = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/pattern/Pattern.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.pattern = pattern2;
@@ -1122,9 +1122,9 @@ var require_Pattern = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js
 var require_Transformers = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/Transformers.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.createSimpleTransformer = createSimpleTransformer2;
@@ -1138,9 +1138,9 @@ var require_Transformers = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js
 var require_transformer = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/transformer.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.CollapseDuplicatesTransformer = void 0;
@@ -1172,9 +1172,9 @@ var require_transformer = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js
 var require_collapse_duplicates = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/collapse-duplicates/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.collapseDuplicatesTransformer = collapseDuplicatesTransformer2;
@@ -1198,9 +1198,9 @@ var require_collapse_duplicates = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js
 var require_remap_characters = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/remap-characters/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.remapCharactersTransformer = remapCharactersTransformer2;
@@ -1228,9 +1228,9 @@ var require_remap_characters = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js
 var require_confusables = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/confusables.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.confusables = void 0;
@@ -1308,9 +1308,9 @@ var require_confusables = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js
 var require_resolve_confusables = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-confusables/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveConfusablesTransformer = resolveConfusablesTransformer2;
@@ -1322,9 +1322,9 @@ var require_resolve_confusables = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js
 var require_dictionary = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/dictionary.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.dictionary = void 0;
@@ -1343,9 +1343,9 @@ var require_dictionary = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js
 var require_resolve_leetspeak = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/resolve-leetspeak/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.resolveLeetSpeakTransformer = resolveLeetSpeakTransformer2;
@@ -1357,9 +1357,9 @@ var require_resolve_leetspeak = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js
 var require_to_ascii_lowercase = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/to-ascii-lowercase/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.toAsciiLowerCaseTransformer = toAsciiLowerCaseTransformer2;
@@ -1371,9 +1371,9 @@ var require_to_ascii_lowercase = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js
 var require_english = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/preset/english.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.englishDataset = exports.englishRecommendedTransformers = exports.englishRecommendedWhitelistMatcherTransformers = exports.englishRecommendedBlacklistMatcherTransformers = void 0;
@@ -1423,9 +1423,9 @@ var require_english = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js
 var require_skip_non_alphabetic = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/transformer/skip-non-alphabetic/index.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.skipNonAlphabeticTransformer = skipNonAlphabeticTransformer2;
@@ -1437,9 +1437,9 @@ var require_skip_non_alphabetic = __commonJS({
   }
 });
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js
 var require_dist = __commonJS({
-  "../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
+  "../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.js"(exports) {
     "use strict";
     var __createBinding = exports && exports.__createBinding || (Object.create ? (function(o, m, k, k2) {
       if (k2 === void 0) k2 = k;
@@ -1776,21 +1776,33 @@ function isBanType(value) {
 }
 function isBan(value) {
   const b = value;
-  return typeof b === "object" && b !== null && typeof b.banId === "string" && typeof b.reason === "string" && (b.expiresAt === null || typeof b.expiresAt === "number" && Number.isFinite(b.expiresAt));
+  return typeof b === "object" && b !== null && typeof b.banId === "string" && typeof b.reason === "string" && (b.expiresAt === null || typeof b.expiresAt === "number" && Number.isFinite(b.expiresAt)) && (b.durationMs === void 0 || typeof b.durationMs === "number" && Number.isFinite(b.durationMs));
+}
+function isPending(ban) {
+  return ban.expiresAt === null && typeof ban.durationMs === "number";
+}
+function startedAt(ban, now) {
+  return isPending(ban) ? __spreadProps(__spreadValues({}, ban), { expiresAt: now + ban.durationMs }) : ban;
 }
 function activeBan(bans, type, now) {
   const ban = bans[type];
   if (!ban) return null;
   return ban.expiresAt === null || ban.expiresAt > now ? ban : null;
 }
-function longer(a, b) {
-  if (!a) return b;
-  if (a.expiresAt === null) return a;
-  if (b.expiresAt === null) return b;
-  return b.expiresAt > a.expiresAt ? b : a;
+function endOf(ban, now) {
+  return isPending(ban) ? now + ban.durationMs : ban.expiresAt;
 }
-function withBan(bans, type, ban) {
-  return __spreadProps(__spreadValues({}, bans), { [type]: longer(bans[type], ban) });
+function longer(a, b, now) {
+  if (!a) return b;
+  if (a.banId === b.banId) return isPending(b) && a.expiresAt !== null ? a : b;
+  const endA = endOf(a, now);
+  const endB = endOf(b, now);
+  if (endA === null) return a;
+  if (endB === null) return b;
+  return endB > endA ? b : a;
+}
+function withBan(bans, type, ban, now = Date.now()) {
+  return __spreadProps(__spreadValues({}, bans), { [type]: longer(bans[type], ban, now) });
 }
 function withoutBan(bans, banId) {
   const next = {};
@@ -1815,6 +1827,7 @@ function bansFromList(list) {
   let bans = {};
   for (const entry of list) {
     const ban = { banId: entry.banId, expiresAt: entry.expiresAt, reason: entry.reason };
+    if (typeof entry.durationMs === "number") ban.durationMs = entry.durationMs;
     if (isBanType(entry.type) && isBan(ban)) bans = withBan(bans, entry.type, ban);
   }
   return bans;
@@ -3049,6 +3062,8 @@ function pullEntries(nk, limit) {
       entries.push({ key: object.key, kind: "chat", at: entry.at, line: entry.line });
     } else if (entry.kind === "forfeit" || entry.kind === "notice") {
       userIds[entry.userId] = true;
+      entries.push(__spreadValues({ key: object.key }, entry));
+    } else if (entry.kind === "ban_started") {
       entries.push(__spreadValues({ key: object.key }, entry));
     } else if (entry.kind === "contest") {
       userIds[entry.by] = true;
@@ -5713,6 +5728,16 @@ function showNameChange(nk, logger, userId) {
   renameLeaderboardEntries(nk, logger, userId, shownNameOf(nk, userId, stored.profile));
 }
 
+// src/moderation/online.ts
+var NOTIFICATIONS_STREAM = 0;
+function isOnline(nk, userId) {
+  try {
+    return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 // src/moderation/enforce.ts
 var BAN_INDEX_COLLECTION = "ban_index";
 var BAN_INDEX_CUSTOM_PREFIX = "custom:";
@@ -5762,14 +5787,40 @@ function enforceAccountBan(nk, userId, ban) {
   removeFromLobby(nk, userId, "banned", false);
   nk.usersBanId([userId]);
 }
-function applyBan(nk, logger, userId, type, ban) {
-  var _a;
+function startPendingBans(nk, userId, now) {
   const before = readBans(nk, userId);
-  const bans = withBan(before, type, ban);
+  const after = {};
+  const started = [];
+  for (const type of BAN_TYPES) {
+    const ban = before[type];
+    if (!ban) continue;
+    if (!isPending(ban)) {
+      after[type] = ban;
+      continue;
+    }
+    const next = startedAt(ban, now);
+    after[type] = next;
+    started.push({ banId: next.banId, expiresAt: next.expiresAt });
+  }
+  if (started.length === 0) return before;
+  writeBans(nk, userId, after);
+  for (const s of started) enqueue(nk, __spreadValues({ kind: "ban_started", at: now }, s));
+  if (after.account && before.account !== after.account) writeIndex(nk, userId, after.account);
+  return after;
+}
+function applyBan(nk, logger, userId, type, banIn) {
+  var _a, _b;
+  const before = readBans(nk, userId);
+  let bans = withBan(before, type, banIn);
   writeBans(nk, userId, bans);
+  let ban = banIn;
+  if (type !== "username" && isPending(bans[type]) && isOnline(nk, userId)) {
+    bans = startPendingBans(nk, userId, Date.now());
+    if (((_a = bans[type]) == null ? void 0 : _a.banId) === banIn.banId) ban = bans[type];
+  }
   if (type === "username") {
     showNameChange(nk, logger, userId);
-    if (((_a = before.username) == null ? void 0 : _a.banId) !== ban.banId)
+    if (((_b = before.username) == null ? void 0 : _b.banId) !== ban.banId)
       sendNotification(nk, userId, NotificationKind.USERNAME_BANNED, { banName: banNameOf(userId) });
   } else pushBan(nk, userId, type, ban);
   if (type === "queue") removeFromLobby(nk, userId, "banned", true);
@@ -5822,6 +5873,10 @@ function checkLoginBan(nk, logger, key, now) {
   const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }]);
   if (objects.length === 0) return;
   const entry = objects[0].value;
+  if (isPending(entry.ban) && accountExists(nk, entry.userId)) {
+    const started = startPendingBans(nk, entry.userId, now).account;
+    if (started && started.banId === entry.ban.banId) entry.ban = started;
+  }
   if (activeBan({ account: entry.ban }, "account", now))
     throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban));
   if (!accountExists(nk, entry.userId)) {
@@ -6182,6 +6237,7 @@ function rpcSessionInit(ctx, logger, nk, payload) {
     writeBans(nk, userId, bans);
     logger.info("Synced player %s from Postgres player %s", userId, sync.playerId);
   }
+  startPendingBans(nk, userId, Date.now());
   const accountBan = activeBan(readBans(nk, userId), "account", Date.now());
   if (accountBan) {
     enforceAccountBan(nk, userId, accountBan);
@@ -7208,7 +7264,7 @@ function partitionTeams(groups) {
 var QUEUE_COLLECTION = "queue_presence";
 var LIST_PAGE4 = 100;
 var MATCH_LIST_LIMIT = 100;
-var NOTIFICATIONS_STREAM = 0;
+var NOTIFICATIONS_STREAM2 = 0;
 var TOMBSTONE_MS = 6e4;
 var MOD_ID_PATTERN3 = /^[A-Za-z0-9_.-]{1,64}$/;
 function recordKey(modId, gameMode) {
@@ -7325,7 +7381,7 @@ function writeGroupRecords(nk, record, members) {
   );
 }
 function sessionsOf(nk, userId) {
-  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM, subject: userId }, true, true).map((p) => p.sessionId);
+  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM2, subject: userId }, true, true).map((p) => p.sessionId);
 }
 function liveTicketHolders(nk, userIds, exceptTicket) {
   return userIds.filter((userId) => {
@@ -7560,16 +7616,16 @@ function requeuePartiesOf(nk, partyIds) {
 }
 
 // src/standing/changed.ts
-var NOTIFICATIONS_STREAM2 = 0;
+var NOTIFICATIONS_STREAM3 = 0;
 var RANKED_PREFIX = "ranked:";
-function isOnline(nk, userId) {
-  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM2, subject: userId }, true, true).length > 0;
+function isOnline2(nk, userId) {
+  return nk.streamUserList({ mode: NOTIFICATIONS_STREAM3, subject: userId }, true, true).length > 0;
 }
 function announceStandings(nk, settings, now) {
   const config = readConfig(nk);
   let told = 0;
   for (const userId of reporterIds(nk)) {
-    if (!isOnline(nk, userId)) continue;
+    if (!isOnline2(nk, userId)) continue;
     const view2 = standingFor(nk, settings, userId, now, config);
     notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view2));
     pushToLobby(nk, userId, { standing: view2.standing });
@@ -7736,7 +7792,7 @@ function rpcAdminPing(ctx, logger, nk, payload) {
   const reply = callExpress(nk, logger, ctx.env, "/ping", {});
   return JSON.stringify({ ok: true, express: reply !== null && reply.status === 200 });
 }
-function isOnline2(nk, userId) {
+function isOnline3(nk, userId) {
   try {
     return nk.streamUserList({ mode: 0, subject: userId }).length > 0;
   } catch (e) {
@@ -7758,7 +7814,7 @@ function rpcAdminNotify(ctx, logger, nk, payload) {
     content,
     input.persistent === true
   );
-  return JSON.stringify({ online: isOnline2(nk, input.userId) });
+  return JSON.stringify({ online: isOnline3(nk, input.userId) });
 }
 function rpcAdminConfigSet(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -7797,7 +7853,10 @@ function rpcAdminBanApply(ctx, logger, nk, payload) {
   const expiresAt = parseExpiresAt(input.expiresAt);
   if (expiresAt === void 0) throw runtimeError(INVALID_ARGUMENT, "expiresAt must be a time or null");
   const reason = typeof input.reason === "string" ? input.reason : "";
-  const bans = applyBan(nk, logger, userId, input.type, { banId: input.banId, expiresAt, reason });
+  const ban = { banId: input.banId, expiresAt, reason };
+  if (typeof input.durationMs === "number" && Number.isFinite(input.durationMs) && input.durationMs > 0)
+    ban.durationMs = input.durationMs;
+  const bans = applyBan(nk, logger, userId, input.type, ban);
   if (bans.account && banNetworks(nk, settingsOf(ctx), userId, bans.account, Date.now()))
     logger.info("Network ban %s from %s", bans.account.banId, userId);
   return JSON.stringify({ bans });
@@ -10472,7 +10531,7 @@ function callModeration(nk, logger, env, request) {
   }
 }
 
-// ../../../../home/virtualized/Projects/BMP-Core/BalatroMultiplayerServer/node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
+// ../node_modules/.pnpm/obscenity@0.4.6/node_modules/obscenity/dist/index.mjs
 var import_index = __toESM(require_dist(), 1);
 var DataSet = import_index.default.DataSet;
 var ParserError = import_index.default.ParserError;
@@ -11516,10 +11575,10 @@ function rpcAdminRunTellVoided(ctx, logger, nk, payload) {
 var LIST_PAGE7 = 100;
 var LIST_PAGES_PER_CALL = 10;
 var FOLD_MAX_RUNS = 100;
-function isReplayable(run, startedAt) {
-  return !!run.rankedMode && (run.status === "agreed" || run.status === "partial") && run.endedAt >= startedAt;
+function isReplayable(run, startedAt2) {
+  return !!run.rankedMode && (run.status === "agreed" || run.status === "partial") && run.endedAt >= startedAt2;
 }
-function listRuns(nk, startedAt, cursor) {
+function listRuns(nk, startedAt2, cursor) {
   const runs = [];
   let next = cursor;
   for (let pages = 0; pages < LIST_PAGES_PER_CALL; pages++) {
@@ -11531,7 +11590,7 @@ function listRuns(nk, startedAt, cursor) {
     );
     for (const o of page.objects || []) {
       const run = o.value;
-      if (isReplayable(run, startedAt))
+      if (isReplayable(run, startedAt2))
         runs.push({ runId: run.runId, endedAt: run.endedAt });
     }
     next = page.cursor || "";
@@ -11613,14 +11672,14 @@ function foldRun(nk, run, state, season) {
 }
 function rpcAdminRatingsReplayList(ctx, _logger, nk, payload) {
   requireServer(ctx);
-  const { startedAt, cursor } = parsePayload(payload);
-  if (typeof startedAt !== "number" || !Number.isFinite(startedAt))
+  const { startedAt: startedAt2, cursor } = parsePayload(payload);
+  if (typeof startedAt2 !== "number" || !Number.isFinite(startedAt2))
     throw runtimeError(INVALID_ARGUMENT, "startedAt is required");
   if (cursor !== void 0 && typeof cursor !== "string")
     throw runtimeError(INVALID_ARGUMENT, "cursor must be a string");
   try {
     return JSON.stringify(
-      listRuns(nk, startedAt, cursor || "")
+      listRuns(nk, startedAt2, cursor || "")
     );
   } catch (e) {
     if (cursor) throw runtimeError(INVALID_ARGUMENT, "Invalid cursor");
@@ -11958,7 +12017,7 @@ function anonymizeMirror(nk, userId, anonymousId) {
   const deletes = [];
   for (const o of listAll(nk, SYSTEM_USER_ID, MIRROR_COLLECTION)) {
     const entry = o.value;
-    const owner = entry.kind === "chat" ? entry.line.userId : entry.kind === "run" ? null : entry.kind === "contest" ? entry.by === userId || entry.against === userId ? userId : null : entry.userId;
+    const owner = entry.kind === "chat" ? entry.line.userId : entry.kind === "run" || entry.kind === "ban_started" ? null : entry.kind === "contest" ? entry.by === userId || entry.against === userId ? userId : null : entry.userId;
     if (owner !== userId) continue;
     const own = entry.kind === "notice" || entry.kind === "chat" && !entry.line.flagged;
     if (own) {

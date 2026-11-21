@@ -8,6 +8,7 @@ export interface Punishment {
   startsAt: string
   endsAt: string | null
   permanent: boolean
+  startsOnLogin: boolean
   status: 'active' | 'ended' | 'lifted'
   reason: string
   // The latest appeal of this punishment, and whether another can be made now.
@@ -63,5 +64,6 @@ export const STATUS_LABEL: Record<Punishment['status'], string> = {
 export function endText(p: Punishment, format: (iso: string) => string): string {
   if (p.type === 'warning') return 'No end'
   if (p.permanent) return 'Permanent'
+  if (p.startsOnLogin) return 'Starts when you next log in'
   return p.endsAt ? format(p.endsAt) : 'Permanent'
 }

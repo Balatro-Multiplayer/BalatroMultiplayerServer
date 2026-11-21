@@ -1,4 +1,5 @@
 // Pure wording for the queue: labels, durations, ages, and who someone is.
+import { STARTS_ON_LOGIN } from '@/lib/ban-end'
 import type {
   ActionEffects,
   ActionKey,
@@ -163,7 +164,9 @@ export function effectsText(action: ActionKey, effects: ActionEffects): string {
     parts.push(
       effects.ban.expiresAt
         ? `Ban until ${new Date(effects.ban.expiresAt).toLocaleString()}.`
-        : 'Permanent ban.'
+        : effects.ban.durationMs
+          ? `Ban ${STARTS_ON_LOGIN}.`
+          : 'Permanent ban.'
     )
   if (effects.liftedBan) parts.push('Ban lifted.')
   if (effects.voided)

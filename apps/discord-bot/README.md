@@ -79,7 +79,7 @@ a boundary, and this catches them.
 - Ticks skip while a sweep runs; the sweep stays as the safety net (new
   links, decay, missed ticks, a player whose only match was voided). A sweep
   that fails keeps the last links.
-- The poll uses the `mmr_updated_idx` index (migration 0076).
+- The poll uses the `mmr_updated_idx` index (migration 0077).
 - Off in dry run, since each sweep already logs the whole plan.
 
 Safety:

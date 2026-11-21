@@ -9,8 +9,13 @@ export type BanType = (typeof BAN_TYPES)[number]
 
 export interface Ban {
 	banId: string
-	// Epoch ms, or null for a permanent ban.
+	// Epoch ms, or null for a permanent ban or a timed ban whose clock has not
+	// started yet (see isPending).
 	expiresAt: number | null
+	// The length of a timed ban. A timed chat, queue or account ban has no end
+	// until the player is first told; startedAt then sets expiresAt to now plus
+	// this. A permanent ban has none.
+	durationMs?: number
 	reason: string
 }
 
@@ -27,8 +32,20 @@ export function isBan(value: unknown): value is Ban {
 		b !== null &&
 		typeof b.banId === 'string' &&
 		typeof b.reason === 'string' &&
-		(b.expiresAt === null || (typeof b.expiresAt === 'number' && Number.isFinite(b.expiresAt)))
+		(b.expiresAt === null || (typeof b.expiresAt === 'number' && Number.isFinite(b.expiresAt))) &&
+		(b.durationMs === undefined || (typeof b.durationMs === 'number' && Number.isFinite(b.durationMs)))
 	)
+}
+
+// A timed ban whose clock has not started. It is enforced like a permanent one
+// until it starts.
+export function isPending(ban: Ban): boolean {
+	return ban.expiresAt === null && typeof ban.durationMs === 'number'
+}
+
+// The ban with its clock started at `now`: it runs its full length from there.
+export function startedAt(ban: Ban, now: number): Ban {
+	return isPending(ban) ? { ...ban, expiresAt: now + (ban.durationMs as number) } : ban
 }
 
 // The ban of that type still in force at `now`, or null.
@@ -38,18 +55,28 @@ export function activeBan(bans: Bans, type: BanType, now: number): Ban | null {
 	return ban.expiresAt === null || ban.expiresAt > now ? ban : null
 }
 
-// The ban that lasts longer: a permanent one, else the later expiry.
-function longer(a: Ban | undefined, b: Ban): Ban {
+// When a ban would end if it counted from `now`; null for a permanent one.
+function endOf(ban: Ban, now: number): number | null {
+	return isPending(ban) ? now + (ban.durationMs as number) : ban.expiresAt
+}
+
+// The ban that lasts longer: a permanent one, else the later end. A repeat of
+// the stored ban (same id) replaces it, except a repeat that has not started
+// never undoes a start.
+function longer(a: Ban | undefined, b: Ban, now: number): Ban {
 	if (!a) return b
-	if (a.expiresAt === null) return a
-	if (b.expiresAt === null) return b
-	return b.expiresAt > a.expiresAt ? b : a
+	if (a.banId === b.banId) return isPending(b) && a.expiresAt !== null ? a : b
+	const endA = endOf(a, now)
+	const endB = endOf(b, now)
+	if (endA === null) return a
+	if (endB === null) return b
+	return endB > endA ? b : a
 }
 
 // Several bans of a type can be active at once in Postgres; Nakama keeps the
 // one that lasts longest.
-export function withBan(bans: Bans, type: BanType, ban: Ban): Bans {
-	return { ...bans, [type]: longer(bans[type], ban) }
+export function withBan(bans: Bans, type: BanType, ban: Ban, now: number = Date.now()): Bans {
+	return { ...bans, [type]: longer(bans[type], ban, now) }
 }
 
 // bans with the given ban (by id) gone.
@@ -75,10 +102,13 @@ export function withoutExpired(bans: Bans, now: number): Bans {
 	return changed ? next : bans
 }
 
-export function bansFromList(list: { type: unknown; banId: unknown; expiresAt: unknown; reason: unknown }[]): Bans {
+export function bansFromList(
+	list: { type: unknown; banId: unknown; expiresAt: unknown; durationMs?: unknown; reason: unknown }[],
+): Bans {
 	let bans: Bans = {}
 	for (const entry of list) {
-		const ban = { banId: entry.banId, expiresAt: entry.expiresAt, reason: entry.reason }
+		const ban: { [key: string]: unknown } = { banId: entry.banId, expiresAt: entry.expiresAt, reason: entry.reason }
+		if (typeof entry.durationMs === 'number') ban.durationMs = entry.durationMs
 		if (isBanType(entry.type) && isBan(ban)) bans = withBan(bans, entry.type, ban)
 	}
 	return bans

@@ -26,6 +26,8 @@ export async function banInNakama(ban: BanRecord): Promise<boolean> {
 		type: ban.banType,
 		banId: ban.id,
 		expiresAt: ban.expiresAt ? ban.expiresAt.getTime() : null,
+		// Set while the clock has not started: Nakama starts it when the player is told.
+		durationMs: ban.expiresAt ? null : (ban.durationMs ?? null),
 		reason: ban.reason,
 	})
 	if (!result.ok) console.warn(`[nakama] Ban ${ban.id} not applied: ${result.error}`)

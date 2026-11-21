@@ -538,7 +538,14 @@
       "idx": 76,
       "version": "7",
       "when": 1795000200000,
-      "tag": "0076_mmr_updated_idx",
+      "tag": "0076_ban_clock",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1795000300000,
+      "tag": "0077_mmr_updated_idx",
       "breakpoints": true
     }
   ]

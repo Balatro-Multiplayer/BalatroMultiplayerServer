@@ -48,7 +48,7 @@ beforeEach(() => {
 
 describe('POST /ratings/season-replay/apply', () => {
 	it('applies for the owner with the token from the dry run', async () => {
-		apply.mockResolvedValue(ok({ backupId: 'b1', games: 3 }))
+		apply.mockResolvedValue(ok({ backupId: 'b1', games: 3, changes: [] }))
 		const res = await post('apply', authAs('owner-1', ['admin']), {
 			token: 'abc',
 			reason: 'Rules changed',
@@ -103,16 +103,23 @@ describe('the staff log', () => {
 		expect(apply).not.toHaveBeenCalled()
 	})
 
-	it('logs an apply with its reason and backup', async () => {
-		apply.mockResolvedValue(ok({ backupId: 'b1', games: 3 }))
+	it("logs an apply with its reason, backup and each player's change, and answers without the list", async () => {
+		const changes = [{ userId: 'u1', name: 'One', before: null, after: { rating: 600 } }]
+		apply.mockResolvedValue(ok({ backupId: 'b1', games: 3, changes }))
 		vi.mocked(staffLog.recordStaffAction).mockClear()
-		await post('apply', authAs('owner-1', ['admin']), { token: 'abc', reason: 'Rules changed' })
+		const res = await post('apply', authAs('owner-1', ['admin']), { token: 'abc', reason: 'Rules changed' })
+		expect(res.body).toEqual({ backupId: 'b1', games: 3 })
 		expect(staffLog.recordStaffAction).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.objectContaining({
 				action: 'season_replay_apply',
 				reason: 'Rules changed',
-				detail: expect.objectContaining({ result: { backupId: 'b1', games: 3 } }),
+				detail: {
+					seasonId: 1,
+					result: { backupId: 'b1', games: 3 },
+					ratingChangeCount: 1,
+					replayRatingChanges: changes,
+				},
 			}),
 		)
 	})

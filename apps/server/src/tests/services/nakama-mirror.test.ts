@@ -335,6 +335,7 @@ function deps() {
 		storeForfeit: vi.fn(async () => undefined),
 		storeNoticeAcceptance: vi.fn(async () => undefined),
 		storeContest: vi.fn(async () => undefined),
+		storeBanStarted: vi.fn(async () => undefined),
 	}
 	const service = createMirrorService({ players, store })
 	return { players, store, service }
@@ -431,6 +432,18 @@ describe('a notice entry', () => {
 		})
 		expect(result.stored).toEqual(['k-n'])
 		expect(store.storeNoticeAcceptance).toHaveBeenCalledWith({ playerId: 'pg-a', version: 2, acceptedAt: new Date(T0) })
+	})
+})
+
+describe('a ban_started entry', () => {
+	it('stores the end Nakama set when it started the ban clock', async () => {
+		const { store, service } = deps()
+		const result = await service.storePull({
+			entries: [{ key: 'k-b', kind: 'ban_started', at: T0, banId: 'ban-1', expiresAt: T0 + DAY }],
+			players: {},
+		})
+		expect(result.stored).toEqual(['k-b'])
+		expect(store.storeBanStarted).toHaveBeenCalledWith('ban-1', new Date(T0 + DAY))
 	})
 })
 

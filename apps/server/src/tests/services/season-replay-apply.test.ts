@@ -111,6 +111,26 @@ describe('apply', () => {
 				repairedGames: 1,
 				dismissedItems: 2,
 				itemsLeftOpen: 1,
+				changes: [
+					{
+						userId: 'u1',
+						playerId: 'p1',
+						name: 'One',
+						modId: 'MultiplayerPvP',
+						mode: 'solo',
+						before: { rating: 600, wins: 3, losses: 3, gamesPlayed: 6 },
+						after: { rating: 640, wins: 3, losses: 3, gamesPlayed: 6 },
+					},
+					{
+						userId: 'u2',
+						playerId: 'p2',
+						name: 'Two',
+						modId: 'MultiplayerPvP',
+						mode: 'solo',
+						before: null,
+						after: { rating: 580, wins: 3, losses: 3, gamesPlayed: 6 },
+					},
+				],
 			}),
 		)
 		expect(log).toEqual(['backup', 'clear', 'write', 'postgres', 'dismiss'])

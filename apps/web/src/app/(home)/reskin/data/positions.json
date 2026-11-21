@@ -1,0 +1,1918 @@
+{
+ "version": 1,
+ "sheets": {
+  "jokers": {
+   "set": "Joker",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 10,
+   "rows": 16,
+   "cells": {
+    "j_joker": [
+     0,
+     0
+    ],
+    "j_greedy_joker": [
+     6,
+     1
+    ],
+    "j_lusty_joker": [
+     7,
+     1
+    ],
+    "j_wrathful_joker": [
+     8,
+     1
+    ],
+    "j_gluttenous_joker": [
+     9,
+     1
+    ],
+    "j_jolly": [
+     2,
+     0
+    ],
+    "j_zany": [
+     3,
+     0
+    ],
+    "j_mad": [
+     4,
+     0
+    ],
+    "j_crazy": [
+     5,
+     0
+    ],
+    "j_droll": [
+     6,
+     0
+    ],
+    "j_sly": [
+     0,
+     14
+    ],
+    "j_wily": [
+     1,
+     14
+    ],
+    "j_clever": [
+     2,
+     14
+    ],
+    "j_devious": [
+     3,
+     14
+    ],
+    "j_crafty": [
+     4,
+     14
+    ],
+    "j_half": [
+     7,
+     0
+    ],
+    "j_stencil": [
+     2,
+     5
+    ],
+    "j_four_fingers": [
+     6,
+     6
+    ],
+    "j_mime": [
+     4,
+     1
+    ],
+    "j_credit_card": [
+     5,
+     1
+    ],
+    "j_ceremonial": [
+     5,
+     5
+    ],
+    "j_banner": [
+     1,
+     2
+    ],
+    "j_mystic_summit": [
+     2,
+     2
+    ],
+    "j_marble": [
+     3,
+     2
+    ],
+    "j_loyalty_card": [
+     4,
+     2
+    ],
+    "j_8_ball": [
+     0,
+     5
+    ],
+    "j_misprint": [
+     6,
+     2
+    ],
+    "j_dusk": [
+     4,
+     7
+    ],
+    "j_raised_fist": [
+     8,
+     2
+    ],
+    "j_chaos": [
+     1,
+     0
+    ],
+    "j_fibonacci": [
+     1,
+     5
+    ],
+    "j_steel_joker": [
+     7,
+     2
+    ],
+    "j_scary_face": [
+     2,
+     3
+    ],
+    "j_abstract": [
+     3,
+     3
+    ],
+    "j_delayed_grat": [
+     4,
+     3
+    ],
+    "j_hack": [
+     5,
+     2
+    ],
+    "j_pareidolia": [
+     6,
+     3
+    ],
+    "j_gros_michel": [
+     7,
+     6
+    ],
+    "j_even_steven": [
+     8,
+     3
+    ],
+    "j_odd_todd": [
+     9,
+     3
+    ],
+    "j_scholar": [
+     0,
+     4
+    ],
+    "j_business": [
+     1,
+     4
+    ],
+    "j_supernova": [
+     2,
+     4
+    ],
+    "j_ride_the_bus": [
+     1,
+     6
+    ],
+    "j_space": [
+     3,
+     5
+    ],
+    "j_egg": [
+     0,
+     10
+    ],
+    "j_burglar": [
+     1,
+     10
+    ],
+    "j_blackboard": [
+     2,
+     10
+    ],
+    "j_runner": [
+     3,
+     10
+    ],
+    "j_ice_cream": [
+     4,
+     10
+    ],
+    "j_dna": [
+     5,
+     10
+    ],
+    "j_splash": [
+     6,
+     10
+    ],
+    "j_blue_joker": [
+     7,
+     10
+    ],
+    "j_sixth_sense": [
+     8,
+     10
+    ],
+    "j_constellation": [
+     9,
+     10
+    ],
+    "j_hiker": [
+     0,
+     11
+    ],
+    "j_faceless": [
+     1,
+     11
+    ],
+    "j_green_joker": [
+     2,
+     11
+    ],
+    "j_superposition": [
+     3,
+     11
+    ],
+    "j_todo_list": [
+     4,
+     11
+    ],
+    "j_cavendish": [
+     5,
+     11
+    ],
+    "j_card_sharp": [
+     6,
+     11
+    ],
+    "j_red_card": [
+     7,
+     11
+    ],
+    "j_madness": [
+     8,
+     11
+    ],
+    "j_square": [
+     9,
+     11
+    ],
+    "j_seance": [
+     0,
+     12
+    ],
+    "j_riff_raff": [
+     1,
+     12
+    ],
+    "j_vampire": [
+     2,
+     12
+    ],
+    "j_shortcut": [
+     3,
+     12
+    ],
+    "j_hologram": [
+     4,
+     12
+    ],
+    "j_vagabond": [
+     5,
+     12
+    ],
+    "j_baron": [
+     6,
+     12
+    ],
+    "j_cloud_9": [
+     7,
+     12
+    ],
+    "j_rocket": [
+     8,
+     12
+    ],
+    "j_obelisk": [
+     9,
+     12
+    ],
+    "j_midas_mask": [
+     0,
+     13
+    ],
+    "j_luchador": [
+     1,
+     13
+    ],
+    "j_photograph": [
+     2,
+     13
+    ],
+    "j_gift": [
+     3,
+     13
+    ],
+    "j_turtle_bean": [
+     4,
+     13
+    ],
+    "j_erosion": [
+     5,
+     13
+    ],
+    "j_reserved_parking": [
+     6,
+     13
+    ],
+    "j_mail": [
+     7,
+     13
+    ],
+    "j_to_the_moon": [
+     8,
+     13
+    ],
+    "j_hallucination": [
+     9,
+     13
+    ],
+    "j_fortune_teller": [
+     7,
+     5
+    ],
+    "j_juggler": [
+     0,
+     1
+    ],
+    "j_drunkard": [
+     1,
+     1
+    ],
+    "j_stone": [
+     9,
+     0
+    ],
+    "j_golden": [
+     9,
+     2
+    ],
+    "j_lucky_cat": [
+     5,
+     14
+    ],
+    "j_baseball": [
+     6,
+     14
+    ],
+    "j_bull": [
+     7,
+     14
+    ],
+    "j_diet_cola": [
+     8,
+     14
+    ],
+    "j_trading": [
+     9,
+     14
+    ],
+    "j_flash": [
+     0,
+     15
+    ],
+    "j_popcorn": [
+     1,
+     15
+    ],
+    "j_trousers": [
+     4,
+     15
+    ],
+    "j_ancient": [
+     7,
+     15
+    ],
+    "j_ramen": [
+     2,
+     15
+    ],
+    "j_walkie_talkie": [
+     8,
+     15
+    ],
+    "j_selzer": [
+     3,
+     15
+    ],
+    "j_castle": [
+     9,
+     15
+    ],
+    "j_smiley": [
+     6,
+     15
+    ],
+    "j_campfire": [
+     5,
+     15
+    ],
+    "j_ticket": [
+     5,
+     3
+    ],
+    "j_mr_bones": [
+     3,
+     4
+    ],
+    "j_acrobat": [
+     2,
+     1
+    ],
+    "j_sock_and_buskin": [
+     3,
+     1
+    ],
+    "j_swashbuckler": [
+     9,
+     5
+    ],
+    "j_troubadour": [
+     0,
+     2
+    ],
+    "j_certificate": [
+     8,
+     8
+    ],
+    "j_smeared": [
+     4,
+     6
+    ],
+    "j_throwback": [
+     5,
+     7
+    ],
+    "j_hanging_chad": [
+     9,
+     6
+    ],
+    "j_rough_gem": [
+     9,
+     7
+    ],
+    "j_bloodstone": [
+     0,
+     8
+    ],
+    "j_arrowhead": [
+     1,
+     8
+    ],
+    "j_onyx_agate": [
+     2,
+     8
+    ],
+    "j_glass": [
+     1,
+     3
+    ],
+    "j_ring_master": [
+     6,
+     5
+    ],
+    "j_flower_pot": [
+     0,
+     6
+    ],
+    "j_blueprint": [
+     0,
+     3
+    ],
+    "j_wee": [
+     0,
+     0
+    ],
+    "j_merry_andy": [
+     8,
+     0
+    ],
+    "j_oops": [
+     5,
+     6
+    ],
+    "j_idol": [
+     6,
+     7
+    ],
+    "j_seeing_double": [
+     4,
+     4
+    ],
+    "j_matador": [
+     4,
+     5
+    ],
+    "j_hit_the_road": [
+     8,
+     5
+    ],
+    "j_duo": [
+     5,
+     4
+    ],
+    "j_trio": [
+     6,
+     4
+    ],
+    "j_family": [
+     7,
+     4
+    ],
+    "j_order": [
+     8,
+     4
+    ],
+    "j_tribe": [
+     9,
+     4
+    ],
+    "j_stuntman": [
+     8,
+     6
+    ],
+    "j_invisible": [
+     1,
+     7
+    ],
+    "j_brainstorm": [
+     7,
+     7
+    ],
+    "j_satellite": [
+     8,
+     7
+    ],
+    "j_shoot_the_moon": [
+     2,
+     6
+    ],
+    "j_drivers_license": [
+     0,
+     7
+    ],
+    "j_cartomancer": [
+     7,
+     3
+    ],
+    "j_astronomer": [
+     2,
+     7
+    ],
+    "j_burnt": [
+     3,
+     7
+    ],
+    "j_bootstraps": [
+     9,
+     8
+    ],
+    "j_caino": [
+     3,
+     8
+    ],
+    "j_triboulet": [
+     4,
+     8
+    ],
+    "j_yorick": [
+     5,
+     8
+    ],
+    "j_chicot": [
+     6,
+     8
+    ],
+    "j_perkeo": [
+     7,
+     8
+    ]
+   },
+   "order": [
+    "j_joker",
+    "j_greedy_joker",
+    "j_lusty_joker",
+    "j_wrathful_joker",
+    "j_gluttenous_joker",
+    "j_jolly",
+    "j_zany",
+    "j_mad",
+    "j_crazy",
+    "j_droll",
+    "j_sly",
+    "j_wily",
+    "j_clever",
+    "j_devious",
+    "j_crafty",
+    "j_half",
+    "j_stencil",
+    "j_four_fingers",
+    "j_mime",
+    "j_credit_card",
+    "j_ceremonial",
+    "j_banner",
+    "j_mystic_summit",
+    "j_marble",
+    "j_loyalty_card",
+    "j_8_ball",
+    "j_misprint",
+    "j_dusk",
+    "j_raised_fist",
+    "j_chaos",
+    "j_fibonacci",
+    "j_steel_joker",
+    "j_scary_face",
+    "j_abstract",
+    "j_delayed_grat",
+    "j_hack",
+    "j_pareidolia",
+    "j_gros_michel",
+    "j_even_steven",
+    "j_odd_todd",
+    "j_scholar",
+    "j_business",
+    "j_supernova",
+    "j_ride_the_bus",
+    "j_space",
+    "j_egg",
+    "j_burglar",
+    "j_blackboard",
+    "j_runner",
+    "j_ice_cream",
+    "j_dna",
+    "j_splash",
+    "j_blue_joker",
+    "j_sixth_sense",
+    "j_constellation",
+    "j_hiker",
+    "j_faceless",
+    "j_green_joker",
+    "j_superposition",
+    "j_todo_list",
+    "j_cavendish",
+    "j_card_sharp",
+    "j_red_card",
+    "j_madness",
+    "j_square",
+    "j_seance",
+    "j_riff_raff",
+    "j_vampire",
+    "j_shortcut",
+    "j_hologram",
+    "j_vagabond",
+    "j_baron",
+    "j_cloud_9",
+    "j_rocket",
+    "j_obelisk",
+    "j_midas_mask",
+    "j_luchador",
+    "j_photograph",
+    "j_gift",
+    "j_turtle_bean",
+    "j_erosion",
+    "j_reserved_parking",
+    "j_mail",
+    "j_to_the_moon",
+    "j_hallucination",
+    "j_fortune_teller",
+    "j_juggler",
+    "j_drunkard",
+    "j_stone",
+    "j_golden",
+    "j_lucky_cat",
+    "j_baseball",
+    "j_bull",
+    "j_diet_cola",
+    "j_trading",
+    "j_flash",
+    "j_popcorn",
+    "j_trousers",
+    "j_ancient",
+    "j_ramen",
+    "j_walkie_talkie",
+    "j_selzer",
+    "j_castle",
+    "j_smiley",
+    "j_campfire",
+    "j_ticket",
+    "j_mr_bones",
+    "j_acrobat",
+    "j_sock_and_buskin",
+    "j_swashbuckler",
+    "j_troubadour",
+    "j_certificate",
+    "j_smeared",
+    "j_throwback",
+    "j_hanging_chad",
+    "j_rough_gem",
+    "j_bloodstone",
+    "j_arrowhead",
+    "j_onyx_agate",
+    "j_glass",
+    "j_ring_master",
+    "j_flower_pot",
+    "j_blueprint",
+    "j_wee",
+    "j_merry_andy",
+    "j_oops",
+    "j_idol",
+    "j_seeing_double",
+    "j_matador",
+    "j_hit_the_road",
+    "j_duo",
+    "j_trio",
+    "j_family",
+    "j_order",
+    "j_tribe",
+    "j_stuntman",
+    "j_invisible",
+    "j_brainstorm",
+    "j_satellite",
+    "j_shoot_the_moon",
+    "j_drivers_license",
+    "j_cartomancer",
+    "j_astronomer",
+    "j_burnt",
+    "j_bootstraps",
+    "j_caino",
+    "j_triboulet",
+    "j_yorick",
+    "j_chicot",
+    "j_perkeo"
+   ]
+  },
+  "tarots": {
+   "set": "Tarot",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 10,
+   "rows": 6,
+   "cells": {
+    "c_fool": [
+     0,
+     0
+    ],
+    "c_magician": [
+     1,
+     0
+    ],
+    "c_high_priestess": [
+     2,
+     0
+    ],
+    "c_empress": [
+     3,
+     0
+    ],
+    "c_emperor": [
+     4,
+     0
+    ],
+    "c_heirophant": [
+     5,
+     0
+    ],
+    "c_lovers": [
+     6,
+     0
+    ],
+    "c_chariot": [
+     7,
+     0
+    ],
+    "c_justice": [
+     8,
+     0
+    ],
+    "c_hermit": [
+     9,
+     0
+    ],
+    "c_wheel_of_fortune": [
+     0,
+     1
+    ],
+    "c_strength": [
+     1,
+     1
+    ],
+    "c_hanged_man": [
+     2,
+     1
+    ],
+    "c_death": [
+     3,
+     1
+    ],
+    "c_temperance": [
+     4,
+     1
+    ],
+    "c_devil": [
+     5,
+     1
+    ],
+    "c_tower": [
+     6,
+     1
+    ],
+    "c_star": [
+     7,
+     1
+    ],
+    "c_moon": [
+     8,
+     1
+    ],
+    "c_sun": [
+     9,
+     1
+    ],
+    "c_judgement": [
+     0,
+     2
+    ],
+    "c_world": [
+     1,
+     2
+    ]
+   },
+   "order": [
+    "c_fool",
+    "c_magician",
+    "c_high_priestess",
+    "c_empress",
+    "c_emperor",
+    "c_heirophant",
+    "c_lovers",
+    "c_chariot",
+    "c_justice",
+    "c_hermit",
+    "c_wheel_of_fortune",
+    "c_strength",
+    "c_hanged_man",
+    "c_death",
+    "c_temperance",
+    "c_devil",
+    "c_tower",
+    "c_star",
+    "c_moon",
+    "c_sun",
+    "c_judgement",
+    "c_world"
+   ]
+  },
+  "planets": {
+   "set": "Planet",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 10,
+   "rows": 6,
+   "cells": {
+    "c_mercury": [
+     0,
+     3
+    ],
+    "c_venus": [
+     1,
+     3
+    ],
+    "c_earth": [
+     2,
+     3
+    ],
+    "c_mars": [
+     3,
+     3
+    ],
+    "c_jupiter": [
+     4,
+     3
+    ],
+    "c_saturn": [
+     5,
+     3
+    ],
+    "c_uranus": [
+     6,
+     3
+    ],
+    "c_neptune": [
+     7,
+     3
+    ],
+    "c_pluto": [
+     8,
+     3
+    ],
+    "c_planet_x": [
+     9,
+     2
+    ],
+    "c_ceres": [
+     8,
+     2
+    ],
+    "c_eris": [
+     3,
+     2
+    ]
+   },
+   "order": [
+    "c_mercury",
+    "c_venus",
+    "c_earth",
+    "c_mars",
+    "c_jupiter",
+    "c_saturn",
+    "c_uranus",
+    "c_neptune",
+    "c_pluto",
+    "c_planet_x",
+    "c_ceres",
+    "c_eris"
+   ]
+  },
+  "spectrals": {
+   "set": "Spectral",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 10,
+   "rows": 6,
+   "cells": {
+    "c_familiar": [
+     0,
+     4
+    ],
+    "c_grim": [
+     1,
+     4
+    ],
+    "c_incantation": [
+     2,
+     4
+    ],
+    "c_talisman": [
+     3,
+     4
+    ],
+    "c_aura": [
+     4,
+     4
+    ],
+    "c_wraith": [
+     5,
+     4
+    ],
+    "c_sigil": [
+     6,
+     4
+    ],
+    "c_ouija": [
+     7,
+     4
+    ],
+    "c_ectoplasm": [
+     8,
+     4
+    ],
+    "c_immolate": [
+     9,
+     4
+    ],
+    "c_ankh": [
+     0,
+     5
+    ],
+    "c_deja_vu": [
+     1,
+     5
+    ],
+    "c_hex": [
+     2,
+     5
+    ],
+    "c_trance": [
+     3,
+     5
+    ],
+    "c_medium": [
+     4,
+     5
+    ],
+    "c_cryptid": [
+     5,
+     5
+    ],
+    "c_soul": [
+     2,
+     2
+    ],
+    "c_black_hole": [
+     9,
+     3
+    ]
+   },
+   "order": [
+    "c_familiar",
+    "c_grim",
+    "c_incantation",
+    "c_talisman",
+    "c_aura",
+    "c_wraith",
+    "c_sigil",
+    "c_ouija",
+    "c_ectoplasm",
+    "c_immolate",
+    "c_ankh",
+    "c_deja_vu",
+    "c_hex",
+    "c_trance",
+    "c_medium",
+    "c_cryptid",
+    "c_soul",
+    "c_black_hole"
+   ]
+  },
+  "vouchers": {
+   "set": "Voucher",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 9,
+   "rows": 4,
+   "cells": {
+    "v_overstock_norm": [
+     0,
+     0
+    ],
+    "v_clearance_sale": [
+     3,
+     0
+    ],
+    "v_hone": [
+     4,
+     0
+    ],
+    "v_reroll_surplus": [
+     0,
+     2
+    ],
+    "v_crystal_ball": [
+     2,
+     2
+    ],
+    "v_telescope": [
+     3,
+     2
+    ],
+    "v_grabber": [
+     5,
+     0
+    ],
+    "v_wasteful": [
+     6,
+     0
+    ],
+    "v_tarot_merchant": [
+     1,
+     0
+    ],
+    "v_planet_merchant": [
+     2,
+     0
+    ],
+    "v_seed_money": [
+     1,
+     2
+    ],
+    "v_blank": [
+     7,
+     0
+    ],
+    "v_magic_trick": [
+     4,
+     2
+    ],
+    "v_hieroglyph": [
+     5,
+     2
+    ],
+    "v_directors_cut": [
+     6,
+     2
+    ],
+    "v_paint_brush": [
+     7,
+     2
+    ],
+    "v_overstock_plus": [
+     0,
+     1
+    ],
+    "v_liquidation": [
+     3,
+     1
+    ],
+    "v_glow_up": [
+     4,
+     1
+    ],
+    "v_reroll_glut": [
+     0,
+     3
+    ],
+    "v_omen_globe": [
+     2,
+     3
+    ],
+    "v_observatory": [
+     3,
+     3
+    ],
+    "v_nacho_tong": [
+     5,
+     1
+    ],
+    "v_recyclomancy": [
+     6,
+     1
+    ],
+    "v_tarot_tycoon": [
+     1,
+     1
+    ],
+    "v_planet_tycoon": [
+     2,
+     1
+    ],
+    "v_money_tree": [
+     1,
+     3
+    ],
+    "v_antimatter": [
+     7,
+     1
+    ],
+    "v_illusion": [
+     4,
+     3
+    ],
+    "v_petroglyph": [
+     5,
+     3
+    ],
+    "v_retcon": [
+     6,
+     3
+    ],
+    "v_palette": [
+     7,
+     3
+    ]
+   },
+   "order": [
+    "v_overstock_norm",
+    "v_clearance_sale",
+    "v_hone",
+    "v_reroll_surplus",
+    "v_crystal_ball",
+    "v_telescope",
+    "v_grabber",
+    "v_wasteful",
+    "v_tarot_merchant",
+    "v_planet_merchant",
+    "v_seed_money",
+    "v_blank",
+    "v_magic_trick",
+    "v_hieroglyph",
+    "v_directors_cut",
+    "v_paint_brush",
+    "v_overstock_plus",
+    "v_liquidation",
+    "v_glow_up",
+    "v_reroll_glut",
+    "v_omen_globe",
+    "v_observatory",
+    "v_nacho_tong",
+    "v_recyclomancy",
+    "v_tarot_tycoon",
+    "v_planet_tycoon",
+    "v_money_tree",
+    "v_antimatter",
+    "v_illusion",
+    "v_petroglyph",
+    "v_retcon",
+    "v_palette"
+   ]
+  },
+  "decks": {
+   "set": "Back",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 7,
+   "rows": 5,
+   "cells": {
+    "b_red": [
+     0,
+     0
+    ],
+    "b_blue": [
+     0,
+     2
+    ],
+    "b_yellow": [
+     1,
+     2
+    ],
+    "b_green": [
+     2,
+     2
+    ],
+    "b_black": [
+     3,
+     2
+    ],
+    "b_magic": [
+     0,
+     3
+    ],
+    "b_nebula": [
+     3,
+     0
+    ],
+    "b_ghost": [
+     6,
+     2
+    ],
+    "b_abandoned": [
+     3,
+     3
+    ],
+    "b_checkered": [
+     1,
+     3
+    ],
+    "b_zodiac": [
+     3,
+     4
+    ],
+    "b_painted": [
+     4,
+     3
+    ],
+    "b_anaglyph": [
+     2,
+     4
+    ],
+    "b_plasma": [
+     4,
+     2
+    ],
+    "b_erratic": [
+     2,
+     3
+    ],
+    "b_challenge": [
+     0,
+     4
+    ]
+   },
+   "order": [
+    "b_red",
+    "b_blue",
+    "b_yellow",
+    "b_green",
+    "b_black",
+    "b_magic",
+    "b_nebula",
+    "b_ghost",
+    "b_abandoned",
+    "b_checkered",
+    "b_zodiac",
+    "b_painted",
+    "b_anaglyph",
+    "b_plasma",
+    "b_erratic",
+    "b_challenge"
+   ]
+  },
+  "enhancers": {
+   "set": "Enhanced",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 7,
+   "rows": 5,
+   "cells": {
+    "m_bonus": [
+     1,
+     1
+    ],
+    "m_mult": [
+     2,
+     1
+    ],
+    "m_wild": [
+     3,
+     1
+    ],
+    "m_glass": [
+     5,
+     1
+    ],
+    "m_steel": [
+     6,
+     1
+    ],
+    "m_stone": [
+     5,
+     0
+    ],
+    "m_gold": [
+     6,
+     0
+    ],
+    "m_lucky": [
+     4,
+     1
+    ]
+   },
+   "order": [
+    "m_bonus",
+    "m_mult",
+    "m_wild",
+    "m_glass",
+    "m_steel",
+    "m_stone",
+    "m_gold",
+    "m_lucky"
+   ]
+  },
+  "boosters": {
+   "set": "Booster",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 4,
+   "rows": 9,
+   "cells": {
+    "p_arcana_normal_1": [
+     0,
+     0
+    ],
+    "p_arcana_normal_2": [
+     1,
+     0
+    ],
+    "p_arcana_normal_3": [
+     2,
+     0
+    ],
+    "p_arcana_normal_4": [
+     3,
+     0
+    ],
+    "p_arcana_jumbo_1": [
+     0,
+     2
+    ],
+    "p_arcana_jumbo_2": [
+     1,
+     2
+    ],
+    "p_arcana_mega_1": [
+     2,
+     2
+    ],
+    "p_arcana_mega_2": [
+     3,
+     2
+    ],
+    "p_celestial_normal_1": [
+     0,
+     1
+    ],
+    "p_celestial_normal_2": [
+     1,
+     1
+    ],
+    "p_celestial_normal_3": [
+     2,
+     1
+    ],
+    "p_celestial_normal_4": [
+     3,
+     1
+    ],
+    "p_celestial_jumbo_1": [
+     0,
+     3
+    ],
+    "p_celestial_jumbo_2": [
+     1,
+     3
+    ],
+    "p_celestial_mega_1": [
+     2,
+     3
+    ],
+    "p_celestial_mega_2": [
+     3,
+     3
+    ],
+    "p_spectral_normal_1": [
+     0,
+     4
+    ],
+    "p_spectral_normal_2": [
+     1,
+     4
+    ],
+    "p_spectral_jumbo_1": [
+     2,
+     4
+    ],
+    "p_spectral_mega_1": [
+     3,
+     4
+    ],
+    "p_standard_normal_1": [
+     0,
+     6
+    ],
+    "p_standard_normal_2": [
+     1,
+     6
+    ],
+    "p_standard_normal_3": [
+     2,
+     6
+    ],
+    "p_standard_normal_4": [
+     3,
+     6
+    ],
+    "p_standard_jumbo_1": [
+     0,
+     7
+    ],
+    "p_standard_jumbo_2": [
+     1,
+     7
+    ],
+    "p_standard_mega_1": [
+     2,
+     7
+    ],
+    "p_standard_mega_2": [
+     3,
+     7
+    ],
+    "p_buffoon_normal_1": [
+     0,
+     8
+    ],
+    "p_buffoon_normal_2": [
+     1,
+     8
+    ],
+    "p_buffoon_jumbo_1": [
+     2,
+     8
+    ],
+    "p_buffoon_mega_1": [
+     3,
+     8
+    ]
+   },
+   "order": [
+    "p_arcana_normal_1",
+    "p_arcana_normal_2",
+    "p_arcana_normal_3",
+    "p_arcana_normal_4",
+    "p_arcana_jumbo_1",
+    "p_arcana_jumbo_2",
+    "p_arcana_mega_1",
+    "p_arcana_mega_2",
+    "p_celestial_normal_1",
+    "p_celestial_normal_2",
+    "p_celestial_normal_3",
+    "p_celestial_normal_4",
+    "p_celestial_jumbo_1",
+    "p_celestial_jumbo_2",
+    "p_celestial_mega_1",
+    "p_celestial_mega_2",
+    "p_spectral_normal_1",
+    "p_spectral_normal_2",
+    "p_spectral_jumbo_1",
+    "p_spectral_mega_1",
+    "p_standard_normal_1",
+    "p_standard_normal_2",
+    "p_standard_normal_3",
+    "p_standard_normal_4",
+    "p_standard_jumbo_1",
+    "p_standard_jumbo_2",
+    "p_standard_mega_1",
+    "p_standard_mega_2",
+    "p_buffoon_normal_1",
+    "p_buffoon_normal_2",
+    "p_buffoon_jumbo_1",
+    "p_buffoon_mega_1"
+   ]
+  },
+  "tags": {
+   "set": "Tag",
+   "cellW": 34,
+   "cellH": 34,
+   "cols": 6,
+   "rows": 5,
+   "cells": {
+    "tag_uncommon": [
+     0,
+     0
+    ],
+    "tag_rare": [
+     1,
+     0
+    ],
+    "tag_negative": [
+     2,
+     0
+    ],
+    "tag_foil": [
+     3,
+     0
+    ],
+    "tag_holo": [
+     0,
+     1
+    ],
+    "tag_polychrome": [
+     1,
+     1
+    ],
+    "tag_investment": [
+     2,
+     1
+    ],
+    "tag_voucher": [
+     3,
+     1
+    ],
+    "tag_boss": [
+     0,
+     2
+    ],
+    "tag_standard": [
+     1,
+     2
+    ],
+    "tag_charm": [
+     2,
+     2
+    ],
+    "tag_meteor": [
+     3,
+     2
+    ],
+    "tag_buffoon": [
+     4,
+     2
+    ],
+    "tag_handy": [
+     1,
+     3
+    ],
+    "tag_garbage": [
+     2,
+     3
+    ],
+    "tag_ethereal": [
+     3,
+     3
+    ],
+    "tag_coupon": [
+     4,
+     0
+    ],
+    "tag_double": [
+     5,
+     0
+    ],
+    "tag_juggle": [
+     5,
+     1
+    ],
+    "tag_d_six": [
+     5,
+     3
+    ],
+    "tag_top_up": [
+     4,
+     1
+    ],
+    "tag_skip": [
+     0,
+     3
+    ],
+    "tag_orbital": [
+     5,
+     2
+    ],
+    "tag_economy": [
+     4,
+     3
+    ]
+   },
+   "order": [
+    "tag_uncommon",
+    "tag_rare",
+    "tag_negative",
+    "tag_foil",
+    "tag_holo",
+    "tag_polychrome",
+    "tag_investment",
+    "tag_voucher",
+    "tag_boss",
+    "tag_standard",
+    "tag_charm",
+    "tag_meteor",
+    "tag_buffoon",
+    "tag_handy",
+    "tag_garbage",
+    "tag_ethereal",
+    "tag_coupon",
+    "tag_double",
+    "tag_juggle",
+    "tag_d_six",
+    "tag_top_up",
+    "tag_skip",
+    "tag_orbital",
+    "tag_economy"
+   ]
+  },
+  "blinds": {
+   "set": "Blind",
+   "cellW": 34,
+   "cellH": 34,
+   "cols": 21,
+   "rows": 31,
+   "frames": 21,
+   "cells": {
+    "bl_small": [
+     0,
+     0
+    ],
+    "bl_big": [
+     0,
+     1
+    ],
+    "bl_ox": [
+     0,
+     2
+    ],
+    "bl_hook": [
+     0,
+     7
+    ],
+    "bl_mouth": [
+     0,
+     18
+    ],
+    "bl_fish": [
+     0,
+     5
+    ],
+    "bl_club": [
+     0,
+     4
+    ],
+    "bl_manacle": [
+     0,
+     8
+    ],
+    "bl_tooth": [
+     0,
+     22
+    ],
+    "bl_wall": [
+     0,
+     9
+    ],
+    "bl_house": [
+     0,
+     3
+    ],
+    "bl_mark": [
+     0,
+     23
+    ],
+    "bl_final_bell": [
+     0,
+     26
+    ],
+    "bl_wheel": [
+     0,
+     10
+    ],
+    "bl_arm": [
+     0,
+     11
+    ],
+    "bl_psychic": [
+     0,
+     12
+    ],
+    "bl_goad": [
+     0,
+     13
+    ],
+    "bl_water": [
+     0,
+     14
+    ],
+    "bl_eye": [
+     0,
+     17
+    ],
+    "bl_plant": [
+     0,
+     19
+    ],
+    "bl_needle": [
+     0,
+     20
+    ],
+    "bl_head": [
+     0,
+     21
+    ],
+    "bl_final_leaf": [
+     0,
+     28
+    ],
+    "bl_final_vessel": [
+     0,
+     29
+    ],
+    "bl_window": [
+     0,
+     6
+    ],
+    "bl_serpent": [
+     0,
+     15
+    ],
+    "bl_pillar": [
+     0,
+     16
+    ],
+    "bl_flint": [
+     0,
+     24
+    ],
+    "bl_final_acorn": [
+     0,
+     27
+    ],
+    "bl_final_heart": [
+     0,
+     25
+    ]
+   },
+   "order": [
+    "bl_small",
+    "bl_big",
+    "bl_ox",
+    "bl_hook",
+    "bl_mouth",
+    "bl_fish",
+    "bl_club",
+    "bl_manacle",
+    "bl_tooth",
+    "bl_wall",
+    "bl_house",
+    "bl_mark",
+    "bl_final_bell",
+    "bl_wheel",
+    "bl_arm",
+    "bl_psychic",
+    "bl_goad",
+    "bl_water",
+    "bl_eye",
+    "bl_plant",
+    "bl_needle",
+    "bl_head",
+    "bl_final_leaf",
+    "bl_final_vessel",
+    "bl_window",
+    "bl_serpent",
+    "bl_pillar",
+    "bl_flint",
+    "bl_final_acorn",
+    "bl_final_heart"
+   ]
+  },
+  "seals": {
+   "set": "Seal",
+   "cellW": 71,
+   "cellH": 95,
+   "cols": 7,
+   "rows": 5,
+   "cells": {
+    "Gold": [
+     2,
+     0
+    ],
+    "Red": [
+     5,
+     4
+    ],
+    "Blue": [
+     6,
+     4
+    ],
+    "Purple": [
+     4,
+     4
+    ]
+   },
+   "order": [
+    "Gold",
+    "Red",
+    "Blue",
+    "Purple"
+   ]
+  },
+  "stakes": {
+   "set": "Stake",
+   "cellW": 29,
+   "cellH": 29,
+   "cols": 5,
+   "rows": 2,
+   "cells": {
+    "stake_white": [
+     0,
+     0
+    ],
+    "stake_red": [
+     1,
+     0
+    ],
+    "stake_green": [
+     2,
+     0
+    ],
+    "stake_black": [
+     4,
+     0
+    ],
+    "stake_blue": [
+     3,
+     0
+    ],
+    "stake_purple": [
+     0,
+     1
+    ],
+    "stake_orange": [
+     1,
+     1
+    ],
+    "stake_gold": [
+     2,
+     1
+    ]
+   },
+   "order": [
+    "stake_white",
+    "stake_red",
+    "stake_green",
+    "stake_black",
+    "stake_blue",
+    "stake_purple",
+    "stake_orange",
+    "stake_gold"
+   ]
+  }
+ }
+}

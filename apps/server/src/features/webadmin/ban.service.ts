@@ -6,6 +6,7 @@ import {
 	type BanType,
 	insertBan,
 } from '../../infrastructure/gateways/ban.gateway.js'
+import { clockedBan } from './ban-clock.js'
 import { banInNakama } from '../../infrastructure/nakama/moderation-sync.js'
 
 export interface IssueBanParams {
@@ -28,17 +29,21 @@ export interface IssueBanParams {
  * service-queue "Ban" action (features/service-queue/dispatcher.ts) can reuse the exact
  * same side-effect sequence instead of duplicating it.
  *
- * §21.3: account and queue bans take effect immediately. Postgres keeps the
+ * §21.3: account and queue bans take effect immediately (a timed one is in
+ * force from now; its end is set when the player is told). Postgres keeps the
  * ban history; Nakama enforces it at once (nakama/src/admin.ts): an account
  * ban closes the player's session and forfeits their match, a queue ban
  * pulls them out of matchmaking. A player Nakama doesn't know yet is caught
  * by the player sync at their next login.
  */
 export async function issueBan(params: IssueBanParams): Promise<BanRecord> {
+	// A timed ban keeps its length and gets its end when the player is told.
+	const clock = clockedBan(params.banType, params.expiresAt, new Date())
 	const row = {
 		playerId: params.playerId,
 		banType: params.banType,
-		expiresAt: params.expiresAt,
+		expiresAt: clock.expiresAt,
+		durationMs: clock.durationMs,
 		issuedBy: params.issuedBy,
 		reason: params.reason,
 	}

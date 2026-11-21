@@ -902,7 +902,12 @@ export const playerBans = pgTable(
 			.notNull()
 			.references(() => players.id),
 		banType: text('ban_type').notNull(), // 'chat' | 'queue' | 'account'
-		expiresAt: timestamp('expires_at', { withTimezone: true }), // null = indefinite
+		// null = permanent, or a timed ban whose clock has not started (then
+		// durationMs is set). Nakama starts the clock when the player is first
+		// told and the mirror stores the end here.
+		expiresAt: timestamp('expires_at', { withTimezone: true }),
+		// The length of a timed chat, queue or account ban; null for a permanent one.
+		durationMs: bigint('duration_ms', { mode: 'number' }),
 		issuedBy: text('issued_by').notNull(), // moderator display name or 'system'
 		issuedAt: timestamp('issued_at', { withTimezone: true })
 			.notNull()

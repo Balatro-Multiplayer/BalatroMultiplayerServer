@@ -27,13 +27,18 @@ import { banNameOf } from '../../../packages/types/src/ban-name'
 import { notify, NotifyCode } from '../notify'
 import { NotificationKind } from '../notification/kinds'
 import { sendNotification } from '../notification/store'
+import { enqueue } from '../mirror/outbox'
 import { forEachStored } from '../shared/storage'
 import { STEAM_HASH_CUSTOM_ID_PREFIX } from '../player/steam_id'
 import { ACCOUNT_BANNED, banMessage } from './access'
 import { showNameChange } from './username_ban'
+import { isOnline } from './online'
 import {
 	activeBan,
+	BAN_TYPES,
+	isPending,
 	readBans,
+	startedAt,
 	withBan,
 	withoutBan,
 	withoutExpired,
@@ -110,16 +115,48 @@ export function enforceAccountBan(nk: nkruntime.Nakama, userId: string, ban: Ban
 	nk.usersBanId([userId])
 }
 
+// Starts the clock of every timed ban that has none: each ends its full length
+// from `now`. The API is told through the mirror outbox. Returns the bans as
+// stored. A player is told of a ban when it reaches them online (applyBan) or
+// at their next session start or refused login.
+export function startPendingBans(nk: nkruntime.Nakama, userId: string, now: number): Bans {
+	const before = readBans(nk, userId)
+	const after: Bans = {}
+	const started: { banId: string; expiresAt: number }[] = []
+	for (const type of BAN_TYPES) {
+		const ban = before[type]
+		if (!ban) continue
+		if (!isPending(ban)) {
+			after[type] = ban
+			continue
+		}
+		const next = startedAt(ban, now)
+		after[type] = next
+		started.push({ banId: next.banId, expiresAt: next.expiresAt as number })
+	}
+	if (started.length === 0) return before
+	writeBans(nk, userId, after)
+	for (const s of started) enqueue(nk, { kind: 'ban_started', at: now, ...s })
+	if (after.account && before.account !== after.account) writeIndex(nk, userId, after.account)
+	return after
+}
+
 export function applyBan(
 	nk: nkruntime.Nakama,
 	logger: nkruntime.Logger,
 	userId: string,
 	type: BanType,
-	ban: Ban,
+	banIn: Ban,
 ): Bans {
 	const before = readBans(nk, userId)
-	const bans = withBan(before, type, ban)
+	let bans = withBan(before, type, banIn)
 	writeBans(nk, userId, bans)
+	// The Notification reaches an online player now, so their clock starts now.
+	let ban = banIn
+	if (type !== 'username' && isPending(bans[type] as Ban) && isOnline(nk, userId)) {
+		bans = startPendingBans(nk, userId, Date.now())
+		if (bans[type]?.banId === banIn.banId) ban = bans[type] as Ban
+	}
 	// A username ban blocks nothing: the player is told by a Notification and
 	// sees the Ban name, so no BANNED push (older clients would read it as an
 	// account ban).
@@ -190,6 +227,11 @@ export function checkLoginBan(nk: nkruntime.Nakama, logger: nkruntime.Logger, ke
 	const objects = nk.storageRead([{ collection: BAN_INDEX_COLLECTION, key, userId: SYSTEM_USER_ID }])
 	if (objects.length === 0) return
 	const entry = objects[0].value as unknown as IndexEntry
+	// A timed account ban's clock starts at the first refused login.
+	if (isPending(entry.ban) && accountExists(nk, entry.userId)) {
+		const started = startPendingBans(nk, entry.userId, now).account
+		if (started && started.banId === entry.ban.banId) entry.ban = started
+	}
 	if (activeBan({ account: entry.ban }, 'account', now))
 		throw runtimeError(PERMISSION_DENIED, banMessage(ACCOUNT_BANNED, entry.ban))
 	if (!accountExists(nk, entry.userId)) {

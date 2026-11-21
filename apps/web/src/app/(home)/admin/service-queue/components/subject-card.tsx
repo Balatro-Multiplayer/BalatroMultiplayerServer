@@ -1,5 +1,6 @@
 'use client'
 
+import { banEndText } from '@/lib/ban-end'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -23,9 +24,7 @@ function BanLine({ ban }: { ban: BanRow }) {
         {formatTime(ban.issuedAt)} →{' '}
         {ban.liftedAt
           ? `lifted ${formatTime(ban.liftedAt)}`
-          : ban.expiresAt
-            ? formatTime(ban.expiresAt)
-            : 'permanent'}
+          : banEndText(ban, formatTime)}
       </span>
     </li>
   )

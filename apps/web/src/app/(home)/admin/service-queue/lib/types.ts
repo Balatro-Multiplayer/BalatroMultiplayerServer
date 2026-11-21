@@ -119,6 +119,8 @@ export interface BanRow {
   playerId: string
   banType: 'chat' | 'queue' | 'account'
   expiresAt: string | null
+  // The length of a timed ban; its end is set when the player is first told.
+  durationMs?: number | null
   issuedBy: string
   issuedAt: string
   reason: string | null
@@ -548,6 +550,7 @@ export interface AppealEvidence {
     issuedBy: string
     issuedByName: string | null
     expiresAt: string | null
+    durationMs?: number | null
     liftedAt: string | null
   } | null
   earlier: {

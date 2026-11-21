@@ -270,6 +270,17 @@ describe('deciding an appeal', () => {
 		expect(s.external.banInNakama).toHaveBeenCalledWith(expect.objectContaining({ id: BAN_ID, expiresAt: end }))
 	})
 
+	it('compares a shortening of a ban that has not started with its length, not with a missing end', async () => {
+		const notStarted = { expiresAt: null, durationMs: 2 * DAY }
+		const s = await opened([ban(notStarted)])
+		expect(await s.service.decide(1, ADMIN, { decision: 'grant', outcome: 'shorten', duration: '7d', reason: 'x' })).toMatchObject({
+			ok: false,
+			refusal: { code: 'invalid_body', field: 'duration' },
+		})
+		await s.service.decide(1, ADMIN, { decision: 'grant', outcome: 'shorten', duration: '24h', reason: 'Too long' })
+		expect(s.external.banInNakama).toHaveBeenCalled()
+	})
+
 	it('refuses a shortening that is not shorter, and a shortening of a warning', async () => {
 		const s = await opened([ban({ expiresAt: new Date(NOW.getTime() + 2 * DAY) })])
 		expect(await s.service.decide(1, ADMIN, { decision: 'grant', outcome: 'shorten', duration: '7d', reason: 'x' })).toMatchObject({

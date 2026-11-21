@@ -209,3 +209,22 @@ describe('session_init avatars', () => {
 		expect(readProgress(on as any, USER)!.progress.milestones).toEqual(['discordLinked'])
 	})
 })
+
+describe('session_init ban clock', () => {
+	it('starts the clock of a timed ban issued while the player was away, for its full length', () => {
+		const DAY = 24 * 60 * 60 * 1000
+		const nk = fakeNk({
+			...account(STEAM_ACCOUNT),
+			httpRequest: () => ({
+				code: 200,
+				headers: {},
+				body: JSON.stringify({ ...SYNC, bans: [{ banId: 'b9', type: 'chat', expiresAt: null, durationMs: DAY, reason: 'spam' }] }),
+			}),
+		})
+		const before = Date.now()
+		rpcSessionInit(playerCtx(USER, ENV), fakeLogger, nk as any, JSON.stringify({ steamName: 'Alice' }))
+		const ban = readBans(nk as any, USER).chat!
+		expect(ban.expiresAt).toBeGreaterThanOrEqual(before + DAY)
+		expect(ban.expiresAt).toBeLessThanOrEqual(Date.now() + DAY)
+	})
+})

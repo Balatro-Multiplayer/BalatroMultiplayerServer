@@ -270,7 +270,9 @@ describe('the dispatcher', () => {
 		expect(world.bans[0]).toMatchObject({
 			playerId: 'rep',
 			banType: 'chat',
-			expiresAt: new Date(NOW.getTime() + 24 * 60 * 60 * 1000),
+			// The end is set when the player is first told; the length is kept.
+			expiresAt: null,
+			durationMs: 24 * 60 * 60 * 1000,
 			issuedBy: 'moderator:mod',
 		})
 	})

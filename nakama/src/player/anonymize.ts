@@ -165,7 +165,7 @@ function anonymizeMirror(
 		const owner =
 			entry.kind === 'chat'
 				? entry.line.userId
-				: entry.kind === 'run'
+				: entry.kind === 'run' || entry.kind === 'ban_started'
 					? null
 					: entry.kind === 'contest'
 						? entry.by === userId || entry.against === userId

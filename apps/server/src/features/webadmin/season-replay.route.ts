@@ -6,6 +6,7 @@ import { requireOwner } from '../../shared/utils/require-owner.js'
 import { activeRankedGames } from '../ratings/active-ranked-games.js'
 import { seasonReplayApplyFor } from '../ratings/season-replay-apply.deps.js'
 import type { ApplyRefusal } from '../ratings/season-replay-apply.service.js'
+import { RATING_CHANGES_KEY } from '../ratings/season-replay-changes.js'
 import {
 	callNakama,
 	replaySeason,
@@ -95,12 +96,20 @@ router.post('/ratings/season-replay/apply', async (req, res, next) => {
 			})
 			return
 		}
+		const { changes, ...report } = result.value
+		// The list can run to thousands of rows: the staff log list leaves it out
+		// and serves it per entry (staff-log.route.ts).
 		await logStaffAction(req, {
 			action: 'season_replay_apply',
 			reason,
-			detail: { seasonId: season.id, result: result.value },
+			detail: {
+				seasonId: season.id,
+				result: report,
+				ratingChangeCount: changes.length,
+				[RATING_CHANGES_KEY]: changes,
+			},
 		})
-		res.json(result.value)
+		res.json(report)
 	} catch (err) {
 		next(err)
 	}
