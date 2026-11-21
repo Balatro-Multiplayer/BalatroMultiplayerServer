@@ -26,7 +26,7 @@ import {
 // gateway owns the seasons (Nakama reads the current one from the config
 // push) and the Express Elo replay that rebuilds a scope after a void.
 
-export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 export interface RatingRow {
 	rating: number
@@ -175,80 +175,76 @@ async function getOrCreateRating(
 }
 
 // Rates one resolved match, as of `at` (when its result was reported), in
-// its own transaction, or in `tx` when given (a rebuild replays a whole
-// board in one).
+// `tx` (a rebuild replays a whole board in one transaction).
 export async function applyRatingTransaction(
 	match: RatedMatch,
 	seasonId: number,
 	placements: PlacementEntry[],
 	at: Date,
-	tx?: Tx,
+	tx: Tx,
 ): Promise<
 	Array<{ playerId: string; newRating: number | null; gamesPlayed: number }>
 > {
 	const mode = detectRatingMode(placements)
 
-	const rate = async (tx: Tx) => {
-		const ratingMap = new Map<string, RatingRow & { playerId: string }>()
-		for (const p of placements) {
-			const r = await getOrCreateRating(
-				tx,
-				p.playerId,
-				match.modId,
-				match.gameMode,
-				seasonId,
-				at,
-			)
-			ratingMap.set(p.playerId, { ...r, playerId: p.playerId })
-		}
-
-		const deltas = computeRatingDeltas(mode, placements, ratingMap)
-		const bestPlace = Math.min(...placements.map((pl) => pl.place))
-		const updated: Array<{
-			playerId: string
-			newRating: number | null
-			gamesPlayed: number
-		}> = []
-
-		for (const p of placements) {
-			const r = ratingMap.get(p.playerId)!
-			const isWin = p.place === bestPlace
-			const newRating = Math.max(
-				RATING_FLOOR,
-				r.rating + (deltas.get(p.playerId) ?? 0),
-			)
-			const gamesPlayed = r.gamesPlayed + 1
-
-			await tx
-				.update(matchmakingRatings)
-				.set({
-					rating: newRating,
-					wins: r.wins + (isWin ? 1 : 0),
-					losses: r.losses + (isWin ? 0 : 1),
-					gamesPlayed,
-					lastMatchAt: at,
-					updatedAt: new Date(),
-				})
-				.where(
-					and(
-						eq(matchmakingRatings.playerId, p.playerId),
-						eq(matchmakingRatings.modId, match.modId),
-						eq(matchmakingRatings.gameMode, match.gameMode),
-						eq(matchmakingRatings.season, seasonId),
-					),
-				)
-
-			updated.push({
-				playerId: p.playerId,
-				newRating: gamesPlayed < PLACEMENT_GAMES ? null : newRating,
-				gamesPlayed,
-			})
-		}
-
-		await applySecondaryMetric(tx, match, seasonId, placements, at)
-		return updated
+	const ratingMap = new Map<string, RatingRow & { playerId: string }>()
+	for (const p of placements) {
+		const r = await getOrCreateRating(
+			tx,
+			p.playerId,
+			match.modId,
+			match.gameMode,
+			seasonId,
+			at,
+		)
+		ratingMap.set(p.playerId, { ...r, playerId: p.playerId })
 	}
-	return tx ? rate(tx) : db.transaction(rate)
+
+	const deltas = computeRatingDeltas(mode, placements, ratingMap)
+	const bestPlace = Math.min(...placements.map((pl) => pl.place))
+	const updated: Array<{
+		playerId: string
+		newRating: number | null
+		gamesPlayed: number
+	}> = []
+
+	for (const p of placements) {
+		const r = ratingMap.get(p.playerId)!
+		const isWin = p.place === bestPlace
+		const newRating = Math.max(
+			RATING_FLOOR,
+			r.rating + (deltas.get(p.playerId) ?? 0),
+		)
+		const gamesPlayed = r.gamesPlayed + 1
+
+		await tx
+			.update(matchmakingRatings)
+			.set({
+				rating: newRating,
+				wins: r.wins + (isWin ? 1 : 0),
+				losses: r.losses + (isWin ? 0 : 1),
+				gamesPlayed,
+				lastMatchAt: at,
+				updatedAt: new Date(),
+			})
+			.where(
+				and(
+					eq(matchmakingRatings.playerId, p.playerId),
+					eq(matchmakingRatings.modId, match.modId),
+					eq(matchmakingRatings.gameMode, match.gameMode),
+					eq(matchmakingRatings.season, seasonId),
+				),
+			)
+
+		updated.push({
+			playerId: p.playerId,
+			newRating: gamesPlayed < PLACEMENT_GAMES ? null : newRating,
+			gamesPlayed,
+		})
+	}
+
+	await applySecondaryMetric(tx, match, seasonId, placements, at)
+	return updated
 }
 
 // Resolve, validate, and upsert each player's secondary personal-best for this match.
