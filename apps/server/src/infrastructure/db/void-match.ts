@@ -18,9 +18,10 @@
  * applyRatingTransaction, in original resultReportedAt order -- the same
  * Elo rules, just run standalone. The wipe and replay are one transaction,
  * so readers (the website, the Discord rank-role bot) see the old board
- * until the new one is complete, never one half built. While it runs, a
- * mirrored write to the same board waits for it (and the mirror, which
- * stores one entry at a time, waits too), then lands after it.
+ * until the new one is complete, never one half built. While it runs, every
+ * other rating write in the season (the mirror, which stores one entry at a
+ * time, and staff match edits) waits for it, then lands after it (see
+ * rating-lock.ts).
  *
  * Known gap, as before the one-transaction rebuild: a mirrored write is
  * Nakama's copy of the player's whole row, which still counts the voided
@@ -218,7 +219,7 @@ export async function rebuildScope(
 
 	// One transaction: readers see the old board until the new one commits.
 	const before = await db.transaction(async (tx) => {
-		await lockSeasonRatings(tx, season.id) // see rating-lock.ts
+		await lockSeasonRatings(tx, season.id, 'rewrite') // see rating-lock.ts
 		const before = await listScopeRatings(modId, gameMode, season.id, tx)
 
 		const delRatings = await tx

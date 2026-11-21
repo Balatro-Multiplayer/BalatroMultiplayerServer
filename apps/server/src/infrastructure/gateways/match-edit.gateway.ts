@@ -86,9 +86,7 @@ export async function applyMatchEditRows(
 	inTransaction?: (tx: DbTransaction) => Promise<void>,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		// Before the match row lock, in the same order as a board rebuild: an
-		// edit applied during one would update rows it is about to replace.
-		if (season !== null) await lockSeasonRatings(tx, season) // see rating-lock.ts
+		if (season !== null) await lockSeasonRatings(tx, season, 'write') // see rating-lock.ts
 		const [row] = await tx
 			.select()
 			.from(matchmakingMatches)
