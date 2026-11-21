@@ -83,8 +83,7 @@ Safety:
 
 3. **Place its role.** Server Settings > Roles: drag the bot's role **above every
    rank role**. Discord refuses changes to a role at or above the bot's highest
-   one (error 50013). The bot logs any such role at startup. It can never edit
-   the server owner's roles.
+   one (error 50013). The bot logs any such role at startup.
 4. **Configure.** Copy `.env.example` to `apps/discord-bot/.env` and fill it in
    (table below). Put the same `DISCORD_BOT_API_KEY` in `apps/server/.env` and
    restart the API.
