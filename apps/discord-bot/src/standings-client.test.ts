@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+	type ChangesAnswer,
+	type ChangesRequest,
 	type StandingsAnswer,
 	type StandingsRequest,
+	createChangesClient,
 	createStandingsClient,
 } from './standings-client.js'
 
@@ -116,5 +119,71 @@ describe('createStandingsClient', () => {
 			throw new TypeError('fetch failed')
 		})
 		await expect(fetch(request)).rejects.toThrow('fetch failed')
+	})
+})
+
+describe('createChangesClient', () => {
+	const changesRequest: ChangesRequest = {
+		modId: 'MultiplayerPvP',
+		gameMode: 'ranked:pvp_ranked_expanded',
+		topN: 50,
+		since: '2026-11-21T10:00:00.000Z',
+	}
+	const changes: ChangesAnswer = {
+		season: 3,
+		cursor: '2026-11-21T10:05:00.000Z',
+		changed: [{ playerId: 'p-1', updatedAt: '2026-11-21T10:04:00.000Z' }],
+		top: ['p-1'],
+	}
+
+	it('POSTs to /changes with the internal key and returns the answer', async () => {
+		const fetchImpl = fakeFetch(200, changes)
+		await expect(
+			createChangesClient(API, KEY, fetchImpl)(changesRequest),
+		).resolves.toEqual(changes)
+		const [url, init] = fetchImpl.mock.calls[0]
+		expect(url).toBe(`${API}/internal/discord-bot/changes`)
+		expect(init?.method).toBe('POST')
+		expect(
+			(init?.headers as Record<string, string>)['x-bmp-internal-key'],
+		).toBe(KEY)
+		expect(JSON.parse(init?.body as string)).toEqual(changesRequest)
+		expect(init?.signal).toBeInstanceOf(AbortSignal)
+	})
+
+	it('sends a null cursor on the first call', async () => {
+		const fetchImpl = fakeFetch(200, { ...changes, changed: [] })
+		await createChangesClient(
+			API,
+			KEY,
+			fetchImpl,
+		)({
+			...changesRequest,
+			since: null,
+		})
+		expect(JSON.parse(fetchImpl.mock.calls[0][1]?.body as string).since).toBe(
+			null,
+		)
+	})
+
+	it('names /changes in an HTTP error', async () => {
+		const fetch = createChangesClient(API, KEY, fakeFetch(503, 'down'))
+		await expect(fetch(changesRequest)).rejects.toThrow(
+			'changes request failed: HTTP 503 down',
+		)
+	})
+
+	it.each([
+		['null', null],
+		['no season', { ...changes, season: undefined }],
+		['no cursor', { ...changes, cursor: undefined }],
+		['a numeric cursor', { ...changes, cursor: 5 }],
+		['changed that is not a list', { ...changes, changed: {} }],
+		['no top', { ...changes, top: undefined }],
+	])('rejects a malformed answer: %s', async (_name, body) => {
+		const fetch = createChangesClient(API, KEY, fakeFetch(200, body))
+		await expect(fetch(changesRequest)).rejects.toThrow(
+			'changes request failed: malformed answer',
+		)
 	})
 })
