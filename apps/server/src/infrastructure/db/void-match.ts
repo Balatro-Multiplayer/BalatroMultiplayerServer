@@ -19,9 +19,15 @@
  * Elo rules, just run standalone. The wipe and replay are one transaction,
  * so readers (the website, the Discord rank-role bot) see the old board
  * until the new one is complete, never one half built. While it runs, a
- * mirrored write to the same board waits for it, then lands on the rebuilt
- * board; the ratings for Nakama are read after the commit so they include
- * it.
+ * mirrored write to the same board waits for it (and the mirror, which
+ * stores one entry at a time, waits too), then lands after it.
+ *
+ * Known gap, as before the one-transaction rebuild: a mirrored write is
+ * Nakama's copy of the player's whole row, which still counts the voided
+ * match. A player from the voided match who finishes another game during the
+ * rebuild keeps the voided match's effect, on both boards (their row is read
+ * after the commit and pushed back to Nakama). Voiding again afterwards
+ * fixes it; a repeated void is safe.
  *
  * Nakama owns live ratings, so the rebuilt scope is then written over
  * Nakama's copy of the board (admin_ratings_set). The replay uses the
@@ -266,7 +272,7 @@ export async function rebuildScope(
 	})
 	// After the commit, not inside it: a mirrored match that waited on the
 	// rebuild has landed by now (or lands within moments, as before), so
-	// Nakama isn't handed a board without it.
+	// Nakama isn't handed a board without it (see the known gap above).
 	const after = await listScopeRatings(modId, gameMode, season.id)
 
 	const entries = nakamaRatingEntries(before, after)
