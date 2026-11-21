@@ -11,6 +11,7 @@ import {
 } from '../../features/ratings/match-edit.service.js'
 import type { DbTransaction } from '../db/executor.js'
 import { db } from '../db/index.js'
+import { lockSeasonRatings } from '../db/rating-lock.js'
 import { restampRatings } from '../db/restamp-ratings.js'
 import { matchmakingMatches, matchmakingRatings } from '../db/schema.js'
 
@@ -86,6 +87,9 @@ export async function applyMatchEditRows(
 	inTransaction?: (tx: DbTransaction) => Promise<void>,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
+		// Before the match row lock, in the same order as a board rebuild: an
+		// edit applied during one would update rows it is about to replace.
+		if (season !== null) await lockSeasonRatings(tx, season) // see rating-lock.ts
 		const [row] = await tx
 			.select()
 			.from(matchmakingMatches)
