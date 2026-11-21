@@ -118,7 +118,7 @@ export async function replaceSeasonRatings(
 	matches: MatchResult[],
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		await lockSeasonRatings(tx, season) // see rating-lock.ts
+		await lockSeasonRatings(tx, season, 'rewrite') // see rating-lock.ts
 		await tx
 			.delete(matchmakingRatings)
 			.where(
