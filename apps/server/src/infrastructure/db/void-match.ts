@@ -38,7 +38,7 @@
  *   tsx --env-file=.env src/infrastructure/db/void-match.ts <matchId>
  */
 
-import { and, asc, eq, gte } from 'drizzle-orm'
+import { and, asc, eq, gte, sql } from 'drizzle-orm'
 import { seasonBestOut } from '../../features/ratings/season-best.js'
 import type { PlacementEntry } from '../../shared/types/index.js'
 import {
@@ -217,6 +217,12 @@ export async function rebuildScope(
 
 	// One transaction: readers see the old board until the new one commits.
 	const before = await db.transaction(async (tx) => {
+		// One rebuild of a board at a time. Two at once would double-count:
+		// the second one's wipe can't see the rows the first one wrote, so it
+		// replays every match on top of them.
+		await tx.execute(
+			sql`SELECT pg_advisory_xact_lock(hashtext(${`rebuild:${modId}:${gameMode}:${season.id}`}))`,
+		)
 		const before = await listScopeRatings(modId, gameMode, season.id, tx)
 
 		const delRatings = await tx
