@@ -41,6 +41,7 @@ export function createDiscordBotRouter(
 			if (
 				typeof modId !== 'string' ||
 				typeof gameMode !== 'string' ||
+				!gameMode.startsWith('ranked:') ||
 				boardName(modId, gameMode) === undefined
 			)
 				throw new AppError('Unknown board', 400)

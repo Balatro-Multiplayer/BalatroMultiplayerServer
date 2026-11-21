@@ -73,6 +73,18 @@ describe('/internal/discord-bot', () => {
 				})
 			).status,
 		).toBe(400)
+		// A known mode without the ranked: prefix has no rating rows: reading
+		// it would strip everyone's roles.
+		expect(
+			(
+				await post({
+					...BOARD,
+					gameMode: 'pvp_ranked_expanded',
+					topN: 50,
+					discordIds: [],
+				})
+			).status,
+		).toBe(400)
 		expect((await post({ ...BOARD, topN: 201, discordIds: [] })).status).toBe(
 			400,
 		)
