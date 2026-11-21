@@ -19,7 +19,7 @@
  * Elo rules, just run standalone. The wipe and replay are one transaction,
  * so readers (the website, the Discord rank-role bot) see the old board
  * until the new one is complete, never one half built. While it runs, every
- * other rating write in the season (the mirror, which stores one entry at a
+ * other rating write to the board (the mirror, which stores one entry at a
  * time, and staff match edits) waits for it, then lands after it (see
  * rating-lock.ts).
  *
@@ -49,7 +49,7 @@ import {
 } from '../gateways/rating.gateway.js'
 import { callNakamaRpc } from '../nakama/admin-client.js'
 import { db, pool } from './index.js'
-import { lockSeasonRatings } from './rating-lock.js'
+import { lockBoardForRewrite } from './rating-lock.js'
 import {
 	leaderboardCache,
 	matchmakingMatches,
@@ -217,9 +217,10 @@ export async function rebuildScope(
 		`[void-match] rebuilding ${modId}:${gameMode}, season ${season.id} "${season.name}" (for ${match.matchId})`,
 	)
 
+	const board = { season: season.id, modId, gameMode }
 	// One transaction: readers see the old board until the new one commits.
 	const before = await db.transaction(async (tx) => {
-		await lockSeasonRatings(tx, season.id, 'rewrite') // see rating-lock.ts
+		await lockBoardForRewrite(tx, board) // see rating-lock.ts
 		const before = await listScopeRatings(modId, gameMode, season.id, tx)
 
 		const delRatings = await tx
@@ -273,10 +274,13 @@ export async function rebuildScope(
 
 		return before
 	})
-	// After the commit, not inside it: a mirrored match that waited on the
-	// rebuild has landed by now (or lands within moments, as before), so
-	// Nakama isn't handed a board without it (see the known gap above).
-	const after = await listScopeRatings(modId, gameMode, season.id)
+	// After the commit, under the board lock again: the writes that waited on
+	// the rebuild get the lock first, so they have committed by now and Nakama
+	// isn't handed a board without them (but see the known gap above).
+	const after = await db.transaction(async (tx) => {
+		await lockBoardForRewrite(tx, board)
+		return listScopeRatings(modId, gameMode, season.id, tx)
+	})
 
 	const entries = nakamaRatingEntries(before, after)
 	for (let i = 0; i < entries.length; i += RATINGS_SET_BATCH) {

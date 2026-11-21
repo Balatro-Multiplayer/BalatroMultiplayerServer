@@ -11,7 +11,7 @@ import {
 } from '../../features/ratings/match-edit.service.js'
 import type { DbTransaction } from '../db/executor.js'
 import { db } from '../db/index.js'
-import { lockSeasonRatings } from '../db/rating-lock.js'
+import { lockBoardsForWrite } from '../db/rating-lock.js'
 import { matchmakingMatches, matchmakingRatings } from '../db/schema.js'
 
 // The row a player gets when an edit rates them and they have none yet: the
@@ -86,7 +86,18 @@ export async function applyMatchEditRows(
 	inTransaction?: (tx: DbTransaction) => Promise<void>,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
-		if (season !== null) await lockSeasonRatings(tx, season, 'write') // see rating-lock.ts
+		if (season !== null) {
+			// The board's lock comes before the match row's (see rating-lock.ts),
+			// so read the board without one: a match never changes board.
+			const [board] = await tx
+				.select({
+					modId: matchmakingMatches.modId,
+					gameMode: matchmakingMatches.gameMode,
+				})
+				.from(matchmakingMatches)
+				.where(eq(matchmakingMatches.matchId, matchId))
+			if (board) await lockBoardsForWrite(tx, [{ season, ...board }])
+		}
 		const [row] = await tx
 			.select()
 			.from(matchmakingMatches)
