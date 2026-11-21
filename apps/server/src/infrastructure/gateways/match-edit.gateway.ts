@@ -116,7 +116,10 @@ export async function applyMatchEditRows(
 						wins: sql`GREATEST(0, ${matchmakingRatings.wins} + ${change.wins})`,
 						losses: sql`GREATEST(0, ${matchmakingRatings.losses} + ${change.losses})`,
 						gamesPlayed: sql`GREATEST(0, ${matchmakingRatings.gamesPlayed} + ${change.gamesPlayed})`,
-						updatedAt: new Date(),
+						// The moment of the write, not before a wait on a board
+						// rebuild's row locks: the Discord bot's change feed
+						// reads updated_at.
+						updatedAt: sql`clock_timestamp()`,
 					}
 					// A void never creates a row; an edit that rates a player for
 					// the first time may find none.
