@@ -117,7 +117,6 @@ export async function applyMatchEditRows(
 						wins: sql`GREATEST(0, ${matchmakingRatings.wins} + ${change.wins})`,
 						losses: sql`GREATEST(0, ${matchmakingRatings.losses} + ${change.losses})`,
 						gamesPlayed: sql`GREATEST(0, ${matchmakingRatings.gamesPlayed} + ${change.gamesPlayed})`,
-						updatedAt: sql`clock_timestamp()`, // and again below
 					}
 					// A void never creates a row; an edit that rates a player for
 					// the first time may find none.
@@ -156,8 +155,7 @@ export async function applyMatchEditRows(
 							})
 					}
 				}
-				// Last of the rating writes: an insert's stamp can predate a
-				// lock wait. See restampRatings.
+				// updated_at, last of the rating writes: see restampRatings.
 				await restampRatings(
 					tx,
 					changes.map((c) => ({

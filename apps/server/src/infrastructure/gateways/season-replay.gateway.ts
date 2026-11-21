@@ -139,10 +139,11 @@ export async function replaceSeasonRatings(
 					updatedAt: new Date(),
 				})
 				.where(eq(matchmakingMatches.matchId, match.matchId))
-		// Last, so a long replay can't leave the stamps behind the bot's cursor.
+		// Last, with the DB clock, so a long replay can't leave the stamps
+		// behind the bot's cursor.
 		await tx
 			.update(matchmakingRatings)
-			.set({ updatedAt: new Date() })
+			.set({ updatedAt: sql`clock_timestamp()` })
 			.where(
 				and(
 					eq(matchmakingRatings.season, season),

@@ -54,12 +54,10 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 		}
 		for (const rating of rows.ratings) {
 			// Nakama owns the rating; the row is its latest copy. updated_at is
-			// the moment of the write, not now() (this transaction's start): a
-			// write that waited on a board rebuild must not land in the past,
-			// behind the Discord bot's change-feed cursor.
+			// set by restampRatings, last in this transaction.
 			await tx
 				.insert(matchmakingRatings)
-				.values({ ...rating, updatedAt: sql`clock_timestamp()` })
+				.values(rating)
 				.onConflictDoUpdate({
 					target: [
 						matchmakingRatings.playerId,
@@ -77,7 +75,6 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 						seasonBestRev: rating.seasonBestRev,
 						seasonBestText: rating.seasonBestText,
 						lastMatchAt: rating.lastMatchAt,
-						updatedAt: sql`clock_timestamp()`,
 					},
 				})
 		}
@@ -90,8 +87,7 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 				.limit(1)
 			if (!existing) await tx.insert(matchResultConflicts).values(rows.conflicts)
 		}
-		// Last: an insert's clock_timestamp() is worked out before it waits on
-		// a conflicting row (say one a board rebuild is deleting).
+		// Last, after any lock wait: the Discord bot's change feed reads it.
 		await restampRatings(tx, rows.ratings)
 	})
 	// After the commit: the queue item points at rows that now exist. One

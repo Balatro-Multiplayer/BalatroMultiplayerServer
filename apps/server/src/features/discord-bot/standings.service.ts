@@ -15,10 +15,10 @@ import type { BoardReads } from '../../infrastructure/gateways/discord-standings
 // with the bot.
 
 /**
- * How far each changes cursor reaches back. A row's updated_at is stamped
- * when its write starts, so a write that commits slowly can carry a time
- * before the last cursor. Rows seen twice are harmless: the bot finds
- * nothing to change.
+ * How far each changes cursor reaches back. Every writer stamps updated_at
+ * with its transaction's last statement, but the commit still comes a
+ * moment later, so a row can carry a time just before the last cursor.
+ * Rows seen twice are harmless: the bot finds nothing to change.
  */
 export const CHANGES_OVERLAP_MS = 2 * 60_000
 

@@ -38,7 +38,7 @@
  *   tsx --env-file=.env src/infrastructure/db/void-match.ts <matchId>
  */
 
-import { and, asc, eq, gte } from 'drizzle-orm'
+import { and, asc, eq, gte, sql } from 'drizzle-orm'
 import { seasonBestOut } from '../../features/ratings/season-best.js'
 import type { PlacementEntry } from '../../shared/types/index.js'
 import {
@@ -276,7 +276,7 @@ export async function rebuildScope(
 		// behind its cursor by the time the board commits.
 		await tx
 			.update(matchmakingRatings)
-			.set({ updatedAt: new Date() })
+			.set({ updatedAt: sql`clock_timestamp()` })
 			.where(
 				and(
 					eq(matchmakingRatings.modId, modId),
