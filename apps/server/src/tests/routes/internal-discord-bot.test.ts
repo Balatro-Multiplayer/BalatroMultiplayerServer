@@ -88,6 +88,15 @@ describe('/internal/discord-bot', () => {
 				})
 			).status,
 		).toBe(400)
+		// Names on Object.prototype are not boards.
+		for (const board of [
+			{ ...BOARD, gameMode: 'ranked:constructor' },
+			{ ...BOARD, modId: '__proto__' },
+			{ ...BOARD, modId: 'constructor' },
+		])
+			expect((await post({ ...board, topN: 50, discordIds: [] })).status).toBe(
+				400,
+			)
 		expect((await post({ ...BOARD, topN: 201, discordIds: [] })).status).toBe(
 			400,
 		)
