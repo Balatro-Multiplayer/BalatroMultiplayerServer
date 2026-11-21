@@ -12,7 +12,7 @@ import {
 import type { DbTransaction } from '../db/executor.js'
 import { db } from '../db/index.js'
 import { lockSeasonRatings } from '../db/rating-lock.js'
-import { restampRatings } from '../db/restamp-ratings.js'
+import { type RatingKey, restampRatings } from '../db/restamp-ratings.js'
 import { matchmakingMatches, matchmakingRatings } from '../db/schema.js'
 
 // The row a player gets when an edit rates them and they have none yet: the
@@ -94,6 +94,7 @@ export async function applyMatchEditRows(
 			.where(eq(matchmakingMatches.matchId, matchId))
 			.for('update')
 		if (!row) return
+		let rated: RatingKey[] = []
 		const atTarget = matchAtTarget(row, request)
 		if (!atTarget) {
 			await tx
@@ -157,18 +158,16 @@ export async function applyMatchEditRows(
 							})
 					}
 				}
-				// updated_at, last of the rating writes: see restampRatings.
-				await restampRatings(
-					tx,
-					changes.map((c) => ({
-						playerId: c.playerId,
-						modId: row.modId,
-						gameMode: row.gameMode,
-						season,
-					})),
-				)
+				rated = changes.map((c) => ({
+					playerId: c.playerId,
+					modId: row.modId,
+					gameMode: row.gameMode,
+					season,
+				}))
 			}
 		}
 		await inTransaction?.(tx)
+		// updated_at, last in the transaction: see restampRatings.
+		await restampRatings(tx, rated)
 	})
 }
