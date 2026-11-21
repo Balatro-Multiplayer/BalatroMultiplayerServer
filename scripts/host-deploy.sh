@@ -6,13 +6,17 @@
 #   scripts/host-deploy.sh full   Nakama, then the API, then the website
 #   scripts/host-deploy.sh web    the API and the website only
 #
+# Both modes end by rebuilding and starting the Discord rank-role bot
+# (apps/discord-bot), so it runs wherever the server runs.
+#
 # Order matters: Nakama first, so an API that calls a new Nakama RPC finds it.
 # Nakama's prod.yml is a single-file bind mount, so it needs a force-recreate
 # (not a restart) to see a new file. The website must be followed by an nginx
 # reload, because nginx resolves web:3000 only at start: a web restart alone
 # leaves the whole site at 502.
 #
-# Any failed step stops the script with a non-zero exit.
+# Any failed step stops the script with a non-zero exit, except the bot step:
+# the bot is an extra, so a failure there only logs a warning.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -84,5 +88,12 @@ docker exec bmp-nginx nginx -s reload
 log "step: check the site answers"
 wait_for "website" docker exec bmp-nginx wget -q --spider http://web:3000/
 wait_for "API" docker exec bmp-nginx wget -q --spider http://127.0.0.1:8788/health
+
+# Last, so a bot problem never holds up the site. Without
+# apps/discord-bot/.env the bot logs "disabled" once and idles.
+log "step: build and start the Discord bot"
+if ! { "${COMPOSE[@]}" build discord-bot && "${COMPOSE[@]}" up -d --no-deps discord-bot; }; then
+	log "WARNING: the Discord bot did not build or start; the rest of the deploy is fine"
+fi
 
 log "done: $MODE deploy finished"

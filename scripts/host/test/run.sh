@@ -277,6 +277,8 @@ assert_contains "full swaps the api with the overlay" "color-swap overlay=docker
 assert_contains "full builds web" "build web" "$log"
 assert_contains "full starts web" "up -d --no-deps web" "$log"
 assert_contains "full reloads nginx" "exec bmp-nginx nginx -s reload" "$log"
+assert_contains "full builds the discord bot" "build discord-bot" "$log"
+assert_contains "full starts the discord bot" "up -d --no-deps discord-bot" "$log"
 first="$(grep -nE 'force-recreate nakama' <<<"$log" | cut -d: -f1)"
 second="$(grep -nE 'color-swap' <<<"$log" | cut -d: -f1)"
 third="$(grep -nE 'build web' <<<"$log" | cut -d: -f1)"
@@ -295,6 +297,11 @@ log="$(cat "$FAKE_DOCKER_LOG")"
 assert_not_contains "web does not touch nakama" "nakama" "$log"
 assert_contains "web swaps the api" "color-swap" "$log"
 assert_contains "web reloads nginx" "nginx -s reload" "$log"
+assert_contains "web builds the discord bot" "build discord-bot" "$log"
+assert_contains "web starts the discord bot" "up -d --no-deps discord-bot" "$log"
+bot="$(grep -nE 'build discord-bot' <<<"$log" | cut -d: -f1)"
+health="$(grep -nE 'wget' <<<"$log" | tail -1 | cut -d: -f1)"
+if [ "$health" -lt "$bot" ]; then ok "the bot step runs after the site checks"; else bad "the bot step runs after the site checks ($health $bot)"; fi
 
 setup_hd
 out="$(SWAP_FAIL=1 run_hd full)"
@@ -314,6 +321,19 @@ assert_not_contains "no api swap after a failed nakama step" "color-swap" "$(cat
 setup_hd
 out="$(FAKE_DOCKER_FAIL="wget" run_hd web)"
 assert_eq "an unanswering site fails the script" 1 "$?"
+assert_not_contains "no bot step when the site fails" "discord-bot" "$(cat "$FAKE_DOCKER_LOG")"
+
+setup_hd
+out="$(FAKE_DOCKER_FAIL="build discord-bot" run_hd full)"
+assert_eq "a failed bot build does not fail the deploy" 0 "$?"
+assert_contains "a failed bot build warns" "WARNING: the Discord bot" "$out"
+assert_not_contains "no bot start after a failed bot build" "up -d --no-deps discord-bot" "$(cat "$FAKE_DOCKER_LOG")"
+assert_contains "the deploy still finishes" "done: full deploy finished" "$out"
+
+setup_hd
+out="$(FAKE_DOCKER_FAIL="up -d --no-deps discord-bot" run_hd web)"
+assert_eq "a failed bot start does not fail the deploy" 0 "$?"
+assert_contains "a failed bot start warns" "WARNING: the Discord bot" "$out"
 
 echo
 echo "$pass passed, $fail failed"

@@ -174,77 +174,77 @@ async function getOrCreateRating(
 	}
 }
 
-// Rates one resolved match, as of `at` (when its result was reported).
+// Rates one resolved match, as of `at` (when its result was reported), in
+// `tx` (a rebuild replays a whole board in one transaction).
 export async function applyRatingTransaction(
 	match: RatedMatch,
 	seasonId: number,
 	placements: PlacementEntry[],
 	at: Date,
+	tx: Tx,
 ): Promise<
 	Array<{ playerId: string; newRating: number | null; gamesPlayed: number }>
 > {
 	const mode = detectRatingMode(placements)
 
-	return db.transaction(async (tx) => {
-		const ratingMap = new Map<string, RatingRow & { playerId: string }>()
-		for (const p of placements) {
-			const r = await getOrCreateRating(
-				tx,
-				p.playerId,
-				match.modId,
-				match.gameMode,
-				seasonId,
-				at,
-			)
-			ratingMap.set(p.playerId, { ...r, playerId: p.playerId })
-		}
+	const ratingMap = new Map<string, RatingRow & { playerId: string }>()
+	for (const p of placements) {
+		const r = await getOrCreateRating(
+			tx,
+			p.playerId,
+			match.modId,
+			match.gameMode,
+			seasonId,
+			at,
+		)
+		ratingMap.set(p.playerId, { ...r, playerId: p.playerId })
+	}
 
-		const deltas = computeRatingDeltas(mode, placements, ratingMap)
-		const bestPlace = Math.min(...placements.map((pl) => pl.place))
-		const updated: Array<{
-			playerId: string
-			newRating: number | null
-			gamesPlayed: number
-		}> = []
+	const deltas = computeRatingDeltas(mode, placements, ratingMap)
+	const bestPlace = Math.min(...placements.map((pl) => pl.place))
+	const updated: Array<{
+		playerId: string
+		newRating: number | null
+		gamesPlayed: number
+	}> = []
 
-		for (const p of placements) {
-			const r = ratingMap.get(p.playerId)!
-			const isWin = p.place === bestPlace
-			const newRating = Math.max(
-				RATING_FLOOR,
-				r.rating + (deltas.get(p.playerId) ?? 0),
-			)
-			const gamesPlayed = r.gamesPlayed + 1
+	for (const p of placements) {
+		const r = ratingMap.get(p.playerId)!
+		const isWin = p.place === bestPlace
+		const newRating = Math.max(
+			RATING_FLOOR,
+			r.rating + (deltas.get(p.playerId) ?? 0),
+		)
+		const gamesPlayed = r.gamesPlayed + 1
 
-			await tx
-				.update(matchmakingRatings)
-				.set({
-					rating: newRating,
-					wins: r.wins + (isWin ? 1 : 0),
-					losses: r.losses + (isWin ? 0 : 1),
-					gamesPlayed,
-					lastMatchAt: at,
-					updatedAt: new Date(),
-				})
-				.where(
-					and(
-						eq(matchmakingRatings.playerId, p.playerId),
-						eq(matchmakingRatings.modId, match.modId),
-						eq(matchmakingRatings.gameMode, match.gameMode),
-						eq(matchmakingRatings.season, seasonId),
-					),
-				)
-
-			updated.push({
-				playerId: p.playerId,
-				newRating: gamesPlayed < PLACEMENT_GAMES ? null : newRating,
+		await tx
+			.update(matchmakingRatings)
+			.set({
+				rating: newRating,
+				wins: r.wins + (isWin ? 1 : 0),
+				losses: r.losses + (isWin ? 0 : 1),
 				gamesPlayed,
+				lastMatchAt: at,
+				updatedAt: new Date(),
 			})
-		}
+			.where(
+				and(
+					eq(matchmakingRatings.playerId, p.playerId),
+					eq(matchmakingRatings.modId, match.modId),
+					eq(matchmakingRatings.gameMode, match.gameMode),
+					eq(matchmakingRatings.season, seasonId),
+				),
+			)
 
-		await applySecondaryMetric(tx, match, seasonId, placements, at)
-		return updated
-	})
+		updated.push({
+			playerId: p.playerId,
+			newRating: gamesPlayed < PLACEMENT_GAMES ? null : newRating,
+			gamesPlayed,
+		})
+	}
+
+	await applySecondaryMetric(tx, match, seasonId, placements, at)
+	return updated
 }
 
 // Resolve, validate, and upsert each player's secondary personal-best for this match.
@@ -329,13 +329,15 @@ async function applySecondaryMetric(
 	}
 }
 
-// Every rating in one board, with the player's Nakama account and display name.
+// Every rating in one board, with the player's Nakama account and display
+// name. Read in `q` when given (a transaction).
 export async function listScopeRatings(
 	modId: string,
 	gameMode: string,
 	seasonId: number,
+	q: typeof db | Tx = db,
 ) {
-	return db
+	return q
 		.select({
 			playerId: matchmakingRatings.playerId,
 			nakamaUserId: players.nakamaUserId,

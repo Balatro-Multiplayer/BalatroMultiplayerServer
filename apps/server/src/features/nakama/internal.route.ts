@@ -1,10 +1,10 @@
-import { timingSafeEqual } from 'node:crypto'
-import { Router, type NextFunction, type Request, type Response } from 'express'
+import { Router } from 'express'
 import { env } from '../../env.js'
 import * as banGateway from '../../infrastructure/gateways/ban.gateway.js'
 import * as muteGateway from '../../infrastructure/gateways/mute.gateway.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
 import * as reportGateway from '../../infrastructure/gateways/report.gateway.js'
+import { requireSharedKey } from '../../middleware/require-shared-key.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { getDiscordAuthUrl } from '../auth/discord.js'
 import { generateLinkState } from '../auth/link-state.js'
@@ -18,20 +18,7 @@ import { createReportRelayService, parseNakamaReport, type ReportRelayService } 
 
 // Routes only Nakama calls (nakama/src/express.ts), guarded by the shared
 // INTERNAL_API_KEY. With no key configured every request is refused.
-export function requireInternalKey(req: Request, res: Response, next: NextFunction) {
-	const sent = req.headers['x-bmp-internal-key']
-	if (!env.INTERNAL_API_KEY || typeof sent !== 'string') {
-		res.status(401).json({ error: 'Missing internal key' })
-		return
-	}
-	const expected = Buffer.from(env.INTERNAL_API_KEY)
-	const actual = Buffer.from(sent)
-	if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
-		res.status(403).json({ error: 'Bad internal key' })
-		return
-	}
-	next()
-}
+export const requireInternalKey = requireSharedKey(() => env.INTERNAL_API_KEY)
 
 const STEAM_ID_HASH = /^[0-9a-f]{64}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

@@ -11,6 +11,8 @@ import {
 } from '../../features/ratings/match-edit.service.js'
 import type { DbTransaction } from '../db/executor.js'
 import { db } from '../db/index.js'
+import { lockBoardsForWrite } from '../db/rating-lock.js'
+import { type RatingKey, restampRatings } from '../db/restamp-ratings.js'
 import { matchmakingMatches, matchmakingRatings } from '../db/schema.js'
 
 // The row a player gets when an edit rates them and they have none yet: the
@@ -85,12 +87,25 @@ export async function applyMatchEditRows(
 	inTransaction?: (tx: DbTransaction) => Promise<void>,
 ): Promise<void> {
 	await db.transaction(async (tx) => {
+		if (season !== null) {
+			// The board's lock comes before the match row's (see rating-lock.ts),
+			// so read the board without one: a match never changes board.
+			const [board] = await tx
+				.select({
+					modId: matchmakingMatches.modId,
+					gameMode: matchmakingMatches.gameMode,
+				})
+				.from(matchmakingMatches)
+				.where(eq(matchmakingMatches.matchId, matchId))
+			if (board) await lockBoardsForWrite(tx, [{ season, ...board }])
+		}
 		const [row] = await tx
 			.select()
 			.from(matchmakingMatches)
 			.where(eq(matchmakingMatches.matchId, matchId))
 			.for('update')
 		if (!row) return
+		let rated: RatingKey[] = []
 		const atTarget = matchAtTarget(row, request)
 		if (!atTarget) {
 			await tx
@@ -116,7 +131,6 @@ export async function applyMatchEditRows(
 						wins: sql`GREATEST(0, ${matchmakingRatings.wins} + ${change.wins})`,
 						losses: sql`GREATEST(0, ${matchmakingRatings.losses} + ${change.losses})`,
 						gamesPlayed: sql`GREATEST(0, ${matchmakingRatings.gamesPlayed} + ${change.gamesPlayed})`,
-						updatedAt: new Date(),
 					}
 					// A void never creates a row; an edit that rates a player for
 					// the first time may find none.
@@ -155,8 +169,16 @@ export async function applyMatchEditRows(
 							})
 					}
 				}
+				rated = changes.map((c) => ({
+					playerId: c.playerId,
+					modId: row.modId,
+					gameMode: row.gameMode,
+					season,
+				}))
 			}
 		}
 		await inTransaction?.(tx)
+		// updated_at, last in the transaction: see restampRatings.
+		await restampRatings(tx, rated)
 	})
 }

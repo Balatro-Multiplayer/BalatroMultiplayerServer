@@ -126,6 +126,10 @@ export const env = {
 	// Shared key Nakama sends (X-BMP-Internal-Key) on /internal/nakama/*.
 	// Unset = those routes refuse everything.
 	INTERNAL_API_KEY: optional('INTERNAL_API_KEY', ''),
+	// Shared key the Discord rank-role bot (apps/discord-bot) sends
+	// (X-BMP-Internal-Key) on /internal/discord-bot/*. Its own key, so the bot
+	// can't call Nakama's routes. Unset = those routes refuse everything.
+	DISCORD_BOT_API_KEY: optional('DISCORD_BOT_API_KEY', ''),
 	// Bearer token GitHub Actions send to /api/deploy/* (ADR 0012). Set on the
 	// Official server only. Unset = those routes answer 404.
 	DEPLOY_TOKEN: optional('DEPLOY_TOKEN', ''),

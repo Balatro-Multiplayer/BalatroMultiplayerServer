@@ -7,6 +7,7 @@ import { createDeployRouter } from '../features/deploy/deploy.route.js'
 import blogRouter from '../features/blog/blog.route.js'
 import launcherRouter from '../features/launcher/launcher.route.js'
 import modsRouter from '../features/mods/mods.route.js'
+import { createDiscordBotRouter } from '../features/discord-bot/discord-bot.route.js'
 import { createInternalNakamaRouter } from '../features/nakama/internal.route.js'
 import r2modmanReleasesRouter from '../features/r2modman-releases/r2modman-releases.route.js'
 import { createContestPageService } from '../features/contests/contest-page.service.js'
@@ -162,5 +163,6 @@ router.use('/api/webadmin', webadminRouter)
 router.use('/api/deploy', createDeployRouter())
 router.use('/admin', adminRouter)
 router.use('/internal/nakama', createInternalNakamaRouter())
+router.use('/internal/discord-bot', createDiscordBotRouter())
 
 export default router

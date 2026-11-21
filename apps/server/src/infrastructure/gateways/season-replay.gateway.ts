@@ -5,6 +5,7 @@ import type {
 } from '../../features/ratings/season-replay-apply.service.js'
 import { parseAntiCheatSourceId } from '../../shared/service-queue/source-ids.js'
 import { db } from '../db/index.js'
+import { lockSeasonForRewrite } from '../db/rating-lock.js'
 import {
 	matchmakingMatches,
 	matchmakingRatings,
@@ -107,12 +108,17 @@ export async function listUnratedMatches(
 
 // One transaction: the Season's ranked rating rows become `ratings` (a player
 // the replay no longer rates loses their row) and each match gets its result.
+// Every row is stamped as written just before the commit, a restored
+// backup's too: the Discord bot's change feed (playersChangedSince) only
+// sees rows with a new updated_at, it only looks back a couple of minutes,
+// and a restore can change anyone's rating.
 export async function replaceSeasonRatings(
 	season: number,
 	ratings: Record<string, unknown>[],
 	matches: MatchResult[],
 ): Promise<void> {
 	await db.transaction(async (tx) => {
+		await lockSeasonForRewrite(tx, season) // see rating-lock.ts
 		await tx
 			.delete(matchmakingRatings)
 			.where(
@@ -133,6 +139,17 @@ export async function replaceSeasonRatings(
 					updatedAt: new Date(),
 				})
 				.where(eq(matchmakingMatches.matchId, match.matchId))
+		// Last, with the DB clock, so a long replay can't leave the stamps
+		// behind the bot's cursor.
+		await tx
+			.update(matchmakingRatings)
+			.set({ updatedAt: sql`clock_timestamp()` })
+			.where(
+				and(
+					eq(matchmakingRatings.season, season),
+					like(matchmakingRatings.gameMode, RANKED_BOARDS),
+				),
+			)
 	})
 }
 

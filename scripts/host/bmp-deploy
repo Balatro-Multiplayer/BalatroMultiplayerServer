@@ -3,8 +3,8 @@
 # server host as /usr/local/bin/bmp-deploy. It reads SSH_ORIGINAL_COMMAND and
 # accepts only:
 #
-#   full <40-hex sha>   Full deploy: Nakama, API, website
-#   web <40-hex sha>    Web deploy: API and website
+#   full <40-hex sha>   Full deploy: Nakama, API, website, Discord bot
+#   web <40-hex sha>    Web deploy: API, website, Discord bot
 #   status              print DEPLOYED_COMMIT, the Nakama commit and health; changes nothing
 #
 # A deploy downloads the commit from public GitHub, backs up the files it is

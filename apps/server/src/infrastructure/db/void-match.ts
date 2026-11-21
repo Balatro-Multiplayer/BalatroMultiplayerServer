@@ -16,7 +16,19 @@
  * mark the target match 'voided' (excluding it from replay), then replay
  * every remaining resolved match in that scope through the real
  * applyRatingTransaction, in original resultReportedAt order -- the same
- * Elo rules, just run standalone.
+ * Elo rules, just run standalone. The wipe and replay are one transaction,
+ * so readers (the website, the Discord rank-role bot) see the old board
+ * until the new one is complete, never one half built. While it runs, every
+ * other rating write to the board (the mirror, which stores one entry at a
+ * time, and staff match edits) waits for it, then lands after it (see
+ * rating-lock.ts).
+ *
+ * Known gap, as before the one-transaction rebuild: a mirrored write is
+ * Nakama's copy of the player's whole row, which still counts the voided
+ * match. A player from the voided match who finishes another game during the
+ * rebuild keeps the voided match's effect, on both boards (their row is read
+ * after the commit and pushed back to Nakama). Voiding again afterwards
+ * fixes it; a repeated void is safe.
  *
  * Nakama owns live ratings, so the rebuilt scope is then written over
  * Nakama's copy of the board (admin_ratings_set). The replay uses the
@@ -27,7 +39,7 @@
  *   tsx --env-file=.env src/infrastructure/db/void-match.ts <matchId>
  */
 
-import { and, asc, eq, gte } from 'drizzle-orm'
+import { and, asc, eq, gte, sql } from 'drizzle-orm'
 import { seasonBestOut } from '../../features/ratings/season-best.js'
 import type { PlacementEntry } from '../../shared/types/index.js'
 import {
@@ -37,6 +49,7 @@ import {
 } from '../gateways/rating.gateway.js'
 import { callNakamaRpc } from '../nakama/admin-client.js'
 import { db, pool } from './index.js'
+import { lockBoardForRewrite } from './rating-lock.js'
 import {
 	leaderboardCache,
 	matchmakingMatches,
@@ -204,59 +217,89 @@ export async function rebuildScope(
 		`[void-match] rebuilding ${modId}:${gameMode}, season ${season.id} "${season.name}" (for ${match.matchId})`,
 	)
 
-	const before = await listScopeRatings(modId, gameMode, season.id)
+	const board = { season: season.id, modId, gameMode }
+	// One transaction: readers see the old board until the new one commits.
+	const before = await db.transaction(async (tx) => {
+		await lockBoardForRewrite(tx, board) // see rating-lock.ts
+		const before = await listScopeRatings(modId, gameMode, season.id, tx)
 
-	const delRatings = await db
-		.delete(matchmakingRatings)
-		.where(
-			and(
-				eq(matchmakingRatings.modId, modId),
-				eq(matchmakingRatings.gameMode, gameMode),
-				eq(matchmakingRatings.season, season.id),
-			),
-		)
-	const delBoard = await db
-		.delete(leaderboardCache)
-		.where(
-			and(
-				eq(leaderboardCache.modId, modId),
-				eq(leaderboardCache.gameMode, gameMode),
-				eq(leaderboardCache.season, season.id),
-			),
-		)
-	console.log(
-		`[void-match] cleared scope (${modId}:${gameMode}, season ${season.id}): ratings=${delRatings.rowCount} leaderboard=${delBoard.rowCount}`,
-	)
-
-	const scopedMatches = (
-		await db
-			.select()
-			.from(matchmakingMatches)
+		const delRatings = await tx
+			.delete(matchmakingRatings)
 			.where(
 				and(
-					eq(matchmakingMatches.status, 'resolved'),
-					eq(matchmakingMatches.modId, modId),
-					eq(matchmakingMatches.gameMode, gameMode),
-					gte(matchmakingMatches.resultReportedAt, season.startedAt),
+					eq(matchmakingRatings.modId, modId),
+					eq(matchmakingRatings.gameMode, gameMode),
+					eq(matchmakingRatings.season, season.id),
 				),
 			)
-			.orderBy(asc(matchmakingMatches.resultReportedAt))
-	).filter((row) => resolvedInSeason(row.resultReportedAt, season))
+		const delBoard = await tx
+			.delete(leaderboardCache)
+			.where(
+				and(
+					eq(leaderboardCache.modId, modId),
+					eq(leaderboardCache.gameMode, gameMode),
+					eq(leaderboardCache.season, season.id),
+				),
+			)
+		console.log(
+			`[void-match] cleared scope (${modId}:${gameMode}, season ${season.id}): ratings=${delRatings.rowCount} leaderboard=${delBoard.rowCount}`,
+		)
 
-	let n = 0
-	for (const row of scopedMatches) {
-		const placements = replayPlacements(row.resultPlacements)
-		if (!placements) continue
-		const at = row.resultReportedAt ?? row.updatedAt
-		await applyRatingTransaction(row, season.id, placements, at)
-		n++
-	}
-	console.log(`[void-match] replayed ${n} of ${scopedMatches.length} resolved matches in scope`)
+		const scopedMatches = (
+			await tx
+				.select()
+				.from(matchmakingMatches)
+				.where(
+					and(
+						eq(matchmakingMatches.status, 'resolved'),
+						eq(matchmakingMatches.modId, modId),
+						eq(matchmakingMatches.gameMode, gameMode),
+						gte(matchmakingMatches.resultReportedAt, season.startedAt),
+					),
+				)
+				.orderBy(asc(matchmakingMatches.resultReportedAt))
+		).filter((row) => resolvedInSeason(row.resultReportedAt, season))
 
-	const entries = nakamaRatingEntries(
-		before,
-		await listScopeRatings(modId, gameMode, season.id),
-	)
+		let n = 0
+		for (const row of scopedMatches) {
+			const placements = replayPlacements(row.resultPlacements)
+			if (!placements) continue
+			const at = row.resultReportedAt ?? row.updatedAt
+			await applyRatingTransaction(row, season.id, placements, at, tx)
+			n++
+		}
+		console.log(
+			`[void-match] replayed ${n} of ${scopedMatches.length} resolved matches in scope`,
+		)
+
+		// Stamp the whole rebuilt board as written now, just before the commit.
+		// The Discord bot's change feed (playersChangedSince) only looks back a
+		// couple of minutes; rows stamped early in a long rebuild would fall
+		// behind its cursor by the time the board commits.
+		await tx
+			.update(matchmakingRatings)
+			.set({ updatedAt: sql`clock_timestamp()` })
+			.where(
+				and(
+					eq(matchmakingRatings.modId, modId),
+					eq(matchmakingRatings.gameMode, gameMode),
+					eq(matchmakingRatings.season, season.id),
+				),
+			)
+
+		return before
+	})
+	// After the commit, under the board lock again: the writes that waited on
+	// the rebuild get the lock first, so they have committed by now and Nakama
+	// isn't handed a board without them (but see the known gap above). A game
+	// Nakama rates while the push runs is still overwritten, as before: no
+	// lock here can stop Nakama, and admin_ratings_set has no compare-and-set.
+	const after = await db.transaction(async (tx) => {
+		await lockBoardForRewrite(tx, board)
+		return listScopeRatings(modId, gameMode, season.id, tx)
+	})
+
+	const entries = nakamaRatingEntries(before, after)
 	for (let i = 0; i < entries.length; i += RATINGS_SET_BATCH) {
 		const result = await callNakamaRpc('admin_ratings_set', {
 			modId,

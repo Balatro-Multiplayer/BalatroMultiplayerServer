@@ -1,0 +1,25 @@
+{
+	"name": "balatro-multiplayer-discord-bot",
+	"version": "1.0.7",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "biome check .",
+		"dev": "tsx watch src/main.ts",
+		"start": "node dist/main.js"
+	},
+	"dependencies": {
+		"@bmp/types": "workspace:*",
+		"discord.js": "^14.28.1"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "*",
+		"@types/node": "^22.0.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
+}

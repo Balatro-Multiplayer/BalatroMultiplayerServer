@@ -2,6 +2,8 @@ import { eq, sql } from 'drizzle-orm'
 import type { ChatRows, ForfeitRow, GameKind, RunRows } from '../../features/nakama/mirror.service.js'
 import { antiCheatSourceId } from '../../shared/service-queue/source-ids.js'
 import { db } from '../db/index.js'
+import { lockBoardsForWrite } from '../db/rating-lock.js'
+import { restampRatings } from '../db/restamp-ratings.js'
 import {
 	chatLogs,
 	flaggedMessages,
@@ -23,6 +25,7 @@ import { enqueueServiceQueueItem, rescoreAfterChange } from './service-queue.gat
 
 export async function storeMirroredRun(rows: RunRows): Promise<void> {
 	await db.transaction(async (tx) => {
+		await lockBoardsForWrite(tx, rows.ratings) // see rating-lock.ts
 		const { lobbyRun } = rows
 		await tx
 			.insert(lobbyRuns)
@@ -52,7 +55,8 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 			await tx.insert(matchmakingMatches).values(rows.match).onConflictDoNothing({ target: matchmakingMatches.matchId })
 		}
 		for (const rating of rows.ratings) {
-			// Nakama owns the rating; the row is its latest copy.
+			// Nakama owns the rating; the row is its latest copy. updated_at is
+			// set by restampRatings, last in this transaction.
 			await tx
 				.insert(matchmakingRatings)
 				.values(rating)
@@ -73,7 +77,6 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 						seasonBestRev: rating.seasonBestRev,
 						seasonBestText: rating.seasonBestText,
 						lastMatchAt: rating.lastMatchAt,
-						updatedAt: sql`now()`,
 					},
 				})
 		}
@@ -86,6 +89,8 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 				.limit(1)
 			if (!existing) await tx.insert(matchResultConflicts).values(rows.conflicts)
 		}
+		// Last, after any lock wait: the Discord bot's change feed reads it.
+		await restampRatings(tx, rows.ratings)
 	})
 	// After the commit: the queue item points at rows that now exist. One
 	// item per flagged player (sourceId = 'runId:playerId', the run log's key).

@@ -2,8 +2,8 @@ name: Full deploy
 
 # Runs only by hand: Actions > Full deploy > Run workflow.
 # Closes Ranked, tells every online player, waits for Ranked matches to end,
-# deploys Nakama, the API and the website to the Official server, then opens
-# Ranked again.
+# deploys Nakama, the API, the website and the Discord rank-role bot to the
+# Official server, then opens Ranked again.
 #
 # The wait is always 30 minutes from the close. Then the run checks every
 # minute and deploys when no Ranked match is running, or 80 minutes after the

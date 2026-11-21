@@ -29,8 +29,11 @@ export const BOARD_NAMES = {
 // "PvP Vanilla" for a known board, undefined when the mod or the mode has no
 // display name (the caller decides what to do; a raw key is never shown).
 export function boardName(modId: string, gameMode: string): string | undefined {
-	const mod = (BOARD_NAMES as BoardMods)[modId]
-	if (!mod) return undefined
-	const mode = mod.modes[gameMode.replace(/^ranked:/, '')]
-	return mode === undefined ? undefined : `${mod.label} ${mode}`
+	// Own keys only: '__proto__' or 'constructor' must not find Object's.
+	const mods: BoardMods = BOARD_NAMES
+	if (!Object.hasOwn(mods, modId)) return undefined
+	const mod = mods[modId]
+	const modeKey = gameMode.replace(/^ranked:/, '')
+	if (!Object.hasOwn(mod.modes, modeKey)) return undefined
+	return `${mod.label} ${mod.modes[modeKey]}`
 }
