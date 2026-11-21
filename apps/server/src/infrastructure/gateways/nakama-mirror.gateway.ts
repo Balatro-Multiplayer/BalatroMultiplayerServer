@@ -2,7 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import type { ChatRows, ForfeitRow, GameKind, RunRows } from '../../features/nakama/mirror.service.js'
 import { antiCheatSourceId } from '../../shared/service-queue/source-ids.js'
 import { db } from '../db/index.js'
-import { lockSeasonRatings } from '../db/rating-lock.js'
+import { lockBoardsForWrite } from '../db/rating-lock.js'
 import { restampRatings } from '../db/restamp-ratings.js'
 import {
 	chatLogs,
@@ -25,10 +25,7 @@ import { enqueueServiceQueueItem, rescoreAfterChange } from './service-queue.gat
 
 export async function storeMirroredRun(rows: RunRows): Promise<void> {
 	await db.transaction(async (tx) => {
-		// Before any row lock, in a fixed order (see rating-lock.ts).
-		const seasons = [...new Set(rows.ratings.map((r) => r.season))]
-		for (const season of seasons.sort((a, b) => a - b))
-			await lockSeasonRatings(tx, season, 'write')
+		await lockBoardsForWrite(tx, rows.ratings) // see rating-lock.ts
 		const { lobbyRun } = rows
 		await tx
 			.insert(lobbyRuns)
