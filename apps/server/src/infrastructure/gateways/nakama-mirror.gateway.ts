@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm'
 import type { ChatRows, ForfeitRow, GameKind, RunRows } from '../../features/nakama/mirror.service.js'
 import { antiCheatSourceId } from '../../shared/service-queue/source-ids.js'
 import { db } from '../db/index.js'
+import { restampRatings } from '../db/restamp-ratings.js'
 import {
 	chatLogs,
 	flaggedMessages,
@@ -89,6 +90,9 @@ export async function storeMirroredRun(rows: RunRows): Promise<void> {
 				.limit(1)
 			if (!existing) await tx.insert(matchResultConflicts).values(rows.conflicts)
 		}
+		// Last: an insert's clock_timestamp() is worked out before it waits on
+		// a conflicting row (say one a board rebuild is deleting).
+		await restampRatings(tx, rows.ratings)
 	})
 	// After the commit: the queue item points at rows that now exist. One
 	// item per flagged player (sourceId = 'runId:playerId', the run log's key).
