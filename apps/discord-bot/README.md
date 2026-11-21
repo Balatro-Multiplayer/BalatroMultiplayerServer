@@ -115,7 +115,9 @@ Safety:
 4. **Configure.** Copy `.env.example` to `apps/discord-bot/.env` and fill it in
    (table below). Put the same `DISCORD_BOT_API_KEY` in `apps/server/.env` and
    restart the API.
-5. **Start it.** The deploy scripts don't start it:
+5. **Start it.** Every deploy (Full or Web) rebuilds and starts the bot, and
+   Docker brings it back after a host reboot. To start it now, without a
+   deploy (e.g. right after filling in the `.env`):
 
    ```sh
    docker compose up -d --build discord-bot

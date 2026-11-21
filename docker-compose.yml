@@ -309,8 +309,8 @@ services:
     restart: unless-stopped
 
   # Discord rank-role bot (apps/discord-bot/README.md). Reads standings from
-  # the API's /internal/discord-bot/* through the "api" alias. The deploy
-  # scripts don't start it: `docker compose up -d --build discord-bot`.
+  # the API's /internal/discord-bot/* through the "api" alias. Every deploy
+  # rebuilds and starts it (scripts/host-deploy.sh, last step, non-fatal).
   # Without apps/discord-bot/.env (or with a setup mistake) it logs
   # "disabled" once and then does nothing, so restarts don't loop.
   discord-bot:
