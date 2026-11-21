@@ -1,7 +1,8 @@
 name: Web deploy
 
 # Runs only by hand: Actions > Web deploy > Run workflow.
-# Deploys the API and the website to the Official server. Nakama is not
+# Deploys the API, the website and the Discord rank-role bot to the Official
+# server. Nakama is not
 # restarted and ranked stays open. If nakama/ differs from the server folder (a Web deploy never copies it),
 # the run shows a warning and still deploys; run a Full deploy to apply it.
 # Needs the secrets DEPLOY_SSH_KEY and DEPLOY_SSH_KNOWN_HOSTS and the
