@@ -4,6 +4,7 @@ import {
 	type Guild,
 	PermissionFlagsBits,
 	PermissionsBitField,
+	Status,
 } from 'discord.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SYNC_COMMAND, guildPort, rolePlacementProblems } from './discord.js'
@@ -213,6 +214,48 @@ describe('guildPort', () => {
 		})
 		expect(byId['8'].name).toBe('user-8')
 		expect(byId['8'].roleIds).not.toContain('20')
+	})
+})
+
+describe('guildPort.cachedMembers', () => {
+	it('lists members from the cache without asking Discord', () => {
+		const { guild, calls } = makeGuild({
+			roles: [{ id: '20', position: 2 }],
+			members: [{ id: '7', roles: ['20'] }],
+		})
+		const listed = guildPort(guild).cachedMembers()
+		expect(listed.map((m) => m.id).sort()).toEqual(['7', BOT_ID])
+		expect(listed.find((m) => m.id === '7')?.roleIds).toContain('20')
+		expect(calls).toEqual([])
+	})
+
+	it('sees a role change that arrived as a gateway member update', () => {
+		const { guild } = makeGuild({
+			roles: [
+				{ id: '20', position: 2 },
+				{ id: '30', position: 1 },
+			],
+			members: [{ id: '7', roles: ['20'] }],
+		})
+		const actions = (
+			guild.client as unknown as {
+				actions: {
+					GuildMemberUpdate: { handle(data: unknown, shard: unknown): void }
+				}
+			}
+		).actions
+		actions.GuildMemberUpdate.handle(
+			{
+				guild_id: GUILD_ID,
+				...memberJson({ id: '7', roles: ['30'] }),
+			},
+			{ status: Status.Ready },
+		)
+		const roleIds = guildPort(guild)
+			.cachedMembers()
+			.find((m) => m.id === '7')?.roleIds
+		expect(roleIds).toContain('30')
+		expect(roleIds).not.toContain('20')
 	})
 })
 
