@@ -27,6 +27,13 @@ export function claimedHash(lines: string[]): string | null {
 	return null
 }
 
+// Closed: the client sent its 'end' event, or there is nothing more to wait for (no log,
+// or a truncated one that keeps no more events).
+export function logClosed(log: PlayerLog | undefined): boolean {
+	if (!log || log.truncated) return true
+	return log.lines.some((line) => opcodeOf(line) === 'end')
+}
+
 // The highest event number the server holds with no gap before it (0 for no log).
 export function logHeldOf(log: PlayerLog | undefined): number {
 	return log ? (log.seq ?? log.lines.length) : 0

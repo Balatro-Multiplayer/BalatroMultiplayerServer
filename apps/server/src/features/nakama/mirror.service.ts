@@ -44,7 +44,7 @@ export interface NakamaRun {
 	modId: string
 	startedAt: number
 	endedAt: number
-	status: 'agreed' | 'partial' | 'disputed' | 'abandoned' | 'restarted' | 'contested'
+	status: 'agreed' | 'partial' | 'disputed' | 'abandoned' | 'restarted' | 'dodged' | 'contested'
 	placements: {
 		playerId: string
 		place: number
@@ -361,7 +361,7 @@ function runStatusOf(
 	status: NakamaRun['status'],
 ): RunRows['lobbyRun']['status'] {
 	if (status === 'abandoned') return 'abandoned'
-	if (status === 'restarted') return 'terminated'
+	if (status === 'restarted' || status === 'dodged') return 'terminated'
 	return 'completed'
 }
 

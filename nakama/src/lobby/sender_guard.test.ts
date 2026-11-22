@@ -21,7 +21,7 @@ const info = (name: string) => ({
 function lobbyWith(...ids: string[]): Lobby {
 	let lobby = newLobby({
 		code: 'ABC123',
-		modId: 'MultiplayerPvP',
+		modId: 'MultiplayerSPDRN',
 		maxPlayers: 4,
 		creatorId: ids[0],
 		now: 0,
@@ -62,13 +62,6 @@ const HOST_KEYS = Object.keys(SENDER_RULES).filter(
 describe('SENDER_RULES', () => {
 	it('covers the outcome actions the research named', () => {
 		for (const key of [
-			'pvp_win',
-			'pvp_player_won',
-			'pvp_end_pvp',
-			'pvp_ready_check',
-			'pvp_round_state',
-			'pvp_death_pending',
-			'pvp_player_lives',
 			'spdrn_match_timeout',
 			'spdrn_seed_change_apply',
 			'spdrn_match_draw',
@@ -85,7 +78,7 @@ describe('SENDER_RULES', () => {
 			'pvp_player_result',
 			'pvp_play_hand',
 			'pvp_ready_blind',
-			'pvp_fail_round',
+			'pvp_blind_lost',
 			'pvp_forfeit',
 			'pvp_draw_vote',
 			'spdrn_forfeit',
@@ -125,7 +118,7 @@ describe('host-only actions', () => {
 		expect(r.payload).toEqual({ cid: 'c1', action: key, reason: 'not_host' })
 	})
 
-	it.each(['pvp_win', 'pvp_round_state'])('drops a forged %s aimed at one player too', (key) => {
+	it.each(['spdrn_match_timeout', 'spdrn_match_draw'])('drops a forged %s aimed at one player too', (key) => {
 		const step = send(
 			lobbyWith('a', 'b', 'c'),
 			'b',
@@ -140,7 +133,7 @@ describe('host-only actions', () => {
 	it('drops forged lives for anyone, the forger included', () => {
 		const lobby = lobbyWith('a', 'b')
 		for (const target of ['a', 'b', '*all*']) {
-			const step = send(lobby, 'b', 'pvp_player_lives', {
+			const step = send(lobby, 'b', 'spdrn_seed_change_apply', {
 				player_id: target,
 				lives: 99,
 			})
@@ -150,7 +143,7 @@ describe('host-only actions', () => {
 
 	it('still spends the forger budget, so forging is rate limited', () => {
 		const lobby = lobbyWith('a', 'b')
-		const step = send(lobby, 'b', 'pvp_win', { winner_id: 'b' })
+		const step = send(lobby, 'b', 'spdrn_match_timeout', { winner_id: 'b' })
 		expect(step.lobby.actionBudget.b.tokens).toBeLessThan(
 			lobby.actionBudget.b?.tokens ?? 100,
 		)
@@ -158,7 +151,7 @@ describe('host-only actions', () => {
 
 	it('keeps the lobby otherwise unchanged when dropping', () => {
 		const lobby = lobbyWith('a', 'b')
-		const step = send(lobby, 'b', 'pvp_win', { winner_id: 'b' })
+		const step = send(lobby, 'b', 'spdrn_match_timeout', { winner_id: 'b' })
 		expect({ ...step.lobby, actionBudget: {} }).toEqual({
 			...lobby,
 			actionBudget: {},
@@ -172,17 +165,17 @@ describe('host transfer', () => {
 		lobby = disconnect(lobby, 'a', 'a-s1', 500).lobby
 		expect(lobby.hostId).toBe('b')
 
-		const fromNew = send(lobby, 'b', 'pvp_win', { winner_id: 'c' })
+		const fromNew = send(lobby, 'b', 'spdrn_match_timeout', { winner_id: 'c' })
 		expect(fromNew.dropped).toBeUndefined()
 		expect(relayed(fromNew.out)).toHaveLength(1)
 
 		// The old host comes back: it is a guest now.
 		lobby = join(lobby, 'a', 'a-s2', info('a')).lobby
 		expect(lobby.hostId).toBe('b')
-		const fromOld = send(lobby, 'a', 'pvp_win', { winner_id: 'a' })
+		const fromOld = send(lobby, 'a', 'spdrn_match_timeout', { winner_id: 'a' })
 		expect(fromOld.dropped).toEqual({
 			kind: 'not_host',
-			key: 'pvp_win',
+			key: 'spdrn_match_timeout',
 			from: 'a',
 			hostId: 'b',
 		})
@@ -193,11 +186,11 @@ describe('host transfer', () => {
 		let lobby = lobbyWith('a', 'b', 'c')
 		lobby = leave(lobby, 'a').lobby
 		expect(lobby.hostId).toBe('b')
-		const step = send(lobby, 'b', 'pvp_player_won', { player_id: 'c' })
+		const step = send(lobby, 'b', 'spdrn_match_timeout', { player_id: 'c' })
 		expect(step.dropped).toBeUndefined()
 		expect(relayed(step.out)[0].to).toEqual(['b', 'c'])
 		expect(
-			send(lobby, 'c', 'pvp_player_won', { player_id: 'c' }).dropped?.kind,
+			send(lobby, 'c', 'spdrn_match_timeout', { player_id: 'c' }).dropped?.kind,
 		).toBe('not_host')
 	})
 
@@ -337,10 +330,10 @@ describe('a forged win does not reach the rated result', () => {
 	const places = (...order: string[]) =>
 		order.map((playerId, i) => ({ playerId, place: i + 1 }))
 
-	function startedPvp(): Lobby {
+	function startedRace(): Lobby {
 		let lobby = newLobby({
 			code: 'ABC123',
-			modId: 'MultiplayerPvP',
+			modId: 'MultiplayerSPDRN',
 			maxPlayers: 2,
 			creatorId: 'a',
 			now: 0,
@@ -354,13 +347,13 @@ describe('a forged win does not reach the rated result', () => {
 	}
 
 	it('the host never sees the forgery, so the forger cannot make the report agree', () => {
-		let lobby = startedPvp()
+		let lobby = startedRace()
 		// The guest declares itself the winner: nobody receives it.
-		const forged = send(lobby, 'b', 'pvp_win', { winner_id: 'b' })
+		const forged = send(lobby, 'b', 'spdrn_match_timeout', { winner_id: 'b' })
 		expect(relayed(forged.out)).toEqual([])
 		lobby = forged.lobby
 		// The host's referee declares the real winner; both clients receive it.
-		const legit = send(lobby, 'a', 'pvp_win', { winner_id: 'a' })
+		const legit = send(lobby, 'a', 'spdrn_match_timeout', { winner_id: 'a' })
 		expect(relayed(legit.out)[0].to).toEqual(['a', 'b'])
 		lobby = legit.lobby
 		// The host reports what it saw; the forger still lies in its own report.

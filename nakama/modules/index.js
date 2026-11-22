@@ -1539,7 +1539,9 @@ var ClientOp = {
   // {playerId, fromStart?} -- a spectator asks for the run of the player it watches: that
   // player's Run save and the events after it (answered with SPECTATE_RUN).
   // fromStart asks for the whole log and no Run save.
-  SPECTATE_VIEW: 7
+  SPECTATE_VIEW: 7,
+  // PvpInputMessage -- one input of a PvP run, from a seated player.
+  INPUT: 8
 };
 var ServerOp = {
   // Snapshot, to the joining player only.
@@ -1573,7 +1575,9 @@ var ServerOp = {
   // (matchmaking/group).
   GROUP_QUEUE: 112,
   // SpectateRun, to the spectator that asked (ClientOp.SPECTATE_VIEW).
-  SPECTATE_RUN: 113
+  SPECTATE_RUN: 113,
+  // PvpViewMessage, to one player: their view of the PvP match, sent when it changed.
+  VIEW: 114
 };
 var BROADCAST_TARGET = "*";
 var SERVER_TARGET = "server";
@@ -1598,6 +1602,29 @@ var RATINGS_COLLECTION = "ratings";
 // src/config.ts
 var CONFIG_COLLECTION = "server_config";
 var CONFIG_KEY = "global";
+var PVP_LIMIT_RANGES = {
+  animatingHoldMilliseconds: { fallback: 3e5, min: 1e3, max: 9e5 },
+  animatingBlindMilliseconds: { fallback: 6e5, min: 1e3, max: 18e5 },
+  awayBudgetMilliseconds: { fallback: 12e4, min: 0, max: 18e5 }
+};
+var LIMIT_NAMES = Object.keys(PVP_LIMIT_RANGES);
+function mergePvpLimits(current, raw) {
+  if (typeof raw !== "object" || raw === null) return current;
+  const given = raw;
+  const next = __spreadValues({}, current);
+  for (const name of LIMIT_NAMES) {
+    const value = given[name];
+    const { min, max } = PVP_LIMIT_RANGES[name];
+    if (typeof value === "number" && Number.isInteger(value) && value >= min && value <= max) next[name] = value;
+  }
+  return next;
+}
+var DEFAULT_PVP_LIMITS = {
+  animatingHoldMilliseconds: PVP_LIMIT_RANGES.animatingHoldMilliseconds.fallback,
+  animatingBlindMilliseconds: PVP_LIMIT_RANGES.animatingBlindMilliseconds.fallback,
+  awayBudgetMilliseconds: PVP_LIMIT_RANGES.awayBudgetMilliseconds.fallback
+};
+var MIN_VERSION_PATTERN = /^\d+\.\d+\.\d+$/;
 var DEFAULT_CONFIG = {
   chatEnabled: true,
   rankedEnabled: true,
@@ -1610,7 +1637,10 @@ var DEFAULT_CONFIG = {
   chatAllowlist: [],
   season: 0,
   queueAllowedModIds: [],
-  queueAllowedModIdsExtra: []
+  queueAllowedModIdsExtra: [],
+  pvpLimits: DEFAULT_PVP_LIMITS,
+  pvpMinVersion: "",
+  pvpServerRulesVersion: ""
 };
 var MAX_MOD_IDS = 500;
 var MOD_ID_PATTERN = /^[^\s]{1,128}$/;
@@ -1644,10 +1674,17 @@ function mergeConfig(current, update) {
   if (allowedIds) next.queueAllowedModIds = allowedIds;
   const extraIds = modIdsOf(update.queueAllowedModIdsExtra);
   if (extraIds) next.queueAllowedModIdsExtra = extraIds;
+  next.pvpLimits = mergePvpLimits(current.pvpLimits, update.pvpLimits);
+  const minVersion = update.pvpMinVersion;
+  if (typeof minVersion === "string" && (minVersion === "" || MIN_VERSION_PATTERN.test(minVersion)))
+    next.pvpMinVersion = minVersion;
+  const rulesVersion = update.pvpServerRulesVersion;
+  if (typeof rulesVersion === "string" && (rulesVersion === "" || MIN_VERSION_PATTERN.test(rulesVersion)))
+    next.pvpServerRulesVersion = rulesVersion;
   return next;
 }
 function clientConfig(config) {
-  const _a = config, { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra } = _a, shown = __objRest(_a, ["chatAllowlist", "queueAllowedModIds", "queueAllowedModIdsExtra"]);
+  const _a = config, { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, pvpLimits, pvpMinVersion, pvpServerRulesVersion } = _a, shown = __objRest(_a, ["chatAllowlist", "queueAllowedModIds", "queueAllowedModIdsExtra", "pvpLimits", "pvpMinVersion", "pvpServerRulesVersion"]);
   return shown;
 }
 function readConfig(nk) {
@@ -1692,6 +1729,8 @@ function disallowedMods(reported, allowedIds) {
 var PVP_MOD_ID = "MultiplayerPvP";
 var VERSION_MISMATCH = "version_mismatch";
 var VERSION_MISMATCH_MESSAGE = "Everyone in a PvP game needs the same MultiplayerPvP version. Update the mod and try again.";
+var UPDATE_REQUIRED = "update_required";
+var UPDATE_REQUIRED_MESSAGE = "Your MultiplayerPvP version is too old to play. Update the mod and try again.";
 var X_Y_Z = /^v?(\d+\.\d+\.\d+)/;
 function pvpVersionOf(reported) {
   for (const entry of reported) {
@@ -1712,6 +1751,12 @@ function compareVersions(a, b) {
   }
   return 0;
 }
+var WHOLE_VERSION = /^\d+\.\d+\.\d+$/;
+function belowMinimum(version, minimum) {
+  if (!WHOLE_VERSION.test(minimum)) return false;
+  if (version === void 0 || !WHOLE_VERSION.test(version)) return true;
+  return compareVersions(version, minimum) < 0;
+}
 function versionOutliers(versionByPlayer) {
   const ids = Object.keys(versionByPlayer);
   const counts = {};
@@ -1726,6 +1771,10 @@ function versionOutliers(versionByPlayer) {
     }
   }
   return ids.filter((id) => versionByPlayer[id] !== kept);
+}
+function everyoneOnServerRules(rulesVersion, versions) {
+  if (rulesVersion === void 0 || !WHOLE_VERSION.test(rulesVersion)) return false;
+  return versions.length > 0 && versions.every((version) => !belowMinimum(version, rulesVersion));
 }
 
 // src/standing/storage.ts
@@ -2443,6 +2492,434 @@ function releaseCode(nk, code, matchId) {
   }
 }
 
+// src/lobby/hooks.ts
+function savedReferee(game) {
+  var _a;
+  const referee = (_a = game.started) == null ? void 0 : _a.referee;
+  if (referee !== void 0) return referee;
+  return game.pvp !== void 0 ? "server" : "players";
+}
+function runningReferee(lobby) {
+  if (lobby.modId !== PVP_MOD_ID) return "not_pvp";
+  return lobby.game.started === null ? "no_game" : savedReferee(lobby.game);
+}
+function nextReferee(lobby, rulesVersion) {
+  const versions = lobby.players.map((seat) => seat.info.pvpVersion);
+  return everyoneOnServerRules(rulesVersion, versions) ? "server" : "players";
+}
+function refereeOf(lobby, rulesVersion) {
+  const running = runningReferee(lobby);
+  return running === "no_game" ? nextReferee(lobby, rulesVersion) : running;
+}
+function joinRefusal(lobby, playerId, minimumVersion) {
+  if (lobby.modId !== PVP_MOD_ID) return null;
+  const seat = lobby.players.find((player) => player.id === playerId);
+  return belowMinimum(seat == null ? void 0 : seat.info.pvpVersion, minimumVersion) ? { reject: "pvp_update_required" } : null;
+}
+
+// src/review/ranked.ts
+function isRankedGameMode(gameMode) {
+  return gameMode.indexOf("ranked:") === 0;
+}
+function rankedContextOf(records, label) {
+  let inGame = false;
+  if (label) {
+    try {
+      const parsed = JSON.parse(label);
+      inGame = typeof parsed.mode === "string" && isRankedGameMode(parsed.mode) && parsed.started === true;
+    } catch (e) {
+      inGame = false;
+    }
+  }
+  return { queued: records.some((r) => isRankedGameMode(r.gameMode)), inGame };
+}
+function lobbyKindOf(lobby) {
+  if (lobby.rankedMode || lobby.gameMode && isRankedGameMode(lobby.gameMode)) return "ranked";
+  return lobby.allowedIds || lobby.gameMode ? "casual" : "private";
+}
+function lobbyKindOfLabel(label) {
+  if (!label) return null;
+  try {
+    const parsed = JSON.parse(label);
+    const mode = typeof parsed.mode === "string" ? parsed.mode : "";
+    if (isRankedGameMode(mode)) return "ranked";
+    return parsed.type === "public" || mode ? "casual" : "private";
+  } catch (e) {
+    return null;
+  }
+}
+
+// src/lobby/log_check.ts
+var FRAMING_OPCODES = { end: true, chk: true };
+function opcodeOf(line) {
+  return JSON.parse(line)[1];
+}
+function hashInput(lines) {
+  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
+}
+function claimedHash(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const event2 = JSON.parse(lines[i]);
+    if (event2[1] !== "chk") continue;
+    const args = event2[2];
+    return args && typeof args.carbon === "string" ? args.carbon : null;
+  }
+  return null;
+}
+function logClosed(log) {
+  if (!log || log.truncated) return true;
+  return log.lines.some((line) => opcodeOf(line) === "end");
+}
+function logHeldOf(log) {
+  var _a;
+  return log ? (_a = log.seq) != null ? _a : log.lines.length : 0;
+}
+function logGapsOf(log) {
+  if (!log || log.ahead === void 0) return 0;
+  return Math.max(0, log.ahead - logHeldOf(log));
+}
+function checkLog(log, sha256) {
+  if (!log) return { carbonHash: null, check: "unavailable" };
+  const carbonHash = claimedHash(log.lines);
+  if (logGapsOf(log) > 0) return { carbonHash, check: "incomplete" };
+  if (carbonHash === null || log.truncated)
+    return { carbonHash, check: "unavailable" };
+  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
+  return {
+    carbonHash,
+    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
+  };
+}
+
+// src/lobby/pvp/core/clock.ts
+var isCounting = (countdown) => countdown.hold.kind === "counting" || countdown.hold.kind === "held for player";
+var stoppedAt = (countdown) => countdown.hold.kind === "counting" ? null : countdown.hold.sinceAt;
+var isPersonalFor = (countdown, player) => countdown.kind === "personal" && countdown.against.includes(player);
+var isTimed = (clocks, player) => clocks.countdowns.some(
+  (countdown) => countdown.kind === "ante" && isCounting(countdown) && countdown.against.includes(player)
+);
+function changeClocks(state, change) {
+  const run = state.run;
+  return run === null ? state : __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, run), { clocks: change(run.clocks) }) });
+}
+function newClocks(players, limits, now) {
+  const clocks = {};
+  for (const player of players)
+    clocks[player] = {
+      awayLeftMilliseconds: limits.awayBudgetMilliseconds,
+      animatingBlindLeftMilliseconds: limits.animatingBlindMilliseconds
+    };
+  return { countdowns: [], playerPauses: [], players: clocks, settledAt: now };
+}
+function timeLeft(countdown, now) {
+  var _a;
+  return countdown.endsAt - ((_a = stoppedAt(countdown)) != null ? _a : now);
+}
+function playerClock(clocks, player) {
+  const own = clocks.players[player];
+  if (own === void 0) throw new Error(`no clock for player ${player}`);
+  return own;
+}
+function pauseLeft(clocks, pause) {
+  const own = playerClock(clocks, pause.player);
+  return pause.reason === "animating" ? Math.min(pause.holdLeftMilliseconds, own.animatingBlindLeftMilliseconds) : own.awayLeftMilliseconds;
+}
+var isAwayPause = (pause) => pause.reason !== "animating";
+var pauseApplies = (pause, countdown) => isAwayPause(pause) || countdown.kind !== "ante" && countdown.against.includes(pause.player);
+var isHeldFor = (clocks, countdown) => clocks.playerPauses.some(
+  (pause) => pauseApplies(pause, countdown) && (isAwayPause(pause) || pauseLeft(clocks, pause) > 0)
+);
+function awayForfeitAt(clocks, player, awaySince) {
+  const own = clocks.players[player];
+  if (own === void 0) return null;
+  const paused = clocks.playerPauses.some(
+    (pause) => pause.player === player && pause.reason === "away"
+  );
+  const from = paused ? clocks.settledAt : Math.max(awaySince, clocks.settledAt);
+  return from + own.awayLeftMilliseconds;
+}
+function applyPauses(clocks, at) {
+  return __spreadProps(__spreadValues({}, clocks), {
+    countdowns: clocks.countdowns.map((countdown) => {
+      const { hold } = countdown;
+      const paused = isHeldFor(clocks, countdown);
+      if (paused && hold.kind === "counting")
+        return __spreadProps(__spreadValues({}, countdown), { hold: { kind: "held for player", sinceAt: at } });
+      if (!paused && hold.kind === "held for player")
+        return __spreadProps(__spreadValues({}, countdown), {
+          endsAt: countdown.endsAt + (at - hold.sinceAt),
+          hold: { kind: "counting" }
+        });
+      return countdown;
+    })
+  });
+}
+function charge(clocks, active, step) {
+  const players = __spreadValues({}, clocks.players);
+  const playerPauses = clocks.playerPauses.map((pause) => {
+    if (!active.some(
+      (found) => found.player === pause.player && found.reason === pause.reason
+    ))
+      return pause;
+    const own = playerClock(__spreadProps(__spreadValues({}, clocks), { players }), pause.player);
+    if (pause.reason === "server restart") return pause;
+    if (pause.reason === "away") {
+      players[pause.player] = __spreadProps(__spreadValues({}, own), {
+        awayLeftMilliseconds: own.awayLeftMilliseconds - step
+      });
+      return pause;
+    }
+    players[pause.player] = __spreadProps(__spreadValues({}, own), {
+      animatingBlindLeftMilliseconds: own.animatingBlindLeftMilliseconds - step
+    });
+    return __spreadProps(__spreadValues({}, pause), { holdLeftMilliseconds: pause.holdLeftMilliseconds - step });
+  });
+  return __spreadProps(__spreadValues({}, clocks), { players, playerPauses });
+}
+function catchUpClocks(clocks, now) {
+  let current = clocks;
+  while (current.settledAt < now) {
+    const held = current.countdowns.filter(
+      (countdown) => countdown.hold.kind === "held for player"
+    );
+    const active = current.playerPauses.filter(
+      (pause) => pause.reason !== "server restart" && pauseLeft(current, pause) > 0 && (pause.reason === "away" || held.some((countdown) => pauseApplies(pause, countdown)))
+    );
+    if (active.length === 0) return __spreadProps(__spreadValues({}, current), { settledAt: now });
+    const step = Math.min(
+      now - current.settledAt,
+      ...active.map((pause) => pauseLeft(current, pause))
+    );
+    const at = current.settledAt + step;
+    current = applyPauses(
+      __spreadProps(__spreadValues({}, charge(current, active, step)), { settledAt: at }),
+      at
+    );
+  }
+  return current;
+}
+function startPlayerPause(clocks, player, reason, limits, now) {
+  playerClock(clocks, player);
+  const settled = catchUpClocks(clocks, now);
+  if (settled.playerPauses.some((s) => s.player === player && s.reason === reason))
+    return settled;
+  const pause = reason === "animating" ? {
+    player,
+    reason,
+    holdLeftMilliseconds: limits.animatingHoldMilliseconds
+  } : { player, reason };
+  return applyPauses(
+    __spreadProps(__spreadValues({}, settled), { playerPauses: [...settled.playerPauses, pause] }),
+    now
+  );
+}
+function endPlayerPause(clocks, player, reason, now) {
+  const settled = catchUpClocks(clocks, now);
+  return applyPauses(
+    __spreadProps(__spreadValues({}, settled), {
+      playerPauses: settled.playerPauses.filter(
+        (pause) => pause.player !== player || pause.reason !== reason
+      )
+    }),
+    now
+  );
+}
+function refillAnimatingBudgets(clocks, limits, now) {
+  const settled = catchUpClocks(clocks, now);
+  const players = {};
+  for (const player of Object.keys(settled.players))
+    players[player] = __spreadProps(__spreadValues({}, settled.players[player]), {
+      animatingBlindLeftMilliseconds: limits.animatingBlindMilliseconds
+    });
+  return __spreadProps(__spreadValues({}, settled), { players });
+}
+function startCountdown(clocks, made, now) {
+  const settled = catchUpClocks(clocks, now);
+  const hold = { kind: "counting" };
+  const base = {
+    by: made.by,
+    against: made.against,
+    endsAt: now + made.lengthMilliseconds,
+    hold
+  };
+  const countdown = made.kind === "ante" ? __spreadProps(__spreadValues({}, base), { kind: "ante", blindKey: made.blindKey }) : made.kind === "personal" ? __spreadProps(__spreadValues({}, base), { kind: "personal", rate: 1 }) : __spreadProps(__spreadValues({}, base), { kind: made.kind });
+  return applyPauses(
+    __spreadProps(__spreadValues({}, settled), { countdowns: [...settled.countdowns, countdown] }),
+    now
+  );
+}
+function pauseCountdowns(clocks, which, now, kind = "paused by starter") {
+  const settled = catchUpClocks(clocks, now);
+  return __spreadProps(__spreadValues({}, settled), {
+    countdowns: settled.countdowns.map((countdown) => {
+      var _a;
+      if (!which(countdown) || !isCounting(countdown)) return countdown;
+      return __spreadProps(__spreadValues({}, countdown), {
+        hold: {
+          kind,
+          sinceAt: (_a = stoppedAt(countdown)) != null ? _a : now
+        }
+      });
+    })
+  });
+}
+function resumeCountdowns(clocks, which, now) {
+  const settled = catchUpClocks(clocks, now);
+  return __spreadProps(__spreadValues({}, settled), {
+    countdowns: settled.countdowns.map((countdown) => {
+      const { hold } = countdown;
+      const paused = isHeldFor(settled, countdown);
+      if (!which(countdown) || hold.kind !== "paused by starter" && hold.kind !== "paused until timed" && hold.kind !== "paused for pvp blind")
+        return countdown;
+      if (paused)
+        return __spreadProps(__spreadValues({}, countdown), {
+          hold: { kind: "held for player", sinceAt: hold.sinceAt }
+        });
+      return __spreadProps(__spreadValues({}, countdown), {
+        endsAt: countdown.endsAt + (now - hold.sinceAt),
+        hold: { kind: "counting" }
+      });
+    })
+  });
+}
+var isPausedFor = (countdown, player) => countdown.kind === "ante" && countdown.hold.kind === "paused for ready" && countdown.against.includes(player);
+function pauseForReady(clocks, player, blindKey, now) {
+  const settled = catchUpClocks(clocks, now);
+  const frozen = [];
+  const kept = settled.countdowns.flatMap((countdown) => {
+    var _a;
+    if (countdown.kind !== "ante" || countdown.blindKey !== blindKey || !countdown.against.includes(player) || timeLeft(countdown, now) <= 0)
+      return [countdown];
+    frozen.push(__spreadProps(__spreadValues({}, countdown), {
+      against: [player],
+      hold: {
+        kind: "paused for ready",
+        sinceAt: (_a = stoppedAt(countdown)) != null ? _a : now,
+        after: isCounting(countdown) ? "counting" : "paused by starter"
+      }
+    }));
+    const others = countdown.against.filter((id) => id !== player);
+    return others.length === 0 ? [] : [__spreadProps(__spreadValues({}, countdown), { against: others })];
+  });
+  return __spreadProps(__spreadValues({}, settled), { countdowns: [...kept, ...frozen] });
+}
+function setPausedAfter(clocks, starter, after) {
+  return __spreadProps(__spreadValues({}, clocks), {
+    countdowns: clocks.countdowns.map(
+      (countdown) => countdown.kind === "ante" && countdown.by === starter && countdown.hold.kind === "paused for ready" ? __spreadProps(__spreadValues({}, countdown), { hold: __spreadProps(__spreadValues({}, countdown.hold), { after }) }) : countdown
+    )
+  });
+}
+function resumeAfterReady(clocks, player, now) {
+  const settled = catchUpClocks(clocks, now);
+  const counting = /* @__PURE__ */ new Set();
+  const waiting = __spreadProps(__spreadValues({}, settled), {
+    countdowns: settled.countdowns.map((countdown) => {
+      const { hold } = countdown;
+      if (hold.kind !== "paused for ready" || !isPausedFor(countdown, player))
+        return countdown;
+      const next = __spreadProps(__spreadValues({}, countdown), {
+        hold: { kind: "paused by starter", sinceAt: hold.sinceAt }
+      });
+      if (hold.after === "counting") counting.add(next);
+      return next;
+    })
+  });
+  return resumeCountdowns(waiting, (countdown) => counting.has(countdown), now);
+}
+function removeCountdowns(clocks, which, now) {
+  const settled = catchUpClocks(clocks, now);
+  return __spreadProps(__spreadValues({}, settled), {
+    countdowns: settled.countdowns.filter((countdown) => !which(countdown))
+  });
+}
+function countdownsAtZero(clocks, now) {
+  return clocks.countdowns.map((countdown, index) => ({ countdown, index })).filter(
+    ({ countdown }) => countdown.hold.kind === "counting" && countdown.endsAt <= now
+  ).sort(
+    (a, b) => a.countdown.endsAt - b.countdown.endsAt || a.index - b.index
+  ).map(({ countdown }) => countdown);
+}
+function shiftTimes(state, downtime) {
+  return changeClocks(state, (clocks) => __spreadProps(__spreadValues({}, clocks), {
+    settledAt: clocks.settledAt + downtime,
+    countdowns: clocks.countdowns.map((countdown) => __spreadProps(__spreadValues({}, countdown), {
+      endsAt: countdown.endsAt + downtime,
+      hold: countdown.hold.kind === "counting" ? countdown.hold : __spreadProps(__spreadValues({}, countdown.hold), { sinceAt: countdown.hold.sinceAt + downtime })
+    }))
+  }));
+}
+
+// src/lobby/active.ts
+function activeRunOf(lobby, userId, sha256) {
+  var _a, _b;
+  const started = lobby.game.started;
+  if (!started || lobby.closed) return null;
+  if (!isParticipant(lobby, userId)) return null;
+  if (!lobby.players.some((p) => p.id === userId)) return null;
+  const lines = (_b = (_a = lobby.game.logs[userId]) == null ? void 0 : _a.lines) != null ? _b : [];
+  const { runSave, runSaveSkipped } = checkedRunSave(
+    lobby,
+    userId,
+    lines,
+    sha256
+  );
+  return {
+    runId: started.runId,
+    code: lobby.code,
+    modId: lobby.modId,
+    events: eventsOf(lines),
+    requiredStanding: lobby.requiredStanding || null,
+    runSave,
+    runSaveSkipped,
+    logText: hashInput(lines)
+  };
+}
+function replayTailOf(lobby, userId) {
+  const started = lobby.game.started;
+  if (!started || lobby.closed) return null;
+  if (!started.players.some((p) => p.id === userId)) return null;
+  const tails = started.players.filter((p) => p.id !== userId).map((p) => {
+    var _a, _b;
+    return {
+      playerId: p.id,
+      events: eventsOf((_b = (_a = lobby.game.logs[p.id]) == null ? void 0 : _a.lines) != null ? _b : [])
+    };
+  }).filter((tail) => tail.events.length > 0);
+  return tails.length > 0 ? { runId: started.runId, tails } : null;
+}
+function eventsOf(lines) {
+  return lines.map((line) => {
+    const [t, opcode, args] = JSON.parse(line);
+    return { t, opcode, args };
+  });
+}
+function checkedRunSave(lobby, userId, lines, sha256) {
+  var _a;
+  const save = (_a = lobby.game.runSaves) == null ? void 0 : _a[userId];
+  if (!save) return { runSave: null, runSaveSkipped: null };
+  if (save.pos > lines.length)
+    return { runSave: null, runSaveSkipped: "beyond_log" };
+  if (sha256(hashInput(lines.slice(0, save.pos))).toLowerCase() !== save.hash.toLowerCase())
+    return { runSave: null, runSaveSkipped: "hash_mismatch" };
+  return {
+    runSave: { id: save.id, pos: save.pos, hash: save.hash, data: save.data },
+    runSaveSkipped: null
+  };
+}
+
+// src/lobby/presence.ts
+var PRESENCE_CAP = 400;
+function withPresence(lobby, event2) {
+  var _a;
+  if (!lobby.game.started) return lobby;
+  const kept = ((_a = lobby.game.presence) != null ? _a : []).concat([event2]).slice(-PRESENCE_CAP);
+  return __spreadProps(__spreadValues({}, lobby), { game: __spreadProps(__spreadValues({}, lobby.game), { presence: kept }) });
+}
+function startingPresence(started) {
+  return started.players.map((p) => ({ userId: p.id, kind: "joined", at: started.startedAt }));
+}
+
 // src/actions/setup.ts
 var STEP_ID_PATTERN = /^[a-z0-9_]{1,32}$/;
 var MAX_CANDIDATES = 64;
@@ -2826,451 +3303,6 @@ function setupAfterDowntime(game, downtime) {
   });
 }
 
-// src/lobby/checkpoint.ts
-var CLAIM_TIMEOUT_MS = 3e4;
-function withoutPendingRunSaves(lobby) {
-  if (!lobby.game.runSavePending) return lobby;
-  const _a = lobby.game, { runSavePending } = _a, game = __objRest(_a, ["runSavePending"]);
-  return __spreadProps(__spreadValues({}, lobby), { game });
-}
-function checkpointOf(lobby, now) {
-  if (lobby.closed || lobby.players.length === 0) return null;
-  const gq = lobby.groupQueue;
-  const parkedUntil = gq && gq.phase === "away" ? gq.until : 0;
-  return {
-    lobby: withoutPendingRunSaves(lobby),
-    at: now,
-    claimedAt: null,
-    expiresAt: Math.max(now + CHECKPOINT_TTL_MS, parkedUntil)
-  };
-}
-function isExpired(checkpoint, now) {
-  return now >= checkpointExpiry(checkpoint);
-}
-function isClaimable(checkpoint, now) {
-  return !isExpired(checkpoint, now) && (checkpoint.claimedAt === null || now - checkpoint.claimedAt >= CLAIM_TIMEOUT_MS);
-}
-function resumeFrom(checkpoint, now) {
-  const lobby = checkpoint.lobby;
-  const downtime = Math.max(0, now - checkpoint.at);
-  const settleFrom = lobby.game.settleFrom;
-  const gq = lobby.groupQueue;
-  return __spreadProps(__spreadValues({}, lobby), {
-    groupQueue: gq && gq.phase === "away" ? gq : null,
-    createdAt: now,
-    players: lobby.players.map((p) => __spreadProps(__spreadValues({}, p), { sessionId: "", awaySince: now })),
-    spectators: [],
-    actionBudget: {},
-    game: __spreadProps(__spreadValues({}, lobby.game), {
-      settleFrom: settleFrom === null ? null : settleFrom + downtime,
-      setup: setupAfterDowntime(lobby.game, downtime)
-    }),
-    sharedRules: lobby.sharedRules ? __spreadProps(__spreadValues({}, lobby.sharedRules), {
-      deadline: lobby.sharedRules.deadline + downtime
-    }) : void 0,
-    almanac: lobby.almanac ? __spreadProps(__spreadValues({}, lobby.almanac), {
-      offers: Object.fromEntries(
-        Object.entries(lobby.almanac.offers).map(([ante, offer]) => [
-          ante,
-          offer.deadline === void 0 ? offer : __spreadProps(__spreadValues({}, offer), { deadline: offer.deadline + downtime })
-        ])
-      )
-    }) : void 0
-  });
-}
-function seatHoldersOf(lobby) {
-  const gq = lobby.groupQueue;
-  const away = gq && gq.phase === "away" ? gq.memberIds : [];
-  return lobby.players.map((p) => p.id).filter((id) => away.indexOf(id) === -1);
-}
-function keyOf2(code) {
-  return { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID };
-}
-function write2(nk, code, checkpoint, version) {
-  nk.storageWrite([
-    __spreadProps(__spreadValues({}, keyOf2(code)), {
-      value: checkpoint,
-      permissionRead: 0,
-      permissionWrite: 0,
-      version
-    })
-  ]);
-}
-function saveCheckpoint(nk, checkpoint) {
-  write2(nk, checkpoint.lobby.code, checkpoint);
-}
-function readCheckpoint(nk, code) {
-  const objects = nk.storageRead([keyOf2(code)]);
-  if (objects.length === 0) return null;
-  return { checkpoint: objects[0].value, version: objects[0].version || "" };
-}
-function deleteCheckpoint(nk, code) {
-  nk.storageDelete([keyOf2(code)]);
-}
-function resumeLobby(nk, logger, code, now) {
-  const found = readCheckpoint(nk, code);
-  if (!found) return { kind: "none" };
-  const checkpoint = found.checkpoint;
-  if (isExpired(checkpoint, now)) {
-    deleteCheckpoint(nk, code);
-    return { kind: "none" };
-  }
-  if (!isClaimable(checkpoint, now)) return { kind: "resuming" };
-  try {
-    write2(nk, code, __spreadProps(__spreadValues({}, checkpoint), { claimedAt: now }), found.version);
-  } catch (e) {
-    return { kind: "resuming" };
-  }
-  const lobby = checkpoint.lobby;
-  const matchId = nk.matchCreate(LOBBY_MATCH, { resumeCode: code });
-  bindCode(nk, code, matchId, lobby.modId);
-  for (const id of seatHoldersOf(lobby)) {
-    nk.storageWrite([
-      {
-        collection: CURRENT_LOBBY_COLLECTION,
-        key: CURRENT_LOBBY_KEY,
-        userId: id,
-        value: { matchId, code, modId: lobby.modId },
-        permissionRead: 0,
-        permissionWrite: 0
-      }
-    ]);
-  }
-  deleteCheckpoint(nk, code);
-  if (logger) logger.info("Lobby %s resumed from its checkpoint as %s", code, matchId);
-  return { kind: "resumed", matchId, modId: lobby.modId };
-}
-
-// src/lobby/create_limit.ts
-var CREATE_LIMIT = 30;
-var CREATE_WINDOW_MS = 6e4;
-var LIMIT_COLLECTION = "limits";
-var LIMIT_KEY = "lobby_create_times";
-function createTimesAfter(times, now) {
-  const recent = times.filter((t) => now - t < CREATE_WINDOW_MS);
-  if (recent.length >= CREATE_LIMIT) return null;
-  return recent.concat([now]);
-}
-function readTimes(nk, userId) {
-  const objects = nk.storageRead([
-    { collection: LIMIT_COLLECTION, key: LIMIT_KEY, userId }
-  ]);
-  const times = objects.length > 0 ? objects[0].value.times : null;
-  return Array.isArray(times) ? times.filter((t) => typeof t === "number") : [];
-}
-function spendLobbyCreate(nk, userId, now) {
-  const times = createTimesAfter(readTimes(nk, userId), now);
-  if (!times) return false;
-  nk.storageWrite([
-    {
-      collection: LIMIT_COLLECTION,
-      key: LIMIT_KEY,
-      userId,
-      value: { times },
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-  return true;
-}
-
-// src/player/steam_id.ts
-var STEAM_HASH_CUSTOM_ID_PREFIX = "steamhash:";
-var DEVICE_ID_HASH_PREFIX = "devicehash:";
-var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
-var STEAM_HASH_CUSTOM_ID = new RegExp(`^${STEAM_HASH_CUSTOM_ID_PREFIX}([0-9a-f]{64})$`);
-function steamIdHash(nk, salt, steamId) {
-  return nk.sha256Hash(steamId + salt);
-}
-function steamIdHashOf(nk, userId) {
-  const match = STEAM_HASH_CUSTOM_ID.exec(
-    nk.accountGetId(userId).customId || ""
-  );
-  return match ? match[1] : null;
-}
-
-// src/mirror/outbox.ts
-var MIRROR_COLLECTION = "mirror_outbox";
-function entryKey(at, unique) {
-  return `${String(at).padStart(15, "0")}-${unique}`;
-}
-function enqueue(nk, entry) {
-  nk.storageWrite([
-    {
-      collection: MIRROR_COLLECTION,
-      key: entryKey(entry.at, nk.uuidv4()),
-      userId: SYSTEM_USER_ID,
-      value: entry,
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-function expandRun(nk, key, entry) {
-  const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }]);
-  if (runs.length === 0) return null;
-  const run = runs[0].value;
-  const logs = {};
-  const stored = nk.storageRead(
-    run.players.map((p) => ({ collection: LOGS_COLLECTION, key: `${run.runId}:${p.id}`, userId: SYSTEM_USER_ID }))
-  );
-  for (const object of stored) logs[object.key.slice(run.runId.length + 1)] = object.value;
-  const ratings = {};
-  if (entry.rating) {
-    const board = `${entry.rating.modId}:${entry.rating.mode}:${entry.rating.season}`;
-    for (const object of nk.storageRead(
-      run.players.map((p) => ({ collection: RATINGS_COLLECTION, key: board, userId: p.id }))
-    ))
-      ratings[object.userId] = object.value;
-  }
-  return { key, kind: "run", at: entry.at, run, logs, rating: entry.rating, ratings };
-}
-function mirrorPlayer(nk, userId) {
-  let steamIdHash2 = null;
-  let deleted = false;
-  try {
-    steamIdHash2 = steamIdHashOf(nk, userId);
-  } catch (e) {
-    deleted = true;
-  }
-  const stored = readProfile(nk, userId);
-  const profile = stored ? stored.profile : null;
-  return {
-    steamIdHash: steamIdHash2,
-    legacyPlayerId: profile ? profile.legacyPlayerId : null,
-    displayName: profile ? profile.steamName : "",
-    deleted
-  };
-}
-function pullEntries(nk, limit) {
-  const page = nk.storageList(SYSTEM_USER_ID, MIRROR_COLLECTION, limit, "");
-  const entries = [];
-  const dropped = [];
-  const userIds = {};
-  for (const object of page.objects || []) {
-    const entry = object.value;
-    if (entry.kind === "run") {
-      const pulled = expandRun(nk, object.key, entry);
-      if (!pulled) {
-        dropped.push(object.key);
-        continue;
-      }
-      for (const p of pulled.run.players) userIds[p.id] = true;
-      entries.push(pulled);
-    } else if (entry.kind === "chat") {
-      userIds[entry.line.userId] = true;
-      entries.push({ key: object.key, kind: "chat", at: entry.at, line: entry.line });
-    } else if (entry.kind === "forfeit" || entry.kind === "notice") {
-      userIds[entry.userId] = true;
-      entries.push(__spreadValues({ key: object.key }, entry));
-    } else if (entry.kind === "ban_started") {
-      entries.push(__spreadValues({ key: object.key }, entry));
-    } else if (entry.kind === "contest") {
-      userIds[entry.by] = true;
-      userIds[entry.against] = true;
-      entries.push(__spreadValues({ key: object.key }, entry));
-    } else {
-      dropped.push(object.key);
-    }
-  }
-  const players = {};
-  for (const userId in userIds) players[userId] = mirrorPlayer(nk, userId);
-  return { entries, dropped, players };
-}
-function ackEntries(nk, keys) {
-  if (keys.length === 0) return;
-  nk.storageDelete(keys.map((key) => ({ collection: MIRROR_COLLECTION, key, userId: SYSTEM_USER_ID })));
-}
-
-// src/lobby/forfeits.ts
-var FORFEITS_COLLECTION = "forfeits";
-var RECONCILIATION_WINDOW_MS = 60 * 1e3;
-function recordForfeit(nk, userId, forfeit) {
-  nk.storageWrite([
-    {
-      collection: FORFEITS_COLLECTION,
-      key: forfeit.runId,
-      userId,
-      value: forfeit,
-      permissionRead: 0,
-      permissionWrite: 0
-    }
-  ]);
-}
-function noteReturn(nk, logger, userId, now) {
-  try {
-    const objects = nk.storageList(userId, FORFEITS_COLLECTION, 10, "").objects || [];
-    if (objects.length === 0) return;
-    for (const object of objects) {
-      const forfeit = object.value;
-      if (now - forfeit.at <= RECONCILIATION_WINDOW_MS)
-        enqueue(nk, {
-          kind: "forfeit",
-          at: now,
-          userId,
-          runId: forfeit.runId,
-          code: forfeit.code,
-          forfeitedAt: forfeit.at,
-          lobbyKind: forfeit.lobbyKind
-        });
-    }
-    nk.storageDelete(objects.map((o) => ({ collection: FORFEITS_COLLECTION, key: o.key, userId })));
-  } catch (e) {
-    logger.warn("Could not check %s for a wrongful forfeit: %v", userId, e);
-  }
-}
-
-// src/lobby/log_check.ts
-var FRAMING_OPCODES = { end: true, chk: true };
-function opcodeOf(line) {
-  return JSON.parse(line)[1];
-}
-function hashInput(lines) {
-  return `[${lines.filter((line) => !FRAMING_OPCODES[opcodeOf(line)]).join(",")}]`;
-}
-function claimedHash(lines) {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const event2 = JSON.parse(lines[i]);
-    if (event2[1] !== "chk") continue;
-    const args = event2[2];
-    return args && typeof args.carbon === "string" ? args.carbon : null;
-  }
-  return null;
-}
-function logHeldOf(log) {
-  var _a;
-  return log ? (_a = log.seq) != null ? _a : log.lines.length : 0;
-}
-function logGapsOf(log) {
-  if (!log || log.ahead === void 0) return 0;
-  return Math.max(0, log.ahead - logHeldOf(log));
-}
-function checkLog(log, sha256) {
-  if (!log) return { carbonHash: null, check: "unavailable" };
-  const carbonHash = claimedHash(log.lines);
-  if (logGapsOf(log) > 0) return { carbonHash, check: "incomplete" };
-  if (carbonHash === null || log.truncated)
-    return { carbonHash, check: "unavailable" };
-  const recomputed = sha256(hashInput(log.lines)).toLowerCase();
-  return {
-    carbonHash,
-    check: recomputed === carbonHash.toLowerCase() ? "match" : "mismatch"
-  };
-}
-
-// src/review/ranked.ts
-function isRankedGameMode(gameMode) {
-  return gameMode.indexOf("ranked:") === 0;
-}
-function rankedContextOf(records, label) {
-  let inGame = false;
-  if (label) {
-    try {
-      const parsed = JSON.parse(label);
-      inGame = typeof parsed.mode === "string" && isRankedGameMode(parsed.mode) && parsed.started === true;
-    } catch (e) {
-      inGame = false;
-    }
-  }
-  return { queued: records.some((r) => isRankedGameMode(r.gameMode)), inGame };
-}
-function lobbyKindOf(lobby) {
-  if (lobby.rankedMode || lobby.gameMode && isRankedGameMode(lobby.gameMode)) return "ranked";
-  return lobby.allowedIds || lobby.gameMode ? "casual" : "private";
-}
-function lobbyKindOfLabel(label) {
-  if (!label) return null;
-  try {
-    const parsed = JSON.parse(label);
-    const mode = typeof parsed.mode === "string" ? parsed.mode : "";
-    if (isRankedGameMode(mode)) return "ranked";
-    return parsed.type === "public" || mode ? "casual" : "private";
-  } catch (e) {
-    return null;
-  }
-}
-
-// src/lobby/active.ts
-function activeRunOf(lobby, userId, sha256) {
-  var _a, _b;
-  const started = lobby.game.started;
-  if (!started || lobby.closed) return null;
-  if (!isParticipant(lobby, userId)) return null;
-  if (!lobby.players.some((p) => p.id === userId)) return null;
-  const lines = (_b = (_a = lobby.game.logs[userId]) == null ? void 0 : _a.lines) != null ? _b : [];
-  const { runSave, runSaveSkipped } = checkedRunSave(
-    lobby,
-    userId,
-    lines,
-    sha256
-  );
-  return {
-    runId: started.runId,
-    code: lobby.code,
-    modId: lobby.modId,
-    events: eventsOf(lines),
-    requiredStanding: lobby.requiredStanding || null,
-    runSave,
-    runSaveSkipped,
-    logText: hashInput(lines)
-  };
-}
-function replayTailOf(lobby, userId) {
-  const started = lobby.game.started;
-  if (!started || lobby.closed) return null;
-  if (!started.players.some((p) => p.id === userId)) return null;
-  const tails = started.players.filter((p) => p.id !== userId).map((p) => {
-    var _a, _b;
-    return {
-      playerId: p.id,
-      events: eventsOf((_b = (_a = lobby.game.logs[p.id]) == null ? void 0 : _a.lines) != null ? _b : [])
-    };
-  }).filter((tail) => tail.events.length > 0);
-  return tails.length > 0 ? { runId: started.runId, tails } : null;
-}
-function eventsOf(lines) {
-  return lines.map((line) => {
-    const [t, opcode, args] = JSON.parse(line);
-    return { t, opcode, args };
-  });
-}
-function checkedRunSave(lobby, userId, lines, sha256) {
-  var _a;
-  const save = (_a = lobby.game.runSaves) == null ? void 0 : _a[userId];
-  if (!save) return { runSave: null, runSaveSkipped: null };
-  if (save.pos > lines.length)
-    return { runSave: null, runSaveSkipped: "beyond_log" };
-  if (sha256(hashInput(lines.slice(0, save.pos))).toLowerCase() !== save.hash.toLowerCase())
-    return { runSave: null, runSaveSkipped: "hash_mismatch" };
-  return {
-    runSave: { id: save.id, pos: save.pos, hash: save.hash, data: save.data },
-    runSaveSkipped: null
-  };
-}
-
-// src/lobby/presence.ts
-var PRESENCE_CAP = 400;
-function withPresence(lobby, event2) {
-  var _a;
-  if (!lobby.game.started) return lobby;
-  const kept = ((_a = lobby.game.presence) != null ? _a : []).concat([event2]).slice(-PRESENCE_CAP);
-  return __spreadProps(__spreadValues({}, lobby), { game: __spreadProps(__spreadValues({}, lobby.game), { presence: kept }) });
-}
-function startingPresence(started) {
-  return started.players.map((p) => ({ userId: p.id, kind: "joined", at: started.startedAt }));
-}
-
-// src/lobby/catch_up.ts
-var CATCH_UP_LIMIT_MS_BY_MOD = {
-  MultiplayerPvP: 18e4
-};
-var CATCH_UP_LIMIT_REASON = "catch_up_limit";
-function catchUpLimitMsFor(modId, overrideSeconds) {
-  const limit = CATCH_UP_LIMIT_MS_BY_MOD[modId];
-  if (limit === void 0) return null;
-  return overrideSeconds !== void 0 && overrideSeconds > 0 ? overrideSeconds * 1e3 : limit;
-}
-
 // src/matchmaking/queue_refusal.ts
 var PRIVATE_LOBBIES_ALLOW_ANY_MODS = "Private lobbies allow any mods.";
 function queueRefusalMessage(refusal) {
@@ -3281,6 +3313,8 @@ function queueRefusalMessage(refusal) {
       return INTEGRITY_REQUIRED;
     case "mods_not_allowed":
       return "These mods aren't allowed in matchmaking: " + refusal.mods.join(", ") + ". " + PRIVATE_LOBBIES_ALLOW_ANY_MODS;
+    case "update_required":
+      return UPDATE_REQUIRED_MESSAGE;
     case "version_mismatch":
       return VERSION_MISMATCH_MESSAGE;
     case "mods_unreported":
@@ -3407,7 +3441,7 @@ function sameMembers(a, b) {
   if (a.length !== b.length) return false;
   return a.every((id) => b.indexOf(id) !== -1) && b.every((id) => a.indexOf(id) !== -1);
 }
-function joinRefusal(status, joinerId) {
+function joinRefusal2(status, joinerId) {
   if (status.memberIds.indexOf(joinerId) === -1) return { code: "not_member", userId: joinerId };
   if (status.phase !== "forming") return { code: "not_forming" };
   return null;
@@ -3494,8 +3528,8 @@ function everyone(lobby) {
   return lobby.players.map((p) => p.id);
 }
 function announce(lobby, reason, requeue = false) {
-  const view2 = viewOf(lobby);
-  const payload = view2 && __spreadProps(__spreadValues({}, view2), { reason, requeue });
+  const view7 = viewOf(lobby);
+  const payload = view7 && __spreadProps(__spreadValues({}, view7), { reason, requeue });
   return { kind: "send", op: ServerOp.GROUP_QUEUE, payload, to: everyone(lobby) };
 }
 function withGroup(lobby, groupQueue) {
@@ -3644,7 +3678,7 @@ var CREATOR_JOIN_TIMEOUT_MS = 3e4;
 var MIN_PLAYERS = 2;
 var MAX_PLAYERS = 128;
 function newLobby(params) {
-  var _a, _b;
+  var _a;
   return {
     code: params.code,
     modId: params.modId,
@@ -3659,8 +3693,7 @@ function newLobby(params) {
     kickedIds: [],
     createdAt: params.now,
     graceMs: params.graceMs,
-    catchUpLimitMs: (_a = params.catchUpLimitMs) != null ? _a : null,
-    resultTimeoutMs: (_b = params.resultTimeoutMs) != null ? _b : DEFAULT_RESULT_TIMEOUT_MS,
+    resultTimeoutMs: (_a = params.resultTimeoutMs) != null ? _a : DEFAULT_RESULT_TIMEOUT_MS,
     closed: false,
     game: emptyGame(),
     actionBudget: {},
@@ -3758,6 +3791,22 @@ function forfeitedStill(lobby, userId) {
 function isCatchingUp(player) {
   return typeof player.catchingUpSince === "number";
 }
+function forfeitTime(lobby, p) {
+  var _a;
+  if (p.awaySince === null) return null;
+  const parked = isParked(lobby) && ((_a = lobby.groupQueue) == null ? void 0 : _a.memberIds.indexOf(p.id)) !== -1;
+  return parked ? null : awayEndsAt(lobby, p, p.awaySince);
+}
+function inLiveRun(lobby) {
+  const pvp = lobby.game.pvp;
+  return pvp !== void 0 && pvp.result === null && pvp.run !== null;
+}
+function awayEndsAt(lobby, player, awaySince) {
+  var _a, _b;
+  const run = (_b = (_a = lobby.game.pvp) == null ? void 0 : _a.run) != null ? _b : null;
+  const budgetEnd = run === null || !inLiveRun(lobby) || player.awayReason === "server restart" ? null : awayForfeitAt(run.clocks, player.id, awaySince);
+  return budgetEnd != null ? budgetEnd : awaySince + lobby.graceMs;
+}
 function snapshotFor(lobby, userId, now = Date.now()) {
   const self = findPlayer(lobby, userId);
   return {
@@ -3775,6 +3824,7 @@ function snapshotFor(lobby, userId, now = Date.now()) {
       mods: p.info.mods,
       standing: p.info.standing || null,
       isAway: p.awaySince !== null,
+      forfeitsAt: forfeitTime(lobby, p),
       catchingUp: isCatchingUp(p)
     })),
     ownState: self ? self.ownState : null,
@@ -3797,7 +3847,14 @@ function join(lobby, userId, sessionId, info, now = Date.now()) {
   if (existing) {
     const wasAway = existing.awaySince !== null;
     const wasCatchingUp = isCatchingUp(existing);
-    const back = __spreadProps(__spreadValues({}, existing), { sessionId, awaySince: null, catchingUpSince: null });
+    const _a = existing.info, { pvpVersion: _ } = _a, kept = __objRest(_a, ["pvpVersion"]);
+    const back = __spreadProps(__spreadValues({}, existing), {
+      sessionId,
+      info: __spreadValues(__spreadValues({}, kept), info.pvpVersion === void 0 ? {} : { pvpVersion: info.pvpVersion }),
+      awaySince: null,
+      awayReason: null,
+      catchingUpSince: null
+    });
     const next2 = withPresence(
       __spreadProps(__spreadValues({}, lobby), { players: lobby.players.map((p) => p.id === userId ? back : p) }),
       { userId, kind: "rejoined", at: now }
@@ -3831,6 +3888,7 @@ function join(lobby, userId, sessionId, info, now = Date.now()) {
     sessionId,
     info,
     awaySince: null,
+    awayReason: null,
     catchingUpSince: null,
     ownState: null
   };
@@ -3933,12 +3991,15 @@ function remove(lobby, userId, type, why) {
   const transferred = transferHostFrom(grouped.lobby, userId);
   const ready2 = __spreadValues({}, transferred.lobby.game.ready);
   delete ready2[userId];
+  const teamPicks = __spreadValues({}, transferred.lobby.teamPicks);
+  delete teamPicks[userId];
   const actionBudget = __spreadValues({}, transferred.lobby.actionBudget);
   delete actionBudget[userId];
   delete actionBudget[logBudgetKey(userId)];
   const next = __spreadProps(__spreadValues({}, transferred.lobby), {
     players: transferred.lobby.players.filter((p) => p.id !== userId),
     game: __spreadProps(__spreadValues({}, transferred.lobby.game), { ready: ready2 }),
+    teamPicks,
     actionBudget
   });
   const others = allIds(next);
@@ -3978,7 +4039,7 @@ function disconnect(lobby, userId, sessionId, now) {
   const player = findPlayer(lobby, userId);
   if (!player || player.sessionId !== sessionId || player.awaySince !== null)
     return { lobby, out: [] };
-  const away = __spreadProps(__spreadValues({}, player), { awaySince: now });
+  const away = __spreadProps(__spreadValues({}, player), { awaySince: now, awayReason: "dropped" });
   const grouped = memberDisconnected(lobby, userId);
   const marked = withPresence(
     __spreadProps(__spreadValues({}, grouped.lobby), {
@@ -3991,7 +4052,11 @@ function disconnect(lobby, userId, sessionId, now) {
     event(
       transferred.lobby,
       "player_disconnected",
-      { playerId: userId, displayName: player.info.displayName },
+      {
+        playerId: userId,
+        displayName: player.info.displayName,
+        data: { forfeitsAt: forfeitTime(transferred.lobby, away), serverNow: now }
+      },
       othersThan(transferred.lobby, userId)
     )
   ]);
@@ -4099,26 +4164,6 @@ function setPlayerInfo(lobby, userId, patch) {
     out: [{ kind: "send", op: ServerOp.PLAYER_INFO, payload: { playerId: userId, info }, to: allIds(lobby) }]
   };
 }
-function catchUpLimitReached(lobby, player, now) {
-  const limit = lobby.catchUpLimitMs;
-  return typeof limit === "number" && typeof player.catchingUpSince === "number" && now - player.catchingUpSince >= limit;
-}
-function toldAndKicked(lobby, player, graceRanOut) {
-  if (graceRanOut || player.awaySince !== null) return [];
-  return [
-    event(
-      lobby,
-      "player_kicked",
-      {
-        playerId: player.id,
-        displayName: player.info.displayName,
-        data: { kickedBy: "server", reason: CATCH_UP_LIMIT_REASON }
-      },
-      [player.id]
-    ),
-    { kind: "kick", userId: player.id }
-  ];
-}
 function tick(lobby, now) {
   if (lobby.closed) return { lobby, out: [] };
   if (lobby.players.length === 0) {
@@ -4130,21 +4175,4300 @@ function tick(lobby, now) {
     const parked = isParked(step.lobby) && step.lobby.groupQueue.memberIds.indexOf(p.id) !== -1;
     const current = findPlayer(step.lobby, p.id) || p;
     const awaySince = current.awaySince;
-    const graceRanOut = !parked && awaySince !== null && now - awaySince >= lobby.graceMs;
-    if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
+    const graceRanOut = !parked && awaySince !== null && now >= awayEndsAt(step.lobby, current, awaySince);
+    if (graceRanOut) {
       const started = step.lobby.game.started;
       const forfeited = started && started.players.some((q) => q.id === p.id) ? [{ kind: "forfeited", userId: p.id, runId: started.runId, code: lobby.code, at: now, lobbyKind: lobbyKindOf(lobby) }] : [];
       const timedOut = withPresence(step.lobby, {
         userId: p.id,
-        kind: graceRanOut ? "timed_out" : "catch_up_limit",
+        kind: "timed_out",
         at: now
       });
       const removed = remove(timedOut, p.id, "player_left", "member_disconnected");
       const marked = forfeited.length > 0 && started ? __spreadProps(__spreadValues({}, removed.lobby), { forfeitedSeats: __spreadProps(__spreadValues({}, removed.lobby.forfeitedSeats || {}), { [p.id]: started.runId }) }) : removed.lobby;
-      step = { lobby: marked, out: step.out.concat(forfeited, removed.out, toldAndKicked(step.lobby, current, graceRanOut)) };
+      step = { lobby: marked, out: step.out.concat(forfeited, removed.out) };
     }
   }
   return step;
+}
+
+// src/lobby/pvp/core/run_player.ts
+function changeRunPlayer(state, player, change) {
+  const run = state.run;
+  const entry = run == null ? void 0 : run.players[player];
+  if (run === null || entry === void 0)
+    throw new Error(`player ${player} is not in the run`);
+  return __spreadProps(__spreadValues({}, state), {
+    run: __spreadProps(__spreadValues({}, run), { players: __spreadProps(__spreadValues({}, run.players), { [player]: change(entry) }) })
+  });
+}
+
+// src/lobby/pvp/core/inbox.ts
+var INBOX_ITEMS_PER_VIEW = 32;
+function addInboxItem(state, player, item) {
+  return changeRunPlayer(state, player, (entry) => __spreadProps(__spreadValues({}, entry), {
+    inbox: [...entry.inbox, __spreadProps(__spreadValues({}, item), { itemNumber: entry.inbox.length + 1 })]
+  }));
+}
+function recordLastItemDone(state, player, inboxDone) {
+  var _a;
+  const entry = (_a = state.run) == null ? void 0 : _a.players[player];
+  if (entry === void 0) return { state, refusals: [] };
+  if (inboxDone > entry.inbox.length)
+    return { state, refusals: ["bad_inbox_done"] };
+  if (inboxDone <= entry.inboxDone) return { state, refusals: [] };
+  return {
+    state: changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), { inboxDone })),
+    refusals: []
+  };
+}
+function visibleInbox(state, player) {
+  var _a;
+  const entry = (_a = state.run) == null ? void 0 : _a.players[player];
+  if (entry === void 0) return { inbox: [], inboxNewest: 0 };
+  return {
+    inbox: entry.inbox.slice(
+      entry.inboxDone,
+      entry.inboxDone + INBOX_ITEMS_PER_VIEW
+    ),
+    inboxNewest: entry.inbox.length
+  };
+}
+
+// src/lobby/pvp/core/random.ts
+function seededRandom(seed) {
+  let hash2 = 2166136261;
+  for (let index = 0; index < seed.length; index++)
+    hash2 = Math.imul(hash2 ^ seed.charCodeAt(index), 16777619);
+  return () => {
+    hash2 = hash2 + 1831565813 | 0;
+    let mixed = Math.imul(hash2 ^ hash2 >>> 15, 1 | hash2);
+    mixed = mixed + Math.imul(mixed ^ mixed >>> 7, 61 | mixed) ^ mixed;
+    return ((mixed ^ mixed >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+// src/lobby/pvp/core/ending.ts
+var everyonePlaces = (run, place) => {
+  const places = {};
+  for (const id of Object.keys(run.lives).sort()) places[id] = place(id);
+  return places;
+};
+function winEnding(run, winners2) {
+  const sorted = [...winners2].sort();
+  return {
+    winners: sorted,
+    places: everyonePlaces(run, (id) => sorted.includes(id) ? 1 : 2)
+  };
+}
+var drawEnding = (run) => ({
+  winners: null,
+  places: everyonePlaces(run, () => 1)
+});
+
+// src/lobby/pvp/modes/common.ts
+var inRunWithLives = (player) => player.lives > 0 && player.status === "playing";
+var isAlive = (run, id) => {
+  const seat = run.lives[id];
+  return seat !== void 0 && inRunWithLives(seat);
+};
+var aliveIds = (run) => Object.keys(run.lives).filter((id) => isAlive(run, id)).sort();
+var aliveInPvpBlind = (run, currentPvpBlind) => Object.keys(currentPvpBlind.players).filter((id) => isAlive(run, id)).sort();
+var highestAnte = (run) => Object.keys(run.lives).reduce((best, id) => {
+  var _a, _b;
+  const ante = (_b = (_a = run.players[id]) == null ? void 0 : _a.ante) != null ? _b : null;
+  return ante === null ? best : best === null ? ante : Math.max(best, ante);
+}, null);
+var scoreOf = (currentPvpBlind, id) => {
+  const own = currentPvpBlind.players[id];
+  return own === void 0 || own.stage === "not entered" ? null : own.score;
+};
+var allOutOfHands = (currentPvpBlind, ids) => ids.every((id) => {
+  var _a;
+  return ((_a = currentPvpBlind.players[id]) == null ? void 0 : _a.stage) === "done";
+});
+var hasNotReported = (currentPvpBlind, id) => {
+  const own = currentPvpBlind.players[id];
+  if (own === void 0 || own.stage === "not entered") return true;
+  return own.stage !== "done" && own.handsLeft === 0;
+};
+var pairingOfAnte = (run, ante) => {
+  var _a;
+  return ante === null ? null : (_a = run.pairings[ante]) != null ? _a : null;
+};
+function latestPairing(run) {
+  const antes = Object.keys(run.pairings).map(Number);
+  return antes.length === 0 ? null : run.pairings[Math.max(...antes)];
+}
+function startingLives(rules, start) {
+  const lives = {};
+  for (const id of [...start.startedIds].sort())
+    lives[id] = {
+      lives: rules.startingLives,
+      status: "playing",
+      events: []
+    };
+  return lives;
+}
+function lastPlayerStanding(run) {
+  const alive = aliveIds(run);
+  if (alive.length > 1) return null;
+  return alive.length === 1 ? winEnding(run, alive) : drawEnding(run);
+}
+function singleOpponent(actor, shown) {
+  var _a;
+  const one = (_a = shown.opponents[actor]) != null ? _a : null;
+  return { one, each: one === null ? [] : [one] };
+}
+var lastStandingBase = {
+  pairs: "none",
+  init: (rules, start) => ({
+    lives: startingLives(rules, start),
+    teams: {},
+    teamLives: null,
+    cardTargets: null
+  }),
+  checkWinner: lastPlayerStanding,
+  pickOpponents: (_run, actor, shown) => singleOpponent(actor, shown)
+};
+
+// src/lobby/pvp/rules/settings.ts
+var MODE_OF_QUEUE = {
+  pvp_nemesis: "nemesis",
+  pvp_experimental: "nemesis",
+  pvp_manhunt: "manhunt",
+  pvp_teams: "teams",
+  pvp_royale: "royale",
+  pvp_smallworld: "royale"
+};
+function modeOfQueue(queueMode) {
+  if (typeof queueMode !== "string") return null;
+  return Object.prototype.hasOwnProperty.call(MODE_OF_QUEUE, queueMode) ? MODE_OF_QUEUE[queueMode] : null;
+}
+function positiveWholeNumber(value) {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+var BLIND_KEY = /^(0|[1-9]\d*):(Small|Big|Boss)$/;
+function isBlindKey(value) {
+  return typeof value === "string" && BLIND_KEY.test(value);
+}
+var anteOfBlind = (blindKey) => Number(blindKey.split(":")[0]);
+function isBossBlind(blindKey) {
+  return blindKey.endsWith(":Boss");
+}
+var MIN_TIMER_MILLISECONDS = 1e4;
+var MAX_TIMER_MILLISECONDS = 36e5;
+var MAX_TIMER_FORGIVENESS = 9;
+var MAX_STARTING_LIVES = 10;
+function numberOrNull(value) {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : null;
+}
+function numberBetween(value, lowest, highest) {
+  const parsed = numberOrNull(value);
+  return parsed !== null && parsed >= lowest && parsed <= highest ? parsed : null;
+}
+function wholeNumberBetween(value, lowest, highest) {
+  const parsed = numberBetween(value, lowest, highest);
+  return parsed !== null && Number.isInteger(parsed) ? parsed : null;
+}
+function lobbyOption(value) {
+  if (value === void 0) return true;
+  return typeof value === "boolean" ? value : null;
+}
+var PRESSURE = {
+  kind: "pressure",
+  baseMultiplier: 2,
+  timedRate: 2,
+  previewCostMilliseconds: 3500
+};
+var SPEEDLATRO = {
+  kind: "speedlatro",
+  baseMilliseconds: 147e3,
+  pvpMilliseconds: 73500,
+  timedRate: 2,
+  previewCostMilliseconds: 0
+};
+var PVP_HAND_TIMER = {
+  baseMilliseconds: 6e4,
+  handMilliseconds: 1e4
+};
+var BANK_ONLY = {
+  ante: "bank",
+  pvp: null,
+  personal: null,
+  ownSkips: false,
+  forcedTimer: null,
+  displayThresholdMilliseconds: null
+};
+var BANK_ONLY_RULESETS = [
+  "ruleset_mp_experimental_legacy",
+  "ruleset_mp_badlatro",
+  "ruleset_mp_legacy_ranked",
+  "ruleset_mp_sandbox",
+  "ruleset_mp_smallworld",
+  "ruleset_mp_vanilla",
+  "ruleset_mp_wsob"
+];
+var PVP_HAND_TIMER_ONLY = __spreadProps(__spreadValues({}, BANK_ONLY), { pvp: PVP_HAND_TIMER });
+var SPEEDLATRO_CLOCK = __spreadProps(__spreadValues({}, BANK_ONLY), {
+  ante: "personal",
+  personal: SPEEDLATRO
+});
+var CLOCK_EXCEPTIONS = {
+  ruleset_mp_experimental: {
+    ante: "personal",
+    pvp: PVP_HAND_TIMER,
+    personal: PRESSURE,
+    ownSkips: false,
+    forcedTimer: null,
+    displayThresholdMilliseconds: null
+  },
+  ruleset_mp_balanced: PVP_HAND_TIMER_ONLY,
+  ruleset_mp_expanded: PVP_HAND_TIMER_ONLY,
+  // Almanac is Expanded plus the almanac layer.
+  ruleset_mp_almanac: PVP_HAND_TIMER_ONLY,
+  ruleset_mp_speedlatro: SPEEDLATRO_CLOCK,
+  ruleset_mp_chaos: SPEEDLATRO_CLOCK,
+  // rulesets/majorleague.lua:11-12 and minorleague.lua:7-8 in the PvP mod.
+  ruleset_mp_majorleague: __spreadProps(__spreadValues({}, BANK_ONLY), {
+    ownSkips: true,
+    forcedTimer: { baseSeconds: 180, forgiveness: 0 },
+    // layers/majorleague.lua: timer_display_threshold = 180.
+    displayThresholdMilliseconds: 18e4
+  }),
+  ruleset_mp_minorleague: __spreadProps(__spreadValues({}, BANK_ONLY), {
+    forcedTimer: { baseSeconds: 210, forgiveness: 1 }
+  }),
+  ruleset_mp_traditional: __spreadProps(__spreadValues({}, BANK_ONLY), { ante: "none" })
+};
+var RULESET_CLOCKS = __spreadValues(__spreadValues({}, Object.fromEntries(BANK_ONLY_RULESETS.map((id) => [id, BANK_ONLY]))), CLOCK_EXCEPTIONS);
+function clockSettingOf(ruleset) {
+  if (typeof ruleset !== "string" || !Object.prototype.hasOwnProperty.call(RULESET_CLOCKS, ruleset))
+    return { ok: false, reason: "bad_rules" };
+  return { ok: true, clock: RULESET_CLOCKS[ruleset] };
+}
+function clockRulesFor(setting, timerBaseMilliseconds) {
+  const { ante, pvp, personal } = setting;
+  if (personal === null) return { ante, pvp, personal: null };
+  if (personal.kind === "speedlatro") return { ante, pvp, personal };
+  return {
+    ante,
+    pvp,
+    personal: {
+      kind: "pressure",
+      baseMilliseconds: timerBaseMilliseconds * personal.baseMultiplier,
+      timedRate: personal.timedRate,
+      previewCostMilliseconds: personal.previewCostMilliseconds
+    }
+  };
+}
+function secondsToMilliseconds(seconds) {
+  return seconds === null ? null : Math.max(0, Math.round(seconds * 1e3));
+}
+function settingsFromLobby(lobbySettings, startedIds) {
+  var _a;
+  const found = clockSettingOf(lobbySettings.ruleset);
+  if (!found.ok) return { ok: false, reason: "bad_rules", key: "ruleset" };
+  const bad = (key) => ({
+    ok: false,
+    reason: "bad_rules",
+    key
+  });
+  const mode = modeOfQueue(lobbySettings.queue_mode);
+  if (mode === null) return bad("queue_mode");
+  const startingLives2 = wholeNumberBetween(
+    lobbySettings.starting_lives,
+    1,
+    MAX_STARTING_LIVES
+  );
+  if (startingLives2 === null) return bad("starting_lives");
+  const hunterLives = positiveWholeNumber(lobbySettings.manhunt_hunter_lives);
+  if (hunterLives === null) return bad("manhunt_hunter_lives");
+  const pvpStartAnte = positiveWholeNumber(lobbySettings.pvp_start_ante);
+  if (pvpStartAnte === null) return bad("pvp_start_ante");
+  const forced = found.clock.forcedTimer;
+  const baseSeconds = forced ? forced.baseSeconds : numberBetween(
+    lobbySettings.timer_base_seconds,
+    MIN_TIMER_MILLISECONDS / 1e3,
+    MAX_TIMER_MILLISECONDS / 1e3
+  );
+  if (baseSeconds === null) return bad("timer_base_seconds");
+  const forgiveness = forced ? forced.forgiveness : wholeNumberBetween(
+    lobbySettings.timer_forgiveness,
+    0,
+    MAX_TIMER_FORGIVENESS
+  );
+  if (forgiveness === null) return bad("timer_forgiveness");
+  const rawIncrement = lobbySettings.timer_increment_seconds;
+  const increment = rawIncrement === null ? null : numberOrNull(rawIncrement);
+  if (rawIncrement !== null && increment === null)
+    return bad("timer_increment_seconds");
+  const deathOnNormalBlindLoss = lobbyOption(lobbySettings.death_on_normal_blind_loss);
+  if (deathOnNormalBlindLoss === null) return bad("death_on_normal_blind_loss");
+  const goldOnLifeLoss = lobbyOption(lobbySettings.gold_on_life_loss);
+  if (goldOnLifeLoss === null) return bad("gold_on_life_loss");
+  const timerOption = lobbyOption(lobbySettings.timer);
+  if (timerOption === null) return bad("timer");
+  const timerBaseMilliseconds = Math.round(baseSeconds * 1e3);
+  return {
+    ok: true,
+    settings: {
+      mode,
+      startedCount: startedIds.length,
+      startingLives: startingLives2,
+      hunterLives,
+      pvpStartAnte,
+      // Timer off (the lobby toggle) stops the Ante bank, Pressure and the PvP hand
+      // timer; the Speedlatro clock ignores it, as on main.
+      clocks: timerOption || ((_a = found.clock.personal) == null ? void 0 : _a.kind) === "speedlatro" ? clockRulesFor(found.clock, timerBaseMilliseconds) : { ante: "none", pvp: null, personal: null },
+      // The host publishes the raw values (timer_base_seconds is not multiplied).
+      timerBaseMilliseconds,
+      timerIncrementMilliseconds: secondsToMilliseconds(increment),
+      skipTimeRule: found.clock.ownSkips ? "own" : "lead",
+      timerDisplayThresholdMilliseconds: found.clock.displayThresholdMilliseconds,
+      timerForgiveness: forgiveness,
+      failedBlindLife: deathOnNormalBlindLoss ? "costs" : "free",
+      lifeLossGold: goldOnLifeLoss ? "paid" : "none"
+    }
+  };
+}
+
+// src/lobby/pvp/rules/players.ts
+function inRunIgnoringLives(playerLives) {
+  return (playerLives == null ? void 0 : playerLives.status) === "playing";
+}
+var isStanding = (seat) => seat !== void 0 && seat.lives > 0 && inRunIgnoringLives(seat);
+var isInRun = (run, player) => isStanding(run.lives[player]);
+function isPvpBlind(run, blindKey) {
+  if (!isBlindKey(blindKey) || !isBossBlind(blindKey)) return false;
+  return Number(blindKey.split(":")[0]) >= run.rules.pvpStartAnte;
+}
+var isResolved = (run, blindKey) => run.finishedPvpBlinds.some((done) => done.blindKey === blindKey);
+function playersOfBoss(run, blindKey) {
+  if (!isPvpBlind(run, blindKey) || isResolved(run, blindKey)) return [];
+  const players = Object.keys(run.lives).filter(
+    (player) => isInRun(run, player)
+  );
+  return players.length >= 2 ? players : [];
+}
+function playedPvpBlind(run, player, blindKey) {
+  const open = run.currentPvpBlind;
+  if ((open == null ? void 0 : open.blindKey) === blindKey && open.players[player] !== void 0)
+    return true;
+  return run.finishedPvpBlinds.some(
+    (done) => done.blindKey === blindKey && player in done.scores
+  ) || playersOfBoss(run, blindKey).includes(player);
+}
+var isPvpBlindOf = (run, player, blindKey) => isPvpBlind(run, blindKey) && playedPvpBlind(run, player, blindKey);
+function requiredPlayers(run) {
+  if (run.currentPvpBlind === null) return [];
+  return Object.keys(run.currentPvpBlind.players).filter(
+    (player) => isInRun(run, player)
+  );
+}
+
+// ../packages/types/src/big-score.ts
+var MAX_SAFE = 9007199254740991;
+var MAX_ARRAY_LENGTH = 100;
+var MAX_TEXT_LENGTH = 4096;
+var LOG_MAX_SAFE = Math.log10(MAX_SAFE);
+var ZERO_SCORE = "0";
+var TOP_SCORE = new Array(MAX_ARRAY_LENGTH).fill(String(MAX_SAFE)).join(",");
+var ENTRY_FIRST = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
+var ENTRY_HIGHER = /^(0|[1-9][0-9]*)$/;
+var TOP_ARRAY = () => new Array(MAX_ARRAY_LENGTH).fill(MAX_SAFE);
+function normalizeArray(input) {
+  if (input.length === 0) return [0];
+  if (input.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
+  const x = input.slice();
+  for (let i = 0; i < x.length; i++) {
+    const e = x[i];
+    if (Number.isNaN(e) || e === Number.POSITIVE_INFINITY || e === Number.NEGATIVE_INFINITY) {
+      return TOP_ARRAY();
+    }
+    if (i !== 0 && e !== Math.floor(e)) x[i] = Math.floor(e);
+  }
+  let again;
+  do {
+    again = false;
+    while (x.length > 0 && x[x.length - 1] === 0) {
+      x.pop();
+      again = true;
+    }
+    if (x[0] > MAX_SAFE) {
+      x[1] = (x[1] || 0) + 1;
+      x[0] = Math.log10(x[0]);
+      again = true;
+    }
+    while (x[0] < LOG_MAX_SAFE && x[1]) {
+      x[0] = __pow(10, x[0]);
+      x[1]--;
+      again = true;
+    }
+    if (x.length > 2 && !x[1]) {
+      let i = 2;
+      while (!x[i]) i++;
+      x[i - 1] = Math.floor(x[0]);
+      x[0] = __pow(10, x[0] - Math.floor(x[0]));
+      x[i]--;
+      again = true;
+    }
+    for (let i = 1; i < x.length; i++) {
+      if (x[i] > MAX_SAFE) {
+        x[i + 1] = (x[i + 1] || 0) + 1;
+        x[0] = x[i] + 1;
+        for (let j = 1; j <= i; j++) x[j] = 0;
+        again = true;
+      }
+    }
+    if (x.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
+  } while (again);
+  if (x.length === 0) return [0];
+  for (let i = 0; i < x.length; i++) if (x[i] === void 0) x[i] = 0;
+  if (x.length === 1) x[0] = Math.floor(x[0]);
+  return x;
+}
+function writeFirst(x) {
+  if (x === Math.floor(x)) return x.toFixed(0);
+  for (let digits = 15; digits <= 17; digits++) {
+    const s = x.toPrecision(digits);
+    if (s.indexOf("e") === -1 && Number(s) === x) {
+      return s.indexOf(".") === -1 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
+    }
+  }
+  return x.toPrecision(17);
+}
+function writeArray(array) {
+  const parts = [writeFirst(array[0])];
+  for (let i = 1; i < array.length; i++) parts.push(array[i].toFixed(0));
+  return parts.join(",");
+}
+function readArray(text) {
+  if (typeof text !== "string" || text.length === 0 || text.length > MAX_TEXT_LENGTH)
+    return null;
+  const parts = text.split(",");
+  if (parts.length > MAX_ARRAY_LENGTH) return null;
+  const array = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (!(i === 0 ? ENTRY_FIRST : ENTRY_HIGHER).test(parts[i])) return null;
+    const n = Number(parts[i]);
+    if (!Number.isFinite(n)) return null;
+    array.push(n);
+  }
+  return array;
+}
+function fromNumber(n) {
+  const value = Number.isNaN(n) || n === Number.POSITIVE_INFINITY ? Number.MAX_VALUE : n;
+  if (value < 1) return ZERO_SCORE;
+  return writeArray(normalizeArray([Math.floor(value)]));
+}
+function fromArray(array, sign) {
+  if (sign < 0) return ZERO_SCORE;
+  return writeArray(normalizeArray(array));
+}
+function normalizeScore(text) {
+  const array = readArray(text);
+  return array === null ? null : writeArray(normalizeArray(array));
+}
+function compareScores(a, b) {
+  const x = readArray(a);
+  const y = readArray(b);
+  if (x === null || y === null) return null;
+  const p = normalizeArray(x);
+  const q = normalizeArray(y);
+  if (p.length !== q.length) return p.length > q.length ? 1 : -1;
+  for (let i = p.length - 1; i >= 0; i--) {
+    if (p[i] > q[i]) return 1;
+    if (p[i] < q[i]) return -1;
+  }
+  return 0;
+}
+var GROUPED_INTEGER = /^\d{1,3}(,\d{3})+$/;
+var HYPER_E = /^(e*)([0-9]+(?:\.[0-9]+)?)e\+?([0-9]+)$/;
+function parseLegacyScore(input) {
+  if (typeof input === "number") return fromNumber(input);
+  if (typeof input !== "string") return ZERO_SCORE;
+  const text = input.trim();
+  if (GROUPED_INTEGER.test(text)) return fromNumber(Number(text.replace(/,/g, "")));
+  const normal = normalizeScore(text);
+  if (normal !== null) return normal;
+  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
+  if (cleaned === "") return ZERO_SCORE;
+  const value = Number(cleaned);
+  if (!Number.isNaN(value) && (Number.isFinite(value) || !HYPER_E.test(cleaned))) return fromNumber(value);
+  if (cleaned === "naneinf" || cleaned === "nan" || cleaned === "inf" || cleaned === "infinity")
+    return fromNumber(Number.POSITIVE_INFINITY);
+  const tower = HYPER_E.exec(cleaned);
+  if (tower !== null) {
+    const layers = tower[1].length;
+    const inner = Number(tower[2] + "e" + tower[3]);
+    if (Number.isFinite(inner)) return fromArray([inner, layers], 1);
+    return fromArray([Number(tower[3]) + Math.log10(Number(tower[2])), layers + 1], 1);
+  }
+  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return TOP_SCORE;
+  return ZERO_SCORE;
+}
+function scoreToNumber(text) {
+  const array = readArray(text);
+  if (array === null) return 0;
+  const a = normalizeArray(array);
+  if (a.length === 1) return a[0];
+  if (a.length > 2) return Number.POSITIVE_INFINITY;
+  let value = a[0];
+  for (let i = 0; i < a[1] && value !== Number.POSITIVE_INFINITY; i++) value = Math.pow(10, value);
+  return value;
+}
+
+// src/lobby/pvp/core/score.ts
+var SCORE_ZERO = ZERO_SCORE;
+function fromGameValue(value) {
+  return fromNumber(value);
+}
+function parse(text) {
+  if (typeof text !== "string") return null;
+  return normalizeScore(text);
+}
+function compare(left, right) {
+  const order = compareScores(left, right);
+  if (order === null)
+    throw new Error("compare was given text that is not a score");
+  return order;
+}
+function compareBlindScore(left, right) {
+  if (left === null) return right === null ? 0 : -1;
+  if (right === null) return 1;
+  return compare(left, right);
+}
+function greater(left, right) {
+  return compare(left, right) > 0;
+}
+var SUM_LIMIT = 1e300;
+function sum(list) {
+  let total = 0;
+  let allPlain = true;
+  let largest = SCORE_ZERO;
+  for (const text of list) {
+    if (greater(text, largest)) largest = text;
+    if (text.includes(",")) allPlain = false;
+    else total += Number(text);
+  }
+  if (allPlain && total < SUM_LIMIT) return fromGameValue(total);
+  return largest;
+}
+
+// src/lobby/pvp/modes/duel.ts
+function duelLosers(run, currentPvpBlind) {
+  const alive = aliveInPvpBlind(run, currentPvpBlind);
+  if (alive.length !== 2) return null;
+  const [firstId, secondId] = alive;
+  const first = currentPvpBlind.players[firstId];
+  const second = currentPvpBlind.players[secondId];
+  if (hasNotReported(currentPvpBlind, firstId) || hasNotReported(currentPvpBlind, secondId))
+    return null;
+  const order = compareBlindScore(
+    scoreOf(currentPvpBlind, firstId),
+    scoreOf(currentPvpBlind, secondId)
+  );
+  const firstScoreLower = order === -1;
+  const secondScoreLower = order === 1;
+  const firstOutOfHands = first.stage === "done";
+  const secondOutOfHands = second.stage === "done";
+  const trigger = firstOutOfHands && firstScoreLower || secondOutOfHands && secondScoreLower || firstOutOfHands && secondOutOfHands;
+  if (!trigger) return null;
+  return order === 0 ? [] : [firstScoreLower ? firstId : secondId];
+}
+function duelOpponents(ids) {
+  var _a;
+  const out = {};
+  for (const id of ids) out[id] = (_a = ids.find((other) => other !== id)) != null ? _a : null;
+  return out;
+}
+var duelMode = __spreadProps(__spreadValues({
+  name: "duel",
+  // The last life lost on a normal blind waits on the opponent.
+  deathWaitsOn: "opponent"
+}, lastStandingBase), {
+  losersOf: duelLosers,
+  view: (run) => ({ opponents: duelOpponents(Object.keys(run.lives).sort()) })
+});
+
+// src/lobby/pvp/modes/manhunt.ts
+var RUNNER_LIVES = 1;
+var LAST_ANTE = 8;
+function onTeam(teams, team) {
+  return Object.keys(teams).filter((id) => teams[id] === team).sort();
+}
+var runnerOf = (run) => {
+  var _a;
+  return (_a = onTeam(run.teams, "RUNNER")[0]) != null ? _a : null;
+};
+var hunterIds = (run) => onTeam(run.teams, "HUNTER");
+var aliveHunters = (run) => hunterIds(run).filter((id) => isAlive(run, id));
+var init = (rules, start) => {
+  var _a;
+  const runner = (_a = start.startedIds.find((id) => start.picks[id] === "RUNNER")) != null ? _a : start.startedIds[0];
+  const lives = startingLives(rules, start);
+  const teams = {};
+  for (const id of start.startedIds) {
+    teams[id] = id === runner ? "RUNNER" : "HUNTER";
+    lives[id] = __spreadProps(__spreadValues({}, lives[id]), {
+      lives: id === runner ? RUNNER_LIVES : rules.hunterLives
+    });
+  }
+  return { lives, teams, teamLives: null, cardTargets: null };
+};
+var behindRunner = (hunter, runner) => {
+  const order = compareBlindScore(runner, hunter);
+  return order === 1 || order === 0 && runner !== null && greater(runner, SCORE_ZERO);
+};
+function losersOf(run, currentPvpBlind) {
+  const runner = runnerOf(run);
+  const inPvpBlind = (id) => currentPvpBlind.players[id] !== void 0 && isAlive(run, id);
+  if (runner === null || !inPvpBlind(runner)) return null;
+  const hunters = aliveHunters(run).filter(inPvpBlind);
+  if (hunters.length === 0) return null;
+  if (!allOutOfHands(currentPvpBlind, [runner, ...hunters])) return null;
+  const runnerScore = scoreOf(currentPvpBlind, runner);
+  const behind = hunters.filter(
+    (id) => behindRunner(scoreOf(currentPvpBlind, id), runnerScore)
+  );
+  const caught = hunters.some(
+    (id) => compareBlindScore(scoreOf(currentPvpBlind, id), runnerScore) === 1
+  );
+  return caught ? [runner, ...behind] : behind;
+}
+var voucherGainers = (run, action2) => run.teams[action2.playerId] === "RUNNER" ? Object.keys(run.teams).filter((id) => run.teams[id] === "HUNTER").sort() : [];
+var mayRedeemVoucher = (run, playerId) => run.teams[playerId] === "RUNNER";
+var opensSideDeath = (run, playerId) => run.teams[playerId] === "RUNNER";
+function checkWinner(run) {
+  var _a, _b;
+  const runner = runnerOf(run);
+  if (runner === null) return null;
+  if (!isAlive(run, runner)) return winEnding(run, hunterIds(run));
+  if (aliveHunters(run).length === 0) return winEnding(run, [runner]);
+  const ante = (_b = (_a = run.players[runner]) == null ? void 0 : _a.ante) != null ? _b : null;
+  if (ante !== null && ante > LAST_ANTE && run.currentPvpBlind === null)
+    return winEnding(run, [runner]);
+  return null;
+}
+function view(run) {
+  var _a;
+  const runner = runnerOf(run);
+  if (runner === null) return { opponents: {} };
+  const opponents = {};
+  for (const id of hunterIds(run)) opponents[id] = runner;
+  opponents[runner] = (_a = aliveHunters(run)[0]) != null ? _a : null;
+  return { opponents };
+}
+function pickOpponents(run, actor, shown) {
+  var _a;
+  const one = (_a = shown.opponents[actor]) != null ? _a : null;
+  if (run.teams[actor] === "RUNNER") return { one, each: hunterIds(run) };
+  return { one, each: one === null ? [] : [one] };
+}
+var manhuntMode = {
+  name: "manhunt",
+  pickableTeams: ["RUNNER", "HUNTER"],
+  // The Runner's death waits on the Hunters as a whole.
+  deathWaitsOn: "side",
+  opensSideDeath,
+  pairs: "none",
+  init,
+  losersOf,
+  voucherGainers,
+  mayRedeemVoucher,
+  checkWinner,
+  view,
+  pickOpponents
+};
+
+// src/lobby/pvp/modes/nemesis.ts
+var pairKey = (first, second) => first < second ? `${first}|${second}` : `${second}|${first}`;
+function shuffled2(ids, random) {
+  const out = [...ids];
+  for (let index = out.length - 1; index >= 1; index--) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    const keep = out[index];
+    out[index] = out[swapIndex];
+    out[swapIndex] = keep;
+  }
+  return out;
+}
+function pairsForAnte(ids, offset) {
+  const playerCount = ids.length;
+  const rotated = [ids[0]];
+  for (let index = 1; index < playerCount; index++)
+    rotated.push(ids[(index - 1 + offset) % (playerCount - 1) + 1]);
+  const pairs = [];
+  for (let index = 0; index < playerCount; index += 2)
+    pairs.push([rotated[index], rotated[index + 1]]);
+  return pairs;
+}
+function freshPvpBlind(ids, used) {
+  for (let offset = 0; offset <= ids.length - 2; offset++) {
+    const pairs = pairsForAnte(ids, offset);
+    if (pairs.every(([first, second]) => !used.has(pairKey(first, second))))
+      return pairs;
+  }
+  return null;
+}
+function pairNemesis(alive, previous, ante, random) {
+  var _a, _b;
+  const used = (_a = previous == null ? void 0 : previous.usedPairs) != null ? _a : [];
+  const lastBye = (_b = previous == null ? void 0 : previous.lastBye) != null ? _b : null;
+  if (alive.length < 2) return { ante, partners: {}, usedPairs: used, lastBye };
+  const ids = shuffled2([...alive].sort(), random);
+  let bye = null;
+  if (ids.length % 2 === 1) {
+    const at = Math.max(
+      0,
+      ids.findIndex((id) => id !== lastBye)
+    );
+    bye = ids.splice(at, 1)[0];
+  }
+  const fresh = freshPvpBlind(ids, new Set(used));
+  const chosen = fresh != null ? fresh : pairsForAnte(ids, 0);
+  const partners = {};
+  if (bye !== null) partners[bye] = null;
+  for (const [first, second] of chosen) {
+    partners[first] = second;
+    partners[second] = first;
+  }
+  return {
+    ante,
+    partners,
+    usedPairs: [
+      ...fresh ? used : [],
+      ...chosen.map(([first, second]) => pairKey(first, second))
+    ],
+    lastBye: bye
+  };
+}
+function onAnte(run, random) {
+  const ante = highestAnte(run);
+  if (ante === null) return run;
+  const previous = latestPairing(run);
+  if (previous !== null && ante <= previous.ante) return run;
+  const made = pairNemesis(aliveIds(run), previous, ante, random);
+  return __spreadProps(__spreadValues({}, run), { pairings: __spreadProps(__spreadValues({}, run.pairings), { [made.ante]: made }) });
+}
+function nemesisLosers(run, currentPvpBlind) {
+  var _a, _b, _c;
+  const alive = aliveInPvpBlind(run, currentPvpBlind);
+  if (alive.length < 2 || !allOutOfHands(currentPvpBlind, alive)) return null;
+  const partners = (_b = (_a = pairingOfAnte(run, anteOfBlind(currentPvpBlind.blindKey))) == null ? void 0 : _a.partners) != null ? _b : {};
+  const losers = [];
+  for (const id of alive) {
+    const partner = (_c = partners[id]) != null ? _c : null;
+    if (partner === null || id > partner || !alive.includes(partner)) continue;
+    const order = compareBlindScore(
+      scoreOf(currentPvpBlind, id),
+      scoreOf(currentPvpBlind, partner)
+    );
+    if (order === -1) losers.push(id);
+    else if (order === 1) losers.push(partner);
+  }
+  return losers.sort();
+}
+function view2(run, ante) {
+  var _a, _b;
+  const pairing = pairingOfAnte(run, ante);
+  const opponents = {};
+  for (const id of aliveIds(run)) opponents[id] = (_a = pairing == null ? void 0 : pairing.partners[id]) != null ? _a : null;
+  return { opponents, pairingAnte: (_b = pairing == null ? void 0 : pairing.ante) != null ? _b : null };
+}
+var nemesisMode = __spreadProps(__spreadValues({
+  name: "nemesis",
+  // A game of 3 or more players: every death waits on all the others.
+  deathWaitsOn: "everyone"
+}, lastStandingBase), {
+  pairs: "by ante",
+  losersOf: nemesisLosers,
+  onAnte,
+  view: view2
+});
+
+// src/lobby/pvp/modes/royale.ts
+var greater2 = (first, second) => compareBlindScore(first, second) === 1;
+function byScore(players) {
+  return [...players].sort(
+    (first, second) => compareBlindScore(first.score, second.score) || (first.id < second.id ? -1 : 1)
+  );
+}
+function cut(ranked) {
+  if (ranked.length === 0) return /* @__PURE__ */ new Set();
+  const top = ranked[ranked.length - 1].score;
+  let cutoff = ranked[Math.max(1, Math.floor(ranked.length / 2)) - 1].score;
+  if (!greater2(top, cutoff)) {
+    const below = ranked.filter((entry) => greater2(top, entry.score)).pop();
+    if (below) cutoff = below.score;
+  }
+  return new Set(
+    ranked.filter((entry) => !greater2(entry.score, cutoff)).map((entry) => entry.id)
+  );
+}
+function rankRoyale(players) {
+  const ranked = byScore(players);
+  const cutIds = cut(ranked);
+  const all = cutIds.size === ranked.length;
+  return {
+    ranked: ranked.map((entry) => entry.id),
+    losers: all ? [] : ranked.map((entry) => entry.id).filter((id) => cutIds.has(id))
+  };
+}
+function royaleLosers(run, currentPvpBlind) {
+  const alive = aliveInPvpBlind(run, currentPvpBlind);
+  if (alive.length < 2 || !allOutOfHands(currentPvpBlind, alive)) return null;
+  return rankRoyale(
+    alive.map((id) => ({ id, score: scoreOf(currentPvpBlind, id) }))
+  ).losers;
+}
+function view3(run) {
+  const ranked = aliveIds(run);
+  if (ranked.length < 2) return { opponents: {}, cut: {} };
+  const opponents = {};
+  const cut2 = {};
+  ranked.forEach((id, place) => {
+    var _a;
+    opponents[id] = (_a = ranked[place + 1]) != null ? _a : null;
+    cut2[id] = "below the cut";
+  });
+  return { opponents, cut: cut2 };
+}
+var royaleMode = __spreadProps(__spreadValues({
+  name: "royale",
+  // A game of 3 or more players: every death waits on all the others.
+  deathWaitsOn: "everyone"
+}, lastStandingBase), {
+  losersOf: royaleLosers,
+  view: view3
+});
+
+// src/lobby/pvp/core/same.ts
+var isRecord = (value) => typeof value === "object" && value !== null;
+function same(a, b) {
+  if (a === b) return true;
+  if (!isRecord(a) || !isRecord(b)) return false;
+  const names = Object.keys(a);
+  return names.length === Object.keys(b).length && names.every((name) => name in b && same(a[name], b[name]));
+}
+
+// src/lobby/pvp/rules/deaths.ts
+function answerOf(run, player, blindKey) {
+  var _a;
+  const own = (_a = run.players[player]) == null ? void 0 : _a.results[blindKey];
+  if (own !== void 0) return own;
+  const played = run.finishedPvpBlinds.find(
+    (done) => done.blindKey === blindKey && player in done.scores
+  );
+  return played === void 0 ? void 0 : { result: played.losers.includes(player) ? "lost" : "beaten" };
+}
+var passed = (answer2) => (answer2 == null ? void 0 : answer2.result) === "beaten" || (answer2 == null ? void 0 : answer2.result) === "skipped";
+var standingIds = (run) => Object.keys(run.lives).sort().filter((id) => isStanding(run.lives[id]));
+function waitingForDeath(run, mode, dead, blindKey) {
+  const others = Object.keys(run.lives).sort().filter((id) => id !== dead);
+  if (mode.deathWaitsOn === "opponent") return others;
+  if (mode.deathWaitsOn === "everyone") return others;
+  const teams = run.teams;
+  const side = teams[dead];
+  return others.filter(
+    (id) => teams[id] !== void 0 && teams[id] !== side && isStanding(run.lives[id]) && answerOf(run, id, blindKey) === void 0
+  );
+}
+function openWaitingDeath(run, mode, id, cause) {
+  var _a;
+  if (cause === null || !isBlindKey(cause) || isPvpBlindOf(run, id, cause))
+    return run;
+  const open = run.waitingDeaths;
+  if (open.some((death2) => death2.playerId === id)) return run;
+  if (mode.deathWaitsOn === "side") {
+    if (open.length > 0) return run;
+    if (((_a = mode.opensSideDeath) == null ? void 0 : _a.call(mode, run, id)) === false) return run;
+  }
+  const death = {
+    playerId: id,
+    blindKey: cause,
+    waitingFor: waitingForDeath(run, mode, id, cause)
+  };
+  return __spreadProps(__spreadValues({}, run), { waitingDeaths: [...open, death] });
+}
+function recordExits(run, after) {
+  var _a, _b;
+  const exited = Object.keys(after).sort().filter((id) => isStanding(run.lives[id]) && !isStanding(after[id]));
+  if (exited.length === 0) return run.exits;
+  const batch = ((_b = (_a = run.exits[run.exits.length - 1]) == null ? void 0 : _a.batch) != null ? _b : 0) + 1;
+  return [
+    ...run.exits,
+    ...exited.map((player) => {
+      const events = after[player].events;
+      const last = events[events.length - 1];
+      const lostLastLife = after[player].lives <= 0 && (last == null ? void 0 : last.delta) === -1;
+      return {
+        player,
+        blindKey: lostLastLife && last.cause !== null && isBlindKey(last.cause) ? last.cause : null,
+        batch
+      };
+    })
+  ];
+}
+var sameList = (left, right) => left.length === right.length && left.every((id, at) => id === right[at]);
+function exitPlaces(run) {
+  const survivors = standingIds(run);
+  const recorded = new Set(run.exits.map((exit) => exit.player));
+  const lost = Object.keys(run.lives).sort().filter((id) => !survivors.includes(id) && !recorded.has(id));
+  const groups = lost.length > 0 ? [lost] : [];
+  let previous = null;
+  for (const exit of run.exits) {
+    if (survivors.includes(exit.player)) continue;
+    const together = previous !== null && (previous.batch === exit.batch || exit.blindKey !== null && previous.blindKey === exit.blindKey);
+    if (together) groups[groups.length - 1].push(exit.player);
+    else groups.push([exit.player]);
+    previous = exit;
+  }
+  const places = {};
+  for (const id of survivors) places[id] = 1;
+  let better = survivors.length;
+  for (let at = groups.length - 1; at >= 0; at--) {
+    for (const id of groups[at]) places[id] = better + 1;
+    better += groups[at].length;
+  }
+  return places;
+}
+function settleOpponent(run, death) {
+  const opponent = death.waitingFor[0];
+  if (opponent === void 0) return null;
+  const seat = run.lives[opponent];
+  if (seat === void 0) return { kept: death };
+  const answer2 = answerOf(run, opponent, death.blindKey);
+  if (passed(answer2)) return { ended: winEnding(run, [opponent]) };
+  if (seat.lives <= 0) return { ended: drawEnding(run) };
+  if (answer2 !== void 0) return { ended: winEnding(run, [opponent]) };
+  if (seat.status === "forfeited" || seat.status === "left")
+    return { ended: winEnding(run, [death.playerId]) };
+  return { kept: death };
+}
+function settleEveryone(run, death) {
+  const waitingFor = standingIds(run).filter(
+    (id) => id !== death.playerId && answerOf(run, id, death.blindKey) === void 0
+  );
+  if (waitingFor.length === 0) return null;
+  return {
+    kept: sameList(waitingFor, death.waitingFor) ? death : __spreadProps(__spreadValues({}, death), { waitingFor })
+  };
+}
+function settleSide(run, death) {
+  const teams = run.teams;
+  const side = teams[death.playerId];
+  const theirs = Object.keys(run.lives).sort().filter((id) => teams[id] !== void 0 && teams[id] !== side);
+  if (theirs.some((id) => passed(answerOf(run, id, death.blindKey))))
+    return { ended: winEnding(run, theirs) };
+  const waitingFor = theirs.filter(
+    (id) => isStanding(run.lives[id]) && answerOf(run, id, death.blindKey) === void 0
+  );
+  if (waitingFor.length === 0)
+    return theirs.some((id) => answerOf(run, id, death.blindKey) !== void 0) ? { ended: drawEnding(run) } : {
+      ended: winEnding(
+        run,
+        Object.keys(run.lives).filter((id) => teams[id] === side)
+      )
+    };
+  return {
+    kept: sameList(waitingFor, death.waitingFor) ? death : __spreadProps(__spreadValues({}, death), { waitingFor })
+  };
+}
+function settleDeaths(run, mode) {
+  const kept = [];
+  let ending2 = null;
+  for (const death of run.waitingDeaths) {
+    const verdict = mode.deathWaitsOn === "opponent" ? settleOpponent(run, death) : mode.deathWaitsOn === "side" ? settleSide(run, death) : settleEveryone(run, death);
+    if (verdict === null) continue;
+    if ("ended" in verdict) ending2 != null ? ending2 : ending2 = verdict.ended;
+    else kept.push(verdict.kept);
+  }
+  const unchanged2 = kept.length === run.waitingDeaths.length && kept.every((death, at) => same(death, run.waitingDeaths[at]));
+  const settled = unchanged2 ? run : __spreadProps(__spreadValues({}, run), { waitingDeaths: kept });
+  if (ending2 !== null) return { run: settled, ending: ending2 };
+  if (mode.deathWaitsOn === "everyone" && kept.length === 0 && run.exits.length > 0 && standingIds(run).length <= 1) {
+    const places = exitPlaces(run);
+    const winners2 = Object.keys(places).filter((id) => places[id] === 1);
+    return {
+      run: settled,
+      ending: { winners: winners2.length === 1 ? winners2 : null, places }
+    };
+  }
+  return { run: settled, ending: null };
+}
+
+// src/lobby/pvp/rules/lives.ts
+function statusAfterLives(status, lives) {
+  if (status === "forfeited" || status === "left") return status;
+  return lives <= 0 ? "out" : "playing";
+}
+function withPlayerLives(run, id, playerLives) {
+  return __spreadProps(__spreadValues({}, run), { lives: __spreadProps(__spreadValues({}, run.lives), { [id]: playerLives }) });
+}
+function withLedger(run, changes) {
+  return __spreadProps(__spreadValues({}, run), { lifeLedger: __spreadValues(__spreadValues({}, run.lifeLedger), changes) });
+}
+function eventCause(cause) {
+  if (cause.kind === "blind") return cause.blindKey;
+  if (cause.kind === "pvp_blind") return `pvp:${cause.number}`;
+  return null;
+}
+function chargedBlindOf(cause) {
+  return cause.kind === "timer_ran_out" ? null : cause.blindKey;
+}
+function loseLife(run, mode, id, lifeCause) {
+  var _a;
+  const cause = eventCause(lifeCause);
+  const chargedBlind = chargedBlindOf(lifeCause);
+  const playerLives = run.lives[id];
+  if (!playerLives || playerLives.lives <= 0 || !inRunIgnoringLives(playerLives))
+    return run;
+  const chargedBlinds = (_a = run.lifeLedger.lifeTakenFor[id]) != null ? _a : [];
+  const lostPvpBlind = lifeCause.kind === "pvp_blind";
+  if (chargedBlind !== null && chargedBlinds.includes(chargedBlind) && (!lostPvpBlind || playerLives.events.some((e) => e.cause === chargedBlind)))
+    return run;
+  const lives = playerLives.lives - 1;
+  let next = withPlayerLives(run, id, __spreadProps(__spreadValues({}, playerLives), {
+    lives,
+    status: statusAfterLives(playerLives.status, lives),
+    events: [...playerLives.events, { delta: -1, cause }]
+  }));
+  if (chargedBlind !== null && !chargedBlinds.includes(chargedBlind))
+    next = withLedger(next, {
+      lifeTakenFor: __spreadProps(__spreadValues({}, run.lifeLedger.lifeTakenFor), {
+        [id]: [...chargedBlinds, chargedBlind]
+      })
+    });
+  return lives <= 0 ? openWaitingDeath(next, mode, id, cause) : next;
+}
+var TEAM_ALREADY_CHARGED = "team:charged";
+function resetTeamCharge(run, mode, id) {
+  var _a;
+  if (!mode.lifePool) return run;
+  const chargedByPlayer = __spreadValues({}, run.lifeLedger.lifeTakenFor);
+  let changed2 = false;
+  for (const member of mode.lifePool.teamMemberIds(run, id)) {
+    if (!((_a = chargedByPlayer[member]) == null ? void 0 : _a.includes(TEAM_ALREADY_CHARGED))) continue;
+    chargedByPlayer[member] = chargedByPlayer[member].filter(
+      (k) => k !== TEAM_ALREADY_CHARGED
+    );
+    changed2 = true;
+  }
+  return changed2 ? withLedger(run, { lifeTakenFor: chargedByPlayer }) : run;
+}
+function losePooledLife(run, mode, pool, id, lifeCause) {
+  var _a, _b;
+  const cause = eventCause(lifeCause);
+  const chargedBlind = chargedBlindOf(lifeCause);
+  const members = pool.teamMemberIds(run, id);
+  if (members.length === 0) return run;
+  const lostPvpBlind = lifeCause.kind === "pvp_blind";
+  if (lifeCause.kind === "blind" && !isPvpBlindOf(run, id, lifeCause.blindKey)) {
+    if (((_a = run.lifeLedger.lifeTakenFor[id]) != null ? _a : []).includes(TEAM_ALREADY_CHARGED))
+      return run;
+    const charged2 = pool.takeLife(run, id, cause);
+    const chargedByPlayer = __spreadValues({}, run.lifeLedger.lifeTakenFor);
+    for (const member of members)
+      chargedByPlayer[member] = [
+        ...(_b = chargedByPlayer[member]) != null ? _b : [],
+        TEAM_ALREADY_CHARGED
+      ];
+    const next2 = withLedger(charged2, { lifeTakenFor: chargedByPlayer });
+    return next2.lives[id].lives <= 0 ? openWaitingDeath(next2, mode, id, cause) : next2;
+  }
+  const teammatesCharged = lostPvpBlind ? members : [id];
+  const chargedBlinds = (member) => {
+    var _a2;
+    return (_a2 = run.lifeLedger.lifeTakenFor[member]) != null ? _a2 : [];
+  };
+  const markCharged = (game) => {
+    if (chargedBlind === null || teammatesCharged.every(
+      (member) => chargedBlinds(member).includes(chargedBlind)
+    ))
+      return game;
+    const chargedByPlayer = __spreadValues({}, run.lifeLedger.lifeTakenFor);
+    for (const member of teammatesCharged)
+      if (!chargedBlinds(member).includes(chargedBlind))
+        chargedByPlayer[member] = [...chargedBlinds(member), chargedBlind];
+    return withLedger(game, { lifeTakenFor: chargedByPlayer });
+  };
+  if (chargedBlind !== null && teammatesCharged.some(
+    (member) => chargedBlinds(member).includes(chargedBlind)
+  ) && (!lostPvpBlind || run.lives[id].events.some((e) => e.cause === chargedBlind)))
+    return markCharged(run);
+  const charged = pool.takeLife(run, id, cause);
+  const next = markCharged(charged);
+  return next.lives[id].lives <= 0 ? openWaitingDeath(next, mode, id, cause) : next;
+}
+function chargeLife(run, mode, id, cause) {
+  return mode.lifePool ? losePooledLife(run, mode, mode.lifePool, id, cause) : loseLife(run, mode, id, cause);
+}
+function comebackBonusOwners(before, after, lifeLossGold) {
+  const owners = [];
+  if (lifeLossGold === "none") return owners;
+  for (const [id, seat] of Object.entries(after)) {
+    const earlier = before[id];
+    if (earlier === void 0) continue;
+    const lost = seat.events.slice(earlier.events.length).filter((event2) => event2.delta < 0).length;
+    for (let count2 = 0; count2 < lost; count2++) owners.push(id);
+  }
+  return owners;
+}
+function gainLife(run, id) {
+  const playerLives = run.lives[id];
+  if (!playerLives || playerLives.lives <= 0 || !inRunIgnoringLives(playerLives))
+    return run;
+  return withPlayerLives(run, id, __spreadProps(__spreadValues({}, playerLives), {
+    lives: playerLives.lives + 1,
+    events: [...playerLives.events, { delta: 1, cause: null }]
+  }));
+}
+function gainVoucherLives(run, mode, action2) {
+  if (!mode.voucherGainers || mode.lifePool) return run;
+  const gainers = new Set(mode.voucherGainers(run, action2));
+  return [...gainers].reduce(gainLife, run);
+}
+function handleTimerRunOut(run, mode, id, forgiveness = "applies") {
+  var _a;
+  const runOutsUsed = (_a = run.lifeLedger.runOutsForgiven[id]) != null ? _a : 0;
+  if (forgiveness === "applies" && runOutsUsed < run.rules.timerForgiveness)
+    return withLedger(run, {
+      runOutsForgiven: __spreadProps(__spreadValues({}, run.lifeLedger.runOutsForgiven), {
+        [id]: runOutsUsed + 1
+      })
+    });
+  return chargeLife(run, mode, id, { kind: "timer_ran_out" });
+}
+function applyAction(run, action2, mode) {
+  switch (action2.type) {
+    case "forfeit": {
+      const playerLives = run.lives[action2.playerId];
+      return playerLives && playerLives.status !== "forfeited" && playerLives.status !== "left" ? withPlayerLives(run, action2.playerId, __spreadProps(__spreadValues({}, playerLives), {
+        status: "forfeited"
+      })) : run;
+    }
+    case "blind":
+      return action2.result === "lost" && run.rules.failedBlindLife === "costs" ? chargeLife(run, mode, action2.playerId, {
+        kind: "blind",
+        blindKey: action2.blindKey
+      }) : run;
+    case "progress":
+      return resetTeamCharge(run, mode, action2.playerId);
+    case "voucher":
+      return gainVoucherLives(run, mode, {
+        playerId: action2.playerId,
+        voucherKey: action2.voucherKey
+      });
+  }
+}
+function markLeft(run, id) {
+  const playerLives = run.lives[id];
+  return playerLives && playerLives.status !== "left" ? withPlayerLives(run, id, __spreadProps(__spreadValues({}, playerLives), { status: "left" })) : run;
+}
+function writeLedger(state, before, after) {
+  const written = __spreadProps(__spreadValues({}, state), {
+    run: __spreadProps(__spreadValues({}, after), { exits: recordExits(before, after.lives) })
+  });
+  return comebackBonusOwners(
+    before.lives,
+    after.lives,
+    after.rules.lifeLossGold
+  ).reduce(
+    (next, player) => addInboxItem(next, player, {
+      from: null,
+      effect: "comebackBonus",
+      amount: 1
+    }),
+    written
+  );
+}
+function changeLedger(state, change) {
+  const run = state.run;
+  if (run === null) return state;
+  return writeLedger(state, run, change(run));
+}
+function takeAction(state, action2) {
+  return changeLedger(state, (run) => applyAction(run, action2, modeOf(run)));
+}
+
+// src/lobby/pvp/modes/teams.ts
+var SIDES = ["A", "B"];
+var otherSide = (side) => side === "A" ? "B" : "A";
+var sideOfTeam = (team) => team === "A" || team === "B" ? team : null;
+function plannedTeams(start) {
+  const started = new Set(start.startedIds);
+  const planned = {};
+  SIDES.forEach((side, position) => {
+    var _a, _b;
+    for (const id of (_b = (_a = start.teamPlan) == null ? void 0 : _a[position]) != null ? _b : [])
+      if (started.has(id)) planned[id] = side;
+  });
+  return planned;
+}
+function assignTeams(start) {
+  var _a;
+  const planned = plannedTeams(start);
+  const teams = {};
+  for (const id of start.startedIds) {
+    const side = (_a = planned[id]) != null ? _a : sideOfTeam(start.picks[id]);
+    if (side !== null) teams[id] = side;
+  }
+  const size = { A: 0, B: 0 };
+  for (const side of Object.values(teams)) size[side]++;
+  for (const id of start.startedIds) {
+    if (teams[id] !== void 0) continue;
+    const side = size.B < size.A ? "B" : "A";
+    teams[id] = side;
+    size[side]++;
+  }
+  return teams;
+}
+var membersOf = (teams, side, ids) => ids.filter((id) => teams[id] === side);
+function drawTarget(teams, mine, alive, random) {
+  const candidates = membersOf(teams, otherSide(mine), alive);
+  return candidates.length === 0 ? null : candidates[Math.floor(random() * candidates.length)];
+}
+function drawCardTargets(teams, alive, ante, random) {
+  const targets = {};
+  for (const id of alive) {
+    const mine = sideOfTeam(teams[id]);
+    if (mine === null) continue;
+    targets[id] = drawTarget(teams, mine, alive, random);
+  }
+  return { ante, targets };
+}
+var init2 = (rules, start, random) => {
+  const lives = startingLives(rules, start);
+  const teams = assignTeams(start);
+  return {
+    lives,
+    teams,
+    teamLives: { A: rules.startingLives, B: rules.startingLives },
+    cardTargets: drawCardTargets(
+      teams,
+      Object.keys(lives).filter((id) => inRunWithLives(lives[id])),
+      1,
+      random
+    )
+  };
+};
+function teamScore(run, currentPvpBlind, side, alive) {
+  const reported = [];
+  for (const id of membersOf(run.teams, side, alive)) {
+    const score = scoreOf(currentPvpBlind, id);
+    if (score !== null) reported.push(score);
+  }
+  return reported.length === 0 ? null : sum(reported);
+}
+function losersOf2(run, currentPvpBlind) {
+  const alive = aliveInPvpBlind(run, currentPvpBlind);
+  if (alive.length === 0 || !allOutOfHands(currentPvpBlind, alive)) return null;
+  const order = compareBlindScore(
+    teamScore(run, currentPvpBlind, "A", alive),
+    teamScore(run, currentPvpBlind, "B", alive)
+  );
+  if (order === 0) return [];
+  return membersOf(run.teams, order < 0 ? "A" : "B", alive);
+}
+function teamIsOut(run, side, pool) {
+  const members = Object.keys(run.lives).filter((id) => run.teams[id] === side);
+  return pool <= 0 || !members.some((id) => inRunIgnoringLives(run.lives[id]));
+}
+function checkWinner2(run) {
+  if (run.teamLives === null) return null;
+  const teamAOut = teamIsOut(run, "A", run.teamLives.A);
+  const teamBOut = teamIsOut(run, "B", run.teamLives.B);
+  if (teamAOut && teamBOut) return drawEnding(run);
+  if (teamAOut)
+    return winEnding(run, membersOf(run.teams, "B", Object.keys(run.lives)));
+  if (teamBOut)
+    return winEnding(run, membersOf(run.teams, "A", Object.keys(run.lives)));
+  return null;
+}
+function onAnte2(run, random) {
+  const ante = highestAnte(run);
+  if (ante === null) return run;
+  if (run.cardTargets !== null && ante <= run.cardTargets.ante) return run;
+  return __spreadProps(__spreadValues({}, run), {
+    cardTargets: drawCardTargets(run.teams, aliveIds(run), ante, random)
+  });
+}
+var view4 = (run) => {
+  var _a, _b, _c, _d;
+  return {
+    opponents: {},
+    pairingAnte: (_b = (_a = run.cardTargets) == null ? void 0 : _a.ante) != null ? _b : null,
+    cardTargets: (_d = (_c = run.cardTargets) == null ? void 0 : _c.targets) != null ? _d : {}
+  };
+};
+var teamScores = (run, currentPvpBlind) => {
+  const alive = aliveIds(run);
+  return {
+    A: teamScore(run, currentPvpBlind, "A", alive),
+    B: teamScore(run, currentPvpBlind, "B", alive)
+  };
+};
+var pickOpponents2 = (_run, actor, shown) => {
+  var _a, _b;
+  const one = (_b = (_a = shown.cardTargets) == null ? void 0 : _a[actor]) != null ? _b : null;
+  return { one, each: one === null ? [] : [one] };
+};
+function poolOf(state, id) {
+  const side = sideOfTeam(state.teams[id]);
+  const pool = state.teamLives;
+  return side === null || pool === null ? null : { side, pool };
+}
+var lifePool = {
+  // The whole team of `id`, or nobody when it has no pool or the pool is already at 0.
+  teamMemberIds: (state, id) => {
+    const held = poolOf(state, id);
+    if (!held || !state.lives[id] || held.pool[held.side] <= 0) return [];
+    return membersOf(state.teams, held.side, Object.keys(state.lives));
+  },
+  // One life off the pool of `id`'s team, shown on every player of that team
+  // with the same event and the pool's value.
+  takeLife: (state, id, cause) => {
+    const held = poolOf(state, id);
+    if (!held) return state;
+    const lives = held.pool[held.side] - 1;
+    const players = __spreadValues({}, state.lives);
+    for (const member of membersOf(
+      state.teams,
+      held.side,
+      Object.keys(players)
+    ))
+      players[member] = __spreadProps(__spreadValues({}, players[member]), {
+        lives,
+        status: statusAfterLives(players[member].status, lives),
+        events: [...players[member].events, { delta: -1, cause }]
+      });
+    return __spreadProps(__spreadValues({}, state), {
+      lives: players,
+      teamLives: __spreadProps(__spreadValues({}, held.pool), { [held.side]: lives })
+    });
+  },
+  // One loser per losing team (the smallest id, so the order of the losers cannot
+  // matter): the team loses one life, not one per member.
+  payers: (state, losers) => {
+    const byTeam = {};
+    for (const id of losers) {
+      const team = state.teams[id];
+      if (team !== void 0 && (byTeam[team] === void 0 || id < byTeam[team]))
+        byTeam[team] = id;
+    }
+    return Object.values(byTeam).sort();
+  }
+};
+var teamsMode = {
+  name: "teams",
+  pickableTeams: SIDES,
+  // The pool of a team at 0 opens a waiting death that waits on the other team.
+  deathWaitsOn: "side",
+  lifePool,
+  pairs: "none",
+  init: init2,
+  losersOf: losersOf2,
+  checkWinner: checkWinner2,
+  onAnte: onAnte2,
+  view: view4,
+  teamScores,
+  pickOpponents: pickOpponents2
+};
+
+// src/lobby/pvp/modes/index.ts
+var finalTwo = (mode) => __spreadProps(__spreadValues({}, mode), {
+  losersOf: duelLosers,
+  view: (run) => ({ opponents: duelOpponents(aliveIds(run)) })
+});
+var royaleFinalTwo = finalTwo(royaleMode);
+var nemesisFinalTwo = finalTwo(nemesisMode);
+function pickMode(mode, startedCount, playersStillInLobby = startedCount) {
+  if (mode === "manhunt") return manhuntMode;
+  if (mode === "teams") return teamsMode;
+  if (startedCount === 2) return duelMode;
+  if (mode === "nemesis")
+    return playersStillInLobby === 2 ? nemesisFinalTwo : nemesisMode;
+  return playersStillInLobby === 2 ? royaleFinalTwo : royaleMode;
+}
+function modeOf(run) {
+  return pickMode(
+    run.rules.mode,
+    run.rules.startedCount,
+    Object.values(run.lives).filter((seat) => seat.status !== "left").length
+  );
+}
+
+// src/lobby/pvp/rules/pvp_blind_rules.ts
+var isPersonalOf = (countdown, currentPvpBlind) => countdown.kind === "personal" && countdown.against.some(
+  (player) => currentPvpBlind.players[player] !== void 0
+);
+var isAway = (run, player) => run.clocks.playerPauses.some(
+  (pause) => pause.player === player && isAwayPause(pause)
+);
+function pvpBlindToOpen(run) {
+  if (run.currentPvpBlind !== null) return null;
+  for (const blindKey of new Set(Object.values(run.ready))) {
+    const players = playersOfBoss(run, blindKey);
+    if (players.length > 0 && players.every((player) => run.ready[player] === blindKey))
+      return { blindKey, players };
+  }
+  return null;
+}
+function waitingBossOf(run, viewer) {
+  var _a, _b;
+  const ante = (_b = (_a = run.players[viewer]) == null ? void 0 : _a.ante) != null ? _b : null;
+  if (ante === null) return null;
+  const blindKey = `${ante}:Boss`;
+  const players = playersOfBoss(run, blindKey);
+  return players.includes(viewer) && players.some((player) => run.ready[player] === blindKey) ? { blindKey, players } : null;
+}
+function scoreViewOf(currentPvpBlind, viewer, player) {
+  const own = currentPvpBlind.players[player];
+  if (own === void 0 || own.stage === "not entered")
+    return { kind: "none yet" };
+  if (own.score === null) return { kind: "none yet" };
+  return player !== viewer && !mayLookAtScores(currentPvpBlind, viewer) ? { kind: "hidden" } : { kind: "shown", score: own.score };
+}
+var scoreOf2 = (own) => own.stage === "not entered" ? null : own.score;
+var handsLeftOf = (own) => own.stage === "not entered" ? null : own.handsLeft;
+var isDone = (own) => own.stage === "done";
+function mayLookAtScores(currentPvpBlind, viewer) {
+  const mine = currentPvpBlind.players[viewer];
+  return mine !== void 0 && mine.stage !== "not entered" && mine.stage !== "entered";
+}
+function losersOf3(run, currentPvpBlind, mode) {
+  const required = requiredPlayers(run);
+  if (required.length === 0) return null;
+  const timedOut = required.filter((player) => {
+    const own = currentPvpBlind.players[player];
+    return own.stage === "done" && own.endedBy === "timer";
+  });
+  if (required.length === 2 && timedOut.length > 0) return timedOut;
+  const named = mode.losersOf(run, currentPvpBlind);
+  if (named === null) return null;
+  return [...named, ...timedOut.filter((player) => !named.includes(player))];
+}
+
+// src/lobby/pvp/rules/opponent_targets.ts
+var unique = (ids) => [...new Set(ids)];
+function pairForNewAnte(state) {
+  var _a, _b;
+  const run = state.run;
+  if (run === null) return state;
+  const ante = highestAnte(run);
+  const next = (_b = (_a = modeOf(run)).onAnte) == null ? void 0 : _b.call(_a, run, seededRandom(`${run.id}:${ante}`));
+  return next === void 0 || next === run ? state : __spreadProps(__spreadValues({}, state), { run: next });
+}
+function mayTarget(run, actor, id) {
+  if (id === actor || !inRunWithLives(run.lives[id])) return false;
+  const mine = run.teams[actor];
+  return mine === void 0 || run.teams[id] !== mine;
+}
+function opponentsFrom(run, mode, shown, actor) {
+  const picked = mode.pickOpponents(run, actor, shown);
+  return {
+    each: unique(picked.each).filter((id) => mayTarget(run, actor, id)),
+    one: picked.one !== null && mayTarget(run, actor, picked.one) ? picked.one : null
+  };
+}
+function shownTargets(state, ante) {
+  const run = state.run;
+  if (run === null) return null;
+  const mode = modeOf(run);
+  return { run, mode, shown: mode.view(run, ante) };
+}
+function shownTargetsOf(state, player) {
+  var _a, _b, _c;
+  return shownTargets(state, (_c = (_b = (_a = state.run) == null ? void 0 : _a.players[player]) == null ? void 0 : _b.ante) != null ? _c : null);
+}
+function myBossOf(state, viewer) {
+  var _a, _b, _c;
+  const run = state.run;
+  const ante = (_b = (_a = run == null ? void 0 : run.players[viewer]) == null ? void 0 : _a.ante) != null ? _b : null;
+  if (run === null || ante === null) return "no pvp this ante";
+  const blindKey = `${ante}:Boss`;
+  if (!isPvpBlind(run, blindKey)) return "no pvp this ante";
+  const resolved = run.finishedPvpBlinds.find(
+    (done) => done.blindKey === blindKey
+  );
+  const inPvpBlind = ((_c = run.currentPvpBlind) == null ? void 0 : _c.blindKey) === blindKey ? run.currentPvpBlind.players[viewer] !== void 0 : resolved !== void 0 ? viewer in resolved.scores : playersOfBoss(run, blindKey).includes(viewer);
+  if (!inPvpBlind) return "no pvp this ante";
+  if (modeOf(run).pairs !== "by ante" || run.pairings[ante] === void 0)
+    return "plays";
+  return opponentsOf(state, viewer).one === null ? "bye" : "plays";
+}
+function opponentsOf(state, actor) {
+  const shown = shownTargetsOf(state, actor);
+  return shown === null ? { each: [], one: null } : opponentsFrom(shown.run, shown.mode, shown.shown, actor);
+}
+function pvpBlindOpponentOf(state, currentPvpBlind, actor) {
+  const run = state.run;
+  if (run === null) return null;
+  const shown = shownTargets(state, anteOfBlind(currentPvpBlind.blindKey));
+  return shown === null ? null : opponentsFrom(shown.run, shown.mode, shown.shown, actor).one;
+}
+function reachedBy(state, actor, reach) {
+  const run = state.run;
+  if (run === null) return [];
+  if (reach === "everyone")
+    return Object.keys(run.lives).sort().filter((id) => id !== actor && isInRun(run, id));
+  const mine = shownTargetsOf(state, actor);
+  if (mine === null) return [];
+  if (reach === "every opponent")
+    return opponentsFrom(mine.run, mine.mode, mine.shown, actor).each;
+  return Object.keys(run.lives).sort().filter((id) => {
+    const theirs = shownTargetsOf(state, id);
+    return theirs !== null && mayTarget(run, actor, id) && opponentsFrom(run, theirs.mode, theirs.shown, id).one === actor;
+  });
+}
+function teamScoresOf(viewer, shown) {
+  var _a, _b;
+  const currentPvpBlind = shown.run.currentPvpBlind;
+  if (currentPvpBlind === null || !mayLookAtScores(currentPvpBlind, viewer))
+    return null;
+  const sums = (_b = (_a = shown.mode).teamScores) == null ? void 0 : _b.call(_a, shown.run, currentPvpBlind);
+  return (sums == null ? void 0 : sums.A) != null && sums.B != null ? { A: sums.A, B: sums.B } : null;
+}
+function targetsOf(state, viewer) {
+  var _a, _b, _c;
+  const shown = shownTargetsOf(state, viewer);
+  const run = state.run;
+  if (shown === null || run === null)
+    return {
+      pairingAnte: null,
+      opponents: [],
+      cardTargets: [],
+      myBoss: myBossOf(state, viewer),
+      cut: "no cut",
+      teamScores: null
+    };
+  const mine = opponentsFrom(shown.run, shown.mode, shown.shown, viewer);
+  return {
+    pairingAnte: (_a = shown.shown.pairingAnte) != null ? _a : null,
+    opponents: mine.one === null ? [] : [mine.one],
+    cardTargets: mine.each,
+    myBoss: myBossOf(state, viewer),
+    // Royale with 3 or more shows whether a player is above the cut; every other mode none.
+    cut: (_c = (_b = shown.shown.cut) == null ? void 0 : _b[viewer]) != null ? _c : "no cut",
+    teamScores: teamScoresOf(viewer, shown)
+  };
+}
+
+// src/lobby/pvp/inputs/effects.ts
+var MAX_EFFECTS_PER_PLAYER = 384;
+var EFFECT_NAMES = ["asteroid", "pizza", "gambling"];
+var EFFECTS = {
+  asteroid: { reach: "targeting me", amount: 1 },
+  pizza: { reach: "everyone", amount: 1 },
+  gambling: { reach: "everyone", amount: 10 }
+};
+var effectSpec = {
+  effect: { type: "oneOf", values: EFFECT_NAMES },
+  total: { type: "whole", max: MAX_EFFECTS_PER_PLAYER }
+};
+function hit(state, from, effect, times, ante) {
+  const { reach, amount } = EFFECTS[effect];
+  let next = state;
+  for (const target of reachedBy(state, from, reach))
+    for (let count2 = 0; count2 < times; count2++)
+      next = addInboxItem(
+        next,
+        target,
+        effect === "pizza" ? { from, effect, amount, ante } : { from, effect, amount }
+      );
+  return next;
+}
+var effectHandler = {
+  spec: effectSpec,
+  handle(state, player, body, _now, previousTotal) {
+    var _a;
+    const run = state.run;
+    const ante = (_a = run == null ? void 0 : run.players[player]) == null ? void 0 : _a.ante;
+    if (run === null || ante === null || ante === void 0)
+      return { refusal: "no_progress" };
+    if (!isInRun(run, player)) return { refusal: "eliminated" };
+    return hit(
+      state,
+      player,
+      body.effect,
+      body.total - (previousTotal != null ? previousTotal : 0),
+      ante
+    );
+  }
+};
+
+// src/lobby/pvp/rules/skips.ts
+var NO_SKIPS = {
+  skips: 0,
+  skipsAtPvp: null,
+  facing: null,
+  spentMilliseconds: 0
+};
+function skipEntryOf(entries, id) {
+  var _a;
+  return (_a = entries[id]) != null ? _a : NO_SKIPS;
+}
+function skipsReported(entries, id, skips) {
+  const entry = skipEntryOf(entries, id);
+  if (entry.skips === skips) return entries;
+  return __spreadProps(__spreadValues({}, entries), { [id]: __spreadProps(__spreadValues({}, entry), { skips }) });
+}
+function skipsSincePvp(entry) {
+  var _a;
+  return Math.max(0, entry.skips - ((_a = entry.skipsAtPvp) != null ? _a : 0));
+}
+function anteBankOf(baseMilliseconds, incrementMilliseconds, rule, own, opponent) {
+  if (incrementMilliseconds === null) return baseMilliseconds;
+  const mine = skipsSincePvp(own);
+  const counted = rule === "own" ? mine : Math.max(0, mine - (opponent === null ? 0 : skipsSincePvp(opponent)));
+  return baseMilliseconds + counted * incrementMilliseconds;
+}
+function skipsAtPvpClose(entries, players) {
+  const next = __spreadValues({}, entries);
+  for (const id of players) {
+    const entry = skipEntryOf(entries, id);
+    next[id] = __spreadProps(__spreadValues({}, entry), { skipsAtPvp: entry.skips });
+  }
+  return next;
+}
+
+// src/lobby/pvp/inputs/personal_clock.ts
+function startPersonalClock(state, player, lengthMilliseconds, now) {
+  const run = state.run;
+  if (run === null || !isInRun(run, player)) return state;
+  return changeClocks(
+    state,
+    (clocks) => startCountdown(
+      removeCountdowns(
+        clocks,
+        (countdown) => isPersonalFor(countdown, player),
+        now
+      ),
+      {
+        kind: "personal",
+        by: null,
+        against: [player],
+        lengthMilliseconds
+      },
+      now
+    )
+  );
+}
+function startAtAnte(state, player, firstReport, now) {
+  var _a, _b;
+  const personal = (_b = (_a = state.run) == null ? void 0 : _a.rules.clocks.personal) != null ? _b : null;
+  if (personal === null) return state;
+  if (personal.kind === "speedlatro" && !firstReport) return state;
+  return startPersonalClock(state, player, personal.baseMilliseconds, now);
+}
+function syncRates(state, now) {
+  var _a;
+  const run = state.run;
+  const personal = (_a = run == null ? void 0 : run.rules.clocks.personal) != null ? _a : null;
+  if (run === null || personal === null) return state;
+  const wanted = (player) => isTimed(run.clocks, player) ? personal.timedRate : 1;
+  if (!run.clocks.countdowns.some(
+    (countdown) => countdown.kind === "personal" && countdown.rate !== wanted(countdown.against[0])
+  ))
+    return state;
+  return changeClocks(state, (clocks) => {
+    const settled = catchUpClocks(clocks, now);
+    return __spreadProps(__spreadValues({}, settled), {
+      countdowns: settled.countdowns.map((countdown) => {
+        var _a2;
+        if (countdown.kind !== "personal") return countdown;
+        const rate = wanted(countdown.against[0]);
+        if (rate === countdown.rate) return countdown;
+        const at = (_a2 = stoppedAt(countdown)) != null ? _a2 : now;
+        const left = Math.round((countdown.endsAt - at) * countdown.rate / rate);
+        return __spreadProps(__spreadValues({}, countdown), { rate, endsAt: at + left });
+      })
+    });
+  });
+}
+function addSkipTime(state, player, milliseconds) {
+  var _a;
+  const run = state.run;
+  if (run === null || ((_a = run.rules.clocks.personal) == null ? void 0 : _a.kind) !== "pressure") return state;
+  const started = run.clocks.countdowns.some(
+    (countdown) => countdown.kind === "ante" && isCounting(countdown) && (countdown.by === player || countdown.against.includes(player))
+  );
+  if (started) return state;
+  return changeClocks(state, (clocks) => __spreadProps(__spreadValues({}, clocks), {
+    countdowns: clocks.countdowns.map(
+      (countdown) => countdown.kind === "personal" && countdown.against.includes(player) ? __spreadProps(__spreadValues({}, countdown), {
+        endsAt: countdown.endsAt + Math.round(milliseconds / countdown.rate)
+      }) : countdown
+    )
+  }));
+}
+
+// src/lobby/pvp/inputs/timer.ts
+var MOST_PAID_PREVIEWS = 1e5;
+var FREE_PREVIEW_MILLISECONDS = 1e4;
+var startSpec = { timer: { type: "oneOf", values: ["ante", "pvp"] } };
+var pauseSpec = {};
+var spendSpec = { total: { type: "whole", max: MOST_PAID_PREVIEWS } };
+var animatingSpec = { on: { type: "flag" } };
+var isStarted = (countdown) => countdown.kind === "ante" || countdown.kind === "pvp";
+var sameCountdown = (left, right) => left.kind === right.kind && left.by === right.by && left.against.length === right.against.length && left.against.every((player, place) => player === right.against[place]);
+function writeBank(state, player, left) {
+  const run = state.run;
+  const currentPvpBlind = run == null ? void 0 : run.currentPvpBlind;
+  if (!run || !currentPvpBlind || currentPvpBlind.banks[player] === void 0)
+    return state;
+  return __spreadProps(__spreadValues({}, state), {
+    run: __spreadProps(__spreadValues({}, run), {
+      currentPvpBlind: __spreadProps(__spreadValues({}, currentPvpBlind), {
+        banks: __spreadProps(__spreadValues({}, currentPvpBlind.banks), { [player]: Math.max(0, left) })
+      })
+    })
+  });
+}
+function addHandTime(state, player, now) {
+  var _a, _b, _c, _d;
+  const pvp = (_b = (_a = state.run) == null ? void 0 : _a.rules.clocks.pvp) != null ? _b : null;
+  const bank = (_d = (_c = state.run) == null ? void 0 : _c.currentPvpBlind) == null ? void 0 : _d.banks[player];
+  if (pvp === null || bank === void 0) return state;
+  return changeClocks(
+    writeBank(state, player, bank + pvp.handMilliseconds),
+    (clocks) => __spreadProps(__spreadValues({}, clocks), {
+      countdowns: clocks.countdowns.map(
+        (countdown) => countdown.kind === "pvp" && countdown.against.includes(player) && timeLeft(countdown, now) > 0 ? __spreadProps(__spreadValues({}, countdown), { endsAt: countdown.endsAt + pvp.handMilliseconds }) : countdown
+      )
+    })
+  );
+}
+function isAhead(run, currentPvpBlind, player, other) {
+  const own = currentPvpBlind.players[player];
+  const theirs = currentPvpBlind.players[other];
+  if (own === void 0 || theirs === void 0) return false;
+  const ownScore = scoreOf2(own);
+  const theirScore = scoreOf2(theirs);
+  if (ownScore === null || theirScore === null) return false;
+  const order = compare(ownScore, theirScore);
+  return order > 0 || order === 0 && run.firstReady.includes(player);
+}
+function bankTimeLeft(state, which, now) {
+  const clocks = state.run === null ? null : catchUpClocks(state.run.clocks, now);
+  if (clocks === null) return state;
+  return clocks.countdowns.filter((countdown) => countdown.kind === "pvp" && which(countdown)).reduce(
+    (game, countdown) => countdown.against.reduce(
+      (inner, target) => writeBank(inner, target, timeLeft(countdown, now)),
+      game
+    ),
+    state
+  );
+}
+function stopAndBank(state, which, now) {
+  return changeClocks(
+    bankTimeLeft(state, which, now),
+    (clocks) => removeCountdowns(clocks, which, now)
+  );
+}
+function resumeFromBank(state, starter, now) {
+  var _a, _b;
+  const banks = (_b = (_a = state.run) == null ? void 0 : _a.currentPvpBlind) == null ? void 0 : _b.banks;
+  if (banks === void 0) return state;
+  return changeClocks(state, (clocks) => __spreadProps(__spreadValues({}, clocks), {
+    countdowns: clocks.countdowns.map((countdown) => {
+      var _a2;
+      const bank = banks[countdown.against[0]];
+      return countdown.kind === "pvp" && countdown.by === starter && bank !== void 0 ? __spreadProps(__spreadValues({}, countdown), { endsAt: ((_a2 = stoppedAt(countdown)) != null ? _a2 : now) + bank }) : countdown;
+    })
+  }));
+}
+function stopPassedTimers(state, now) {
+  const run = state.run;
+  const currentPvpBlind = run == null ? void 0 : run.currentPvpBlind;
+  if (!run || !currentPvpBlind) return state;
+  const passed2 = (countdown) => {
+    const starter = countdown.by;
+    return countdown.kind === "pvp" && starter !== null && timeLeft(countdown, now) > 0 && !countdown.against.every(
+      (target) => isAhead(run, currentPvpBlind, starter, target)
+    );
+  };
+  return stopAndBank(state, passed2, now);
+}
+function anteBankIn(state, run, player) {
+  const base = run.rules.timerBaseMilliseconds;
+  if (run.rules.clocks.ante === "personal") return base;
+  const opponent = opponentsOf(state, player).one;
+  return anteBankOf(
+    base,
+    run.rules.timerIncrementMilliseconds,
+    run.rules.skipTimeRule,
+    skipEntryOf(run.skips, player),
+    opponent === null ? null : skipEntryOf(run.skips, opponent)
+  );
+}
+function personalLeft(run, player, now) {
+  const own = run.clocks.countdowns.find(
+    (countdown) => isPersonalFor(countdown, player)
+  );
+  return own === void 0 ? run.rules.timerBaseMilliseconds : timeLeft(own, now);
+}
+function pvpTarget(state, run, currentPvpBlind, player) {
+  const own = currentPvpBlind.players[player];
+  if (own === void 0 || handsLeftOf(own) === null)
+    return { refusal: "not_in_pvp_blind" };
+  const target = pvpBlindOpponentOf(state, currentPvpBlind, player);
+  if (target === null) return { refusal: "no_opponent" };
+  const theirs = currentPvpBlind.players[target];
+  if (theirs === void 0 || isDone(theirs) || handsLeftOf(theirs) === null || !isInRun(run, target))
+    return { refusal: "nobody_to_time" };
+  if (handsLeftOf(theirs) === 0) return { refusal: "out_of_hands" };
+  return isAhead(run, currentPvpBlind, player, target) ? { target } : { refusal: "not_ahead" };
+}
+function whoToTime(state, run, player, timer, now) {
+  const currentPvpBlind = run.currentPvpBlind;
+  if (timer === "pvp") {
+    const pvp = run.rules.clocks.pvp;
+    if (pvp === null) return { refusal: "pvp_timer_off" };
+    if (currentPvpBlind === null) return { refusal: "not_pvp_blind" };
+    const found = pvpTarget(state, run, currentPvpBlind, player);
+    if ("refusal" in found) return found;
+    const bank = currentPvpBlind.banks[found.target];
+    if (bank === void 0) return { refusal: "no_bank" };
+    return { timer: "pvp", against: [found.target], lengthMilliseconds: bank };
+  }
+  if (currentPvpBlind !== null) return { refusal: "not_waiting" };
+  const blindKey = run.ready[player];
+  if (blindKey === void 0) return { refusal: "not_ready" };
+  const needed = playersOfBoss(run, blindKey);
+  if (!needed.includes(player)) return { refusal: "not_waiting" };
+  const against = needed.slice().sort().filter(
+    (id) => id !== player && isInRun(run, id) && run.ready[id] !== blindKey
+  );
+  if (against.length === 0) return { refusal: "nobody_to_time" };
+  return {
+    timer: "ante",
+    against,
+    lengthMilliseconds: run.rules.clocks.ante === "personal" ? Math.min(...against.map((id) => personalLeft(run, id, now))) : anteBankIn(state, run, player),
+    blindKey
+  };
+}
+function startCheck(state, player, timer, now) {
+  const run = state.run;
+  if (run === null) return { refusal: "no_run" };
+  if (!isInRun(run, player)) return { refusal: "eliminated" };
+  const countdowns = run.clocks.countdowns;
+  if (countdowns.some(
+    (countdown) => isStarted(countdown) && isCounting(countdown) && countdown.by !== null && countdown.by !== player && countdown.against.includes(player)
+  ))
+    return { refusal: "being_timed" };
+  if (countdowns.some(
+    (countdown) => countdown.kind === timer && countdown.by === player && isCounting(countdown)
+  ))
+    return { refusal: "already_running" };
+  const found = whoToTime(state, run, player, timer, now);
+  if ("refusal" in found) return found;
+  const taken = countdowns.some(
+    (countdown) => countdown.kind === timer && isCounting(countdown) && countdown.by !== player && countdown.against.some((id) => found.against.includes(id))
+  );
+  if (taken) return { refusal: "already_timed" };
+  return Object.keys(run.players).some(
+    (id) => isInRun(run, id) && isAway(run, id)
+  ) ? { refusal: "someone_away" } : found;
+}
+function timerButtonOf(state, player, now) {
+  if (state.run === null) return "none";
+  let button = "none";
+  for (const timer of ["ante", "pvp"]) {
+    const checked = startCheck(state, player, timer, now);
+    if ("against" in checked) return timer;
+    if (checked.refusal === "someone_away") button = "someone away";
+  }
+  return button;
+}
+var timerStartHandler = {
+  spec: startSpec,
+  handle(state, player, body, now) {
+    var _a;
+    const checked = startCheck(state, player, body.timer, now);
+    if ("refusal" in checked) return checked;
+    const held = (_a = state.run) == null ? void 0 : _a.clocks.countdowns.some(
+      (countdown) => countdown.kind === body.timer && countdown.by === player && countdown.hold.kind !== "paused for ready"
+    );
+    const timedNow = (clocks) => body.timer === "ante" ? setPausedAfter(
+      resumeCountdowns(
+        clocks,
+        (countdown) => countdown.kind === "personal" && countdown.against.some((id) => checked.against.includes(id)),
+        now
+      ),
+      player,
+      "counting"
+    ) : clocks;
+    if (held === true) {
+      const resumed = changeClocks(
+        state,
+        (clocks) => timedNow(
+          resumeCountdowns(
+            clocks,
+            (countdown) => countdown.kind === body.timer && countdown.by === player,
+            now
+          )
+        )
+      );
+      return body.timer === "pvp" ? resumeFromBank(resumed, player, now) : resumed;
+    }
+    return changeClocks(
+      state,
+      (clocks) => timedNow(
+        startCountdown(
+          clocks,
+          checked.timer === "ante" ? {
+            kind: "ante",
+            by: player,
+            against: checked.against,
+            lengthMilliseconds: checked.lengthMilliseconds,
+            blindKey: checked.blindKey
+          } : {
+            kind: "pvp",
+            by: player,
+            against: checked.against,
+            lengthMilliseconds: checked.lengthMilliseconds
+          },
+          now
+        )
+      )
+    );
+  }
+};
+var timerPauseHandler = {
+  spec: pauseSpec,
+  handle(state, player, _body, now) {
+    const run = state.run;
+    if (run === null) return { refusal: "no_run" };
+    const own = (countdown) => isStarted(countdown) && countdown.by === player;
+    if (!run.clocks.countdowns.some(
+      (countdown) => own(countdown) && isCounting(countdown)
+    ))
+      return { refusal: "no_timer_to_pause" };
+    const freed = run.clocks.countdowns.filter(
+      (countdown) => own(countdown) && countdown.kind === "ante" && isCounting(countdown)
+    ).flatMap((countdown) => countdown.against);
+    const banked = bankTimeLeft(
+      state,
+      (countdown) => own(countdown) && isCounting(countdown),
+      now
+    );
+    return changeClocks(banked, (clocks) => {
+      const paused = setPausedAfter(
+        pauseCountdowns(clocks, own, now),
+        player,
+        "paused by starter"
+      );
+      const stillTimed = (id) => paused.countdowns.some(
+        (countdown) => countdown.kind === "ante" && isCounting(countdown) && countdown.against.includes(id)
+      );
+      return pauseCountdowns(
+        paused,
+        (countdown) => countdown.kind === "personal" && countdown.against.every(
+          (id) => freed.includes(id) && !stillTimed(id)
+        ),
+        now,
+        "paused until timed"
+      );
+    });
+  }
+};
+var paidPreviewsHandler = {
+  spec: spendSpec,
+  handle(state, player, body, now, previousTotal) {
+    const run = state.run;
+    if (run === null) return { refusal: "no_run" };
+    const personal = run.rules.clocks.personal;
+    if (personal === null) return { refusal: "no_timer" };
+    const clocks = catchUpClocks(run.clocks, now);
+    const ownAt = clocks.countdowns.findIndex(
+      (countdown) => isPersonalFor(countdown, player)
+    );
+    const own = clocks.countdowns[ownAt];
+    if (own === void 0 || own.kind !== "personal")
+      return { refusal: "no_timer" };
+    const cost = personal.previewCostMilliseconds;
+    const uses = body.total - (previousTotal != null ? previousTotal : 0);
+    const free = Math.max(FREE_PREVIEW_MILLISECONDS, cost);
+    const left = timeLeft(own, now) * own.rate;
+    if (cost <= 0 || left <= free) return __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, run), { clocks }) });
+    const paid = Math.min(uses, Math.ceil((left - free) / cost));
+    return __spreadProps(__spreadValues({}, state), {
+      run: __spreadProps(__spreadValues({}, run), {
+        clocks: __spreadProps(__spreadValues({}, clocks), {
+          countdowns: clocks.countdowns.map(
+            (countdown, at) => at === ownAt ? __spreadProps(__spreadValues({}, countdown), {
+              endsAt: countdown.endsAt - Math.round(paid * cost / own.rate)
+            }) : countdown
+          )
+        })
+      })
+    });
+  }
+};
+var animatingHandler = {
+  spec: animatingSpec,
+  handle(state, player, body, now) {
+    const run = state.run;
+    if (run === null) return { refusal: "no_run" };
+    if (run.clocks.players[player] === void 0)
+      return { refusal: "unknown_player" };
+    const pause = body.on ? "started" : "stopped";
+    if (pause === "started" && !isInRun(run, player))
+      return { refusal: "eliminated" };
+    return changeClocks(
+      state,
+      (clocks) => pause === "started" ? startPlayerPause(clocks, player, "animating", run.rules.limits, now) : endPlayerPause(clocks, player, "animating", now)
+    );
+  }
+};
+function timersView(state, viewer, now) {
+  var _a, _b;
+  const run = state.run;
+  if (run === null)
+    return {
+      timerButton: "none",
+      deadlines: [],
+      pauses: [],
+      pvpBanks: {},
+      anteBanks: {}
+    };
+  const { clocks } = run;
+  const threshold = run.rules.timerDisplayThresholdMilliseconds;
+  const heldBack = (countdown) => threshold !== null && countdown.kind === "ante" && countdown.by !== viewer && timeLeft(countdown, now) > threshold;
+  const seen = clocks.countdowns.filter(
+    (countdown) => (countdown.by === viewer || countdown.against.includes(viewer)) && !heldBack(countdown)
+  );
+  const deadlines = seen.map((countdown) => __spreadValues({
+    kind: countdown.kind,
+    by: countdown.by,
+    against: countdown.against,
+    endsAt: countdown.endsAt,
+    pausedAt: stoppedAt(countdown),
+    hold: countdown.hold.kind
+  }, countdown.kind === "personal" ? { rate: countdown.rate } : {}));
+  const pauses = [];
+  const heldSeen = seen.filter(
+    (countdown) => countdown.hold.kind === "held for player"
+  );
+  if (heldSeen.length > 0)
+    for (const reason of ["away", "animating"]) {
+      const active = clocks.playerPauses.filter(
+        (pause) => pause.reason === reason && pauseLeft(clocks, pause) > 0 && heldSeen.some((countdown) => pauseApplies(pause, countdown))
+      );
+      if (active.length === 0) continue;
+      pauses.push({
+        reason,
+        players: active.map((pause) => pause.player).sort(),
+        endsAt: Math.min(
+          ...active.map((pause) => clocks.settledAt + pauseLeft(clocks, pause))
+        )
+      });
+    }
+  return {
+    timerButton: timerButtonOf(state, viewer, now),
+    deadlines,
+    pauses,
+    pvpBanks: (_b = (_a = run.currentPvpBlind) == null ? void 0 : _a.banks) != null ? _b : {},
+    anteBanks: Object.fromEntries(
+      Object.keys(run.players).map((player) => [
+        player,
+        anteBankIn(state, run, player)
+      ])
+    )
+  };
+}
+
+// src/lobby/pvp/inputs/pvp_blind.ts
+var MAX_HANDS = 100;
+var BLIND_KEY_MAX = 16;
+function startPvpBlind(state, blindKey, players, now) {
+  const run = state.run;
+  if (run === null) return state;
+  const entries = {};
+  const ready2 = __spreadValues({}, run.ready);
+  for (const player of players) {
+    entries[player] = { stage: "not entered" };
+    delete ready2[player];
+  }
+  const banks = {};
+  const pvpTimer = run.rules.clocks.pvp;
+  if (pvpTimer !== null)
+    for (const player of players) banks[player] = pvpTimer.baseMilliseconds;
+  const currentPvpBlind = {
+    blindKey,
+    players: entries,
+    banks
+  };
+  const started = __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, run), { ready: ready2, currentPvpBlind }) });
+  const paused = changeClocks(
+    withBlindClocks(started, now),
+    (clocks) => pauseCountdowns(
+      refillAnimatingBudgets(clocks, run.rules.limits, now),
+      (countdown) => isPersonalOf(countdown, currentPvpBlind) && isCounting(countdown),
+      now,
+      "paused for pvp blind"
+    )
+  );
+  return setBlindClock(paused);
+}
+function withBlindClocks(state, now) {
+  var _a, _b;
+  const run = state.run;
+  const personal = (_a = run == null ? void 0 : run.rules.clocks.personal) != null ? _a : null;
+  const currentPvpBlind = (_b = run == null ? void 0 : run.currentPvpBlind) != null ? _b : null;
+  if (run === null || (personal == null ? void 0 : personal.kind) !== "speedlatro" || currentPvpBlind === null)
+    return state;
+  return Object.keys(currentPvpBlind.players).reduce(
+    (next, player) => run.clocks.countdowns.some((c) => isPersonalFor(c, player)) ? next : startPersonalClock(next, player, personal.pvpMilliseconds, now),
+    state
+  );
+}
+function setBlindClock(state) {
+  var _a, _b;
+  const run = state.run;
+  const personal = (_a = run == null ? void 0 : run.rules.clocks.personal) != null ? _a : null;
+  const currentPvpBlind = (_b = run == null ? void 0 : run.currentPvpBlind) != null ? _b : null;
+  if ((personal == null ? void 0 : personal.kind) !== "speedlatro" || currentPvpBlind === null) return state;
+  const length = personal.pvpMilliseconds;
+  return changeClocks(state, (clocks) => __spreadProps(__spreadValues({}, clocks), {
+    countdowns: clocks.countdowns.map(
+      (countdown) => isPersonalOf(countdown, currentPvpBlind) && countdown.hold.kind !== "counting" ? __spreadProps(__spreadValues({}, countdown), { endsAt: countdown.hold.sinceAt + length }) : countdown
+    )
+  }));
+}
+function runWhileBehind(state, now) {
+  var _a, _b;
+  const run = state.run;
+  const currentPvpBlind = (_a = run == null ? void 0 : run.currentPvpBlind) != null ? _a : null;
+  if (run === null || currentPvpBlind === null) return state;
+  if (((_b = run.rules.clocks.personal) == null ? void 0 : _b.kind) !== "speedlatro") return state;
+  return Object.keys(currentPvpBlind.players).reduce((next, player) => {
+    const opponent = pvpBlindOpponentOf(next, currentPvpBlind, player);
+    const own = scoreOf2(currentPvpBlind.players[player]);
+    const theirs = opponent === null || currentPvpBlind.players[opponent] === void 0 ? null : scoreOf2(currentPvpBlind.players[opponent]);
+    const behind = !isDone(currentPvpBlind.players[player]) && own !== null && theirs !== null && compare(theirs, own) > 0;
+    const mine = (countdown) => isPersonalFor(countdown, player);
+    return changeClocks(
+      next,
+      (clocks) => behind ? resumeCountdowns(clocks, mine, now) : pauseCountdowns(clocks, mine, now, "paused for pvp blind")
+    );
+  }, state);
+}
+function openPvpBlindIfReady(state, now) {
+  const run = state.run;
+  const open = run === null ? null : pvpBlindToOpen(run);
+  return open === null ? state : startPvpBlind(state, open.blindKey, open.players, now);
+}
+function changePvpBlindPlayer(state, player, change) {
+  const run = state.run;
+  const currentPvpBlind = run == null ? void 0 : run.currentPvpBlind;
+  const own = currentPvpBlind == null ? void 0 : currentPvpBlind.players[player];
+  if (!run || !currentPvpBlind || own === void 0) return state;
+  return __spreadProps(__spreadValues({}, state), {
+    run: __spreadProps(__spreadValues({}, run), {
+      currentPvpBlind: __spreadProps(__spreadValues({}, currentPvpBlind), {
+        players: __spreadProps(__spreadValues({}, currentPvpBlind.players), { [player]: change(own) })
+      })
+    })
+  });
+}
+function endPvpBlindFor(state, player, reason) {
+  var _a, _b;
+  const own = (_b = (_a = state.run) == null ? void 0 : _a.currentPvpBlind) == null ? void 0 : _b.players[player];
+  if (own === void 0 || own.stage === "done") return state;
+  return changePvpBlindPlayer(state, player, (entry) => ({
+    stage: "done",
+    endedBy: reason,
+    handsLeft: handsLeftOf(entry),
+    score: scoreOf2(entry)
+  }));
+}
+function settlePvpBlind(state, now) {
+  var _a, _b, _c;
+  const run = state.run;
+  const currentPvpBlind = (_a = run == null ? void 0 : run.currentPvpBlind) != null ? _a : null;
+  if (run === null || currentPvpBlind === null) return state;
+  const mode = modeOf(run);
+  const personal = run.rules.clocks.personal;
+  const losers = losersOf3(run, currentPvpBlind, mode);
+  if (losers === null) return state;
+  const payers = mode.lifePool ? mode.lifePool.payers(run, losers) : losers;
+  const charged = payers.reduce(
+    (game, payer) => chargeLife(game, mode, payer, {
+      kind: "pvp_blind",
+      number: run.finishedPvpBlinds.length + 1,
+      blindKey: currentPvpBlind.blindKey
+    }),
+    run
+  );
+  const lives = charged.lives;
+  const result = {
+    blindKey: currentPvpBlind.blindKey,
+    scores: {},
+    endedBy: {},
+    losers,
+    livesAfter: {},
+    teamScores: (_c = (_b = mode.teamScores) == null ? void 0 : _b.call(mode, run, currentPvpBlind)) != null ? _c : null
+  };
+  for (const player of Object.keys(currentPvpBlind.players)) {
+    const own = currentPvpBlind.players[player];
+    const seat = lives[player];
+    if (seat === void 0) throw new Error(`no lives entry for ${player}`);
+    result.scores[player] = scoreOf2(own);
+    if (own.stage === "done") result.endedBy[player] = own.endedBy;
+    result.livesAfter[player] = seat.lives;
+  }
+  const closed = __spreadProps(__spreadValues({}, charged), {
+    currentPvpBlind: null,
+    firstReady: run.firstReady.filter(
+      (player) => currentPvpBlind.players[player] === void 0
+    ),
+    finishedPvpBlinds: [...run.finishedPvpBlinds, result],
+    skips: skipsAtPvpClose(run.skips, Object.keys(currentPvpBlind.players)),
+    clocks: resumeCountdowns(
+      removeCountdowns(
+        run.clocks,
+        (countdown) => isPersonalOf(countdown, currentPvpBlind) && countdown.against.every((player) => !isStanding(lives[player])),
+        now
+      ),
+      (countdown) => isPersonalOf(countdown, currentPvpBlind),
+      now
+    )
+  });
+  const written = writeLedger(state, run, closed);
+  return (personal == null ? void 0 : personal.kind) === "speedlatro" ? Object.keys(currentPvpBlind.players).filter((player) => isStanding(lives[player])).reduce(
+    (next, player) => startPersonalClock(next, player, personal.baseMilliseconds, now),
+    written
+  ) : written;
+}
+var pvpBlindInputSpec = {
+  blindKey: { type: "text", max: BLIND_KEY_MAX },
+  handsLeft: { type: "whole", max: MAX_HANDS }
+};
+var blindStartSpec = __spreadProps(__spreadValues({}, pvpBlindInputSpec), {
+  score: { type: "score" }
+});
+var handPlayedSpec = pvpBlindInputSpec;
+var handScoredSpec = blindStartSpec;
+function playingEntry(state, player, blindKey) {
+  var _a;
+  const currentPvpBlind = (_a = state.run) == null ? void 0 : _a.currentPvpBlind;
+  if (!currentPvpBlind) return { refusal: "no_pvp_blind" };
+  if (currentPvpBlind.blindKey !== blindKey) return { refusal: "wrong_blind" };
+  const own = currentPvpBlind.players[player];
+  if (own === void 0) return { refusal: "not_in_pvp_blind" };
+  if (own.stage === "done") return { refusal: "pvp_blind_done" };
+  return { own };
+}
+function afterInput(state, player, now, lastHand = false) {
+  return settlePvpBlind(
+    runWhileBehind(
+      lastHand ? endPvpBlindFor(state, player, "hands") : state,
+      now
+    ),
+    now
+  );
+}
+var blindStartHandler = {
+  spec: blindStartSpec,
+  handle(state, player, body, now) {
+    const entry = playingEntry(state, player, body.blindKey);
+    if ("refusal" in entry) return entry;
+    if (entry.own.stage !== "not entered") return { refusal: "already_started" };
+    const changed2 = changePvpBlindPlayer(state, player, () => ({
+      stage: "entered",
+      handsLeft: body.handsLeft,
+      score: body.score
+    }));
+    return afterInput(changed2, player, now);
+  }
+};
+var handPlayedHandler = {
+  spec: handPlayedSpec,
+  handle(state, player, body, now) {
+    const entry = playingEntry(state, player, body.blindKey);
+    if ("refusal" in entry) return entry;
+    const { own } = entry;
+    if (own.stage === "not entered") return { refusal: "not_started" };
+    const changed2 = changePvpBlindPlayer(state, player, () => ({
+      stage: "scoring a hand",
+      handsLeft: body.handsLeft,
+      score: own.score
+    }));
+    return afterInput(addHandTime(changed2, player, now), player, now);
+  }
+};
+var handScoredHandler = {
+  spec: handScoredSpec,
+  handle(state, player, body, now) {
+    const entry = playingEntry(state, player, body.blindKey);
+    if ("refusal" in entry) return entry;
+    if (entry.own.stage === "not entered") return { refusal: "not_started" };
+    const changed2 = changePvpBlindPlayer(state, player, () => ({
+      stage: "played a hand",
+      handsLeft: body.handsLeft,
+      score: body.score
+    }));
+    return afterInput(
+      stopPassedTimers(changed2, now),
+      player,
+      now,
+      body.handsLeft === 0
+    );
+  }
+};
+function pvpBlindView(state, viewer) {
+  const run = state.run;
+  if (run === null) return null;
+  const currentPvpBlind = run.currentPvpBlind;
+  if (currentPvpBlind !== null) {
+    const players2 = {};
+    for (const player of Object.keys(currentPvpBlind.players)) {
+      const own = currentPvpBlind.players[player];
+      if (own.stage === "not entered")
+        players2[player] = { stage: "not entered" };
+      else if (own.stage === "done")
+        players2[player] = {
+          stage: "done",
+          endedBy: own.endedBy,
+          handsLeft: own.handsLeft,
+          score: scoreViewOf(currentPvpBlind, viewer, player)
+        };
+      else
+        players2[player] = {
+          stage: own.stage,
+          handsLeft: own.handsLeft,
+          score: scoreViewOf(currentPvpBlind, viewer, player)
+        };
+    }
+    return { stage: "playing", blindKey: currentPvpBlind.blindKey, players: players2 };
+  }
+  const waiting = waitingBossOf(run, viewer);
+  if (waiting === null) return null;
+  const players = {};
+  for (const player of waiting.players)
+    players[player] = run.ready[player] === waiting.blindKey ? "ready" : "not ready";
+  return { stage: "waiting", blindKey: waiting.blindKey, players };
+}
+
+// src/lobby/pvp/inputs/entry.ts
+var readySpec = {
+  ready: { type: "flag" },
+  blindKey: { type: "text", max: BLIND_KEY_MAX }
+};
+var teamSpec = {
+  team: { type: "oneOf", values: ["A", "B", "RUNNER", "HUNTER"] }
+};
+var readyHandler = {
+  spec: readySpec,
+  handle(state, player, body, now) {
+    var _a;
+    const run = state.run;
+    if (run === null) return { refusal: "no_pvp_blind" };
+    const { blindKey } = body;
+    if (!isPvpBlind(run, blindKey)) return { refusal: "not_pvp_blind" };
+    if (!isInRun(run, player)) return { refusal: "eliminated" };
+    if (run.finishedPvpBlinds.some((done) => done.blindKey === blindKey))
+      return { refusal: "pvp_blind_over" };
+    if (run.currentPvpBlind !== null)
+      return {
+        refusal: run.currentPvpBlind.blindKey === blindKey ? "pvp_blind_playing" : "wrong_blind"
+      };
+    const mark = body.ready ? "ready" : "not ready";
+    if (mark === "ready") {
+      if (blindKey !== `${(_a = run.players[player]) == null ? void 0 : _a.ante}:Boss`)
+        return { refusal: "wrong_blind" };
+      if (!playersOfBoss(run, blindKey).includes(player))
+        return { refusal: "not_in_pvp_blind" };
+    }
+    if (mark === "ready" === (run.ready[player] === blindKey)) return state;
+    const ready2 = __spreadValues({}, run.ready);
+    if (mark === "ready") ready2[player] = blindKey;
+    else delete ready2[player];
+    const others = playersOfBoss(run, blindKey).filter((id) => id !== player);
+    const first = mark === "ready" && run.rules.startedCount === 2 && !others.some(
+      (id) => run.ready[id] === blindKey || run.firstReady.includes(id)
+    ) && !run.firstReady.includes(player);
+    const marked = __spreadProps(__spreadValues({}, state), {
+      run: __spreadProps(__spreadValues({}, run), {
+        ready: ready2,
+        firstReady: first ? [...run.firstReady, player] : run.firstReady
+      })
+    });
+    const own = (countdown) => isPersonalFor(countdown, player);
+    const pauseAnteTime = (clocks) => run.rules.clocks.ante === "personal" ? clocks : pauseForReady(clocks, player, blindKey, now);
+    const unready = (frozenClocks) => {
+      var _a2;
+      const clocks = resumeAfterReady(frozenClocks, player, now);
+      const stopped = pauseCountdowns(
+        setPausedAfter(
+          pauseCountdowns(
+            clocks,
+            (c) => c.kind === "ante" && c.by === player && isCounting(c),
+            now
+          ),
+          player,
+          "paused by starter"
+        ),
+        (c) => own(c) && isCounting(c),
+        now,
+        "paused until timed"
+      );
+      const timed = stopped.countdowns.some(
+        (c) => c.kind === "ante" && isCounting(c) && c.against.includes(player)
+      );
+      return timed || ((_a2 = run.rules.clocks.personal) == null ? void 0 : _a2.kind) === "speedlatro" ? resumeCountdowns(stopped, own, now) : stopped;
+    };
+    return changeClocks(
+      marked,
+      (clocks) => mark === "ready" ? pauseAnteTime(
+        pauseCountdowns(
+          clocks,
+          (c) => own(c) && isCounting(c),
+          now,
+          "paused until timed"
+        )
+      ) : unready(clocks)
+    );
+  }
+};
+var teamHandler = {
+  spec: teamSpec,
+  beforeRun: true,
+  handle(state, player, body) {
+    var _a;
+    if (state.run !== null) return { refusal: "run_started" };
+    const offered = pickMode(state.lobbyMode, Object.keys(state.players).length);
+    if (((_a = offered.pickableTeams) == null ? void 0 : _a.includes(body.team)) !== true)
+      return { refusal: "team_not_offered" };
+    return __spreadProps(__spreadValues({}, state), {
+      players: __spreadProps(__spreadValues({}, state.players), {
+        [player]: __spreadProps(__spreadValues({}, state.players[player]), { team: body.team })
+      })
+    });
+  }
+};
+
+// src/lobby/pvp/inputs/finish.ts
+var END_GAME_TEXT_MAX = 6e3;
+var JOKERS_TEXT_MAX = 1500;
+var COUNT_MAX = 1e6;
+var voteSpec = {
+  topic: { type: "oneOf", values: ["draw", "seed"] },
+  yes: { type: "flag" }
+};
+var forfeitSpec = {};
+var jokersSpec = {
+  jokers: { type: "text", max: JOKERS_TEXT_MAX, mayBeEmpty: true }
+};
+var endGameSpec = {
+  jokers: { type: "text", max: END_GAME_TEXT_MAX, mayBeEmpty: true },
+  deck: { type: "text", max: END_GAME_TEXT_MAX, mayBeEmpty: true },
+  stats: {
+    type: "object",
+    fields: {
+      rerollCount: { type: "whole", max: COUNT_MAX },
+      rerollCostTotal: { type: "whole", max: COUNT_MAX }
+    }
+  }
+};
+var ratingOf = (ranked) => ranked ? "rated" : "unrated";
+var winResult = (winners2, ranked) => ({
+  kind: "win",
+  winners: [...winners2].sort(),
+  rating: ratingOf(ranked)
+});
+var drawResult = (ranked) => ({
+  kind: "draw",
+  rating: ratingOf(ranked)
+});
+var agreedResult = () => ({ kind: "agreed" });
+var abandonedResult = () => ({ kind: "abandoned" });
+var restartedResult = () => ({ kind: "restarted" });
+function setResult(state, result) {
+  return state.result === null ? __spreadProps(__spreadValues({}, state), { result }) : state;
+}
+var goneFromRun = (state, player) => {
+  var _a;
+  const seat = (_a = state.run) == null ? void 0 : _a.lives[player];
+  return seat === void 0 || seat.status === "forfeited" || seat.status === "left";
+};
+var everyoneGone = (state) => state.run !== null && Object.keys(state.run.lives).every((player) => goneFromRun(state, player));
+function decideMatch(state, ranked) {
+  const run = state.run;
+  if (run === null || state.result !== null) return state;
+  if (run.waitingDeaths.length > 0) return state;
+  const ending2 = modeOf(run).checkWinner(run);
+  const withPlaces = ending2 === null ? state : __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, run), { places: ending2.places }) });
+  if (ending2 !== null && ending2.winners !== null)
+    return setResult(withPlaces, winResult(ending2.winners, ranked));
+  if (everyoneGone(state)) return setResult(state, abandonedResult());
+  if (ending2 !== null) return setResult(withPlaces, drawResult(ranked));
+  const players = Object.keys(run.lives).filter(
+    (player) => isInRun(run, player)
+  );
+  if (players.length < 2) return state;
+  if (players.every((player) => run.votes.draw.includes(player)))
+    return setResult(state, drawResult(ranked));
+  if (players.every((player) => run.votes.seed.includes(player)))
+    return setResult(state, restartedResult());
+  return state;
+}
+function settleWaitingDeaths(state, ranked) {
+  const run = state.run;
+  if (run === null || state.result !== null) return state;
+  const settled = settleDeaths(run, modeOf(run));
+  if (settled.ending === null)
+    return settled.run === run ? state : __spreadProps(__spreadValues({}, state), { run: settled.run });
+  const { winners: winners2, places } = settled.ending;
+  return setResult(
+    __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, settled.run), { places }) }),
+    winners2 === null ? drawResult(ranked) : winResult(winners2, ranked)
+  );
+}
+function leaveBeforeRun(state, leavers, ranked) {
+  if (state.run !== null || leavers.length === 0) return state;
+  return setResult(state, ranked ? abandonedResult() : agreedResult());
+}
+function dropPlayer(state, player, how, now) {
+  const run = state.run;
+  if (run === null || state.result !== null || goneFromRun(state, player))
+    return state;
+  const changed2 = changeLedger(
+    state,
+    (before) => how === "forfeit" ? applyAction(
+      before,
+      { type: "forfeit", playerId: player },
+      modeOf(before)
+    ) : markLeft(before, player)
+  );
+  return settlePvpBlind(changed2, now);
+}
+var voteHandler = {
+  spec: voteSpec,
+  handle(state, player, body) {
+    const run = state.run;
+    if (run === null) return { refusal: "no_run" };
+    if (!isInRun(run, player)) return { refusal: "eliminated" };
+    const others = run.votes[body.topic].filter((id) => id !== player);
+    const voted = body.yes ? [...others, player].sort() : others;
+    return __spreadProps(__spreadValues({}, state), {
+      run: __spreadProps(__spreadValues({}, run), { votes: __spreadProps(__spreadValues({}, run.votes), { [body.topic]: voted }) })
+    });
+  }
+};
+var forfeitHandler = {
+  spec: forfeitSpec,
+  handle(state, player, _body, now) {
+    if (state.run === null) return { refusal: "no_run" };
+    if (!isInRun(state.run, player)) return { refusal: "already_out" };
+    return dropPlayer(state, player, "forfeit", now);
+  }
+};
+var jokersHandler = {
+  spec: jokersSpec,
+  handle(state, player, body) {
+    const run = state.run;
+    if (run === null) return { refusal: "no_run" };
+    return __spreadProps(__spreadValues({}, state), {
+      run: __spreadProps(__spreadValues({}, run), { lastJokers: __spreadProps(__spreadValues({}, run.lastJokers), { [player]: body.jokers }) })
+    });
+  }
+};
+var endGameHandler = {
+  spec: endGameSpec,
+  handle(state, player, body) {
+    const run = state.run;
+    if (run === null) return { refusal: "no_run" };
+    if (state.result === null && isInRun(run, player))
+      return { refusal: "still_playing" };
+    return __spreadProps(__spreadValues({}, state), {
+      run: __spreadProps(__spreadValues({}, run), { endGames: __spreadProps(__spreadValues({}, run.endGames), { [player]: body }) })
+    });
+  }
+};
+
+// src/lobby/pvp/inputs/run.ts
+var MAX_ANTE = 100;
+var LOCATION_MAX = 32;
+var VOUCHER_KEY_MAX = 64;
+var MAX_SELLS_PER_ANTE = 1e3;
+var MAX_SHOPS_PER_RUN = 160;
+var MAX_SPENT = 1e6;
+var progressSpec = {
+  ante: { type: "whole", max: MAX_ANTE },
+  location: { type: "text", max: LOCATION_MAX }
+};
+var CLIENT_BLIND_RESULTS = ["beaten", "failed on the clock", "lost"];
+var blindResultSpec = {
+  blindKey: { type: "text", max: BLIND_KEY_MAX },
+  result: { type: "oneOf", values: CLIENT_BLIND_RESULTS }
+};
+var skipSpec = {
+  blindKey: { type: "text", max: BLIND_KEY_MAX },
+  total: { type: "whole", max: 2 * (MAX_ANTE + 2) }
+};
+var sellSpec = {
+  ante: { type: "whole", max: MAX_ANTE },
+  total: { type: "whole", max: MAX_SELLS_PER_ANTE }
+};
+var shopSpec = {
+  ante: { type: "whole", max: MAX_ANTE },
+  total: { type: "whole", max: MAX_SHOPS_PER_RUN },
+  spent: { type: "whole", max: MAX_SPENT, nullable: true }
+};
+var voucherSpec = {
+  voucherKey: { type: "text", max: VOUCHER_KEY_MAX }
+};
+function entryOf2(state, player) {
+  const run = state.run;
+  const entry = run == null ? void 0 : run.players[player];
+  return run === null || entry === void 0 ? null : { run, entry };
+}
+function aheadOfProgress(entry, ante) {
+  if (entry.ante === null) return ante > 1 ? "no_progress" : null;
+  return ante > entry.ante ? "ahead_of_progress" : null;
+}
+var progressHandler = {
+  spec: progressSpec,
+  handle(state, player, body, now) {
+    const found = entryOf2(state, player);
+    if (found === null) return { refusal: "no_run" };
+    const { entry } = found;
+    const rose = entry.ante === null || body.ante > entry.ante;
+    const written = changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), {
+      ante: rose ? body.ante : own.ante,
+      location: body.location
+    }));
+    if (!rose) return written;
+    return startAtAnte(
+      settlePvpBlind(
+        pairForNewAnte(
+          takeAction(written, { type: "progress", playerId: player })
+        ),
+        now
+      ),
+      player,
+      entry.ante === null,
+      now
+    );
+  }
+};
+function recordBlindResult(state, player, blindKey, result) {
+  return changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), {
+    results: __spreadProps(__spreadValues({}, own.results), { [blindKey]: result })
+  }));
+}
+var blindResultHandler = {
+  spec: blindResultSpec,
+  handle(state, player, body) {
+    const found = entryOf2(state, player);
+    if (found === null) return { refusal: "no_run" };
+    if (playedPvpBlind(found.run, player, body.blindKey))
+      return { refusal: "pvp_blind" };
+    const ahead = aheadOfProgress(found.entry, anteOfBlind(body.blindKey));
+    if (ahead !== null) return { refusal: ahead };
+    if (found.entry.results[body.blindKey] !== void 0) return state;
+    const { result } = body;
+    const recorded = recordBlindResult(state, player, body.blindKey, {
+      result
+    });
+    return takeAction(recorded, {
+      type: "blind",
+      playerId: player,
+      blindKey: body.blindKey,
+      result
+    });
+  }
+};
+var skipHandler = {
+  spec: skipSpec,
+  handle(state, player, body) {
+    const found = entryOf2(state, player);
+    if (found === null) return { refusal: "no_run" };
+    if (!isInRun(found.run, player)) return { refusal: "eliminated" };
+    const ante = anteOfBlind(body.blindKey);
+    const ahead = aheadOfProgress(found.entry, ante);
+    if (ahead !== null) return { refusal: ahead };
+    const counted = __spreadProps(__spreadValues({}, state), {
+      run: __spreadProps(__spreadValues({}, found.run), {
+        skips: skipsReported(found.run.skips, player, body.total)
+      })
+    });
+    const increment = found.run.rules.timerIncrementMilliseconds;
+    const gained = body.total - skipEntryOf(found.run.skips, player).skips;
+    const timed = increment === null || gained <= 0 ? counted : opponentsOf(counted, player).each.reduce(
+      (next, opponent) => addSkipTime(next, opponent, gained * increment),
+      counted
+    );
+    return found.entry.results[body.blindKey] === void 0 ? recordBlindResult(timed, player, body.blindKey, { result: "skipped" }) : timed;
+  }
+};
+var sellHandler = {
+  spec: sellSpec,
+  handle(state, player, body) {
+    const found = entryOf2(state, player);
+    if (found === null) return { refusal: "no_run" };
+    const ahead = aheadOfProgress(found.entry, body.ante);
+    if (ahead !== null) return { refusal: ahead };
+    return changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), {
+      sells: __spreadProps(__spreadValues({}, own.sells), { [String(body.ante)]: body.total })
+    }));
+  }
+};
+var shopHandler = {
+  spec: shopSpec,
+  handle(state, player, body) {
+    const found = entryOf2(state, player);
+    if (found === null) return { refusal: "no_run" };
+    if (!isInRun(found.run, player)) return { refusal: "eliminated" };
+    const ahead = aheadOfProgress(found.entry, body.ante);
+    if (ahead !== null) return { refusal: ahead };
+    const shop = String(body.total);
+    if (found.entry.shopSpends[shop] !== void 0) return state;
+    return changeRunPlayer(state, player, (own) => {
+      var _a;
+      return __spreadProps(__spreadValues({}, own), {
+        shopSpends: __spreadProps(__spreadValues({}, own.shopSpends), { [shop]: (_a = body.spent) != null ? _a : 0 })
+      });
+    });
+  }
+};
+var voucherHandler = {
+  spec: voucherSpec,
+  handle(state, player, body) {
+    var _a, _b, _c;
+    const found = entryOf2(state, player);
+    if (found === null) return { refusal: "no_run" };
+    const mode = modeOf(found.run);
+    if (!((_a = mode.mayRedeemVoucher) == null ? void 0 : _a.call(mode, found.run, player)))
+      return { refusal: "not_in_run" };
+    if (found.entry.vouchers.includes(body.voucherKey))
+      return { refusal: "already_redeemed" };
+    const recorded = changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), {
+      vouchers: [...own.vouchers, body.voucherKey]
+    }));
+    const gained = takeAction(recorded, {
+      type: "voucher",
+      playerId: player,
+      voucherKey: body.voucherKey
+    });
+    const before = found.run.lives;
+    return Object.keys((_c = (_b = gained.run) == null ? void 0 : _b.lives) != null ? _c : {}).sort().filter((id) => {
+      var _a2, _b2;
+      return ((_b2 = (_a2 = gained.run) == null ? void 0 : _a2.lives[id].lives) != null ? _b2 : 0) > before[id].lives;
+    }).reduce(
+      (next, hunter) => addInboxItem(next, hunter, {
+        from: player,
+        effect: "voucherLife",
+        amount: 1
+      }),
+      gained
+    );
+  }
+};
+function runPlayerView(run, player) {
+  const entry = run.players[player];
+  return {
+    lives: run.lives[player].lives,
+    ante: entry.ante,
+    location: entry.location,
+    skips: skipEntryOf(run.skips, player).skips,
+    sells: __spreadValues({}, entry.sells),
+    shopSpends: Array.from(
+      { length: Math.max(0, ...Object.keys(entry.shopSpends).map(Number)) },
+      (_, place) => {
+        var _a;
+        return (_a = entry.shopSpends[String(place + 1)]) != null ? _a : null;
+      }
+    )
+  };
+}
+
+// src/lobby/pvp/inputs/traps.ts
+var ARCANE_LOCK_KEY = "c_mp_trap_arcane_lock";
+var TRAP_KEY_MAX = 64;
+var MAX_PLANTS_PER_KEY = 32;
+var MAX_TRAP_ID = 1e6;
+var MAX_FIRE_DATA_KEYS = 16;
+var MAX_FIRE_DATA_KEY_LENGTH = 32;
+var MAX_FIRE_DATA_SIZE = 1024;
+var plantSpec = {
+  key: { type: "text", max: TRAP_KEY_MAX },
+  total: { type: "whole", max: MAX_PLANTS_PER_KEY }
+};
+var fireSpec = {
+  trapId: { type: "whole", max: MAX_TRAP_ID },
+  data: {
+    type: "record",
+    maxKeys: MAX_FIRE_DATA_KEYS,
+    maxKeyLength: MAX_FIRE_DATA_KEY_LENGTH,
+    maxSize: MAX_FIRE_DATA_SIZE
+  }
+};
+var lostSpec = {
+  trapId: { type: "whole", max: MAX_TRAP_ID }
+};
+function withTraps(state, traps) {
+  if (state.run === null) return state;
+  return __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, state.run), { traps }) });
+}
+function withTrapState(traps, id, newState) {
+  return traps.map(
+    (trap) => trap.id === id ? __spreadProps(__spreadValues({}, trap), { state: newState }) : trap
+  );
+}
+function liveLockHeldBy(traps, player) {
+  return traps.find(
+    (trap) => trap.key === ARCANE_LOCK_KEY && trap.holder === player && trap.state === "live"
+  );
+}
+function bounced(state, lock, key, planter) {
+  var _a, _b;
+  const traps = (_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [];
+  const sent = withTraps(state, [
+    ...withTrapState(traps, lock.id, "fired"),
+    {
+      id: traps.length + 1,
+      key,
+      owner: lock.owner,
+      holder: planter,
+      state: "live"
+    }
+  ]);
+  return addInboxItem(sent, lock.owner, {
+    from: planter,
+    effect: "trapReward",
+    amount: 1,
+    trap: { id: lock.id, key: lock.key, data: {} }
+  });
+}
+function plantedAt(state, key, planter, target) {
+  var _a, _b;
+  const traps = (_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [];
+  return withTraps(state, [
+    ...traps,
+    {
+      id: traps.length + 1,
+      key,
+      owner: planter,
+      holder: target,
+      state: "live"
+    }
+  ]);
+}
+var trapPlantHandler = {
+  spec: plantSpec,
+  handle(state, player, body, _now, previousTotal) {
+    var _a, _b, _c;
+    const run = state.run;
+    const ante = (_a = run == null ? void 0 : run.players[player]) == null ? void 0 : _a.ante;
+    if (run === null || ante === null || ante === void 0)
+      return { refusal: "no_progress" };
+    if (!isInRun(run, player)) return { refusal: "eliminated" };
+    const targets = reachedBy(state, player, "every opponent");
+    const planted = body.total - (previousTotal != null ? previousTotal : 0);
+    let next = state;
+    for (let count2 = 0; count2 < planted; count2++) {
+      const lock = liveLockHeldBy((_c = (_b = next.run) == null ? void 0 : _b.traps) != null ? _c : [], player);
+      if (lock !== void 0) next = bounced(next, lock, body.key, player);
+      else
+        for (const target of targets)
+          next = plantedAt(next, body.key, player, target);
+    }
+    return next;
+  }
+};
+function liveTrapHeldBy(state, player, id) {
+  var _a;
+  const trap = (_a = state.run) == null ? void 0 : _a.traps.find((each) => each.id === id);
+  if (trap === void 0 || trap.holder !== player)
+    return { ok: false, refusal: "not_holder" };
+  return trap.state === "live" ? { ok: true, trap } : { ok: false, refusal: "already_fired" };
+}
+var trapFireHandler = {
+  spec: fireSpec,
+  handle(state, player, body) {
+    var _a, _b;
+    const held = liveTrapHeldBy(state, player, body.trapId);
+    if (!held.ok) return { refusal: held.refusal };
+    const trap = held.trap;
+    if (trap.key === ARCANE_LOCK_KEY) return { refusal: "arcane_lock" };
+    const fired = withTraps(
+      state,
+      withTrapState((_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [], trap.id, "fired")
+    );
+    return addInboxItem(fired, trap.owner, {
+      from: player,
+      effect: "trapReward",
+      amount: 1,
+      trap: { id: trap.id, key: trap.key, data: body.data }
+    });
+  }
+};
+var trapLostHandler = {
+  spec: lostSpec,
+  handle(state, player, body) {
+    var _a, _b;
+    const held = liveTrapHeldBy(state, player, body.trapId);
+    if (!held.ok) return { refusal: held.refusal };
+    const trap = held.trap;
+    return withTraps(
+      state,
+      withTrapState((_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [], trap.id, "lost")
+    );
+  }
+};
+function trapsView(state, viewer) {
+  var _a, _b;
+  return ((_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : []).filter((trap) => trap.owner === viewer || trap.holder === viewer).map((trap) => __spreadValues({}, trap));
+}
+
+// src/lobby/pvp/core/request_checks.ts
+function isObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isWholeNumber(value, max = Number.MAX_SAFE_INTEGER) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max;
+}
+function isMessageNumber(value) {
+  return isWholeNumber(value) && value > 0;
+}
+function judgeMessageNumber(last, value) {
+  if (!isMessageNumber(value)) return "unreadable";
+  return value === last + 1 ? "next" : "ignored";
+}
+function isTextUpTo(value, max) {
+  return typeof value === "string" && value.length > 0 && value.length <= max;
+}
+
+// src/lobby/pvp/core/utf8.ts
+function utf8Bytes(text) {
+  var _a;
+  let bytes = 0;
+  for (const letter of text) {
+    const code = (_a = letter.codePointAt(0)) != null ? _a : 0;
+    bytes += code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4;
+  }
+  return bytes;
+}
+
+// src/lobby/pvp/core/read_input.ts
+function readRecord(field3, value) {
+  if (Array.isArray(value) && value.length === 0) return {};
+  if (!isObject(value)) return void 0;
+  const names = Object.keys(value);
+  if (names.length > field3.maxKeys) return void 0;
+  const result = {};
+  for (const name of names) {
+    const each = value[name];
+    if (name === "__proto__" || utf8Bytes(name) > field3.maxKeyLength)
+      return void 0;
+    if (typeof each !== "string" && typeof each !== "boolean" && !(typeof each === "number" && Number.isFinite(each)))
+      return void 0;
+    result[name] = each;
+  }
+  return utf8Bytes(JSON.stringify(result)) > field3.maxSize ? void 0 : result;
+}
+function readField(field3, value) {
+  var _a;
+  if (value === null) return field3.nullable === true ? null : void 0;
+  switch (field3.type) {
+    case "whole":
+      return isWholeNumber(value, field3.max) ? value : void 0;
+    case "text":
+      if (field3.mayBeEmpty === true && value === "") return value;
+      return isTextUpTo(value, field3.max) ? value : void 0;
+    case "flag":
+      return typeof value === "boolean" ? value : void 0;
+    case "oneOf":
+      return typeof value === "string" && field3.values.includes(value) ? value : void 0;
+    case "score":
+      return (_a = parse(value)) != null ? _a : void 0;
+    case "object": {
+      const inner = readFields(field3.fields, value);
+      return inner === null ? void 0 : inner;
+    }
+    case "record":
+      return readRecord(field3, value);
+  }
+}
+function readFields(spec, body) {
+  if (!isObject(body)) return null;
+  const names = Object.keys(spec);
+  if (Object.keys(body).some((name) => !names.includes(name))) return null;
+  const result = {};
+  for (const name of names) {
+    const value = readField(spec[name], body[name]);
+    if (value === void 0) return null;
+    result[name] = value;
+  }
+  return result;
+}
+function readInput(spec, body) {
+  return readFields(spec, body);
+}
+
+// src/lobby/pvp/inputs/timer_run_out.ts
+var isReadyFor = (run, player, blindKey) => run.ready[player] === blindKey;
+var isAnte = (countdown) => countdown.kind === "ante";
+var pressedBy = (run, countdown) => {
+  const { blindKey } = countdown;
+  const needed = playersOfBoss(run, blindKey);
+  return countdown.against.filter(
+    (player) => needed.includes(player) && isInRun(run, player) && !isReadyFor(run, player, blindKey)
+  );
+};
+function loseToTimer(state, players, forgiveness) {
+  const run = state.run;
+  if (run === null) return state;
+  const mode = modeOf(run);
+  const charged = players.filter((player) => isInRun(run, player));
+  return changeLedger(
+    state,
+    (before) => charged.reduce(
+      (next, player) => handleTimerRunOut(next, mode, player, forgiveness),
+      before
+    )
+  );
+}
+function playersWhoLostALife(before, after) {
+  var _a, _b;
+  const lives = (_b = (_a = before.run) == null ? void 0 : _a.lives) != null ? _b : {};
+  return Object.keys(lives).filter((player) => {
+    var _a2;
+    const now = (_a2 = after.run) == null ? void 0 : _a2.lives[player];
+    return now !== void 0 && now.lives < lives[player].lives;
+  });
+}
+var costsALife = (countdown) => countdown.kind === "ante" || countdown.kind === "personal";
+function clearAfterLoss(state, lost, at) {
+  var _a, _b, _c, _d;
+  const markers = ((_a = state.run) == null ? void 0 : _a.rules.clocks.ante) === "personal";
+  const hits = (countdown) => costsALife(countdown) && !(markers && countdown.kind === "ante") ? countdown.against.filter((player) => lost.includes(player)) : [];
+  const cleared = ((_c = (_b = state.run) == null ? void 0 : _b.clocks.countdowns) != null ? _c : []).filter(
+    (countdown) => hits(countdown).length > 0
+  );
+  const kept = changeClocks(state, (clocks) => __spreadProps(__spreadValues({}, clocks), {
+    countdowns: clocks.countdowns.flatMap((countdown) => {
+      if (hits(countdown).length === 0) return [countdown];
+      const against = countdown.against.filter(
+        (player) => !lost.includes(player)
+      );
+      return against.length === 0 ? [] : [__spreadProps(__spreadValues({}, countdown), { against })];
+    })
+  }));
+  if (((_d = state.run) == null ? void 0 : _d.rules.clocks.ante) === "personal") return kept;
+  return cleared.filter(isAnte).reduce(
+    (next, countdown) => restartAnte(next, __spreadProps(__spreadValues({}, countdown), { against: hits(countdown) }), at),
+    kept
+  );
+}
+function restartAnte(state, ran, now) {
+  const run = state.run;
+  if (run === null || run.currentPvpBlind !== null || ran.by === null || !playersOfBoss(run, ran.blindKey).includes(ran.by) || !isReadyFor(run, ran.by, ran.blindKey))
+    return state;
+  const against = pressedBy(run, ran);
+  if (against.length === 0) return state;
+  return changeClocks(
+    state,
+    (clocks) => startCountdown(
+      clocks,
+      {
+        kind: "ante",
+        by: ran.by,
+        against,
+        lengthMilliseconds: run.rules.timerBaseMilliseconds,
+        blindKey: ran.blindKey
+      },
+      now
+    )
+  );
+}
+function runOutTimers(state, now) {
+  const run = state.run;
+  if (run === null) return state;
+  const clocks = catchUpClocks(run.clocks, now);
+  const settled = __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, run), { clocks }) });
+  const lost = /* @__PURE__ */ new Set();
+  const charge2 = (next, players, countdown, forgiveness = "applies") => {
+    const charged = loseToTimer(next, players, forgiveness);
+    const dropped = playersWhoLostALife(next, charged);
+    for (const player of dropped) lost.add(player);
+    return dropped.length === 0 ? charged : clearAfterLoss(charged, dropped, countdown.endsAt);
+  };
+  const due = countdownsAtZero(clocks, now).filter(
+    (ran) => !(ran.kind === "ante" && run.rules.clocks.ante === "personal")
+  );
+  const ended = due.reduce((next, ran) => {
+    const countdown = costsALife(ran) ? __spreadProps(__spreadValues({}, ran), { against: ran.against.filter((player) => !lost.has(player)) }) : ran;
+    const removed = changeClocks(
+      next,
+      (current) => removeCountdowns(
+        current,
+        (other) => sameCountdown(other, countdown),
+        now
+      )
+    );
+    if (countdown.kind === "pvp")
+      return run.rules.clocks.pvp !== null ? countdown.against.reduce(
+        (inner, player) => endPvpBlindFor(inner, player, "timer"),
+        removed
+      ) : removed;
+    if (countdown.kind === "ante") {
+      const charged2 = charge2(
+        removed,
+        removed.run === null ? [] : pressedBy(removed.run, countdown),
+        countdown
+      );
+      return restartAnte(charged2, countdown, countdown.endsAt);
+    }
+    const rules = run.rules.clocks.personal;
+    const timedBefore = removed.run === null ? [] : countdown.against.filter(
+      (player) => isTimed(removed.run.clocks, player)
+    );
+    const charged = charge2(
+      removed,
+      countdown.against,
+      countdown,
+      (rules == null ? void 0 : rules.kind) === "speedlatro" ? "none" : "applies"
+    );
+    if ((rules == null ? void 0 : rules.kind) !== "pressure") return charged;
+    return timedBefore.reduce(
+      (next2, player) => next2.run !== null && isInRun(next2.run, player) ? startPersonalClock(
+        next2,
+        player,
+        rules.baseMilliseconds,
+        countdown.endsAt
+      ) : next2,
+      charged
+    );
+  }, settled);
+  return settlePvpBlind(syncRates(ended, now), now);
+}
+function isUnneededTimer(run, countdown) {
+  const currentPvpBlind = run.currentPvpBlind;
+  if (isStarted(countdown) && countdown.by !== null && !isInRun(run, countdown.by))
+    return true;
+  if (countdown.kind === "ante") {
+    const { blindKey, by } = countdown;
+    if (currentPvpBlind !== null) return true;
+    const needed = playersOfBoss(run, blindKey);
+    return by !== null && !needed.includes(by) || !countdown.against.some(
+      (player) => needed.includes(player) && isInRun(run, player)
+    );
+  }
+  if (countdown.kind !== "pvp") return false;
+  return run.rules.clocks.pvp === null || currentPvpBlind === null || countdown.against.every((player) => {
+    const own = currentPvpBlind.players[player];
+    return own === void 0 || isDone(own);
+  });
+}
+function dropUnneededTimers(state, now) {
+  const run = state.run;
+  if (run === null) return state;
+  if (!run.clocks.countdowns.some((countdown) => isUnneededTimer(run, countdown)))
+    return syncRates(state, now);
+  return syncRates(
+    stopAndBank(state, (countdown) => isUnneededTimer(run, countdown), now),
+    now
+  );
+}
+
+// src/lobby/pvp/core/apply.ts
+var inputHandlers = {
+  ready: readyHandler,
+  team: teamHandler,
+  blindStart: blindStartHandler,
+  handPlayed: handPlayedHandler,
+  handScored: handScoredHandler,
+  progress: progressHandler,
+  blindResult: blindResultHandler,
+  skip: skipHandler,
+  sell: sellHandler,
+  shop: shopHandler,
+  voucher: voucherHandler,
+  effect: effectHandler,
+  trapPlant: trapPlantHandler,
+  trapFire: trapFireHandler,
+  trapLost: trapLostHandler,
+  timerStart: timerStartHandler,
+  timerPause: timerPauseHandler,
+  paidPreviews: paidPreviewsHandler,
+  animating: animatingHandler,
+  vote: voteHandler,
+  forfeit: forfeitHandler,
+  jokers: jokersHandler,
+  endGame: endGameHandler
+};
+var applied = { spec: {}, handle: (state) => state };
+function totalKey(input) {
+  switch (input.kind) {
+    case "skip":
+      return "skip";
+    case "sell":
+      return `sell:${String(input.ante)}`;
+    case "shop":
+      return "shop";
+    case "effect":
+      return `effect:${String(input.effect)}`;
+    case "trapPlant":
+      return `trap:${String(input.key)}`;
+    case "paidPreviews":
+      return "paidPreviews";
+    default:
+      return null;
+  }
+}
+function refuse(state, code) {
+  return { state, refusals: [code] };
+}
+function handlerOf(kind, table) {
+  if (typeof kind !== "string") return void 0;
+  if (kind === "applied") return applied;
+  return Object.prototype.hasOwnProperty.call(table, kind) ? table[kind] : void 0;
+}
+function take(state, player, fields, now, table) {
+  var _b, _c, _d, _e;
+  const _a = fields, { kind, runId } = _a, rest = __objRest(_a, ["kind", "runId"]);
+  const handler = handlerOf(kind, table);
+  if (handler !== void 0 && state.result !== null && kind !== "endGame" && kind !== "applied")
+    return refuse(state, "already_decided");
+  const body = handler === void 0 ? null : readInput(handler.spec, rest);
+  if (handler === void 0 || body === null || typeof kind !== "string")
+    return refuse(state, "bad_request_body");
+  if (handler.beforeRun === true) {
+    if (runId !== null && runId !== void 0)
+      return refuse(state, "bad_request_body");
+  } else {
+    if (typeof runId !== "string") return refuse(state, "bad_request_body");
+    if (((_b = state.run) == null ? void 0 : _b.id) !== runId) return refuse(state, "wrong_run");
+    if (state.run.players[player] === void 0)
+      return refuse(state, "unknown_player");
+  }
+  const key = totalKey(__spreadValues({ kind }, body));
+  const total = body.total;
+  const counted = key !== null && typeof total === "number" ? { key, total } : null;
+  const seen = counted === null ? 0 : (_e = (_d = (_c = state.run) == null ? void 0 : _c.players[player]) == null ? void 0 : _d.totals[counted.key]) != null ? _e : 0;
+  if (counted !== null && counted.total <= seen) return { state, refusals: [] };
+  const handled = handler.handle(
+    state,
+    player,
+    body,
+    now,
+    counted === null ? null : seen
+  );
+  if ("refusal" in handled) return refuse(state, handled.refusal);
+  return {
+    state: counted === null ? handled : changeRunPlayer(handled, player, (entry) => __spreadProps(__spreadValues({}, entry), {
+      totals: __spreadProps(__spreadValues({}, entry.totals), { [counted.key]: counted.total })
+    })),
+    refusals: []
+  };
+}
+function apply(state, player, input, last, now, table = inputHandlers) {
+  const unchanged2 = (result) => __spreadProps(__spreadValues({}, result), {
+    lastNumber: last
+  });
+  if (state.players[player] === void 0)
+    return unchanged2(refuse(state, "unknown_player"));
+  if (!isObject(input)) return unchanged2(refuse(state, "unreadable_header"));
+  const _a = input, { messageNumber, inboxDone } = _a, fields = __objRest(_a, ["messageNumber", "inboxDone"]);
+  if (!isMessageNumber(messageNumber) || !isWholeNumber(inboxDone))
+    return unchanged2(refuse(state, "unreadable_header"));
+  if (judgeMessageNumber(last, messageNumber) === "ignored")
+    return unchanged2({ state, refusals: [] });
+  const noted = state.run !== null && fields.runId === state.run.id ? recordLastItemDone(state, player, inboxDone) : { state, refusals: [] };
+  const taken = take(noted.state, player, fields, now, table);
+  const settled = dropUnneededTimers(openPvpBlindIfReady(taken.state, now), now);
+  return {
+    state: settled,
+    refusals: [...noted.refusals, ...taken.refusals],
+    lastNumber: messageNumber
+  };
+}
+
+// src/lobby/pvp/core/tick.ts
+function settleMatch(state, facts) {
+  return decideMatch(settleWaitingDeaths(state, facts.ranked), facts.ranked);
+}
+function timersDue(state, now) {
+  const run = state.run;
+  if (run === null) return false;
+  const clocks = catchUpClocks(run.clocks, now);
+  return countdownsAtZero(clocks, now).length > 0 || clocks.countdowns.some((countdown) => isUnneededTimer(run, countdown));
+}
+function tick2(state, now, facts) {
+  if (state.run === null || state.result !== null) return state;
+  const timed = timersDue(state, now) ? runOutTimers(dropUnneededTimers(state, now), now) : state;
+  return settleMatch(openPvpBlindIfReady(timed, now), facts);
+}
+
+// src/lobby/pvp/core/view.ts
+function stageOf(state, facts) {
+  if (state.result !== null) return "ended";
+  if (state.run !== null) return "run";
+  return facts.gameStarted ? "setup" : "lobby";
+}
+function statusOf(state, player, facts) {
+  if (facts.left.includes(player)) return "left";
+  if (facts.away.includes(player)) return "away";
+  const run = state.run;
+  if (run === null) return "playing";
+  const waiting = run.waitingDeaths.some((death) => death.playerId === player);
+  return isStanding(run.lives[player]) || waiting ? "playing" : "out";
+}
+function resultView(result) {
+  if (result === null) return null;
+  switch (result.kind) {
+    case "win":
+      return {
+        kind: "win",
+        winners: result.winners,
+        rated: result.rating === "rated"
+      };
+    case "draw":
+      return { kind: "draw", rated: result.rating === "rated" };
+    case "agreed":
+    case "abandoned":
+    case "contested":
+    case "restarted":
+      return result;
+    default: {
+      const unhandled = result;
+      return unhandled;
+    }
+  }
+}
+function runViewOf(state, run, viewer) {
+  const players = {};
+  for (const player of Object.keys(run.players))
+    players[player] = runPlayerView(run, player);
+  return {
+    id: run.id,
+    rules: run.rules,
+    players,
+    currentPvpBlind: pvpBlindView(state, viewer),
+    finishedPvpBlinds: run.finishedPvpBlinds,
+    targets: targetsOf(state, viewer),
+    waitingDeaths: run.waitingDeaths.map((death) => ({
+      player: death.playerId,
+      blindKey: death.blindKey,
+      waitingFor: death.waitingFor
+    })),
+    teamLives: run.teamLives,
+    votes: run.votes
+  };
+}
+function playersViewOf(state, viewer, facts) {
+  var _a, _b;
+  const run = state.run;
+  const players = {};
+  const viewerStatus = statusOf(state, viewer, facts);
+  const viewerDone = state.result !== null || viewerStatus === "out" || viewerStatus === "left";
+  for (const player of Object.keys(state.players)) {
+    const endGame = run == null ? void 0 : run.endGames[player];
+    const showEndGame = state.result !== null && player !== viewer && endGame !== void 0;
+    const lastJokers = endGame !== void 0 && endGame.jokers !== "" ? endGame.jokers : (_a = run == null ? void 0 : run.lastJokers) == null ? void 0 : _a[player];
+    const showJokers = viewerDone && player !== viewer && lastJokers !== void 0 && !showEndGame;
+    players[player] = __spreadValues(__spreadValues(__spreadValues({
+      team: run === null ? state.players[player].team : (_b = run.teams[player]) != null ? _b : null,
+      status: statusOf(state, player, facts)
+    }, run !== null && player in run.places ? { place: run.places[player] } : {}), showEndGame ? { endGame } : {}), showJokers ? { jokers: lastJokers } : {});
+  }
+  return players;
+}
+function view5(state, player, now, facts) {
+  var _a;
+  const own = state.players[player];
+  if (own === void 0) return null;
+  const timers = timersView(state, player, now);
+  const grace = facts.grace === null ? [] : [
+    {
+      kind: "grace",
+      by: null,
+      against: facts.grace.against,
+      endsAt: facts.grace.endsAt,
+      pausedAt: null,
+      hold: "counting"
+    }
+  ];
+  return {
+    serverTime: now,
+    lastMessageReceived: (_a = facts.messageNumbers[player]) != null ? _a : 0,
+    me: player,
+    match: {
+      stage: stageOf(state, facts),
+      result: resultView(state.result),
+      run: state.run === null ? null : runViewOf(state, state.run, player)
+    },
+    players: playersViewOf(state, player, facts),
+    timers: __spreadProps(__spreadValues({}, timers), { deadlines: [...timers.deadlines, ...grace] }),
+    onlyMine: __spreadValues({
+      traps: trapsView(state, player)
+    }, visibleInbox(state, player))
+  };
+}
+
+// src/lobby/pvp/match_hooks/last_view_sent.ts
+function viewsToSend(sent, after, players, now, facts) {
+  return changedViews(sent, players, (player) => view5(after, player, now, facts));
+}
+function changedViews(sent, players, viewOf4) {
+  const views = [];
+  const record = Object.fromEntries(
+    Object.entries(sent).filter(([player]) => players.includes(player))
+  );
+  for (const player of players) {
+    const mine = viewOf4(player);
+    if (mine === null) continue;
+    const before = sent[player];
+    if (before !== void 0 && same(__spreadProps(__spreadValues({}, before), { serverTime: 0 }), __spreadProps(__spreadValues({}, mine), { serverTime: 0 })))
+      continue;
+    views.push({ player, view: mine });
+    record[player] = mine;
+  }
+  return { views, sent: record };
+}
+
+// src/lobby/pvp/rules/locked_rules.ts
+var RANKED_PREFIX = "pvp_ranked_";
+var RANKED_RULESETS = [
+  "balanced",
+  "expanded",
+  "vanilla",
+  "majorleague",
+  "smallworld"
+];
+function lockedRulesForRankedMode(rankedMode) {
+  if (!rankedMode.startsWith(RANKED_PREFIX))
+    return { ok: false, reason: "unknown_ranked_mode" };
+  const shortName = rankedMode.slice(RANKED_PREFIX.length);
+  if (!RANKED_RULESETS.includes(shortName))
+    return { ok: false, reason: "unknown_ranked_mode" };
+  const ruleset = `ruleset_mp_${shortName}`;
+  const found = clockSettingOf(ruleset);
+  if (!found.ok) return { ok: false, reason: "unknown_ranked_mode" };
+  const locked = {
+    ruleset,
+    queue_mode: "pvp_nemesis",
+    starting_lives: 4,
+    pvp_start_ante: 2,
+    // The client's lobby default (core.lua) and what flow.lua sends: `or 7`.
+    manhunt_hunter_lives: 7
+  };
+  if (!found.clock.forcedTimer) {
+    locked.timer_base_seconds = 150;
+    locked.timer_forgiveness = 0;
+  }
+  locked.timer_increment_seconds = 60;
+  return { ok: true, locked };
+}
+function lockedRulesFor(modId, rankedMode, pvpModId) {
+  if (modId !== pvpModId || rankedMode === "") return { ok: true, locked: {} };
+  return lockedRulesForRankedMode(rankedMode);
+}
+
+// src/lobby/pvp/match_hooks/pvp_start.ts
+var VOTE_QUEUES = ["pvp_nemesis", "pvp_royale", "pvp_manhunt", "pvp_teams"];
+var SCHEDULE_QUEUES = ["pvp_nemesis", "pvp_smallworld"];
+var ROTATION_QUEUES = ["pvp_royale", "pvp_manhunt", "pvp_teams"];
+var TRAP_RULESETS = ["balanced", "expanded"];
+function planOf(kind, queueMode, players) {
+  const queue = typeof queueMode === "string" ? queueMode : "";
+  const draftFits = SCHEDULE_QUEUES.includes(queue) ? players === 2 : ROTATION_QUEUES.includes(queue) && players >= 2;
+  return {
+    votes: kind === "casual" && VOTE_QUEUES.includes(queue),
+    draft: kind !== "private" && draftFits
+  };
+}
+function nextStep(plan, results) {
+  if (plan.votes) {
+    const ruleset = results.ruleset;
+    if (ruleset === void 0 || ruleset.kind !== "vote") return "ruleset";
+    if (TRAP_RULESETS.includes(ruleset.option) && results.traps === void 0)
+      return "traps";
+  }
+  return plan.draft && results.draft === void 0 ? "draft" : null;
+}
+var setupDone = (plan, results) => nextStep(plan, results) === null;
+var refuse2 = (reject2) => ({ ok: false, reject: reject2 });
+function rulesOf(lobby) {
+  var _a, _b;
+  const locked = lockedRulesFor(lobby.modId, (_a = lobby.rankedMode) != null ? _a : "", PVP_MOD_ID);
+  if (!locked.ok) return refuse2("bad_rules");
+  const vote = (_b = lobby.game.setup) == null ? void 0 : _b.results.ruleset;
+  const rolled = vote !== void 0 && vote.kind === "vote" ? { ruleset: `ruleset_mp_${vote.option}` } : {};
+  return { ok: true, rules: __spreadValues(__spreadValues(__spreadValues({}, lobby.metadata), rolled), locked.locked) };
+}
+var setupDoneFor = (lobby, queueMode) => {
+  var _a, _b, _c, _d;
+  return setupDone(
+    planOf(
+      lobbyKindOf(lobby),
+      queueMode,
+      (_b = (_a = lobby.game.started) == null ? void 0 : _a.players.length) != null ? _b : 0
+    ),
+    (_d = (_c = lobby.game.setup) == null ? void 0 : _c.results) != null ? _d : {}
+  );
+};
+var emptyInbox = () => ({
+  inbox: [],
+  inboxDone: 0,
+  totals: {},
+  ante: null,
+  location: null,
+  sells: {},
+  shopSpends: {},
+  results: {},
+  vouchers: []
+});
+function startPvpRun(lobby, config, now) {
+  var _a, _b;
+  const started = lobby.game.started;
+  const base = lobby.game.pvp;
+  if (started === null || base === void 0) return refuse2("no_game");
+  if (base.run !== null) return refuse2("run_started");
+  const merged = rulesOf(lobby);
+  if (!merged.ok) return merged;
+  if (!setupDoneFor(lobby, merged.rules.queue_mode))
+    return refuse2("setup_not_done");
+  const ids = started.players.map((player) => player.id);
+  const found = settingsFromLobby(merged.rules, ids);
+  if (!found.ok) return refuse2("bad_rules");
+  const picks = {};
+  for (const id of ids) {
+    const known = base.players[id];
+    if (known === void 0) return refuse2("unknown_player");
+    if (known.team !== null) picks[id] = known.team;
+  }
+  const settings = found.settings;
+  const mode = pickMode(settings.mode, settings.startedCount);
+  const opening = mode.init(
+    settings,
+    { startedIds: ids, picks, teamPlan: (_a = lobby.teamPlan) != null ? _a : null },
+    seededRandom(started.runId)
+  );
+  const players = {};
+  const inboxes = {};
+  for (const id of ids) {
+    players[id] = { team: (_b = opening.teams[id]) != null ? _b : null };
+    inboxes[id] = emptyInbox();
+  }
+  const limits = config.pvpLimits;
+  return {
+    ok: true,
+    state: __spreadProps(__spreadValues({}, base), {
+      players,
+      run: {
+        id: started.runId,
+        rules: __spreadProps(__spreadValues({}, settings), { limits }),
+        players: inboxes,
+        clocks: newClocks(ids, limits, now),
+        currentPvpBlind: null,
+        ready: {},
+        firstReady: [],
+        finishedPvpBlinds: [],
+        lives: opening.lives,
+        teamLives: opening.teamLives,
+        waitingDeaths: [],
+        exits: [],
+        lifeLedger: { lifeTakenFor: {}, runOutsForgiven: {} },
+        pairings: {},
+        cardTargets: opening.cardTargets,
+        teams: opening.teams,
+        skips: {},
+        traps: [],
+        votes: { draw: [], seed: [] },
+        places: {},
+        endGames: {},
+        lastJokers: {}
+      }
+    })
+  };
+}
+
+// src/lobby/pvp/match_hooks/pvp_shell.ts
+function awayFromOf(lobby) {
+  const from = {};
+  for (const player of lobby.players)
+    if (player.awaySince !== null && player.awayReason !== null)
+      from[player.id] = { since: player.awaySince, reason: player.awayReason };
+  return from;
+}
+function factsOf(lobby) {
+  var _a, _b, _c, _d;
+  const matchPlayers = Object.keys((_b = (_a = lobby.game.pvp) == null ? void 0 : _a.players) != null ? _b : {});
+  const runId = (_c = lobby.game.started) == null ? void 0 : _c.runId;
+  const away = lobby.players.flatMap(
+    (player) => player.awaySince === null ? [] : [
+      {
+        id: player.id,
+        endsAt: awayEndsAt(lobby, player, player.awaySince)
+      }
+    ]
+  );
+  const left = matchPlayers.filter(
+    (id) => !lobby.players.some((player) => player.id === id)
+  );
+  const soonest = Math.min(...away.map((entry) => entry.endsAt));
+  return {
+    gameStarted: lobby.game.started !== null,
+    away: away.map((entry) => entry.id),
+    left,
+    // One display deadline: the earliest grace; those ending with it are named.
+    grace: away.length === 0 ? null : {
+      against: away.filter((e) => e.endsAt === soonest).map((e) => e.id),
+      endsAt: soonest
+    },
+    messageNumbers: (_d = lobby.messageNumbers) != null ? _d : {},
+    ranked: lobbyKindOf(lobby) === "ranked",
+    awayFrom: awayFromOf(lobby),
+    forfeited: left.filter(
+      (id) => {
+        var _a2;
+        return runId !== void 0 && ((_a2 = lobby.forfeitedSeats) == null ? void 0 : _a2[id]) === runId;
+      }
+    )
+  };
+}
+function endedView(lobby, player, now) {
+  const ended = lobby.game.ended;
+  if (ended === void 0) return null;
+  return view5(
+    ended,
+    player,
+    now,
+    factsOf(__spreadProps(__spreadValues({}, lobby), { game: __spreadProps(__spreadValues({}, lobby.game), { pvp: ended }) }))
+  );
+}
+function inputFactsOf(lobby) {
+  const { ranked, left, awayFrom, messageNumbers } = factsOf(lobby);
+  const sessions = {};
+  for (const player of lobby.players) sessions[player.id] = player.sessionId;
+  return { ranked, left, awayFrom, sessions, messageNumbers };
+}
+var pauseReasonOf = (reason) => reason === "dropped" ? "away" : "server restart";
+function endAwayPauses(run, now, facts) {
+  let clocks = run.clocks;
+  const ready2 = __spreadValues({}, run.ready);
+  let firstReady = run.firstReady;
+  let returned = false;
+  for (const pause of run.clocks.playerPauses) {
+    const player = pause.player;
+    const away = facts.awayFrom[player] !== void 0 && !facts.left.includes(player);
+    if (away || pause.reason === "animating") continue;
+    clocks = resumeAfterReady(
+      endPlayerPause(clocks, player, pause.reason, now),
+      player,
+      now
+    );
+    delete ready2[player];
+    firstReady = firstReady.filter((id) => id !== player);
+    returned = true;
+  }
+  return returned ? __spreadProps(__spreadValues({}, run), { clocks, ready: ready2, firstReady }) : run;
+}
+function startAwayPauses(state, now, facts) {
+  const drops = Object.entries(facts.awayFrom).filter(([player]) => !facts.left.includes(player)).sort(([, a], [, b]) => a.since - b.since);
+  let current = state;
+  for (const [player, from] of drops) {
+    const before = current.run;
+    if (before === null || current.result !== null) break;
+    if (before.clocks.players[player] === void 0 || isAway(before, player))
+      continue;
+    const at = Math.min(Math.max(from.since, before.clocks.settledAt), now);
+    const ticked = tick2(current, at, facts);
+    const run = ticked.run;
+    if (run === null || ticked.result !== null) return ticked;
+    current = __spreadProps(__spreadValues({}, ticked), {
+      run: __spreadProps(__spreadValues({}, run), {
+        clocks: startPlayerPause(
+          run.clocks,
+          player,
+          pauseReasonOf(from.reason),
+          run.rules.limits,
+          at
+        )
+      })
+    });
+  }
+  return current;
+}
+function settledRun(run, now) {
+  const clocks = catchUpClocks(run.clocks, now);
+  return same(clocks.countdowns, run.clocks.countdowns) ? run : __spreadProps(__spreadValues({}, run), { clocks });
+}
+function returnedAway(state, now, facts) {
+  const before = state.run;
+  if (before === null || state.result !== null) return state;
+  const run = endAwayPauses(before, now, facts);
+  return run === before ? state : __spreadProps(__spreadValues({}, state), { run });
+}
+function bringUpToNow(state, now, facts) {
+  const paused = startAwayPauses(state, now, facts);
+  const ticked = tick2(returnedAway(paused, now, facts), now, facts);
+  const before = ticked.run;
+  if (before === null) return ticked;
+  const run = settledRun(before, now);
+  return openPvpBlindIfReady(run === before ? ticked : __spreadProps(__spreadValues({}, ticked), { run }), now);
+}
+function handleMessage(state, player, session, message2, now, facts) {
+  var _a;
+  const last = (_a = facts.messageNumbers[player]) != null ? _a : 0;
+  if (facts.sessions[player] !== session)
+    return { state, refusals: [], lastNumber: last };
+  const applied2 = apply(
+    bringUpToNow(state, now, facts),
+    player,
+    message2,
+    last,
+    now
+  );
+  return __spreadProps(__spreadValues({}, applied2), { state: settleMatch(applied2.state, facts) });
+}
+function shellTick(state, now, facts) {
+  if (state.result !== null) return state;
+  const gone = Object.keys(state.players).filter(
+    (id) => facts.left.includes(id)
+  );
+  if (state.run === null) return leaveBeforeRun(state, gone, facts.ranked);
+  const ticked = bringUpToNow(state, now, facts);
+  const dropped = gone.reduce(
+    (current, id) => dropPlayer(
+      current,
+      id,
+      facts.forfeited.includes(id) ? "forfeit" : "left",
+      now
+    ),
+    ticked
+  );
+  if (dropped === ticked) return ticked;
+  return settleMatch(openPvpBlindIfReady(dropped, now), facts);
+}
+function resumeState(state, downtime) {
+  return shiftTimes(state, downtime);
+}
+function ending(state) {
+  var _a, _b;
+  const result = state.result;
+  if (result === null) return null;
+  if (result.kind !== "win" && result.kind !== "draw")
+    return { status: result.kind, placements: [] };
+  const places = (_b = (_a = state.run) == null ? void 0 : _a.places) != null ? _b : {};
+  const placements = Object.keys(places).map((playerId) => ({ playerId, place: places[playerId] })).sort((a, b) => a.place - b.place || a.playerId.localeCompare(b.playerId));
+  return { status: "agreed", placements };
+}
+var CONNECTION_REPLACED_REASON = "opened_elsewhere";
+function connectionReplacedNotice(lobby, playerId) {
+  var _a;
+  return {
+    type: "player_kicked",
+    lobbyCode: lobby.code,
+    playerId,
+    displayName: (_a = lobby.players.find((player) => player.id === playerId)) == null ? void 0 : _a.info.displayName,
+    data: { kickedBy: "server", reason: CONNECTION_REPLACED_REASON }
+  };
+}
+function lastItemOf(run, player, keys) {
+  var _a, _b;
+  const hasItem = "pvp_inbox_done" in keys;
+  const hasRun = "pvp_run" in keys;
+  if (!hasItem && !hasRun) return 0;
+  const item = keys.pvp_inbox_done;
+  const runId = keys.pvp_run;
+  if (!hasItem || !hasRun || !isWholeNumber(item) || typeof runId !== "string")
+    return { reject: "bad_params" };
+  if (runId !== run.id) return 0;
+  return item > ((_b = (_a = run.players[player]) == null ? void 0 : _a.inbox.length) != null ? _b : 0) ? { reject: "bad_params" } : item;
+}
+function wholeNumberKeys(keys) {
+  const item = keys.pvp_inbox_done;
+  return typeof item === "string" && /^\d{1,9}$/.test(item) ? __spreadProps(__spreadValues({}, keys), { pvp_inbox_done: Number(item) }) : keys;
+}
+function joinState(state, player, keys) {
+  const run = state.run;
+  const mine = run == null ? void 0 : run.players[player];
+  if (run === null || mine === void 0) return state;
+  const item = lastItemOf(run, player, keys);
+  if (typeof item !== "number") return item;
+  return __spreadProps(__spreadValues({}, state), {
+    run: __spreadProps(__spreadValues({}, run), {
+      players: __spreadProps(__spreadValues({}, run.players), { [player]: __spreadProps(__spreadValues({}, mine), { inboxDone: item }) })
+    })
+  });
+}
+var storePvp = (lobby, pvp) => {
+  const teamPicks = __spreadValues({}, lobby.teamPicks);
+  for (const [id, player] of Object.entries(pvp.players))
+    if (pvp.run === null && player.team !== null) teamPicks[id] = player.team;
+  return __spreadProps(__spreadValues({}, lobby), { teamPicks, game: __spreadProps(__spreadValues({}, lobby.game), { pvp }) });
+};
+function startedStep(lobby, config, now) {
+  const before = lobby.game.pvp;
+  if (before !== void 0) {
+    const left = shellTick(before, now, factsOf(lobby));
+    if (left.result !== null) return { lobby: storePvp(lobby, left), out: [] };
+  }
+  const queue = rulesOf(lobby);
+  if (!queue.ok || !setupDoneFor(lobby, queue.rules.queue_mode))
+    return queue.ok ? { lobby, out: [] } : { reject: queue.reject };
+  const run = startPvpRun(lobby, config, now);
+  if (!run.ok) return { reject: run.reject };
+  const next = storePvp(lobby, run.state);
+  return {
+    lobby: storePvp(next, shellTick(run.state, now, factsOf(next))),
+    out: []
+  };
+}
+function newMatch(lobby, config, now) {
+  var _a, _b;
+  const started = lobby.game.started;
+  const merged = rulesOf(lobby);
+  if (started === null) return { reject: "no_game" };
+  if (!merged.ok) return { reject: merged.reject };
+  const mode = modeOfQueue(merged.rules.queue_mode);
+  if (mode === null) return { reject: "bad_rules" };
+  const players = {};
+  for (const player of started.players)
+    players[player.id] = { team: (_b = (_a = lobby.teamPicks) == null ? void 0 : _a[player.id]) != null ? _b : null };
+  const fresh = storePvp(lobby, {
+    lobbyMode: mode,
+    players,
+    run: null,
+    result: null
+  });
+  return startedStep(fresh, config, now);
+}
+function inputAfterGameEnded(lobby, from, message2, now) {
+  var _a, _b;
+  const ended = lobby.game.ended;
+  if (ended === void 0 || lobby.players.every((p) => p.id !== from.playerId))
+    return { lobby, refusals: [] };
+  if (inputFactsOf(lobby).sessions[from.playerId] !== from.session)
+    return { lobby, refusals: [] };
+  const last = (_b = (_a = lobby.messageNumbers) == null ? void 0 : _a[from.playerId]) != null ? _b : 0;
+  const taken = apply(ended, from.playerId, message2, last, now, {
+    endGame: endGameHandler
+  });
+  const run = ended.run;
+  const next = __spreadValues(__spreadValues({}, ended), run !== null && taken.state.run !== null ? { run: __spreadProps(__spreadValues({}, run), { endGames: taken.state.run.endGames }) } : {});
+  return {
+    lobby: __spreadProps(__spreadValues({}, lobby), {
+      messageNumbers: __spreadProps(__spreadValues({}, lobby.messageNumbers), {
+        [from.playerId]: taken.lastNumber
+      }),
+      game: __spreadProps(__spreadValues({}, lobby.game), { ended: next })
+    }),
+    refusals: taken.refusals
+  };
+}
+var PVP_RELAYED_KEYS = ["mp_mpapi_sync"];
+var pvpHooks = {
+  // A game has been built for the lobby: refuse it, or add PvP's own state.
+  onStart(lobby, config, now) {
+    var _a, _b, _c;
+    for (const player of (_b = (_a = lobby.game.started) == null ? void 0 : _a.players) != null ? _b : []) {
+      const version = (_c = lobby.players.find((seat) => seat.id === player.id)) == null ? void 0 : _c.info.pvpVersion;
+      if (belowMinimum(version, config.pvpMinVersion))
+        return { reject: "pvp_update_required" };
+    }
+    return newMatch(lobby, config, now);
+  },
+  // A Setup action, or the Setup tick, has changed the lobby's Setup results; a refusal means
+  // the run cannot be built from what Setup produced.
+  startRunWhenSetupDone(lobby, config, now) {
+    const pvp = lobby.game.pvp;
+    if (pvp === void 0 || pvp.run !== null || pvp.result !== null)
+      return { lobby, out: [] };
+    return startedStep(lobby, config, now);
+  },
+  // A restart has built the new game; the Setup results were kept.
+  onRestart(lobby, config, now) {
+    return newMatch(lobby, config, now);
+  },
+  // A player is joining; joinKeys are the keys of its join message.
+  onJoin(lobby, join2, now) {
+    const pvp = lobby.game.pvp;
+    if (pvp === void 0 || pvp.players[join2.playerId] === void 0)
+      return { lobby, out: [] };
+    const joined = joinState(
+      returnedAway(pvp, now, inputFactsOf(lobby)),
+      join2.playerId,
+      wholeNumberKeys(join2.joinKeys)
+    );
+    if ("reject" in joined) return joined;
+    return { lobby: storePvp(lobby, joined), out: [] };
+  },
+  // The lobby was loaded from its checkpoint after the server was down for downtime.
+  onResume(lobby, downtime) {
+    const pvp = lobby.game.pvp;
+    return pvp === void 0 ? lobby : storePvp(lobby, resumeState(pvp, downtime));
+  },
+  ending(lobby, _now) {
+    const pvp = lobby.game.pvp;
+    return pvp === void 0 ? null : ending(pvp);
+  },
+  // One message of op 8 from a player's session; the refusal codes are for the log.
+  onInput(lobby, from, message2, now) {
+    const pvp = lobby.game.pvp;
+    if (pvp === void 0) return inputAfterGameEnded(lobby, from, message2, now);
+    const taken = handleMessage(
+      pvp,
+      from.playerId,
+      from.session,
+      message2,
+      now,
+      inputFactsOf(lobby)
+    );
+    return {
+      lobby: __spreadProps(__spreadValues({}, storePvp(lobby, taken.state)), {
+        messageNumbers: __spreadProps(__spreadValues({}, lobby.messageNumbers), {
+          [from.playerId]: taken.lastNumber
+        })
+      }),
+      refusals: taken.refusals
+    };
+  },
+  // The 5 Hz tick: the match clock, and every player the lobby no longer has.
+  onTick(lobby, now) {
+    const pvp = lobby.game.pvp;
+    if (pvp === void 0) return lobby;
+    const next = shellTick(pvp, now, factsOf(lobby));
+    return next === pvp ? lobby : storePvp(lobby, next);
+  },
+  // The views that changed since `sent`, as sends, and the new record of what was sent.
+  views(lobby, sent, now) {
+    const pvp = lobby.game.pvp;
+    if (pvp === void 0) return { out: [], sent };
+    const shown = viewsToSend(
+      sent,
+      pvp,
+      lobby.players.map((player) => player.id),
+      now,
+      factsOf(lobby)
+    );
+    return {
+      out: shown.views.map(({ player, view: view7 }) => ({
+        kind: "send",
+        op: ServerOp.VIEW,
+        payload: view7,
+        to: [player]
+      })),
+      sent: shown.sent
+    };
+  }
+};
+
+// src/lobby/checkpoint.ts
+var CLAIM_TIMEOUT_MS = 3e4;
+function withoutPendingRunSaves(lobby) {
+  if (!lobby.game.runSavePending) return lobby;
+  const _a = lobby.game, { runSavePending } = _a, game = __objRest(_a, ["runSavePending"]);
+  return __spreadProps(__spreadValues({}, lobby), { game });
+}
+function checkpointOf(lobby, now) {
+  if (lobby.closed || lobby.players.length === 0) return null;
+  const gq = lobby.groupQueue;
+  const parkedUntil = gq && gq.phase === "away" ? gq.until : 0;
+  return {
+    lobby: withoutPendingRunSaves(lobby),
+    at: now,
+    claimedAt: null,
+    expiresAt: Math.max(now + CHECKPOINT_TTL_MS, parkedUntil)
+  };
+}
+function isExpired(checkpoint, now) {
+  return now >= checkpointExpiry(checkpoint);
+}
+function isClaimable(checkpoint, now) {
+  return !isExpired(checkpoint, now) && (checkpoint.claimedAt === null || now - checkpoint.claimedAt >= CLAIM_TIMEOUT_MS);
+}
+function resumedSeat(player, live, downtime, now) {
+  const since = player.awaySince;
+  const dropped = live && since !== null && player.awayReason === "dropped";
+  return __spreadProps(__spreadValues({}, player), {
+    sessionId: "",
+    awaySince: dropped ? since + downtime : now,
+    awayReason: dropped ? "dropped" : "server restart"
+  });
+}
+function resumeFrom(checkpoint, now) {
+  const lobby = checkpoint.lobby;
+  const downtime = Math.max(0, now - checkpoint.at);
+  const settleFrom = lobby.game.settleFrom;
+  const gq = lobby.groupQueue;
+  const resumed = __spreadProps(__spreadValues({}, lobby), {
+    groupQueue: gq && gq.phase === "away" ? gq : null,
+    createdAt: now,
+    players: lobby.players.map(
+      (p) => resumedSeat(p, inLiveRun(lobby), downtime, now)
+    ),
+    spectators: [],
+    actionBudget: {},
+    game: __spreadProps(__spreadValues({}, lobby.game), {
+      settleFrom: settleFrom === null ? null : settleFrom + downtime,
+      setup: setupAfterDowntime(lobby.game, downtime)
+    }),
+    sharedRules: lobby.sharedRules ? __spreadProps(__spreadValues({}, lobby.sharedRules), {
+      deadline: lobby.sharedRules.deadline + downtime
+    }) : void 0,
+    almanac: lobby.almanac ? __spreadProps(__spreadValues({}, lobby.almanac), {
+      offers: Object.fromEntries(
+        Object.entries(lobby.almanac.offers).map(([ante, offer]) => [
+          ante,
+          offer.deadline === void 0 ? offer : __spreadProps(__spreadValues({}, offer), { deadline: offer.deadline + downtime })
+        ])
+      )
+    }) : void 0
+  });
+  return runningReferee(resumed) === "server" ? pvpHooks.onResume(resumed, downtime) : resumed;
+}
+function seatHoldersOf(lobby) {
+  const gq = lobby.groupQueue;
+  const away = gq && gq.phase === "away" ? gq.memberIds : [];
+  return lobby.players.map((p) => p.id).filter((id) => away.indexOf(id) === -1);
+}
+function keyOf2(code) {
+  return { collection: LOBBY_CHECKPOINT_COLLECTION, key: code, userId: SYSTEM_USER_ID };
+}
+function write2(nk, code, checkpoint, version) {
+  nk.storageWrite([
+    __spreadProps(__spreadValues({}, keyOf2(code)), {
+      value: checkpoint,
+      permissionRead: 0,
+      permissionWrite: 0,
+      version
+    })
+  ]);
+}
+function saveCheckpoint(nk, checkpoint) {
+  write2(nk, checkpoint.lobby.code, checkpoint);
+}
+function readCheckpoint(nk, code) {
+  const objects = nk.storageRead([keyOf2(code)]);
+  if (objects.length === 0) return null;
+  return { checkpoint: objects[0].value, version: objects[0].version || "" };
+}
+function deleteCheckpoint(nk, code) {
+  nk.storageDelete([keyOf2(code)]);
+}
+function resumeLobby(nk, logger, code, now) {
+  const found = readCheckpoint(nk, code);
+  if (!found) return { kind: "none" };
+  const checkpoint = found.checkpoint;
+  if (isExpired(checkpoint, now)) {
+    deleteCheckpoint(nk, code);
+    return { kind: "none" };
+  }
+  if (!isClaimable(checkpoint, now)) return { kind: "resuming" };
+  try {
+    write2(nk, code, __spreadProps(__spreadValues({}, checkpoint), { claimedAt: now }), found.version);
+  } catch (e) {
+    return { kind: "resuming" };
+  }
+  const lobby = checkpoint.lobby;
+  const matchId = nk.matchCreate(LOBBY_MATCH, { resumeCode: code });
+  bindCode(nk, code, matchId, lobby.modId);
+  for (const id of seatHoldersOf(lobby)) {
+    nk.storageWrite([
+      {
+        collection: CURRENT_LOBBY_COLLECTION,
+        key: CURRENT_LOBBY_KEY,
+        userId: id,
+        value: { matchId, code, modId: lobby.modId },
+        permissionRead: 0,
+        permissionWrite: 0
+      }
+    ]);
+  }
+  deleteCheckpoint(nk, code);
+  if (logger) logger.info("Lobby %s resumed from its checkpoint as %s", code, matchId);
+  return { kind: "resumed", matchId, modId: lobby.modId };
+}
+
+// src/lobby/create_limit.ts
+var CREATE_LIMIT = 30;
+var CREATE_WINDOW_MS = 6e4;
+var LIMIT_COLLECTION = "limits";
+var LIMIT_KEY = "lobby_create_times";
+function createTimesAfter(times, now) {
+  const recent = times.filter((t) => now - t < CREATE_WINDOW_MS);
+  if (recent.length >= CREATE_LIMIT) return null;
+  return recent.concat([now]);
+}
+function readTimes(nk, userId) {
+  const objects = nk.storageRead([
+    { collection: LIMIT_COLLECTION, key: LIMIT_KEY, userId }
+  ]);
+  const times = objects.length > 0 ? objects[0].value.times : null;
+  return Array.isArray(times) ? times.filter((t) => typeof t === "number") : [];
+}
+function spendLobbyCreate(nk, userId, now) {
+  const times = createTimesAfter(readTimes(nk, userId), now);
+  if (!times) return false;
+  nk.storageWrite([
+    {
+      collection: LIMIT_COLLECTION,
+      key: LIMIT_KEY,
+      userId,
+      value: { times },
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+  return true;
+}
+
+// src/player/steam_id.ts
+var STEAM_HASH_CUSTOM_ID_PREFIX = "steamhash:";
+var DEVICE_ID_HASH_PREFIX = "devicehash:";
+var STEAM_ID64_PATTERN = /^7656119\d{10}$/;
+var STEAM_HASH_CUSTOM_ID = new RegExp(`^${STEAM_HASH_CUSTOM_ID_PREFIX}([0-9a-f]{64})$`);
+function steamIdHash(nk, salt, steamId) {
+  return nk.sha256Hash(steamId + salt);
+}
+function steamIdHashOf(nk, userId) {
+  const match = STEAM_HASH_CUSTOM_ID.exec(
+    nk.accountGetId(userId).customId || ""
+  );
+  return match ? match[1] : null;
+}
+
+// src/mirror/outbox.ts
+var MIRROR_COLLECTION = "mirror_outbox";
+function entryKey(at, unique2) {
+  return `${String(at).padStart(15, "0")}-${unique2}`;
+}
+function enqueue(nk, entry) {
+  nk.storageWrite([
+    {
+      collection: MIRROR_COLLECTION,
+      key: entryKey(entry.at, nk.uuidv4()),
+      userId: SYSTEM_USER_ID,
+      value: entry,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function expandRun(nk, key, entry) {
+  const runs = nk.storageRead([{ collection: RUNS_COLLECTION, key: entry.runId, userId: SYSTEM_USER_ID }]);
+  if (runs.length === 0) return null;
+  const run = runs[0].value;
+  const logs = {};
+  const stored = nk.storageRead(
+    run.players.map((p) => ({ collection: LOGS_COLLECTION, key: `${run.runId}:${p.id}`, userId: SYSTEM_USER_ID }))
+  );
+  for (const object of stored) logs[object.key.slice(run.runId.length + 1)] = object.value;
+  const ratings = {};
+  if (entry.rating) {
+    const board = `${entry.rating.modId}:${entry.rating.mode}:${entry.rating.season}`;
+    for (const object of nk.storageRead(
+      run.players.map((p) => ({ collection: RATINGS_COLLECTION, key: board, userId: p.id }))
+    ))
+      ratings[object.userId] = object.value;
+  }
+  return { key, kind: "run", at: entry.at, run, logs, rating: entry.rating, ratings };
+}
+function mirrorPlayer(nk, userId) {
+  let steamIdHash2 = null;
+  let deleted = false;
+  try {
+    steamIdHash2 = steamIdHashOf(nk, userId);
+  } catch (e) {
+    deleted = true;
+  }
+  const stored = readProfile(nk, userId);
+  const profile = stored ? stored.profile : null;
+  return {
+    steamIdHash: steamIdHash2,
+    legacyPlayerId: profile ? profile.legacyPlayerId : null,
+    displayName: profile ? profile.steamName : "",
+    deleted
+  };
+}
+function pullEntries(nk, limit) {
+  const page = nk.storageList(SYSTEM_USER_ID, MIRROR_COLLECTION, limit, "");
+  const entries = [];
+  const dropped = [];
+  const userIds = {};
+  for (const object of page.objects || []) {
+    const entry = object.value;
+    if (entry.kind === "run") {
+      const pulled = expandRun(nk, object.key, entry);
+      if (!pulled) {
+        dropped.push(object.key);
+        continue;
+      }
+      for (const p of pulled.run.players) userIds[p.id] = true;
+      entries.push(pulled);
+    } else if (entry.kind === "chat") {
+      userIds[entry.line.userId] = true;
+      entries.push({ key: object.key, kind: "chat", at: entry.at, line: entry.line });
+    } else if (entry.kind === "forfeit" || entry.kind === "notice") {
+      userIds[entry.userId] = true;
+      entries.push(__spreadValues({ key: object.key }, entry));
+    } else if (entry.kind === "ban_started") {
+      entries.push(__spreadValues({ key: object.key }, entry));
+    } else if (entry.kind === "contest") {
+      userIds[entry.by] = true;
+      userIds[entry.against] = true;
+      entries.push(__spreadValues({ key: object.key }, entry));
+    } else {
+      dropped.push(object.key);
+    }
+  }
+  const players = {};
+  for (const userId in userIds) players[userId] = mirrorPlayer(nk, userId);
+  return { entries, dropped, players };
+}
+function ackEntries(nk, keys) {
+  if (keys.length === 0) return;
+  nk.storageDelete(keys.map((key) => ({ collection: MIRROR_COLLECTION, key, userId: SYSTEM_USER_ID })));
+}
+
+// src/lobby/forfeits.ts
+var FORFEITS_COLLECTION = "forfeits";
+var RECONCILIATION_WINDOW_MS = 60 * 1e3;
+function recordForfeit(nk, userId, forfeit) {
+  nk.storageWrite([
+    {
+      collection: FORFEITS_COLLECTION,
+      key: forfeit.runId,
+      userId,
+      value: forfeit,
+      permissionRead: 0,
+      permissionWrite: 0
+    }
+  ]);
+}
+function noteReturn(nk, logger, userId, now) {
+  try {
+    const objects = nk.storageList(userId, FORFEITS_COLLECTION, 10, "").objects || [];
+    if (objects.length === 0) return;
+    for (const object of objects) {
+      const forfeit = object.value;
+      if (now - forfeit.at <= RECONCILIATION_WINDOW_MS)
+        enqueue(nk, {
+          kind: "forfeit",
+          at: now,
+          userId,
+          runId: forfeit.runId,
+          code: forfeit.code,
+          forfeitedAt: forfeit.at,
+          lobbyKind: forfeit.lobbyKind
+        });
+    }
+    nk.storageDelete(objects.map((o) => ({ collection: FORFEITS_COLLECTION, key: o.key, userId })));
+  } catch (e) {
+    logger.warn("Could not check %s for a wrongful forfeit: %v", userId, e);
+  }
 }
 
 // src/lobby/spectate.ts
@@ -4166,7 +8490,7 @@ function spectateRejection(lobby, userId, modId) {
   if (spectatorsOf(lobby).length >= MAX_SPECTATORS) return "This lobby has too many spectators";
   return null;
 }
-function isObject(value) {
+function isObject2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function snapshotEntry(playerId, lines) {
@@ -4188,15 +8512,15 @@ function snapshotEntry(playerId, lines) {
     } else if (opcode === "hand_result" && Array.isArray(args)) {
       if (typeof args[0] === "string") score = args[0];
       if (typeof args[1] === "number") handsRemaining = args[1];
-    } else if (opcode === "lobby_info" && !lobbyInfo && isObject(args) && typeof args.gamemode === "string" && typeof args.ruleset === "string") {
-      const options = isObject(args.options) ? args.options : {};
+    } else if (opcode === "lobby_info" && !lobbyInfo && isObject2(args) && typeof args.gamemode === "string" && typeof args.ruleset === "string") {
+      const options = isObject2(args.options) ? args.options : {};
       lobbyInfo = {
         gamemode: args.gamemode,
         ruleset: args.ruleset,
         sleeve: typeof options.sleeve === "string" ? options.sleeve : null,
         challenge: typeof options.challenge === "string" ? options.challenge : null
       };
-    } else if (opcode === "run_info" && isObject(args) && typeof args.seed === "string" && typeof args.deck === "string") {
+    } else if (opcode === "run_info" && isObject2(args) && typeof args.seed === "string" && typeof args.deck === "string") {
       runInfo = {
         seed: args.seed,
         deck: args.deck,
@@ -4273,7 +8597,7 @@ function spectatableLobbies(labels) {
     } catch (e) {
       continue;
     }
-    if (!isObject(label) || label.spectatable !== true || typeof label.code !== "string") continue;
+    if (!isObject2(label) || label.spectatable !== true || typeof label.code !== "string") continue;
     if (typeof label.spectators === "number" && label.spectators >= MAX_SPECTATORS) continue;
     lobbies.push({
       code: label.code,
@@ -4630,7 +8954,7 @@ var SPDRN_MODES = [
   "spdrn_all_deck",
   "spdrn_stake_climb"
 ];
-function membersOf(collection) {
+function membersOf2(collection) {
   switch (collection) {
     case "vanillaDecks":
       return VANILLA_DECKS;
@@ -5013,158 +9337,6 @@ function moneySpent(events) {
   return spent;
 }
 
-// ../packages/types/src/big-score.ts
-var MAX_SAFE = 9007199254740991;
-var MAX_ARRAY_LENGTH = 100;
-var MAX_TEXT_LENGTH = 4096;
-var LOG_MAX_SAFE = Math.log10(MAX_SAFE);
-var ZERO_SCORE = "0";
-var TOP_SCORE = new Array(MAX_ARRAY_LENGTH).fill(String(MAX_SAFE)).join(",");
-var ENTRY_FIRST = /^(0|[1-9][0-9]*)(\.[0-9]+)?$/;
-var ENTRY_HIGHER = /^(0|[1-9][0-9]*)$/;
-var TOP_ARRAY = () => new Array(MAX_ARRAY_LENGTH).fill(MAX_SAFE);
-function normalizeArray(input) {
-  if (input.length === 0) return [0];
-  if (input.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
-  const x = input.slice();
-  for (let i = 0; i < x.length; i++) {
-    const e = x[i];
-    if (Number.isNaN(e) || e === Number.POSITIVE_INFINITY || e === Number.NEGATIVE_INFINITY) {
-      return TOP_ARRAY();
-    }
-    if (i !== 0 && e !== Math.floor(e)) x[i] = Math.floor(e);
-  }
-  let again;
-  do {
-    again = false;
-    while (x.length > 0 && x[x.length - 1] === 0) {
-      x.pop();
-      again = true;
-    }
-    if (x[0] > MAX_SAFE) {
-      x[1] = (x[1] || 0) + 1;
-      x[0] = Math.log10(x[0]);
-      again = true;
-    }
-    while (x[0] < LOG_MAX_SAFE && x[1]) {
-      x[0] = __pow(10, x[0]);
-      x[1]--;
-      again = true;
-    }
-    if (x.length > 2 && !x[1]) {
-      let i = 2;
-      while (!x[i]) i++;
-      x[i - 1] = Math.floor(x[0]);
-      x[0] = __pow(10, x[0] - Math.floor(x[0]));
-      x[i]--;
-      again = true;
-    }
-    for (let i = 1; i < x.length; i++) {
-      if (x[i] > MAX_SAFE) {
-        x[i + 1] = (x[i + 1] || 0) + 1;
-        x[0] = x[i] + 1;
-        for (let j = 1; j <= i; j++) x[j] = 0;
-        again = true;
-      }
-    }
-    if (x.length > MAX_ARRAY_LENGTH) return TOP_ARRAY();
-  } while (again);
-  if (x.length === 0) return [0];
-  for (let i = 0; i < x.length; i++) if (x[i] === void 0) x[i] = 0;
-  if (x.length === 1) x[0] = Math.floor(x[0]);
-  return x;
-}
-function writeFirst(x) {
-  if (x === Math.floor(x)) return x.toFixed(0);
-  for (let digits = 15; digits <= 17; digits++) {
-    const s = x.toPrecision(digits);
-    if (s.indexOf("e") === -1 && Number(s) === x) {
-      return s.indexOf(".") === -1 ? s : s.replace(/0+$/, "").replace(/\.$/, "");
-    }
-  }
-  return x.toPrecision(17);
-}
-function writeArray(array) {
-  const parts = [writeFirst(array[0])];
-  for (let i = 1; i < array.length; i++) parts.push(array[i].toFixed(0));
-  return parts.join(",");
-}
-function readArray(text) {
-  if (typeof text !== "string" || text.length === 0 || text.length > MAX_TEXT_LENGTH)
-    return null;
-  const parts = text.split(",");
-  if (parts.length > MAX_ARRAY_LENGTH) return null;
-  const array = [];
-  for (let i = 0; i < parts.length; i++) {
-    if (!(i === 0 ? ENTRY_FIRST : ENTRY_HIGHER).test(parts[i])) return null;
-    const n = Number(parts[i]);
-    if (!Number.isFinite(n)) return null;
-    array.push(n);
-  }
-  return array;
-}
-function fromNumber(n) {
-  const value = Number.isNaN(n) || n === Number.POSITIVE_INFINITY ? Number.MAX_VALUE : n;
-  if (value < 1) return ZERO_SCORE;
-  return writeArray(normalizeArray([Math.floor(value)]));
-}
-function fromArray(array, sign) {
-  if (sign < 0) return ZERO_SCORE;
-  return writeArray(normalizeArray(array));
-}
-function normalizeScore(text) {
-  const array = readArray(text);
-  return array === null ? null : writeArray(normalizeArray(array));
-}
-function compareScores(a, b) {
-  const x = readArray(a);
-  const y = readArray(b);
-  if (x === null || y === null) return null;
-  const p = normalizeArray(x);
-  const q = normalizeArray(y);
-  if (p.length !== q.length) return p.length > q.length ? 1 : -1;
-  for (let i = p.length - 1; i >= 0; i--) {
-    if (p[i] > q[i]) return 1;
-    if (p[i] < q[i]) return -1;
-  }
-  return 0;
-}
-var GROUPED_INTEGER = /^\d{1,3}(,\d{3})+$/;
-var HYPER_E = /^(e*)([0-9]+(?:\.[0-9]+)?)e\+?([0-9]+)$/;
-function parseLegacyScore(input) {
-  if (typeof input === "number") return fromNumber(input);
-  if (typeof input !== "string") return ZERO_SCORE;
-  const text = input.trim();
-  if (GROUPED_INTEGER.test(text)) return fromNumber(Number(text.replace(/,/g, "")));
-  const normal = normalizeScore(text);
-  if (normal !== null) return normal;
-  const cleaned = text.replace(/[,\s]/g, "").toLowerCase();
-  if (cleaned === "") return ZERO_SCORE;
-  const value = Number(cleaned);
-  if (!Number.isNaN(value) && (Number.isFinite(value) || !HYPER_E.test(cleaned))) return fromNumber(value);
-  if (cleaned === "naneinf" || cleaned === "nan" || cleaned === "inf" || cleaned === "infinity")
-    return fromNumber(Number.POSITIVE_INFINITY);
-  const tower = HYPER_E.exec(cleaned);
-  if (tower !== null) {
-    const layers = tower[1].length;
-    const inner = Number(tower[2] + "e" + tower[3]);
-    if (Number.isFinite(inner)) return fromArray([inner, layers], 1);
-    return fromArray([Number(tower[3]) + Math.log10(Number(tower[2])), layers + 1], 1);
-  }
-  if (/^[0-9.]*e/.test(cleaned) || cleaned.indexOf("#") !== -1) return TOP_SCORE;
-  return ZERO_SCORE;
-}
-function scoreToNumber(text) {
-  const array = readArray(text);
-  if (array === null) return 0;
-  const a = normalizeArray(array);
-  if (a.length === 1) return a[0];
-  if (a.length > 2) return Number.POSITIVE_INFINITY;
-  let value = a[0];
-  for (let i = 0; i < a[1] && value !== Number.POSITIVE_INFINITY; i++) value = Math.pow(10, value);
-  return value;
-}
-
 // src/achievements/facts/score.ts
 function parseScore(text) {
   return scoreToNumber(parseLegacyScore(text));
@@ -5242,7 +9414,7 @@ function counterValue(progress, counter2) {
   return counter2 === "bestWinStreak" ? progress.winStreak.best : progress.counters[counter2];
 }
 function covered(progress, rule) {
-  const members = membersOf(rule.collection);
+  const members = membersOf2(rule.collection);
   const played = rule.collection === "vanillaDecks" ? members.filter((deck) => (progress.deckGames[deck] || 0) > 0) : members.filter((mode) => progress.spdrnModesPlayed.indexOf(mode) !== -1);
   return played.length;
 }
@@ -5264,7 +9436,7 @@ function goalOf(entry, progress, holdings) {
     case "deckGames":
       return { kind: "deckGames", key: rule.deck, threshold: rule.threshold, progress: Math.min(progress.deckGames[rule.deck] || 0, rule.threshold) };
     case "allOf":
-      return { kind: "allOf", key: rule.collection, threshold: membersOf(rule.collection).length, progress: covered(progress, rule) };
+      return { kind: "allOf", key: rule.collection, threshold: membersOf2(rule.collection).length, progress: covered(progress, rule) };
     case "milestone":
       return { kind: "milestone", key: rule.milestone, threshold: 1, progress: progress.milestones.indexOf(rule.milestone) !== -1 ? 1 : 0 };
     case "allUnlockable":
@@ -5280,7 +9452,7 @@ function meets(rule, progress) {
     case "deckGames":
       return (progress.deckGames[rule.deck] || 0) >= rule.threshold;
     case "allOf":
-      return covered(progress, rule) >= membersOf(rule.collection).length;
+      return covered(progress, rule) >= membersOf2(rule.collection).length;
     case "milestone":
       return progress.milestones.indexOf(rule.milestone) !== -1;
     default:
@@ -5567,14 +9739,14 @@ function computeFFA(players) {
   const deltas = /* @__PURE__ */ new Map();
   for (const p of players) {
     const kp = effectiveK(p.gamesPlayed, p.performance) / kDivisor;
-    let sum = 0;
+    let sum2 = 0;
     for (const q of players) {
       if (q.playerId === p.playerId) continue;
       const score = p.place < q.place ? 1 : p.place > q.place ? 0 : 0.5;
       const ep = expectedScore(p.rating, q.rating);
-      sum += kp * (score - ep);
+      sum2 += kp * (score - ep);
     }
-    deltas.set(p.playerId, Math.round(sum));
+    deltas.set(p.playerId, Math.round(sum2));
   }
   return deltas;
 }
@@ -5586,9 +9758,9 @@ function computeTeam(teams, winnerTeamIndex) {
     }
     return deltas;
   }
-  const avgRating = (team) => team.reduce((sum, p) => sum + p.rating, 0) / team.length;
-  const avgPerformance = (team) => team.reduce((sum, p) => sum + p.performance, 0) / team.length;
-  const avgGamesPlayed = (team) => team.reduce((sum, p) => sum + p.gamesPlayed, 0) / team.length;
+  const avgRating = (team) => team.reduce((sum2, p) => sum2 + p.rating, 0) / team.length;
+  const avgPerformance = (team) => team.reduce((sum2, p) => sum2 + p.performance, 0) / team.length;
+  const avgGamesPlayed = (team) => team.reduce((sum2, p) => sum2 + p.gamesPlayed, 0) / team.length;
   const loserTeamIndex = winnerTeamIndex === 0 ? 1 : 0;
   const winner = teams[winnerTeamIndex];
   const loser = teams[loserTeamIndex];
@@ -5948,14 +10120,14 @@ function ipv6Groups(text) {
   }
   const halves = head.split("::");
   if (halves.length > 2) return null;
-  const parse = (part) => {
+  const parse2 = (part) => {
     if (part === "") return [];
     const groups = part.split(":");
     for (const g of groups) if (!HEX_GROUP.test(g)) return null;
     return groups.map((g) => Number.parseInt(g, 16));
   };
-  const left = parse(halves[0]);
-  const right = halves.length === 2 ? parse(halves[1]) : [];
+  const left = parse2(halves[0]);
+  const right = halves.length === 2 ? parse2(halves[1]) : [];
   if (!left || !right) return null;
   const given = left.length + right.length + tail.length;
   if (halves.length === 1) return given === 8 ? left.concat(tail) : null;
@@ -6570,19 +10742,19 @@ function rpcAvatarCatalog(ctx, logger, nk, payload) {
 function rpcAdminAvatarsFor(ctx, logger, nk, payload) {
   requireServer(ctx);
   const input = parsePayload(payload);
-  let view2;
+  let view7;
   if (input.userId !== void 0) {
     if (typeof input.userId !== "string" || !USER_ID2.test(input.userId)) throw runtimeError(INVALID_ARGUMENT, "Invalid userId");
     if (!readProfile(nk, input.userId)) throw runtimeError(NOT_FOUND, "No such player");
-    view2 = viewOf3(nk, input.userId, "");
+    view7 = viewOf3(nk, input.userId, "");
   } else {
     const privileges = input.privileges;
     if (!Array.isArray(privileges) || !privileges.every((p) => typeof p === "string" && PRIVILEGE.test(p)))
       throw runtimeError(INVALID_ARGUMENT, "userId or privileges is required");
     const progress = emptyProgress();
-    view2 = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
+    view7 = catalogView(progress, { privileges, unlocked: [] }, "j_joker", readConfig(nk).achievementsEnabled);
   }
-  return JSON.stringify(__spreadProps(__spreadValues({}, view2), { jokers: view2.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
+  return JSON.stringify(__spreadProps(__spreadValues({}, view7), { jokers: view7.avatars.filter((a) => a.unlocked).map((a) => a.id) }));
 }
 function testingRpcsAllowed(ctx) {
   return settingsOf(ctx).testingRpcs;
@@ -6910,7 +11082,7 @@ function backfillPlayer(nk, userId, privileges, discordLinked) {
   });
   return filled;
 }
-function isDone(nk) {
+function isDone2(nk) {
   return nk.storageRead([
     {
       collection: BACKFILL_COLLECTION,
@@ -6993,7 +11165,7 @@ function rpcAdminAchievementsBackfill(ctx, logger, nk, payload) {
   const { cursor, force } = parseInput(payload);
   if (!readConfig(nk).achievementsEnabled)
     return answer(false, false, NO_COUNTS, "");
-  if (cursor === "" && !force && isDone(nk))
+  if (cursor === "" && !force && isDone2(nk))
     return answer(true, true, NO_COUNTS, "");
   const page = listCollectionPage(nk, PLAYER_COLLECTION, PLAYER_PAGE, cursor);
   const counts = fillPage(nk, logger, page.objects || []);
@@ -7095,7 +11267,7 @@ function signalHome(nk, homeCode, signal2) {
   if (!entry) return null;
   return nk.matchSignal(entry.matchId, JSON.stringify(signal2));
 }
-function statusOf(nk, partyId) {
+function statusOf2(nk, partyId) {
   const binding = readBinding(nk, partyId);
   if (!binding) return null;
   const reply = signalHome(nk, binding.homeCode, { type: "group_status", partyId });
@@ -7109,7 +11281,7 @@ function statusOf(nk, partyId) {
 function groupOf(nk, userId) {
   const objects = nk.storageRead([memberKey(userId)]);
   if (objects.length === 0) return null;
-  const found = statusOf(nk, String(objects[0].value.partyId));
+  const found = statusOf2(nk, String(objects[0].value.partyId));
   if (!found || found.status.memberIds.indexOf(userId) === -1) {
     nk.storageDelete([memberKey(userId)]);
     return null;
@@ -7182,13 +11354,19 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
 function refusedMemberOf(player) {
   return { userId: player.userId, reason: player.refusal.code, mods: refusedMods(player.refusal) };
 }
-function pvpVersionOutliers(nk, userIds) {
+function pvpVersionRefusals(nk, userIds) {
   const versions = {};
   for (const userId of userIds) {
     const report = readModReport(nk, userId);
     versions[userId] = pvpVersionOf(report ? report.mods : []);
   }
-  return versionOutliers(versions);
+  const minimum = readConfig(nk).pvpMinVersion;
+  const refusals = {};
+  for (const userId of versionOutliers(versions)) refusals[userId] = { code: VERSION_MISMATCH };
+  for (const userId of userIds) {
+    if (belowMinimum(versions[userId], minimum)) refusals[userId] = { code: UPDATE_REQUIRED };
+  }
+  return refusals;
 }
 function refusedPlayers(nk, settings, plan) {
   const now = Date.now();
@@ -7199,8 +11377,9 @@ function refusedPlayers(nk, settings, plan) {
     if (refusal) out.push({ userId, refusal });
   }
   if (plan.modId === PVP_MOD_ID) {
-    for (const userId of pvpVersionOutliers(nk, plan.playerIds)) {
-      if (out.every((r) => r.userId !== userId)) out.push({ userId, refusal: { code: VERSION_MISMATCH } });
+    const versions = pvpVersionRefusals(nk, plan.playerIds);
+    for (const userId of Object.keys(versions)) {
+      if (out.every((r) => r.userId !== userId)) out.push({ userId, refusal: versions[userId] });
     }
   }
   return out;
@@ -7222,7 +11401,7 @@ function requeueSolos(nk, plan, refused) {
     if (grouped.indexOf(id) !== -1) continue;
     const own = refused.filter((r) => r.userId === id)[0];
     if (own) {
-      if (isStandingRefusal(own.refusal) || own.refusal.code === VERSION_MISMATCH) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal);
+      if (isStandingRefusal(own.refusal) || own.refusal.code === VERSION_MISMATCH || own.refusal.code === UPDATE_REQUIRED) cancelSoloQueue(nk, id, plan.modId, mode, own.refusal);
       continue;
     }
     notify(nk, id, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
@@ -7320,7 +11499,7 @@ function ownRecords(nk, userId) {
   return out;
 }
 var REMOVED_PREFIX2 = "removed:";
-function isRecord(o) {
+function isRecord2(o) {
   return o.key.indexOf(REMOVED_PREFIX2) !== 0;
 }
 function afterMatchmakerAdd(ctx, logger, nk, output, input) {
@@ -7347,7 +11526,7 @@ function afterMatchmakerAdd(ctx, logger, nk, output, input) {
 function beforeMatchmakerRemove(ctx, logger, nk, envelope) {
   const ticket = field(field(envelope, "matchmakerRemove", "matchmaker_remove"), "ticket", "ticket");
   if (!ctx.userId || typeof ticket !== "string" || !ticket) return envelope;
-  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord(o) && o.value.ticket === ticket).map((o) => o.key);
+  const keys = ownRecords(nk, ctx.userId).filter((o) => isRecord2(o) && o.value.ticket === ticket).map((o) => o.key);
   if (keys.length > 0) {
     deleteRecords(nk, ctx.userId, keys);
   } else {
@@ -7385,7 +11564,7 @@ function sessionsOf(nk, userId) {
 }
 function liveTicketHolders(nk, userIds, exceptTicket) {
   return userIds.filter((userId) => {
-    const records = ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => r.ticket !== exceptTicket);
+    const records = ownRecords(nk, userId).filter(isRecord2).map((o) => o.value).filter((r) => r.ticket !== exceptTicket);
     if (records.length === 0) return false;
     const sessions = sessionsOf(nk, userId);
     return records.some((r) => sessions.indexOf(r.sessionId) !== -1);
@@ -7393,7 +11572,7 @@ function liveTicketHolders(nk, userIds, exceptTicket) {
 }
 function liveRecordsOf(nk, userId) {
   const sessions = sessionsOf(nk, userId);
-  return ownRecords(nk, userId).filter(isRecord).map((o) => o.value).filter((r) => sessions.indexOf(r.sessionId) !== -1);
+  return ownRecords(nk, userId).filter(isRecord2).map((o) => o.value).filter((r) => sessions.indexOf(r.sessionId) !== -1);
 }
 function liveQueuedPlayers(nk, modId, now) {
   const byUser = {};
@@ -7401,7 +11580,7 @@ function liveQueuedPlayers(nk, modId, now) {
   do {
     const page = nk.storageList(null, QUEUE_COLLECTION, LIST_PAGE4, cursor);
     for (const o of page.objects || []) {
-      if (!isRecord(o)) {
+      if (!isRecord2(o)) {
         if (now - Number(o.value.at) > TOMBSTONE_MS) deleteRecords(nk, o.userId, [o.key]);
         continue;
       }
@@ -7585,7 +11764,7 @@ function groupFits(status, group, plan) {
 function resolveGroups(nk, plan) {
   const resolved = { homes: [], faulty: [] };
   for (const group of plan.groups) {
-    const found = statusOf(nk, group.partyId);
+    const found = statusOf2(nk, group.partyId);
     if (found && groupFits(found.status, group, plan))
       resolved.homes.push({ partyId: group.partyId, homeCode: found.binding.homeCode, memberIds: group.memberIds });
     else resolved.faulty.push({ partyId: group.partyId, binding: found ? found.binding : null });
@@ -7608,7 +11787,7 @@ function requeuePartiesOf(nk, partyIds) {
   for (const partyId of partyIds) {
     const binding = readBinding(nk, partyId);
     if (!binding) continue;
-    const found = statusOf(nk, partyId);
+    const found = statusOf2(nk, partyId);
     if (!found || found.status.phase !== "queued") continue;
     clearMatched(nk, binding.modId, queueKey(found.status.mode, "casual"), found.status.memberIds);
     requeueGroup(nk, { partyId, homeCode: binding.homeCode, memberIds: found.status.memberIds });
@@ -7617,7 +11796,7 @@ function requeuePartiesOf(nk, partyIds) {
 
 // src/standing/changed.ts
 var NOTIFICATIONS_STREAM3 = 0;
-var RANKED_PREFIX = "ranked:";
+var RANKED_PREFIX2 = "ranked:";
 function isOnline2(nk, userId) {
   return nk.streamUserList({ mode: NOTIFICATIONS_STREAM3, subject: userId }, true, true).length > 0;
 }
@@ -7626,9 +11805,9 @@ function announceStandings(nk, settings, now) {
   let told = 0;
   for (const userId of reporterIds(nk)) {
     if (!isOnline2(nk, userId)) continue;
-    const view2 = standingFor(nk, settings, userId, now, config);
-    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view2));
-    pushToLobby(nk, userId, { standing: view2.standing });
+    const view7 = standingFor(nk, settings, userId, now, config);
+    notify(nk, userId, NotifyCode.STANDING_CHANGED, "standing_changed", __spreadValues({}, view7));
+    pushToLobby(nk, userId, { standing: view7.standing });
     told++;
   }
   return told;
@@ -7647,10 +11826,10 @@ function regateQueued(nk, settings, now) {
       cancelledParties.push(group.partyId);
       continue;
     }
-    const ranked = record.gameMode.indexOf(RANKED_PREFIX) === 0;
+    const ranked = record.gameMode.indexOf(RANKED_PREFIX2) === 0;
     const refusal = queueRefusalFor(nk, settings, userId, ranked, now);
     if (!refusal || !isStandingRefusal(refusal)) continue;
-    const mode = ranked ? record.gameMode.slice(RANKED_PREFIX.length) : record.gameMode;
+    const mode = ranked ? record.gameMode.slice(RANKED_PREFIX2.length) : record.gameMode;
     cancelSoloQueue(nk, userId, record.modId, mode, refusal);
     clearMatched(nk, record.modId, record.gameMode, [userId]);
     solos++;
@@ -7908,9 +12087,9 @@ function rpcAdminLobbyGet(ctx, logger, nk, payload) {
   requireServer(ctx);
   const lobby = lobbyByCode(nk, parsePayload(payload).code);
   const signal2 = { type: "admin_view" };
-  const view2 = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
-  if (!view2) throw runtimeError(NOT_FOUND, "No such lobby");
-  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view2)), { matchId: lobby.matchId }) });
+  const view7 = nk.matchSignal(lobby.matchId, JSON.stringify(signal2));
+  if (!view7) throw runtimeError(NOT_FOUND, "No such lobby");
+  return JSON.stringify({ lobby: __spreadProps(__spreadValues({}, JSON.parse(view7)), { matchId: lobby.matchId }) });
 }
 function rpcAdminLobbyKick(ctx, logger, nk, payload) {
   requireServer(ctx);
@@ -8473,8 +12652,8 @@ var runSavePart = {
       return { game: lobby.game, params: null, to: "none" };
     const game = lobby.game;
     const held = (_a = game.runSavePending) == null ? void 0 : _a[ctx.from];
-    const same = held && held.id === params.id && held.count === params.count && held.pos === params.pos && held.hash === params.hash;
-    const pending = same ? __spreadProps(__spreadValues({}, held), { parts: __spreadValues({}, held.parts) }) : {
+    const same2 = held && held.id === params.id && held.count === params.count && held.pos === params.pos && held.hash === params.hash;
+    const pending = same2 ? __spreadProps(__spreadValues({}, held), { parts: __spreadValues({}, held.parts) }) : {
       id: params.id,
       count: params.count,
       pos: params.pos,
@@ -8594,6 +12773,7 @@ function remainingParticipants(lobby) {
   return started.players.filter((p) => seated[p.id]).map((p) => p.id);
 }
 function finishGame(lobby, now, override) {
+  var _a, _b;
   const game = lobby.game;
   const started = game.started;
   if (!started) return { lobby, out: [] };
@@ -8604,7 +12784,7 @@ function finishGame(lobby, now, override) {
     started.hostId
   );
   const status = game.contest ? "contested" : override ? override.status : reconciled.status;
-  const placements = status === "abandoned" ? [] : reconciled.placements;
+  const placements = (_a = override == null ? void 0 : override.placements) != null ? _a : status === "abandoned" ? [] : reconciled.placements;
   const run = __spreadValues(__spreadValues({
     runId: started.runId,
     code: lobby.code,
@@ -8626,22 +12806,39 @@ function finishGame(lobby, now, override) {
   const seated = {};
   for (const p of lobby.players) seated[p.id] = true;
   const lateResultTo = game.resultWasPending && status !== "abandoned" ? started.players.filter((p) => !seated[p.id]).map((p) => p.id) : [];
-  const next = __spreadProps(__spreadValues({}, lobby), { lastRunId: started.runId, game: emptyGame() });
+  const ended = ((_b = game.pvp) == null ? void 0 : _b.result) ? { ended: game.pvp } : {};
+  const next = __spreadProps(__spreadValues({}, lobby), { lastRunId: started.runId, game: __spreadValues(__spreadValues({}, emptyGame()), ended) });
   const out = [{ kind: "saveRun", run, logs: game.logs, lateResultTo }];
   if (!override || override.announce) {
-    const ended = { runId: started.runId, status, placements };
+    const ended2 = { runId: started.runId, status, placements };
     out.push({
       kind: "send",
       op: ServerOp.EVENT,
-      payload: { type: "game_ended", lobbyCode: lobby.code, data: ended },
+      payload: { type: "game_ended", lobbyCode: lobby.code, data: ended2 },
       to: next.players.map((p) => p.id)
     });
   }
   return { lobby: next, out };
 }
 function settle(lobby, now) {
+  var _a;
   const started = lobby.game.started;
   if (!started) return { lobby, out: [] };
+  if (runningReferee(lobby) === "server") {
+    const ending2 = pvpHooks.ending(lobby, now);
+    if (ending2 === null || ending2.status === "restarted")
+      return { lobby, out: [] };
+    const decided = __spreadProps(__spreadValues({}, ending2), { announce: true });
+    const logs = lobby.game.logs;
+    if (remainingParticipants(lobby).every((id) => logClosed(logs[id])))
+      return finishGame(lobby, now, decided);
+    const from2 = (_a = lobby.game.settleFrom) != null ? _a : now;
+    if (now - from2 >= lobby.resultTimeoutMs)
+      return finishGame(lobby, now, decided);
+    if (from2 === lobby.game.settleFrom) return { lobby, out: [] };
+    const game = __spreadProps(__spreadValues({}, lobby.game), { settleFrom: from2 });
+    return { lobby: __spreadProps(__spreadValues({}, lobby), { game }), out: [] };
+  }
   const remaining = remainingParticipants(lobby);
   if (remaining.length === 0) return finishGame(lobby, now);
   if (lobby.game.resultPending && !lobby.game.contest) return { lobby, out: [] };
@@ -8689,8 +12886,15 @@ function startedParams(started) {
     players: started.players
   };
 }
-function newGame(lobby, ctx, stake, options) {
-  return {
+function handedToMod(lobby, game, ctx, call) {
+  var _a;
+  if (((_a = game.started) == null ? void 0 : _a.referee) !== "server") return { game, out: [] };
+  if (ctx.config === void 0) return { reject: "no_config" };
+  const step = pvpHooks[call](__spreadProps(__spreadValues({}, lobby), { game }), ctx.config, ctx.now);
+  return "reject" in step ? step : { game: step.lobby.game, out: step.out };
+}
+function newGame(lobby, ctx, stake, options, referee) {
+  return __spreadProps(__spreadValues({}, referee === void 0 ? {} : { referee }), {
     runId: ctx.newId(),
     seed: ctx.newSeed(),
     stake,
@@ -8701,11 +12905,12 @@ function newGame(lobby, ctx, stake, options) {
       id: pl.id,
       displayName: pl.info.displayName
     }, pl.info.preferredJoker ? { avatar: pl.info.preferredJoker } : {}))
-  };
+  });
 }
 var startGame = {
   key: "mpapi_start_game",
   reduce(lobby, ctx, params) {
+    var _a, _b;
     const p = isPlainObject4(params) ? params : {};
     if (p.stake !== void 0 && typeof p.stake !== "number")
       return { reject: "bad_params" };
@@ -8733,39 +12938,76 @@ var startGame = {
       for (const pl of present) versions[pl.id] = pl.info.pvpVersion || "";
       if (versionOutliers(versions).length > 0) return { reject: VERSION_MISMATCH };
     }
+    if (lobby.modId === PVP_MOD_ID && ctx.config === void 0) return { reject: "no_config" };
+    const referee = lobby.modId === PVP_MOD_ID ? nextReferee(lobby, (_b = (_a = ctx.config) == null ? void 0 : _a.pvpServerRulesVersion) != null ? _b : "") : void 0;
     const started = newGame(
       lobby,
       ctx,
       typeof p.stake === "number" ? p.stake : null,
-      options
+      options,
+      referee
     );
-    return {
-      game: __spreadProps(__spreadValues({}, emptyGame()), { started, presence: startingPresence(started) }),
+    const game = __spreadProps(__spreadValues({}, emptyGame()), { started, presence: startingPresence(started) });
+    const handed = handedToMod(lobby, game, ctx, "onStart");
+    if ("reject" in handed) return handed;
+    return __spreadValues({
+      game: handed.game,
       params: startedParams(started)
-    };
+    }, handed.out.length > 0 ? { out: handed.out } : {});
   }
 };
-var restartGame = {
-  key: "mpapi_restart_game",
+function restartGame(lobby, ctx) {
+  const current = lobby.game.started;
+  if (!current) return { reject: "not_in_game" };
+  const finished = finishGame(lobby, ctx.now, {
+    status: "restarted",
+    announce: false
+  });
+  const referee = lobby.modId === PVP_MOD_ID ? savedReferee(lobby.game) : void 0;
+  const started = newGame(
+    finished.lobby,
+    ctx,
+    current.stake,
+    current.options,
+    referee
+  );
+  const game = __spreadProps(__spreadValues({}, emptyGame()), { started, setup: setupForRestart(lobby.game), presence: startingPresence(started) });
+  const handed = handedToMod(finished.lobby, game, ctx, "onRestart");
+  if ("reject" in handed) return handed;
+  return { game: handed.game, params: startedParams(started), out: finished.out.concat(handed.out) };
+}
+function restartedStep(lobby, ctx) {
+  var _a;
+  const result = restartGame(lobby, ctx);
+  if ("reject" in result) return result;
+  const envelope = {
+    cid: "",
+    action: RESTART_KEY,
+    from: SERVER_TARGET,
+    to: BROADCAST_TARGET,
+    params: result.params
+  };
+  const broadcast = {
+    kind: "send",
+    op: ServerOp.ACTION,
+    payload: envelope,
+    to: lobby.players.map((p) => p.id)
+  };
+  return { lobby: __spreadProps(__spreadValues({}, lobby), { game: result.game }), out: [broadcast, ...(_a = result.out) != null ? _a : []] };
+}
+var RESTART_KEY = "mpapi_restart_game";
+var restartAction = {
+  key: RESTART_KEY,
   reduce(lobby, ctx) {
     if (lobby.hostId !== ctx.from) return { reject: "not_host" };
-    const current = lobby.game.started;
-    if (!current) return { reject: "not_in_game" };
-    const finished = finishGame(lobby, ctx.now, {
-      status: "restarted",
-      announce: false
-    });
-    const started = newGame(finished.lobby, ctx, current.stake, current.options);
-    return {
-      game: __spreadProps(__spreadValues({}, emptyGame()), { started, setup: setupForRestart(lobby.game), presence: startingPresence(started) }),
-      params: startedParams(started),
-      out: finished.out
-    };
+    return restartGame(lobby, ctx);
   }
 };
+var SERVER_REFEREE = "server_referee";
 var abandonGame = {
   key: "mpapi_abandon_game",
   reduce(lobby, ctx) {
+    if (runningReferee(lobby) === "server") return { reject: SERVER_REFEREE };
     if (lobby.hostId !== ctx.from) return { reject: "not_host" };
     const current = lobby.game.started;
     if (!current) return { reject: "not_in_game" };
@@ -8783,6 +13025,7 @@ var abandonGame = {
 var reportResult = {
   key: "mpapi_report_result",
   reduce(lobby, ctx, params) {
+    if (runningReferee(lobby) === "server") return { reject: SERVER_REFEREE };
     const started = lobby.game.started;
     if (!started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
@@ -8805,6 +13048,7 @@ var reportResult = {
 var setResultPending = {
   key: "mpapi_set_result_pending",
   reduce(lobby, ctx, params) {
+    if (runningReferee(lobby) === "server") return { reject: SERVER_REFEREE };
     const started = lobby.game.started;
     if (!started) return { reject: "not_in_game" };
     if (!isParticipant(lobby, ctx.from)) return { reject: "not_participant" };
@@ -8953,7 +13197,7 @@ var logEvents = {
 var REGISTRY = {
   [ready.key]: ready,
   [startGame.key]: startGame,
-  [restartGame.key]: restartGame,
+  [restartAction.key]: restartAction,
   [abandonGame.key]: abandonGame,
   [reportResult.key]: reportResult,
   [setResultPending.key]: setResultPending,
@@ -8980,87 +13224,8 @@ function seedFromHex(hex) {
   return seed;
 }
 
-// src/lobby/group_signals.ts
-var GROUP_SIGNALS = [
-  "group_members",
-  "group_status",
-  "group_open",
-  "group_open_refused",
-  "group_queued",
-  "group_unqueued",
-  "group_requeue",
-  "group_matched",
-  "group_cancel",
-  "away_over"
-];
-function isGroupSignal(signal2) {
-  return GROUP_SIGNALS.indexOf(signal2.type) !== -1;
-}
-function unchanged(lobby, reply) {
-  return { step: { lobby, out: [] }, reply: JSON.stringify(reply) };
-}
-function answered(lobby, result) {
-  if (!result.ok) return unchanged(lobby, { refused: result.error });
-  return { step: result.value, reply: JSON.stringify({ groupQueue: viewOf(result.value.lobby) }) };
-}
-function stepped(step) {
-  return { step, reply: JSON.stringify({ groupQueue: viewOf(step.lobby) }) };
-}
-function answerGroupSignal(lobby, signal2, switches, now) {
-  switch (signal2.type) {
-    case "group_members":
-      return unchanged(lobby, homeFactsOf(lobby));
-    case "group_status": {
-      const view2 = viewOf(lobby);
-      return unchanged(lobby, view2 && view2.partyId === signal2.partyId ? view2 : null);
-    }
-    case "group_open":
-      return answered(
-        lobby,
-        openGroupQueue(lobby, signal2.userId, { partyId: signal2.partyId, mode: signal2.mode, teams: signal2.teams }, switches, now)
-      );
-    case "group_open_refused":
-      return stepped(refuseOpen(lobby, signal2.userId, signal2.partyId, signal2.refused));
-    case "group_queued":
-      return answered(lobby, groupQueued(lobby, signal2.partyId, signal2.ticket));
-    case "group_unqueued":
-      return stepped(groupUnqueued(lobby, signal2.partyId, false));
-    case "group_requeue":
-      return stepped(groupUnqueued(lobby, signal2.partyId, true));
-    case "group_matched":
-      return answered(lobby, groupMatched(lobby, signal2.partyId, signal2.matchId, signal2.code, now));
-    case "group_cancel":
-      return answered(lobby, cancelGroup(lobby, signal2.partyId, signal2.reason, signal2.userId || null, signal2.refused));
-    case "away_over":
-      return stepped(awayOver(lobby, signal2.partyId, signal2.code, now));
-  }
-}
-
 // src/lobby/sender_guard.ts
 var SENDER_RULES = {
-  // PvP referee (pvp_api/referee.lua: every broadcast is under is_host()).
-  pvp_win: "host",
-  pvp_player_won: "host",
-  // check_single_survivor: host only
-  pvp_end_pvp: "host",
-  pvp_round_state: "host",
-  pvp_player_lives: "host",
-  pvp_eliminated: "host",
-  pvp_start_blind: "host",
-  pvp_ready_check: "host",
-  // referee.lua: the host asks everyone to confirm Ready before a blind
-  pvp_timer_hand_lost: "host",
-  pvp_nemesis_pairing: "host",
-  pvp_royale_target: "host",
-  pvp_manhunt_target: "host",
-  pvp_team_card_target: "host",
-  pvp_team_score_board: "host",
-  pvp_team_lives: "host",
-  pvp_team_roster: "host",
-  pvp_death_pending: "host",
-  // pvp_api/referee.lua: the host broadcasts a pending death
-  pvp_reseed: "host",
-  // run_actions.lua: host on a unanimous seed vote
   // SPDRN host decisions.
   spdrn_match_timeout: "host",
   // matchmaking/duration.lua: host clock
@@ -9177,17 +13342,17 @@ function almanacAction(lobby, from, key, input, now) {
   var _a;
   if (!["pvp_almanac_open", "pvp_almanac_pick", "pvp_almanac_offer"].includes(key))
     return null;
-  const refuse3 = (reason) => rejectStep(lobby, from, key, reason);
-  if (key === "pvp_almanac_offer") return refuse3("server_only");
+  const refuse5 = (reason) => rejectStep(lobby, from, key, reason);
+  if (key === "pvp_almanac_offer") return refuse5("server_only");
   const started = lobby.game.started;
   if (!isAlmanac(lobby) || !started || started.players.length !== 2 || !started.players.some((p) => p.id === from))
-    return refuse3("unavailable");
-  if (lobby.players.length > 2) return refuse3("too_many_players");
-  if (lobby.players.length !== 2) return refuse3("unavailable");
+    return refuse5("unavailable");
+  if (lobby.players.length > 2) return refuse5("too_many_players");
+  if (lobby.players.length !== 2) return refuse5("unavailable");
   const params = paramsObject(input);
   const ante = params.ante;
   if (typeof ante !== "number" || !MILESTONES2.includes(ante))
-    return refuse3("bad_ante");
+    return refuse5("bad_ante");
   const players = started.players.map((p) => p.id).sort();
   const current = ((_a = lobby.almanac) == null ? void 0 : _a.run) === started.runId ? lobby.almanac : {
     run: started.runId,
@@ -9203,7 +13368,7 @@ function almanacAction(lobby, from, key, input, now) {
       var _a2;
       return !!((_a2 = current.offers[previous]) == null ? void 0 : _a2.picks[p]);
     }))
-      return refuse3("previous_pending");
+      return refuse5("previous_pending");
     const pool = Object.keys(DECK_ANTES).filter(
       (deck) => DECK_ANTES[deck] <= ante && players.every((p) => !current.acquired[p].includes(deck))
     ).sort();
@@ -9226,12 +13391,12 @@ function almanacAction(lobby, from, key, input, now) {
     });
     return { lobby: next2, out: [offerMessage(next2, offer2, from, now)] };
   }
-  if (!existing || params.id !== existing.id) return refuse3("stale_offer");
+  if (!existing || params.id !== existing.id) return refuse5("stale_offer");
   if (existing.deadline !== void 0 && now >= existing.deadline)
     return almanacTick(lobby, now);
   if (existing.picks[from]) return { lobby, out: [offerMessage(lobby, existing, from, now)] };
   if (typeof params.deck !== "string" || !existing.choices.includes(params.deck))
-    return refuse3("not_offered");
+    return refuse5("not_offered");
   const offer = __spreadProps(__spreadValues({}, existing), {
     picks: __spreadProps(__spreadValues({}, existing.picks), { [from]: params.deck })
   });
@@ -9310,7 +13475,7 @@ function roll(state, count2) {
 function eligible(ante) {
   return Object.keys(RULE_ANTES).filter((key) => RULE_ANTES[key] <= ante).sort();
 }
-function view(lobby, state, id, now) {
+function view6(lobby, state, id, now) {
   if (state.rules) {
     return message(
       lobby,
@@ -9364,7 +13529,7 @@ function sharedRulesTick(lobby, now) {
   const next = __spreadProps(__spreadValues({}, lobby), { sharedRules: state });
   return {
     lobby: next,
-    out: state.players.map((id) => view(next, state, id, now))
+    out: state.players.map((id) => view6(next, state, id, now))
   };
 }
 function sharedRulesEnabled(lobby) {
@@ -9388,34 +13553,34 @@ function sharedRulesAction(lobby, from, key, input, now) {
     "pvp_rules_offer"
   ].includes(key))
     return null;
-  const refuse3 = (reason) => rejectStep(lobby, from, key, reason);
-  if (key === "pvp_rules_offer") return refuse3("server_only");
+  const refuse5 = (reason) => rejectStep(lobby, from, key, reason);
+  if (key === "pvp_rules_offer") return refuse5("server_only");
   const started = lobby.game.started;
   if (!started || !sharedRulesEnabled(lobby) || started.players.length !== 2 || !started.players.some((player) => player.id === from))
-    return refuse3("unavailable");
-  if (lobby.players.length > 2) return refuse3("too_many_players");
-  if (lobby.players.length !== 2) return refuse3("unavailable");
+    return refuse5("unavailable");
+  if (lobby.players.length > 2) return refuse5("too_many_players");
+  if (lobby.players.length !== 2) return refuse5("unavailable");
   const params = paramsObject(input);
   const current = ((_a = lobby.sharedRules) == null ? void 0 : _a.run) === started.runId ? lobby.sharedRules : void 0;
   if (key === "pvp_rules_open") {
-    if (from !== lobby.hostId) return refuse3("not_host");
+    if (from !== lobby.hostId) return refuse5("not_host");
     const ante = params.ante;
     if (typeof ante !== "number" || !Number.isInteger(ante) || ante < 3 || typeof params.first_player !== "string" || !started.players.some((player) => player.id === params.first_player))
-      return refuse3("bad_params");
+      return refuse5("bad_params");
     const roundId = typeof params.round_id === "string" && params.round_id.length > 0 ? params.round_id : void 0;
-    if (isAlmanac(lobby) && !roundId) return refuse3("bad_round");
+    if (isAlmanac(lobby) && !roundId) return refuse5("bad_round");
     const id = `${started.runId}:${roundId || ante}`;
     if (current && (ante < current.ante || ((_b = current.retiredIds) == null ? void 0 : _b.includes(id))))
-      return refuse3("stale_encounter");
+      return refuse5("stale_encounter");
     if (current && id === current.id) {
       return {
         lobby,
-        out: current.players.map((id2) => view(lobby, current, id2, now))
+        out: current.players.map((id2) => view6(lobby, current, id2, now))
       };
     }
     if (current && ante === current.ante && !roundId)
-      return refuse3("stale_encounter");
-    if (current && !current.rules) return refuse3("draft_in_progress");
+      return refuse5("stale_encounter");
+    if (current && !current.rules) return refuse5("draft_in_progress");
     const players = started.players.map((player) => player.id).sort();
     const rng = seededRng(id);
     const startingHands = {};
@@ -9449,27 +13614,27 @@ function sharedRulesAction(lobby, from, key, input, now) {
     const next2 = __spreadProps(__spreadValues({}, lobby), { sharedRules: state2 });
     return {
       lobby: next2,
-      out: players.map((player) => view(next2, state2, player, now))
+      out: players.map((player) => view6(next2, state2, player, now))
     };
   }
   if (!current)
-    return key === "pvp_rules_sync" ? { lobby, out: [] } : refuse3("no_draft");
+    return key === "pvp_rules_sync" ? { lobby, out: [] } : refuse5("no_draft");
   if (key === "pvp_rules_sync") {
     const ticked = sharedRulesTick(lobby, now);
     if (ticked.out.length) return ticked;
-    return { lobby, out: [view(lobby, current, from, now)] };
+    return { lobby, out: [view6(lobby, current, from, now)] };
   }
-  if (params.id !== current.id) return refuse3("stale_encounter");
+  if (params.id !== current.id) return refuse5("stale_encounter");
   if (now >= current.deadline) return sharedRulesTick(lobby, now);
-  if (current.rules || current.picks[from]) return refuse3("already_locked");
+  if (current.rules || current.picks[from]) return refuse5("already_locked");
   if (typeof params.rule !== "string" || !current.offers[from].includes(params.rule))
-    return refuse3("not_offered");
+    return refuse5("not_offered");
   const state = __spreadProps(__spreadValues({}, current), { picks: __spreadProps(__spreadValues({}, current.picks), { [from]: params.rule }) });
   if (state.players.every((id) => !!state.picks[id])) resolve(state);
   const next = __spreadProps(__spreadValues({}, lobby), { sharedRules: state });
   return {
     lobby: next,
-    out: state.rules ? state.players.map((id) => view(next, state, id, now)) : [view(next, state, from, now)]
+    out: state.rules ? state.players.map((id) => view6(next, state, id, now)) : [view6(next, state, from, now)]
   };
 }
 
@@ -9525,7 +13690,7 @@ function action(lobby, senderId, data, ctx) {
   const sender = findPlayer(lobby, senderId);
   if (!sender || sender.awaySince === null) return relayAction(lobby, senderId, data, ctx);
   const back = __spreadProps(__spreadValues({}, lobby), {
-    players: lobby.players.map((p) => p.id === senderId ? __spreadProps(__spreadValues({}, p), { awaySince: null }) : p)
+    players: lobby.players.map((p) => p.id === senderId ? __spreadProps(__spreadValues({}, p), { awaySince: null, awayReason: null }) : p)
   });
   const payload = {
     type: "player_reconnected",
@@ -9546,18 +13711,18 @@ function relayAction(lobby, senderId, data, ctx) {
   const cid = stringField(data, "cid").slice(0, MAX_CID_LENGTH);
   const key = stringField(data, "action");
   const to = stringField(data, "to");
-  const refuse3 = (reason) => ({
+  const refuse5 = (reason) => ({
     lobby,
     out: [reject(senderId, { cid, action: key, reason })],
     refused: { key, reason }
   });
   if (!findPlayer(lobby, senderId)) return { lobby, out: [], refused: { key, reason: "no_seat" } };
-  if (!ACTION_KEY_PATTERN.test(key)) return refuse3("bad_action");
+  if (!ACTION_KEY_PATTERN.test(key)) return refuse5("bad_action");
   const params = data.params === void 0 ? null : data.params;
   if (JSON.stringify(params).length > MAX_PARAMS_BYTES)
-    return refuse3("too_large");
+    return refuse5("too_large");
   const budgeted = spend(lobby, senderId, key, ctx.now, spendCost(key, params));
-  if (!budgeted) return refuse3("rate_limited");
+  if (!budgeted) return refuse5("rate_limited");
   const almanac = almanacAction(budgeted, senderId, key, params, ctx.now);
   if (almanac) return almanac;
   const sharedRules = sharedRulesAction(
@@ -9569,16 +13734,16 @@ function relayAction(lobby, senderId, data, ctx) {
   );
   if (sharedRules) return sharedRules;
   const rulesRequired = startBlindRefusal(budgeted, key, params);
-  if (rulesRequired) return refuse3(rulesRequired);
+  if (rulesRequired) return refuse5(rulesRequired);
   const authoritative = authoritativeAction(key);
   if (to === SERVER_TARGET) {
-    if (!authoritative) return refuse3("not_authoritative");
+    if (!authoritative) return refuse5("not_authoritative");
     const result = authoritative.reduce(
       budgeted,
       __spreadProps(__spreadValues({}, ctx), { from: senderId }),
       params
     );
-    if ("reject" in result) return refuse3(result.reject);
+    if ("reject" in result) return refuse5(result.reject);
     const next = __spreadProps(__spreadValues({}, budgeted), { game: result.game });
     const out = [];
     const audience = result.to || "all";
@@ -9612,7 +13777,8 @@ function relayAction(lobby, senderId, data, ctx) {
     const settled = settle(next, ctx.now);
     return { lobby: settled.lobby, out: out.concat(settled.out) };
   }
-  if (authoritative) return refuse3("authoritative_only");
+  if (authoritative) return refuse5("authoritative_only");
+  if (runningReferee(budgeted) === "server" && !PVP_RELAYED_KEYS.includes(key)) return refuse5(SERVER_REFEREE);
   const dropped = senderRefusal(budgeted, senderId, key, params);
   if (dropped)
     return {
@@ -9626,7 +13792,7 @@ function relayAction(lobby, senderId, data, ctx) {
   } else if (findPlayer(budgeted, to)) {
     targets = [to];
   } else {
-    return refuse3("unknown_target");
+    return refuse5("unknown_target");
   }
   const envelope = {
     cid,
@@ -9641,6 +13807,242 @@ function relayAction(lobby, senderId, data, ctx) {
     lobby: budgeted,
     out: [{ kind: "send", op: ServerOp.ACTION, payload: envelope, to: targets }]
   };
+}
+
+// src/lobby/lobby_input.ts
+var LOBBY_INPUT_KINDS = ["lobbyReady", "lobbyStart", "team"];
+function isLobbyInput(data) {
+  return LOBBY_INPUT_KINDS.some((kind) => kind === data.kind);
+}
+function actionOf(data) {
+  if (data.kind === "lobbyReady")
+    return { key: "mpapi_ready", params: { ready: data.ready } };
+  return {
+    key: "mpapi_start_game",
+    params: { stake: data.stake, options: data.options }
+  };
+}
+function takeTeamInput(lobby, senderId, data, now) {
+  var _a, _b, _c, _d, _e, _f;
+  const merged = rulesOf(lobby);
+  const mode = merged.ok ? modeOfQueue(merged.rules.queue_mode) : null;
+  if (mode === null) {
+    const number = data.messageNumber;
+    const verdict = judgeMessageNumber(
+      (_b = (_a = lobby.messageNumbers) == null ? void 0 : _a[senderId]) != null ? _b : 0,
+      number
+    );
+    if (verdict === "unreadable" || !isMessageNumber(number))
+      return {
+        lobby,
+        out: [],
+        refused: { key: "input", reason: "unreadable_header" }
+      };
+    if (verdict === "ignored") return { lobby, out: [] };
+    return {
+      lobby: __spreadProps(__spreadValues({}, lobby), {
+        messageNumbers: __spreadProps(__spreadValues({}, lobby.messageNumbers), { [senderId]: number })
+      }),
+      out: [],
+      refused: { key: "input", reason: "bad_rules" }
+    };
+  }
+  const players = {};
+  for (const seat of lobby.players)
+    players[seat.id] = { team: (_d = (_c = lobby.teamPicks) == null ? void 0 : _c[seat.id]) != null ? _d : null };
+  const taken = apply(
+    { lobbyMode: mode, players, run: null, result: null },
+    senderId,
+    data,
+    (_f = (_e = lobby.messageNumbers) == null ? void 0 : _e[senderId]) != null ? _f : 0,
+    now,
+    { team: teamHandler }
+  );
+  const mine = taken.state.players[senderId];
+  const refused = taken.refusals.length > 0 ? { refused: { key: "input", reason: taken.refusals.join(",") } } : {};
+  if (mine === void 0) return __spreadValues({ lobby, out: [] }, refused);
+  return __spreadValues({
+    lobby: __spreadProps(__spreadValues({}, lobby), {
+      messageNumbers: __spreadProps(__spreadValues({}, lobby.messageNumbers), { [senderId]: taken.lastNumber }),
+      teamPicks: __spreadValues(__spreadValues({}, lobby.teamPicks), mine.team === null ? {} : { [senderId]: mine.team })
+    }),
+    out: []
+  }, refused);
+}
+function takeLobbyInput(lobby, senderId, data, ctx) {
+  var _a, _b, _c, _d, _e;
+  const number = data.messageNumber;
+  if (!lobby.players.some((player) => player.id === senderId))
+    return { lobby, out: [] };
+  if (data.kind === "team") return takeTeamInput(lobby, senderId, data, ctx.now);
+  const verdict = judgeMessageNumber(
+    (_b = (_a = lobby.messageNumbers) == null ? void 0 : _a[senderId]) != null ? _b : 0,
+    number
+  );
+  if (verdict === "unreadable" || !isMessageNumber(number))
+    return {
+      lobby,
+      out: [],
+      refused: { key: "input", reason: "unreadable_header" }
+    };
+  if (verdict === "ignored") return { lobby, out: [] };
+  const counted = __spreadProps(__spreadValues({}, lobby), {
+    messageNumbers: __spreadProps(__spreadValues({}, lobby.messageNumbers), { [senderId]: number })
+  });
+  const asked = actionOf(data);
+  const step = action(
+    counted,
+    senderId,
+    { cid: "", action: asked.key, to: SERVER_TARGET, params: asked.params },
+    ctx
+  );
+  if (((_c = step.refused) == null ? void 0 : _c.reason) === "rate_limited") return { lobby, out: [] };
+  const out = step.out.filter(
+    (sent) => !(sent.kind === "send" && sent.op === ServerOp.ACTION_REJECTED)
+  );
+  if (data.kind !== "lobbyStart") return __spreadProps(__spreadValues({}, step), { out });
+  return __spreadProps(__spreadValues({}, step), {
+    out,
+    lobby: __spreadProps(__spreadValues({}, step.lobby), {
+      startAnswers: __spreadProps(__spreadValues({}, step.lobby.startAnswers), {
+        [senderId]: { number, refused: (_e = (_d = step.refused) == null ? void 0 : _d.reason) != null ? _e : null }
+      })
+    })
+  });
+}
+function isSettingsInput(data) {
+  return data.kind === "lobbySettings";
+}
+function takeSettingsInput(lobby, senderId, data) {
+  var _a, _b;
+  const number = data.messageNumber;
+  if (!lobby.players.some((player) => player.id === senderId))
+    return { lobby, out: [] };
+  const verdict = judgeMessageNumber(
+    (_b = (_a = lobby.messageNumbers) == null ? void 0 : _a[senderId]) != null ? _b : 0,
+    number
+  );
+  if (verdict === "unreadable" || !isMessageNumber(number))
+    return {
+      lobby,
+      out: [],
+      refused: { key: "input", reason: "unreadable_header" }
+    };
+  const pvp = lobby.game.pvp;
+  if (verdict === "ignored" || pvp !== void 0 && pvp.players[senderId] === void 0)
+    return { lobby, out: [] };
+  const counted = __spreadProps(__spreadValues({}, lobby), {
+    messageNumbers: __spreadProps(__spreadValues({}, lobby.messageNumbers), { [senderId]: number })
+  });
+  const step = setMetadata(counted, senderId, data.settings);
+  return {
+    lobby: step.lobby,
+    out: step.out.filter(
+      (sent) => !(sent.kind === "send" && sent.op === ServerOp.ERROR)
+    )
+  };
+}
+var readyOf = (lobby, id) => lobby.game.ready[id] === true ? "ready" : "not ready";
+function lobbyView(lobby, player, now) {
+  var _a, _b, _c;
+  const number = (_b = (_a = lobby.messageNumbers) == null ? void 0 : _a[player]) != null ? _b : 0;
+  const answer2 = (_c = lobby.startAnswers) == null ? void 0 : _c[player];
+  const ended = endedView(lobby, player, now);
+  return {
+    serverTime: now,
+    lastMessageReceived: number,
+    me: player,
+    match: __spreadValues({
+      stage: "lobby",
+      result: null,
+      run: null,
+      lobby: {
+        // The game reads a flag per seat.
+        ready: Object.fromEntries(
+          lobby.players.map((seat) => [
+            seat.id,
+            readyOf(lobby, seat.id) === "ready"
+          ])
+        ),
+        away: lobby.players.filter((seat) => seat.awaySince !== null).map((seat) => seat.id),
+        // Only the answer to the latest input counts: an older one is history.
+        start: answer2 !== void 0 && answer2.number === number ? answer2 : null
+      }
+    }, ended === null ? {} : { ended }),
+    // Only a player who has picked a team is listed, as the match's view shows it.
+    players: Object.fromEntries(
+      lobby.players.flatMap((seat) => {
+        var _a2;
+        const team = (_a2 = lobby.teamPicks) == null ? void 0 : _a2[seat.id];
+        const status = seat.awaySince === null ? "playing" : "away";
+        return team === void 0 ? [] : [[seat.id, { team, status }]];
+      })
+    ),
+    timers: {
+      timerButton: "none",
+      deadlines: [],
+      pauses: [],
+      pvpBanks: {},
+      anteBanks: {}
+    },
+    onlyMine: { traps: [], inbox: [], inboxNewest: 0 }
+  };
+}
+
+// src/lobby/group_signals.ts
+var GROUP_SIGNALS = [
+  "group_members",
+  "group_status",
+  "group_open",
+  "group_open_refused",
+  "group_queued",
+  "group_unqueued",
+  "group_requeue",
+  "group_matched",
+  "group_cancel",
+  "away_over"
+];
+function isGroupSignal(signal2) {
+  return GROUP_SIGNALS.indexOf(signal2.type) !== -1;
+}
+function unchanged(lobby, reply) {
+  return { step: { lobby, out: [] }, reply: JSON.stringify(reply) };
+}
+function answered(lobby, result) {
+  if (!result.ok) return unchanged(lobby, { refused: result.error });
+  return { step: result.value, reply: JSON.stringify({ groupQueue: viewOf(result.value.lobby) }) };
+}
+function stepped(step) {
+  return { step, reply: JSON.stringify({ groupQueue: viewOf(step.lobby) }) };
+}
+function answerGroupSignal(lobby, signal2, switches, now) {
+  switch (signal2.type) {
+    case "group_members":
+      return unchanged(lobby, homeFactsOf(lobby));
+    case "group_status": {
+      const view7 = viewOf(lobby);
+      return unchanged(lobby, view7 && view7.partyId === signal2.partyId ? view7 : null);
+    }
+    case "group_open":
+      return answered(
+        lobby,
+        openGroupQueue(lobby, signal2.userId, { partyId: signal2.partyId, mode: signal2.mode, teams: signal2.teams }, switches, now)
+      );
+    case "group_open_refused":
+      return stepped(refuseOpen(lobby, signal2.userId, signal2.partyId, signal2.refused));
+    case "group_queued":
+      return answered(lobby, groupQueued(lobby, signal2.partyId, signal2.ticket));
+    case "group_unqueued":
+      return stepped(groupUnqueued(lobby, signal2.partyId, false));
+    case "group_requeue":
+      return stepped(groupUnqueued(lobby, signal2.partyId, true));
+    case "group_matched":
+      return answered(lobby, groupMatched(lobby, signal2.partyId, signal2.matchId, signal2.code, now));
+    case "group_cancel":
+      return answered(lobby, cancelGroup(lobby, signal2.partyId, signal2.reason, signal2.userId || null, signal2.refused));
+    case "away_over":
+      return stepped(awayOver(lobby, signal2.partyId, signal2.code, now));
+  }
 }
 
 // src/lobby/chat.ts
@@ -9777,12 +14179,12 @@ function messageOf(refusal) {
   }
 }
 function rejoinRejectMessage(refusal) {
-  const view2 = {
+  const view7 = {
     reason: refusal.reason,
     mods: refusal.reason === "mods_not_allowed" ? refusal.mods : [],
     message: messageOf(refusal)
   };
-  return REJOIN_REFUSED_PREFIX + JSON.stringify(view2);
+  return REJOIN_REFUSED_PREFIX + JSON.stringify(view7);
 }
 
 // src/lobby/match.ts
@@ -9815,15 +14217,84 @@ function clearCurrent(nk, ctx, userId) {
     nk.storageDelete([key]);
   }
 }
-function apply(ctx, logger, nk, dispatcher, state, raw) {
+function withViews(logger, state, step, every, now, rulesVersion) {
+  var _a;
+  const refereed = refereeOf(step.lobby, rulesVersion) === "server" || step.lobby.game.ended !== void 0;
+  const pvp = step.lobby.game.pvp;
+  const sent = (_a = state.lastViewSent) != null ? _a : {};
+  if (refereed && pvp === void 0 && step.lobby.game.started === null) {
+    const shown2 = changedViews(
+      sent,
+      step.lobby.players.map((seat) => seat.id),
+      (player) => lobbyView(step.lobby, player, now)
+    );
+    const out = shown2.views.map(({ player, view: view7 }) => ({
+      kind: "send",
+      op: ServerOp.VIEW,
+      payload: view7,
+      to: [player]
+    }));
+    return { step: { lobby: step.lobby, out: step.out.concat(out) }, lastViewSent: shown2.sent };
+  }
+  if (!refereed || pvp === void 0 || !every && pvp === state.lobby.game.pvp) {
+    return { step, lastViewSent: state.lastViewSent };
+  }
+  const shown = tryHook(logger, step.lobby, "views", { out: [], sent }, () => pvpHooks.views(step.lobby, sent, now));
+  return { step: { lobby: step.lobby, out: step.out.concat(shown.out) }, lastViewSent: shown.sent };
+}
+function tryHook(logger, lobby, call, fallback, run, throws) {
+  var _a;
+  try {
+    const result = run();
+    if (throws) throws[call] = 0;
+    return result;
+  } catch (e) {
+    logger.error("Lobby %s: %s threw: %v", lobby.code, call, e);
+    if (throws) throws[call] = ((_a = throws[call]) != null ? _a : 0) + 1;
+    return fallback;
+  }
+}
+var THROWS_BEFORE_ABANDON = 10;
+function abandonIfStuck(ctx, logger, nk, dispatcher, state, throws, now) {
+  const call = Object.keys(throws).find((name) => throws[name] >= THROWS_BEFORE_ABANDON);
+  if (call === void 0 || state.lobby.game.started === null) return state;
+  logger.error("Lobby %s: %s threw %d times in a row, the game is abandoned", state.lobby.code, call, throws[call]);
+  for (const name of Object.keys(throws)) throws[name] = 0;
+  return abandonGame2(ctx, logger, nk, dispatcher, state, now);
+}
+var RULES_REFRESH_MS = 5e3;
+function rulesVersionFor(nk, lobby) {
+  return lobby.modId === PVP_MOD_ID && lobby.game.started === null ? readConfig(nk).pvpServerRulesVersion : "";
+}
+function rulesVersionIn(nk, state) {
+  var _a, _b;
+  return (_b = (_a = state.rules) == null ? void 0 : _a.version) != null ? _b : rulesVersionFor(nk, state.lobby);
+}
+function withRules(nk, state, now) {
+  const { lobby } = state;
+  if (lobby.modId !== PVP_MOD_ID || lobby.game.started !== null) return state;
+  if (state.rules !== void 0 && now - state.rules.readAt < RULES_REFRESH_MS) return state;
+  return __spreadProps(__spreadValues({}, state), { rules: { version: rulesVersionFor(nk, lobby), readAt: now } });
+}
+function abandonGame2(ctx, logger, nk, dispatcher, state, now) {
+  return apply2(ctx, logger, nk, dispatcher, state, finishGame(state.lobby, now, { status: "abandoned", announce: true }));
+}
+function decidedEnding(logger, lobby, now) {
+  const ending2 = runningReferee(lobby) === "server" ? tryHook(logger, lobby, "ending", null, () => pvpHooks.ending(lobby, now)) : null;
+  return ending2 === null || ending2.status === "restarted" ? null : ending2;
+}
+function apply2(ctx, logger, nk, dispatcher, state, raw, everyView = false, now = Date.now()) {
   if (state.lobby.closed) return null;
   let step = raw;
   if (step.lobby.closed && step.lobby.game.started) {
-    const finished = finishGame(step.lobby, Date.now());
+    const ending2 = decidedEnding(logger, step.lobby, now);
+    const finished = finishGame(step.lobby, now, ending2 === null ? void 0 : __spreadProps(__spreadValues({}, ending2), { announce: true }));
     step = { lobby: finished.lobby, out: step.out.concat(finished.out) };
   }
   const released = releaseGroups(state.lobby.game.started !== null, step.lobby);
   step = { lobby: released.lobby, out: step.out.concat(released.out) };
+  const shown = withViews(logger, state, step, everyView, now, rulesVersionIn(nk, state));
+  step = shown.step;
   const presences = __spreadValues({}, state.presences);
   for (const effect of step.out) {
     runEffect(ctx, logger, nk, dispatcher, step.lobby, presences, effect);
@@ -9837,7 +14308,11 @@ function apply(ctx, logger, nk, dispatcher, state, raw) {
     logger.info("Lobby %s closed", step.lobby.code);
     return null;
   }
-  return __spreadProps(__spreadValues({}, state), { lobby: step.lobby, presences, label });
+  return __spreadValues(__spreadProps(__spreadValues({}, state), {
+    lobby: step.lobby,
+    presences,
+    label
+  }), shown.lastViewSent === void 0 ? {} : { lastViewSent: shown.lastViewSent });
 }
 function judged(nk, logger, run, logs, events) {
   const checks = logChecksOf(run, logs, (input) => nk.sha256Hash(input));
@@ -10031,7 +14506,6 @@ function lobbyMatchInit(ctx, logger, nk, params) {
     requiredStanding: requiredStandingParam(params),
     now: Date.now(),
     graceMs: secondsFromEnv(ctx, "LOBBY_GRACE_SECONDS", DEFAULT_GRACE_MS),
-    catchUpLimitMs: catchUpLimitMsFor(stringParam(params, "modId"), Number(ctx.env.LOBBY_CATCH_UP_LIMIT_SECONDS) || void 0),
     resultTimeoutMs: secondsFromEnv(
       ctx,
       "RESULT_TIMEOUT_SECONDS",
@@ -10142,13 +14616,14 @@ function lobbyMatchJoinAttempt(ctx, logger, nk, dispatcher, tickNumber, state, p
   }
   const info = joinInfoOf(nk, settingsOf(ctx), presence, meta);
   return {
-    state: __spreadProps(__spreadValues({}, state), {
+    state: __spreadValues(__spreadProps(__spreadValues({}, state), {
       pendingInfo: __spreadProps(__spreadValues({}, state.pendingInfo), { [presence.userId]: info })
-    }),
+    }), refereeOf(state.lobby, rulesVersionFor(nk, state.lobby)) === "server" ? { pendingJoinKeys: __spreadProps(__spreadValues({}, state.pendingJoinKeys), { [presence.userId]: meta }) } : {}),
     accept: true
   };
 }
 function lobbyMatchJoin(ctx, logger, nk, dispatcher, tickNumber, state, presences) {
+  var _a, _b;
   let current = state;
   for (const presence of presences) {
     if (!current) break;
@@ -10158,7 +14633,7 @@ function lobbyMatchJoin(ctx, logger, nk, dispatcher, tickNumber, state, presence
         pendingSpectators: pendingSpectators.filter((id) => id !== presence.userId),
         presences: __spreadProps(__spreadValues({}, current.presences), { [presence.userId]: presence })
       });
-      current = apply(ctx, logger, nk, dispatcher, watching, addSpectator(watching.lobby, presence.userId));
+      current = apply2(ctx, logger, nk, dispatcher, watching, addSpectator(watching.lobby, presence.userId));
       continue;
     }
     const pendingInfo = __spreadValues({}, current.pendingInfo);
@@ -10168,17 +14643,61 @@ function lobbyMatchJoin(ctx, logger, nk, dispatcher, tickNumber, state, presence
       mods: null
     };
     delete pendingInfo[presence.userId];
-    const attached = __spreadProps(__spreadValues({}, current), {
+    const pendingJoinKeys = __spreadValues({}, current.pendingJoinKeys);
+    const joinKeys = pendingJoinKeys[presence.userId] || {};
+    delete pendingJoinKeys[presence.userId];
+    const lastViewSent = Object.fromEntries(
+      Object.entries((_a = current.lastViewSent) != null ? _a : {}).filter(([id]) => id !== presence.userId)
+    );
+    const attached = __spreadValues(__spreadProps(__spreadValues({}, current), {
       pendingInfo,
+      pendingJoinKeys,
       presences: __spreadProps(__spreadValues({}, current.presences), { [presence.userId]: presence })
-    });
-    current = apply(
+    }), current.lastViewSent === void 0 ? {} : { lastViewSent });
+    const now = Date.now();
+    const joined = join(attached.lobby, presence.userId, presence.sessionId, info, now);
+    const config = joined.lobby.modId === PVP_MOD_ID ? readConfig(nk) : null;
+    const refereed = config !== null && refereeOf(joined.lobby, config.pvpServerRulesVersion) === "server";
+    const handed = config === null ? null : (_b = joinRefusal(joined.lobby, presence.userId, config.pvpMinVersion)) != null ? _b : refereed ? tryHook(
+      logger,
+      joined.lobby,
+      "onJoin",
+      { reject: "hook_failed" },
+      () => pvpHooks.onJoin(joined.lobby, { playerId: presence.userId, joinKeys }, now)
+    ) : null;
+    const replaced = current.presences[presence.userId];
+    const replacing = replaced !== void 0 && replaced.sessionId !== presence.sessionId;
+    if (handed && "reject" in handed) {
+      logger.info("Lobby %s refused %s: %s", attached.lobby.code, presence.userId, handed.reject);
+      const refused = {
+        lobby: attached.lobby,
+        out: [
+          { kind: "send", op: ServerOp.ERROR, payload: { message: handed.reject }, to: [presence.userId] },
+          { kind: "kick", userId: presence.userId }
+        ]
+      };
+      const sentAway = apply2(ctx, logger, nk, dispatcher, attached, refused);
+      current = sentAway && replacing ? __spreadProps(__spreadValues({}, sentAway), { presences: __spreadProps(__spreadValues({}, sentAway.presences), { [presence.userId]: replaced }) }) : sentAway;
+      continue;
+    }
+    if (refereed && replacing) {
+      dispatcher.broadcastMessage(
+        ServerOp.EVENT,
+        JSON.stringify(connectionReplacedNotice(attached.lobby, presence.userId)),
+        [replaced],
+        null,
+        true
+      );
+      dispatcher.matchKick([replaced]);
+    }
+    current = apply2(
       ctx,
       logger,
       nk,
       dispatcher,
       attached,
-      join(attached.lobby, presence.userId, presence.sessionId, info, Date.now())
+      handed ? { lobby: handed.lobby, out: joined.out.concat(handed.out) } : joined,
+      refereed
     );
   }
   return current ? { state: current } : null;
@@ -10196,10 +14715,10 @@ function lobbyMatchLeave(ctx, logger, nk, dispatcher, tickNumber, state, presenc
     }
     if (isSpectator(current.lobby, presence.userId)) {
       if (attached && attached.sessionId === presence.sessionId)
-        current = apply(ctx, logger, nk, dispatcher, current, removeSpectator(current.lobby, presence.userId));
+        current = apply2(ctx, logger, nk, dispatcher, current, removeSpectator(current.lobby, presence.userId));
       continue;
     }
-    current = apply(
+    current = apply2(
       ctx,
       logger,
       nk,
@@ -10220,15 +14739,32 @@ function parseMessage(nk, message2) {
     return null;
   }
 }
-function stepForMessage(nk, lobby, senderId, opCode, data) {
+function stepForMessage(nk, lobby, senderId, sessionId, opCode, data) {
   switch (opCode) {
     case ClientOp.ACTION:
-      return action(lobby, senderId, data, {
+      return action(lobby, senderId, data, __spreadValues({
         now: Date.now(),
         newSeed: () => seedFromHex(nk.uuidv4()),
         newId: () => nk.uuidv4(),
         random: Math.random
-      });
+      }, lobby.modId === PVP_MOD_ID ? { config: readConfig(nk) } : {}));
+    case ClientOp.INPUT: {
+      if (refereeOf(lobby, rulesVersionFor(nk, lobby)) !== "server" && lobby.game.ended === void 0) return null;
+      if (isSettingsInput(data)) return takeSettingsInput(lobby, senderId, data);
+      if (lobby.game.pvp === void 0 && isLobbyInput(data))
+        return takeLobbyInput(lobby, senderId, data, {
+          now: Date.now(),
+          newSeed: () => seedFromHex(nk.uuidv4()),
+          newId: () => nk.uuidv4(),
+          random: Math.random,
+          config: readConfig(nk)
+        });
+      const taken = pvpHooks.onInput(lobby, { playerId: senderId, session: sessionId }, data, Date.now());
+      return __spreadValues({
+        lobby: taken.lobby,
+        out: []
+      }, taken.refusals.length > 0 ? { refused: { key: "input", reason: taken.refusals.join(",") } } : {});
+    }
     case ClientOp.LEAVE:
       if (isSpectator(lobby, senderId)) {
         const stopped = removeSpectator(lobby, senderId);
@@ -10263,19 +14799,52 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
       return null;
   }
 }
+function restartIfVoted(ctx, logger, nk, dispatcher, state, now, throws) {
+  if (runningReferee(state.lobby) !== "server") return state;
+  const ending2 = tryHook(logger, state.lobby, "ending", null, () => pvpHooks.ending(state.lobby, now), throws);
+  if ((ending2 == null ? void 0 : ending2.status) !== "restarted") return state;
+  const restart = tryHook(
+    logger,
+    state.lobby,
+    "restart",
+    { reject: "hook_failed" },
+    () => restartedStep(state.lobby, {
+      now,
+      newSeed: () => seedFromHex(nk.uuidv4()),
+      newId: () => nk.uuidv4(),
+      random: Math.random,
+      config: readConfig(nk)
+    })
+  );
+  if (!("reject" in restart)) return apply2(ctx, logger, nk, dispatcher, state, restart);
+  logger.error("Lobby %s: could not restart: %s", state.lobby.code, restart.reject);
+  return abandonGame2(ctx, logger, nk, dispatcher, state, now);
+}
+function startRunIfSetupDone(ctx, logger, nk, dispatcher, state, now, throws) {
+  const pvp = state.lobby.game.pvp;
+  if (pvp === void 0 || pvp.run !== null) return state;
+  const step = tryHook(
+    logger,
+    state.lobby,
+    "startRunWhenSetupDone",
+    { lobby: state.lobby, out: [] },
+    () => pvpHooks.startRunWhenSetupDone(state.lobby, readConfig(nk), now),
+    throws
+  );
+  if (!("reject" in step)) return apply2(ctx, logger, nk, dispatcher, state, step);
+  logger.error("Lobby %s: could not start the run: %s", state.lobby.code, step.reject);
+  return abandonGame2(ctx, logger, nk, dispatcher, state, now);
+}
 function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages) {
   if (state.stopping || state.lobby.closed) return null;
-  let current = state;
+  const throws = __spreadValues({}, state.hookThrows);
+  let current = withRules(nk, state, Date.now());
   for (const message2 of messages) {
     if (!current) break;
     const data = parseMessage(nk, message2);
-    const step = data && stepForMessage(
-      nk,
-      current.lobby,
-      message2.sender.userId,
-      message2.opCode,
-      data
-    );
+    const lobby = current.lobby;
+    const read2 = () => data ? stepForMessage(nk, lobby, message2.sender.userId, message2.sender.sessionId, message2.opCode, data) : null;
+    const step = lobby.modId === PVP_MOD_ID ? tryHook(logger, lobby, "a message", null, read2) : read2();
     if (!step) {
       logger.warn(
         "Lobby %s: dropped op %d from %s",
@@ -10306,48 +14875,50 @@ function lobbyMatchLoop(ctx, logger, nk, dispatcher, tickNumber, state, messages
         d.kind === "not_self" ? `; claimed ${d.claimed}` : ""
       );
     }
-    current = apply(ctx, logger, nk, dispatcher, current, step);
+    current = apply2(ctx, logger, nk, dispatcher, current, step);
   }
   if (!current) return null;
   const now = Date.now();
-  const ticked = apply(ctx, logger, nk, dispatcher, current, tick(current.lobby, now));
+  const ticked = apply2(ctx, logger, nk, dispatcher, current, tick(current.lobby, now), false, now);
   if (!ticked) return null;
-  const rulesTicked = apply(
+  const refereed = runningReferee(ticked.lobby) === "server";
+  const shellTicked = refereed ? apply2(
     ctx,
     logger,
     nk,
     dispatcher,
     ticked,
-    sharedRulesTick(ticked.lobby, now)
-  );
+    {
+      lobby: tryHook(logger, ticked.lobby, "onTick", ticked.lobby, () => pvpHooks.onTick(ticked.lobby, now), throws),
+      out: []
+    },
+    true,
+    now
+  ) : ticked;
+  if (!shellTicked) return null;
+  const rulesTicked = apply2(ctx, logger, nk, dispatcher, shellTicked, sharedRulesTick(shellTicked.lobby, now), false, now);
   if (!rulesTicked) return null;
-  const decksTicked = apply(
-    ctx,
-    logger,
-    nk,
-    dispatcher,
-    rulesTicked,
-    almanacTick(rulesTicked.lobby, now)
-  );
+  const decksTicked = apply2(ctx, logger, nk, dispatcher, rulesTicked, almanacTick(rulesTicked.lobby, now), false, now);
   if (!decksTicked) return null;
-  const setupTicked = apply(
+  const setupTicked = apply2(
     ctx,
     logger,
     nk,
     dispatcher,
     decksTicked,
-    setupTick(decksTicked.lobby, now, Math.random)
+    setupTick(decksTicked.lobby, now, Math.random),
+    false,
+    now
   );
   if (!setupTicked) return null;
-  const settled = apply(
-    ctx,
-    logger,
-    nk,
-    dispatcher,
-    setupTicked,
-    settle(setupTicked.lobby, now)
-  );
-  return settled ? { state: settled } : null;
+  const running = startRunIfSetupDone(ctx, logger, nk, dispatcher, setupTicked, now, throws);
+  if (!running) return null;
+  const restarted = refereed ? restartIfVoted(ctx, logger, nk, dispatcher, running, now, throws) : running;
+  if (!restarted) return null;
+  const ending2 = refereed ? tryHook(logger, restarted.lobby, "settle", { lobby: restarted.lobby, out: [] }, () => settle(restarted.lobby, now), throws) : settle(restarted.lobby, now);
+  const settled = apply2(ctx, logger, nk, dispatcher, restarted, ending2, false, now);
+  const kept = settled && refereed ? abandonIfStuck(ctx, logger, nk, dispatcher, settled, throws, now) : settled;
+  return kept ? { state: refereed ? __spreadProps(__spreadValues({}, kept), { hookThrows: throws }) : kept } : null;
 }
 function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) {
   let signal2;
@@ -10361,7 +14932,7 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
   }
   if (isGroupSignal(signal2)) {
     const answer2 = answerGroupSignal(state.lobby, signal2, readConfig(nk), Date.now());
-    const next = apply(ctx, logger, nk, dispatcher, state, answer2.step);
+    const next = apply2(ctx, logger, nk, dispatcher, state, answer2.step);
     return { state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }), data: answer2.reply };
   }
   if (signal2.type === "get_active") {
@@ -10389,7 +14960,7 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     };
   }
   if (signal2.type === "chat_post") {
-    const next = apply(
+    const next = apply2(
       ctx,
       logger,
       nk,
@@ -10400,7 +14971,7 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
     return { state: next || state, data: "ok" };
   }
   if (signal2.type === "player_info") {
-    const next = apply(
+    const next = apply2(
       ctx,
       logger,
       nk,
@@ -10412,7 +14983,7 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
   }
   if (signal2.type === "admin_remove") {
     const member = state.lobby.players.some((p) => p.id === signal2.userId);
-    const next = apply(
+    const next = apply2(
       ctx,
       logger,
       nk,
@@ -10431,14 +15002,14 @@ function lobbyMatchSignal(ctx, logger, nk, dispatcher, tickNumber, state, data) 
   }
   if (signal2.type === "admin_view") return { state, data: JSON.stringify(adminView(state.lobby)) };
   if (signal2.type === "admin_close") {
-    const next = apply(ctx, logger, nk, dispatcher, state, close(state.lobby));
+    const next = apply2(ctx, logger, nk, dispatcher, state, close(state.lobby));
     return {
       state: next || __spreadProps(__spreadValues({}, state), { lobby: __spreadProps(__spreadValues({}, state.lobby), { closed: true }) }),
       data: "ok"
     };
   }
   if (signal2.type === "leave") {
-    const next = apply(
+    const next = apply2(
       ctx,
       logger,
       nk,
@@ -10475,7 +15046,7 @@ function lobbyMatchTerminate(ctx, logger, nk, dispatcher, tickNumber, state, gra
       }
     }
   }
-  apply(ctx, logger, nk, dispatcher, state, close(state.lobby));
+  apply2(ctx, logger, nk, dispatcher, state, close(state.lobby));
   return { state };
 }
 
@@ -10704,7 +15275,7 @@ function partyIdOf(message2) {
   const id = field2(message2, "partyId", "party_id");
   return typeof id === "string" ? id : "";
 }
-function refuse(refusal) {
+function refuse3(refusal) {
   return runtimeError(PERMISSION_DENIED, refusalMessage(refusal));
 }
 function memberFactsOf(nk, settings, modId, memberIds, exceptTicket, now) {
@@ -10714,8 +15285,9 @@ function memberFactsOf(nk, settings, modId, memberIds, exceptTicket, now) {
     if (refused) refusals[id] = refused;
   }
   if (modId === PVP_MOD_ID) {
-    for (const id of pvpVersionOutliers(nk, memberIds)) {
-      if (!refusals[id]) refusals[id] = { code: VERSION_MISMATCH };
+    const versions = pvpVersionRefusals(nk, memberIds);
+    for (const id of Object.keys(versions)) {
+      if (!refusals[id]) refusals[id] = versions[id];
     }
   }
   return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket) };
@@ -10736,19 +15308,19 @@ function partyTicketOf(add) {
 function beforePartyJoin(ctx, logger, nk, envelope) {
   const partyId = partyIdOf(field2(envelope, "partyJoin", "party_join"));
   if (!ctx.userId || !partyId || !readBinding(nk, partyId)) return envelope;
-  const found = statusOf(nk, partyId);
+  const found = statusOf2(nk, partyId);
   if (!found) return envelope;
-  const refused = joinRefusal(found.status, ctx.userId);
-  if (refused) throw refuse(refused);
+  const refused = joinRefusal2(found.status, ctx.userId);
+  if (refused) throw refuse3(refused);
   const queueRefused = queueRefusalFor(nk, settingsOf(ctx), ctx.userId, false, Date.now());
-  if (queueRefused) throw refuse(memberRefused(ctx.userId, queueRefused));
+  if (queueRefused) throw refuse3(memberRefused(ctx.userId, queueRefused));
   return envelope;
 }
 function beforePartyMatchmakerAdd(ctx, logger, nk, envelope) {
   if (!ctx.userId) return envelope;
   const add = field2(envelope, "partyMatchmakerAdd", "party_matchmaker_add");
   const partyId = partyIdOf(add);
-  const found = partyId ? statusOf(nk, partyId) : null;
+  const found = partyId ? statusOf2(nk, partyId) : null;
   const memberIds = found ? found.status.memberIds : [];
   const refused = ticketRefusal({
     switches: readConfig(nk),
@@ -10760,7 +15332,7 @@ function beforePartyMatchmakerAdd(ctx, logger, nk, envelope) {
   });
   if (refused) {
     logger.info("Group ticket for party %s refused: %s", partyId, refused.code);
-    throw refuse(refused);
+    throw refuse3(refused);
   }
   return envelope;
 }
@@ -10791,7 +15363,7 @@ function beforePartyMatchmakerRemove(ctx, logger, nk, envelope) {
   const partyId = partyIdOf(remove3);
   const ticket = field2(remove3, "ticket", "ticket");
   if (!partyId || typeof ticket !== "string") return envelope;
-  const found = statusOf(nk, partyId);
+  const found = statusOf2(nk, partyId);
   if (!found) return envelope;
   if (found.status.phase !== "queued" || found.status.ticket !== ticket) {
     markTicketRemoved(nk, ticket);
@@ -11203,7 +15775,7 @@ function planResultNotifications(before, after, decidesContest, contesters = [])
 }
 
 // src/rating/match_edit.ts
-var refuse2 = (refusal) => ({
+var refuse4 = (refusal) => ({
   ok: false,
   refusal
 });
@@ -11217,8 +15789,8 @@ function winners(placements) {
 function planMatchEdit(run, current, edit) {
   var _b, _c, _d, _e;
   if (edit.placements === null && run.voided)
-    return refuse2({ kind: "unchanged" });
-  if (edit.placements !== null && run.voided) return refuse2({ kind: "voided" });
+    return refuse4({ kind: "unchanged" });
+  if (edit.placements !== null && run.voided) return refuse4({ kind: "voided" });
   const rated = run.rankedMode !== void 0 && edit.season !== null;
   const hadRatings = hasRatings(run);
   let next = run;
@@ -11230,7 +15802,7 @@ function planMatchEdit(run, current, edit) {
       places = overturn.places;
     } else if (overturn.refusal.kind === "unchanged" && !hadRatings && rated && run.placements.length >= 2) {
     } else {
-      return refuse2(
+      return refuse4(
         overturn.refusal.kind === "unchanged" ? { kind: "unchanged" } : { kind: "players_differ" }
       );
     }
@@ -11260,13 +15832,13 @@ function planMatchEdit(run, current, edit) {
     const old = (_b = run.ratings) == null ? void 0 : _b[id];
     if (hadRatings) {
       if (!old || old.delta === null || old.newRating === null)
-        return refuse2({ kind: "old_change_unknown", playerId: id });
+        return refuse4({ kind: "old_change_unknown", playerId: id });
       befores[id] = {
         rating: old.newRating - old.delta,
         gamesPlayed: old.gamesPlayed - 1
       };
       oldDeltas[id] = old.delta;
-      if (!record) return refuse2({ kind: "record_missing", playerId: id });
+      if (!record) return refuse4({ kind: "record_missing", playerId: id });
     } else {
       const base = record != null ? record : newRating();
       befores[id] = { rating: base.rating, gamesPlayed: base.gamesPlayed };
@@ -11335,7 +15907,7 @@ function planMatchEdit(run, current, edit) {
       lastMatchAt: change.gamesPlayed > 0 ? Math.max(stored.lastMatchAt, run.endedAt) : stored.lastMatchAt
     });
     if (record.wins < 0 || record.losses < 0 || record.gamesPlayed < 0)
-      return refuse2({ kind: "record_too_small", playerId: id });
+      return refuse4({ kind: "record_too_small", playerId: id });
     changes[id] = change;
     records[id] = record;
   }
@@ -12455,7 +17027,7 @@ function rpcWebLoginLink(ctx, logger, nk, payload) {
 }
 
 // src/matchmaking/ranked_close.ts
-var RANKED_PREFIX2 = "ranked:";
+var RANKED_PREFIX3 = "ranked:";
 var DEFAULT_REASON = "Ranked is closed for a server update";
 var MATCH_LIST_LIMIT2 = 1e4;
 function rpcAdminRankedQueueCancel(ctx, logger, nk, payload) {
@@ -12464,10 +17036,10 @@ function rpcAdminRankedQueueCancel(ctx, logger, nk, payload) {
   const reason = typeof input.reason === "string" && input.reason ? input.reason : DEFAULT_REASON;
   let cancelled = 0;
   for (const { userId, record } of liveQueuedPlayers(nk, null, Date.now())) {
-    if (record.gameMode.indexOf(RANKED_PREFIX2) !== 0) continue;
+    if (record.gameMode.indexOf(RANKED_PREFIX3) !== 0) continue;
     notify(nk, userId, NotifyCode.QUEUE_CANCELLED, "queue_cancelled", {
       modId: record.modId,
-      mode: record.gameMode.slice(RANKED_PREFIX2.length),
+      mode: record.gameMode.slice(RANKED_PREFIX3.length),
       reason,
       requeue: false
     });
@@ -12483,7 +17055,7 @@ function rpcAdminRankedLive(ctx, logger, nk, payload) {
   for (const m of nk.matchList(MATCH_LIST_LIMIT2, true, null, null, null, "+label.started:T")) {
     try {
       const label = JSON.parse(m.label || "{}");
-      if (label.started === true && typeof label.mode === "string" && label.mode.indexOf(RANKED_PREFIX2) === 0) running++;
+      if (label.started === true && typeof label.mode === "string" && label.mode.indexOf(RANKED_PREFIX3) === 0) running++;
     } catch (e) {
     }
   }
