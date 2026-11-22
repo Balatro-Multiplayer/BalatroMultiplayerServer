@@ -165,6 +165,7 @@ export function startPvpRun(
 				cardTargets: opening.cardTargets,
 				teams: opening.teams,
 				skips: {},
+				traps: [],
 				votes: { draw: [], seed: [] },
 				places: {},
 				endGames: {},

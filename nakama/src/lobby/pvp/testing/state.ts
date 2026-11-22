@@ -86,6 +86,7 @@ export function runState(
 			lifeLedger: { lifeTakenFor: {}, runOutsForgiven: {} },
 			pairings: {},
 			skips: {},
+			traps: [],
 			cardTargets: null,
 			teams: {},
 			votes: { draw: [], seed: [] },

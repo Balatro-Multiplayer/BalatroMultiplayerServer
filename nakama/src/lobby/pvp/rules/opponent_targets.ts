@@ -17,6 +17,10 @@ import { modeOf } from '../modes/index'
 import { mayLookAtScores } from './pvp_blind_rules'
 import { anteOfBlind } from './settings'
 
+// Who a card reaches: `every opponent` the targets of the player's own card, `everyone` every other player
+// still in the run (a teammate too), `targeting me` every player whose opponent is this player.
+export type Reach = 'every opponent' | 'everyone' | 'targeting me'
+
 const unique = (ids: PlayerId[]): PlayerId[] => [...new Set(ids)]
 
 // The mode's ante rule, run when a player reports a higher ante. The draw is seeded by the
@@ -111,6 +115,34 @@ export function pvpBlindOpponentOf(
 	return shown === null
 		? null
 		: opponentsFrom(shown.run, shown.mode, shown.shown, actor).one
+}
+
+// Who a card of `actor` reaches now, players still in the run only. Nobody is a normal answer.
+export function reachedBy(
+	state: State,
+	actor: PlayerId,
+	reach: Reach,
+): PlayerId[] {
+	const run = state.run
+	if (run === null) return []
+	if (reach === 'everyone')
+		return Object.keys(run.lives)
+			.sort()
+			.filter((id) => id !== actor && isInRun(run, id))
+	const mine = shownTargetsOf(state, actor)
+	if (mine === null) return []
+	if (reach === 'every opponent')
+		return opponentsFrom(mine.run, mine.mode, mine.shown, actor).each
+	return Object.keys(run.lives)
+		.sort()
+		.filter((id) => {
+			const theirs = shownTargetsOf(state, id)
+			return (
+				theirs !== null &&
+				mayTarget(run, actor, id) &&
+				opponentsFrom(run, theirs.mode, theirs.shown, id).one === actor
+			)
+		})
 }
 
 // The team sums of the PvP blind being played, from the scores the players reported. Hidden

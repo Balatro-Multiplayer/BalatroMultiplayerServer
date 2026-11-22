@@ -8,6 +8,7 @@
 //
 // Dispatch: one row per kind in `inputHandlers`, naming its body spec and its handler. Each
 // handler's change adds its rows.
+import { effectHandler } from '../inputs/effects'
 import { readyHandler, teamHandler } from '../inputs/entry'
 import {
 	endGameHandler,
@@ -35,6 +36,11 @@ import {
 	paidPreviewsHandler,
 	timerStartHandler,
 } from '../inputs/timer'
+import {
+	trapFireHandler,
+	trapLostHandler,
+	trapPlantHandler,
+} from '../inputs/traps'
 import { type InputValues, type InputFields, readInput } from './read_input'
 import { dropUnneededTimers } from '../inputs/timer_run_out'
 import {
@@ -79,6 +85,10 @@ export const inputHandlers: InputHandlers = {
 	sell: sellHandler,
 	shop: shopHandler,
 	voucher: voucherHandler,
+	effect: effectHandler,
+	trapPlant: trapPlantHandler,
+	trapFire: trapFireHandler,
+	trapLost: trapLostHandler,
 	timerStart: timerStartHandler,
 	timerPause: timerPauseHandler,
 	paidPreviews: paidPreviewsHandler,
@@ -104,6 +114,10 @@ export function totalKey(input: {
 			return `sell:${String(input.ante)}`
 		case 'shop':
 			return 'shop'
+		case 'effect':
+			return `effect:${String(input.effect)}`
+		case 'trapPlant':
+			return `trap:${String(input.key)}`
 		case 'paidPreviews':
 			return 'paidPreviews'
 		default:

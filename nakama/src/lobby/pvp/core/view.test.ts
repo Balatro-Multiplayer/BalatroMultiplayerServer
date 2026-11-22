@@ -64,7 +64,8 @@ const progress = (state: State, players: string[], ante: number): State =>
 		state,
 	)
 
-// A duel in the PvP blind: both posted a score, neither has played a hand.
+// A duel in the PvP blind: both posted a score, neither has played a hand, Bob played a
+// Pizza (Ann has it in her inbox) and Ann planted a trap that Bob holds.
 function duelMidBlind(): State {
 	const players = ['ann', 'bob']
 	let state = progress(
@@ -80,7 +81,17 @@ function duelMidBlind(): State {
 		score,
 	})
 	state = send(state, 'ann', start('10')).state
-	return send(state, 'bob', start('20')).state
+	state = send(state, 'bob', start('20')).state
+	state = send(state, 'bob', {
+		kind: 'effect',
+		effect: 'pizza',
+		total: 1,
+	}).state
+	return send(state, 'ann', {
+		kind: 'trapPlant',
+		key: 'c_mp_trap_snare',
+		total: 1,
+	}).state
 }
 
 describe('view of a duel in the PvP blind', () => {
@@ -157,11 +168,25 @@ describe('view of a duel in the PvP blind', () => {
 				pvpBanks: {},
 				anteBanks: { ann: 150_000, bob: 150_000 },
 			},
-			onlyMine: { inbox: [], inboxNewest: 0 },
+			onlyMine: {
+				traps: [
+					{
+						id: 1,
+						key: 'c_mp_trap_snare',
+						owner: 'ann',
+						holder: 'bob',
+						state: 'live',
+					},
+				],
+				inbox: [
+					{ itemNumber: 1, from: 'bob', effect: 'pizza', amount: 1, ante: 2 },
+				],
+				inboxNewest: 1,
+			},
 		})
 	})
 
-	it('shows Bob his own score, and hides the score of Ann', () => {
+	it('shows Bob his own score, and no other player the traps or inbox of Ann', () => {
 		const bob = viewOf(duelMidBlind(), 'bob')
 		expect(bob.match.run?.currentPvpBlind?.players.bob).toMatchObject({
 			score: { kind: 'shown', score: '20' },
@@ -171,6 +196,7 @@ describe('view of a duel in the PvP blind', () => {
 		})
 		expect(bob.onlyMine.inbox).toEqual([])
 		expect(bob.onlyMine.inboxNewest).toBe(0)
+		expect(bob.onlyMine.traps.map((trap) => trap.id)).toEqual([1])
 	})
 
 	it('a player not in the match has no view', () => {
@@ -215,7 +241,7 @@ describe('stage', () => {
 			pvpBanks: {},
 			anteBanks: {},
 		})
-		expect(shown.onlyMine).toEqual({ inbox: [], inboxNewest: 0 })
+		expect(shown.onlyMine).toEqual({ traps: [], inbox: [], inboxNewest: 0 })
 		expect(shown.players).toEqual({
 			ann: { team: null, status: 'playing' },
 			bob: { team: null, status: 'playing' },
@@ -597,6 +623,8 @@ type Move =
 	| { kind: 'ready'; value: boolean }
 	| { kind: 'handScored'; hands: number }
 	| { kind: 'handPlayed'; hands: number }
+	| { kind: 'effect'; effect: 'asteroid' | 'pizza' | 'gambling' }
+	| { kind: 'trapPlant' }
 	| { kind: 'timerStart'; timer: 'ante' | 'pvp' }
 	| { kind: 'animating'; on: boolean }
 	| { kind: 'forfeit' }
@@ -616,6 +644,11 @@ const moveArbitrary: fc.Arbitrary<Move> = fc.oneof(
 		kind: fc.constant('handPlayed' as const),
 		hands: fc.integer({ min: 0, max: 3 }),
 	}),
+	fc.record({
+		kind: fc.constant('effect' as const),
+		effect: fc.constantFrom('asteroid', 'pizza', 'gambling'),
+	}),
+	fc.record({ kind: fc.constant('trapPlant' as const) }),
 	fc.record({
 		kind: fc.constant('timerStart' as const),
 		timer: fc.constantFrom('ante', 'pvp'),
@@ -661,6 +694,11 @@ function play(
 	const { players } = setup
 	let state = setup.make()
 	let seconds = 0
+	const totals: { [key: string]: number } = {}
+	const nextTotal = (key: string): number => {
+		totals[key] = (totals[key] ?? 0) + 1
+		return totals[key]
+	}
 	state = progress(state, players, 2)
 	for (const player of players) state = ready(state, player).state
 	players.forEach((player, at) => {
@@ -701,6 +739,16 @@ function play(
 				blindKey: BLIND,
 				handsLeft: move.kind === 'handPlayed' ? move.hands : 0,
 			},
+			effect: {
+				kind: 'effect',
+				effect: move.kind === 'effect' ? move.effect : 'pizza',
+				total: nextTotal(`${player}:effect`),
+			},
+			trapPlant: {
+				kind: 'trapPlant',
+				key: 'c_mp_trap_snare',
+				total: nextTotal(`${player}:trap`),
+			},
 			timerStart: {
 				kind: 'timerStart',
 				timer: move.kind === 'timerStart' ? move.timer : 'ante',
@@ -727,7 +775,7 @@ const playArbitrary = fc.record({
 const clone = <Value>(value: Value): Value => structuredClone(value)
 
 describe('what a view holds, over random legal play', () => {
-	it('view_never_contains_hidden: no hidden score or inbox of another player', () => {
+	it('view_never_contains_hidden: no hidden score, inbox or trap of another player', () => {
 		fc.assert(
 			fc.property(playArbitrary, ({ setup, steps }) => {
 				const { state, seconds } = play(setup, steps)
@@ -753,6 +801,8 @@ describe('what a view holds, over random legal play', () => {
 							mine.inboxDone + INBOX_ITEMS_PER_VIEW,
 						) ?? [],
 					)
+					for (const trap of shown.onlyMine.traps)
+						expect([trap.owner, trap.holder]).toContain(viewer)
 				}
 			}),
 			{ numRuns: 300 },
@@ -777,6 +827,9 @@ describe('what a view holds, over random legal play', () => {
 										? entry
 										: { ...entry, inbox: [], inboxDone: 0, totals: {} },
 								]),
+							),
+							traps: run.traps.filter(
+								(trap) => trap.owner === viewer || trap.holder === viewer,
 							),
 						},
 					}
@@ -838,7 +891,7 @@ describe('view_fits_one_message', () => {
 			teamScores: null,
 		}))
 
-	// The largest inbox item.
+	// The largest item that is not a trap reward.
 	const biggestPlainItem = (itemNumber: number): InboxItem => ({
 		itemNumber,
 		from: 'p2',
@@ -892,6 +945,70 @@ describe('view_fits_one_message', () => {
 		const shown = viewOf(fullRun(biggestPlainItem, null, null), 'p1')
 		expect(shown.onlyMine.inbox).toHaveLength(INBOX_ITEMS_PER_VIEW)
 		expect(bytesOf(shown)).toBeLessThan(32_768)
+	})
+
+	// The largest trap reward the server takes: a 64-character trap key and 16 fire data
+	// entries with 32-character names, filled up to 1024 characters of JSON.
+	const biggestTrapReward =
+		(letter: string) =>
+		(itemNumber: number): InboxItem => {
+			const names = Array.from({ length: 16 }, (_, at) =>
+				String(at).padStart(2, '0').padEnd(32, letter),
+			)
+			const dataOf = (valueLength: number) =>
+				Object.fromEntries(
+					names.map((name) => [name, letter.repeat(valueLength)]),
+				)
+			let valueLength = 0
+			while (JSON.stringify(dataOf(valueLength + 1)).length <= 1024)
+				valueLength++
+			return {
+				itemNumber,
+				from: 'p2',
+				effect: 'trapReward',
+				amount: 1,
+				trap: {
+					id: 1_000_000,
+					key: letter.repeat(64),
+					data: dataOf(valueLength),
+				},
+			}
+		}
+
+	it('the run on: 32 of the largest trap rewards, 8 players, ten PvP blinds, under 65,536 bytes', () => {
+		const shown = viewOf(fullRun(biggestTrapReward('t'), null, null), 'p1')
+		expect(shown.onlyMine.inbox).toHaveLength(INBOX_ITEMS_PER_VIEW)
+		expect(bytesOf(shown)).toBeLessThan(65_536)
+	})
+
+	it('the run on: 32 non-ASCII trap rewards at the byte limits, 8 players, under 65,536 bytes', () => {
+		const letter = '€'
+		const makeItem = (itemNumber: number): InboxItem => {
+			const names = Array.from(
+				{ length: 16 },
+				(_, at) => `${String(at).padStart(2, '0')}${letter.repeat(10)}`,
+			)
+			const dataOf = (valueLength: number) =>
+				Object.fromEntries(
+					names.map((name) => [name, letter.repeat(valueLength)]),
+				)
+			let valueLength = 0
+			while (utf8Bytes(JSON.stringify(dataOf(valueLength + 1))) <= 1024)
+				valueLength++
+			const data = dataOf(valueLength)
+			expect(utf8Bytes(JSON.stringify(data))).toBeLessThanOrEqual(1024)
+			for (const name of names) expect(utf8Bytes(name)).toBeLessThanOrEqual(32)
+			return {
+				itemNumber,
+				from: 'p2',
+				effect: 'trapReward',
+				amount: 1,
+				trap: { id: 1_000_000, key: letter.repeat(21), data },
+			}
+		}
+		const shown = viewOf(fullRun(makeItem, null, null), 'p1')
+		expect(shown.onlyMine.inbox).toHaveLength(INBOX_ITEMS_PER_VIEW)
+		expect(bytesOf(shown)).toBeLessThan(65_536)
 	})
 
 	it('the ended view: seven end games of the largest non-ASCII text the server takes stay under 65,536 bytes', () => {

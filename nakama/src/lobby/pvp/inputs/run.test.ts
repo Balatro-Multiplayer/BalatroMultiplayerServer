@@ -561,6 +561,10 @@ describe('a player out of the run', () => {
 	}
 
 	it.each([
+		['eliminated', 'effect', { effect: 'pizza', total: 1 }],
+		['forfeited', 'effect', { effect: 'pizza', total: 1 }],
+		['eliminated', 'trapPlant', { key: 'c_mp_trap_x', total: 1 }],
+		['forfeited', 'trapPlant', { key: 'c_mp_trap_x', total: 1 }],
 		['eliminated', 'shop', { ante: 2, total: 1, spent: 3 }],
 		['forfeited', 'shop', { ante: 2, total: 1, spent: 3 }],
 		['eliminated', 'skip', { blindKey: '2:Small', total: 1 }],
@@ -594,6 +598,16 @@ describe('lives change only through the ledger', () => {
 			kind: fc.constant('skip'),
 			blindKey: fc.constantFrom('1:Small', '2:Big'),
 			total: fc.integer({ min: 1, max: 2 }),
+		}),
+		fc.record({
+			kind: fc.constant('effect'),
+			effect: fc.constantFrom('asteroid', 'pizza', 'gambling'),
+			total: fc.integer({ min: 1, max: 5 }),
+		}),
+		fc.record({
+			kind: fc.constant('trapPlant'),
+			key: fc.constant('c_mp_trap_x'),
+			total: fc.integer({ min: 1, max: 5 }),
 		}),
 		fc.record({
 			kind: fc.constant('progress'),

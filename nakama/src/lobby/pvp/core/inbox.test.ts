@@ -10,15 +10,16 @@ import {
 import type { NewInboxItem, State } from './types'
 
 const PLAYERS = ['ann', 'bob']
-const ITEM: NewInboxItem = {
+const PIZZA: NewInboxItem = {
 	from: null,
-	effect: 'comebackBonus',
+	effect: 'pizza',
 	amount: 3,
+	ante: 1,
 }
 
 function withItems(state: State, player: string, count: number): State {
 	let next = state
-	for (let i = 0; i < count; i++) next = addInboxItem(next, player, ITEM)
+	for (let i = 0; i < count; i++) next = addInboxItem(next, player, PIZZA)
 	return next
 }
 
@@ -44,7 +45,7 @@ function play(steps: Step[]): State[] {
 		const before = states[states.length - 1]
 		states.push(
 			step.step === 'add'
-				? addInboxItem(before, step.player, ITEM)
+				? addInboxItem(before, step.player, PIZZA)
 				: recordLastItemDone(before, step.player, step.claim).state,
 		)
 	}
@@ -82,21 +83,36 @@ describe('inbox_numbers_have_no_gap', () => {
 	})
 
 	it('an item for a player outside the run is a bug, not an input', () => {
-		expect(() => addInboxItem(runState(PLAYERS), 'zed', ITEM)).toThrow()
+		expect(() => addInboxItem(runState(PLAYERS), 'zed', PIZZA)).toThrow()
 	})
 })
 
 describe('inbox_wire_shape', () => {
 	it('each effect is sent with exactly its own fields', () => {
 		const items: NewInboxItem[] = [
+			{ from: 'bob', effect: 'pizza', amount: 1, ante: 3 },
+			{ from: 'bob', effect: 'gambling', amount: 10 },
 			{ from: null, effect: 'comebackBonus', amount: 1 },
-			{ from: 'bob', effect: 'voucherLife', amount: 1 },
+			{
+				from: 'bob',
+				effect: 'trapReward',
+				amount: 1,
+				trap: { id: 2, key: 'c_mp_x', data: { n: 1 } },
+			},
 		]
 		let state = runState(PLAYERS)
 		for (const item of items) state = addInboxItem(state, 'ann', item)
 		expect(visibleInbox(state, 'ann').inbox).toEqual([
-			{ itemNumber: 1, from: null, effect: 'comebackBonus', amount: 1 },
-			{ itemNumber: 2, from: 'bob', effect: 'voucherLife', amount: 1 },
+			{ itemNumber: 1, from: 'bob', effect: 'pizza', amount: 1, ante: 3 },
+			{ itemNumber: 2, from: 'bob', effect: 'gambling', amount: 10 },
+			{ itemNumber: 3, from: null, effect: 'comebackBonus', amount: 1 },
+			{
+				itemNumber: 4,
+				from: 'bob',
+				effect: 'trapReward',
+				amount: 1,
+				trap: { id: 2, key: 'c_mp_x', data: { n: 1 } },
+			},
 		])
 		expect(Object.keys(visibleInbox(state, 'ann').inbox[1]).sort()).toEqual([
 			'amount',

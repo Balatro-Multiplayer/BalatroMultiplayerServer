@@ -31,6 +31,7 @@ const BODIES: { [field: string]: unknown }[] = [
 	{ kind: 'sell', ante: 2, total: 1 },
 	{ kind: 'shop', ante: 2, total: 1, spent: 5 },
 	{ kind: 'voucher', voucherKey: 'v_overstock' },
+	{ kind: 'effect', effect: 'pizza', total: 1 },
 	{ kind: 'timerStart', timer: 'ante' },
 	{ kind: 'timerPause' },
 	{ kind: 'paidPreviews', total: 1 },

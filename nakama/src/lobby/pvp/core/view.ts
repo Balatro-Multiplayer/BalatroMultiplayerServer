@@ -1,10 +1,11 @@
 // The one view each player is shown. It only puts parts together: a part with a hiding rule
-// is built by the module that owns the rule (pvpBlindView, timersView, visibleInbox,
+// is built by the module that owns the rule (pvpBlindView, timersView, trapsView, visibleInbox,
 // targetsOf); a plain copy of state is built here. `stage` and `status` are worked out for
 // every view and stored nowhere. A pure read: it changes nothing and reads no clock.
 import { pvpBlindView } from '../inputs/pvp_blind'
 import { runPlayerView } from '../inputs/run'
 import { timersView } from '../inputs/timer'
+import { trapsView } from '../inputs/traps'
 import { targetsOf } from '../rules/opponent_targets'
 import { isStanding } from '../rules/players'
 import { visibleInbox } from './inbox'
@@ -178,6 +179,7 @@ export function view(
 		players: playersViewOf(state, player, facts),
 		timers: { ...timers, deadlines: [...timers.deadlines, ...grace] },
 		onlyMine: {
+			traps: trapsView(state, player),
 			...visibleInbox(state, player),
 		},
 	}

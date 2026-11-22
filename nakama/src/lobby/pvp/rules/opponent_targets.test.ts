@@ -5,7 +5,7 @@ import { runOutTimers } from '../inputs/timer_run_out'
 import { ready, runOf, send } from '../testing/inputs'
 import { pairedRun, runInMode, runState } from '../testing/state'
 import { inPvpBlind, pvpStarted } from '../testing/timers'
-import { targetsOf } from './opponent_targets'
+import { reachedBy, targetsOf } from './opponent_targets'
 import { isInRun } from './players'
 
 type Out = 'eliminated' | 'forfeited'
@@ -62,7 +62,109 @@ const duel = () => pairedRun(['ann', 'bob'], { ann: 'bob', bob: 'ann' })
 const nemesisWithBye = () =>
 	pairedRun(THREE, { ann: 'bob', bob: 'ann', cat: null })
 
-describe('who is in the run', () => {
+describe('who a card reaches', () => {
+	it.each<[string, () => State, string, string[], string[], string[]]>([
+		['duel', duel, 'ann', ['bob'], ['bob'], ['bob']],
+		['nemesis pair', nemesisWithBye, 'ann', ['bob'], ['bob', 'cat'], ['bob']],
+		['nemesis bye', nemesisWithBye, 'cat', [], ['ann', 'bob'], []],
+		[
+			'teams, own target',
+			teamsRun,
+			'ann',
+			['cat'],
+			['bob', 'cat', 'dan'],
+			['cat'],
+		],
+		[
+			'manhunt Runner',
+			manhuntRun,
+			'ann',
+			['bob', 'cat'],
+			['bob', 'cat'],
+			['bob', 'cat'],
+		],
+		['manhunt Hunter', manhuntRun, 'bob', ['ann'], ['ann', 'cat'], ['ann']],
+	])('%s: %s %s', (_name, make, actor, each, all, targeting) => {
+		const state = make()
+		expect(reachedBy(state, actor, 'every opponent')).toEqual(each)
+		expect(reachedBy(state, actor, 'everyone')).toEqual(all)
+		expect(reachedBy(state, actor, 'targeting me')).toEqual(targeting)
+	})
+
+	it.each<[string, () => State, PlayerId, Out, string[], string[]]>([
+		['duel, the opponent eliminated', duel, 'bob', 'eliminated', [], []],
+		['duel, the opponent forfeited', duel, 'bob', 'forfeited', [], []],
+		[
+			'nemesis, the partner eliminated',
+			nemesisWithBye,
+			'bob',
+			'eliminated',
+			[],
+			['cat'],
+		],
+		[
+			'nemesis, the player with the bye forfeited',
+			nemesisWithBye,
+			'cat',
+			'forfeited',
+			['bob'],
+			['bob'],
+		],
+		[
+			'teams, the target eliminated',
+			teamsRun,
+			'cat',
+			'eliminated',
+			[],
+			['bob', 'dan'],
+		],
+		[
+			'teams, a teammate forfeited',
+			teamsRun,
+			'bob',
+			'forfeited',
+			['cat'],
+			['cat', 'dan'],
+		],
+		[
+			'manhunt, one Hunter eliminated',
+			manhuntRun,
+			'bob',
+			'eliminated',
+			['cat'],
+			['cat'],
+		],
+		[
+			'manhunt, both Hunters out',
+			() => markOut(manhuntRun(), 'cat', 'forfeited'),
+			'bob',
+			'eliminated',
+			[],
+			[],
+		],
+	])(
+		'%s: ann is left with each %j, all %j',
+		(_name, make, out, how, each, all) => {
+			const state = markOut(make(), out, how)
+			expect(reachedBy(state, 'ann', 'every opponent')).toEqual(each)
+			expect(reachedBy(state, 'ann', 'everyone')).toEqual(all)
+		},
+	)
+
+	it('a card target that is a teammate is never reached', () => {
+		const base = teamsRun()
+		const run = base.run as NonNullable<State['run']>
+		const state: State = {
+			...base,
+			run: {
+				...run,
+				cardTargets: { ante: 2, targets: { ann: 'bob', bob: 'ann' } },
+			},
+		}
+		expect(reachedBy(state, 'ann', 'every opponent')).toEqual([])
+		expect(reachedBy(state, 'bob', 'targeting me')).toEqual([])
+	})
+
 	it('a player out of the run is not in it', () => {
 		const state = markOut(
 			markOut(runState(THREE), 'bob', 'eliminated'),
@@ -76,6 +178,13 @@ describe('who is in the run', () => {
 			isInRun(run, 'cat'),
 		]).toEqual([true, false, false])
 		expect(isInRun(run, 'nobody')).toBe(false)
+	})
+
+	it('a run with no run state reaches nobody', () => {
+		const state: State = { ...duel(), run: null }
+		expect(reachedBy(state, 'ann', 'every opponent')).toEqual([])
+		expect(reachedBy(state, 'ann', 'everyone')).toEqual([])
+		expect(reachedBy(state, 'ann', 'targeting me')).toEqual([])
 	})
 })
 
@@ -228,6 +337,68 @@ describe('where the viewer stands against the cut', () => {
 	})
 })
 
+describe('reachedBy never reaches the wrong player', () => {
+	const modes: { [name: string]: () => State } = {
+		duel,
+		nemesisWithBye,
+		teams: teamsRun,
+		manhunt: manhuntRun,
+	}
+	const outs = fc.dictionary(
+		fc.constantFrom(...FOUR),
+		fc.constantFrom<Out>('eliminated', 'forfeited'),
+	)
+
+	it('never the actor, never a player out of the run, never a teammate', () => {
+		fc.assert(
+			fc.property(
+				fc.constantFrom(...Object.keys(modes)),
+				outs,
+				fc.constantFrom(...FOUR),
+				fc.constantFrom<'every opponent' | 'targeting me'>('every opponent', 'targeting me'),
+				(mode, gone, actor, reach) => {
+					let state = modes[mode]()
+					const run = state.run as NonNullable<State['run']>
+					for (const [player, how] of Object.entries(gone))
+						if (player in run.lives) state = markOut(state, player, how)
+					const teams = state.players
+					for (const target of reachedBy(state, actor, reach)) {
+						expect(target).not.toBe(actor)
+						expect(
+							isInRun(state.run as NonNullable<State['run']>, target),
+						).toBe(true)
+						const mine = teams[actor]?.team
+						if (mine !== null && mine !== undefined)
+							expect(teams[target]?.team).not.toBe(mine)
+					}
+				},
+			),
+		)
+	})
+
+	it('all never holds the actor or a player out of the run', () => {
+		fc.assert(
+			fc.property(
+				fc.constantFrom(...Object.keys(modes)),
+				outs,
+				fc.constantFrom(...FOUR),
+				(mode, gone, actor) => {
+					let state = modes[mode]()
+					const run = state.run as NonNullable<State['run']>
+					for (const [player, how] of Object.entries(gone))
+						if (player in run.lives) state = markOut(state, player, how)
+					for (const target of reachedBy(state, actor, 'everyone')) {
+						expect(target).not.toBe(actor)
+						expect(
+							isInRun(state.run as NonNullable<State['run']>, target),
+						).toBe(true)
+					}
+				},
+			),
+		)
+	})
+})
+
 const BLIND_2 = '2:Boss'
 
 function progress(state: State, player: PlayerId, ante: number): State {
@@ -308,6 +479,7 @@ describe('the pairing of one ante is never changed by the next ante', () => {
 		expect(targets.myBoss).toBe('plays')
 		expect(targets.opponents).toEqual([])
 		expect(targets.pairingAnte).toBeNull()
+		expect(reachedBy(skipped, other, 'every opponent')).toEqual([])
 	})
 
 	it('making the next pairing leaves the stored pairing of the ante as it was', () => {
@@ -320,6 +492,7 @@ describe('the pairing of one ante is never changed by the next ante', () => {
 
 	const answersOf = (state: State, viewer: PlayerId) => ({
 		targets: targetsOf(state, viewer),
+		each: reachedBy(state, viewer, 'every opponent'),
 	})
 
 	it('property: pairing the next ante changes no answer of a player still on this ante', () => {

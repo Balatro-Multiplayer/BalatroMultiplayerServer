@@ -4192,6 +4192,62 @@ function tick(lobby, now) {
   return step;
 }
 
+// src/lobby/pvp/core/run_player.ts
+function changeRunPlayer(state, player, change) {
+  const run = state.run;
+  const entry = run == null ? void 0 : run.players[player];
+  if (run === null || entry === void 0)
+    throw new Error(`player ${player} is not in the run`);
+  return __spreadProps(__spreadValues({}, state), {
+    run: __spreadProps(__spreadValues({}, run), { players: __spreadProps(__spreadValues({}, run.players), { [player]: change(entry) }) })
+  });
+}
+
+// src/lobby/pvp/core/inbox.ts
+var INBOX_ITEMS_PER_VIEW = 32;
+function addInboxItem(state, player, item) {
+  return changeRunPlayer(state, player, (entry) => __spreadProps(__spreadValues({}, entry), {
+    inbox: [...entry.inbox, __spreadProps(__spreadValues({}, item), { itemNumber: entry.inbox.length + 1 })]
+  }));
+}
+function recordLastItemDone(state, player, inboxDone) {
+  var _a;
+  const entry = (_a = state.run) == null ? void 0 : _a.players[player];
+  if (entry === void 0) return { state, refusals: [] };
+  if (inboxDone > entry.inbox.length)
+    return { state, refusals: ["bad_inbox_done"] };
+  if (inboxDone <= entry.inboxDone) return { state, refusals: [] };
+  return {
+    state: changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), { inboxDone })),
+    refusals: []
+  };
+}
+function visibleInbox(state, player) {
+  var _a;
+  const entry = (_a = state.run) == null ? void 0 : _a.players[player];
+  if (entry === void 0) return { inbox: [], inboxNewest: 0 };
+  return {
+    inbox: entry.inbox.slice(
+      entry.inboxDone,
+      entry.inboxDone + INBOX_ITEMS_PER_VIEW
+    ),
+    inboxNewest: entry.inbox.length
+  };
+}
+
+// src/lobby/pvp/core/random.ts
+function seededRandom(seed) {
+  let hash2 = 2166136261;
+  for (let index = 0; index < seed.length; index++)
+    hash2 = Math.imul(hash2 ^ seed.charCodeAt(index), 16777619);
+  return () => {
+    hash2 = hash2 + 1831565813 | 0;
+    let mixed = Math.imul(hash2 ^ hash2 >>> 15, 1 | hash2);
+    mixed = mixed + Math.imul(mixed ^ mixed >>> 7, 61 | mixed) ^ mixed;
+    return ((mixed ^ mixed >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 // src/lobby/pvp/core/ending.ts
 var everyonePlaces = (run, place) => {
   const places = {};
@@ -4275,6 +4331,243 @@ var lastStandingBase = {
   checkWinner: lastPlayerStanding,
   pickOpponents: (_run, actor, shown) => singleOpponent(actor, shown)
 };
+
+// src/lobby/pvp/rules/settings.ts
+var MODE_OF_QUEUE = {
+  pvp_nemesis: "nemesis",
+  pvp_experimental: "nemesis",
+  pvp_manhunt: "manhunt",
+  pvp_teams: "teams",
+  pvp_royale: "royale",
+  pvp_smallworld: "royale"
+};
+function modeOfQueue(queueMode) {
+  if (typeof queueMode !== "string") return null;
+  return Object.prototype.hasOwnProperty.call(MODE_OF_QUEUE, queueMode) ? MODE_OF_QUEUE[queueMode] : null;
+}
+function positiveWholeNumber(value) {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+var BLIND_KEY = /^(0|[1-9]\d*):(Small|Big|Boss)$/;
+function isBlindKey(value) {
+  return typeof value === "string" && BLIND_KEY.test(value);
+}
+var anteOfBlind = (blindKey) => Number(blindKey.split(":")[0]);
+function isBossBlind(blindKey) {
+  return blindKey.endsWith(":Boss");
+}
+var MIN_TIMER_MILLISECONDS = 1e4;
+var MAX_TIMER_MILLISECONDS = 36e5;
+var MAX_TIMER_FORGIVENESS = 9;
+var MAX_STARTING_LIVES = 10;
+function numberOrNull(value) {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : null;
+}
+function numberBetween(value, lowest, highest) {
+  const parsed = numberOrNull(value);
+  return parsed !== null && parsed >= lowest && parsed <= highest ? parsed : null;
+}
+function wholeNumberBetween(value, lowest, highest) {
+  const parsed = numberBetween(value, lowest, highest);
+  return parsed !== null && Number.isInteger(parsed) ? parsed : null;
+}
+function lobbyOption(value) {
+  if (value === void 0) return true;
+  return typeof value === "boolean" ? value : null;
+}
+var PRESSURE = {
+  kind: "pressure",
+  baseMultiplier: 2,
+  timedRate: 2,
+  previewCostMilliseconds: 3500
+};
+var SPEEDLATRO = {
+  kind: "speedlatro",
+  baseMilliseconds: 147e3,
+  pvpMilliseconds: 73500,
+  timedRate: 2,
+  previewCostMilliseconds: 0
+};
+var PVP_HAND_TIMER = {
+  baseMilliseconds: 6e4,
+  handMilliseconds: 1e4
+};
+var BANK_ONLY = {
+  ante: "bank",
+  pvp: null,
+  personal: null,
+  ownSkips: false,
+  forcedTimer: null,
+  displayThresholdMilliseconds: null
+};
+var BANK_ONLY_RULESETS = [
+  "ruleset_mp_experimental_legacy",
+  "ruleset_mp_badlatro",
+  "ruleset_mp_legacy_ranked",
+  "ruleset_mp_sandbox",
+  "ruleset_mp_smallworld",
+  "ruleset_mp_vanilla",
+  "ruleset_mp_wsob"
+];
+var PVP_HAND_TIMER_ONLY = __spreadProps(__spreadValues({}, BANK_ONLY), { pvp: PVP_HAND_TIMER });
+var SPEEDLATRO_CLOCK = __spreadProps(__spreadValues({}, BANK_ONLY), {
+  ante: "personal",
+  personal: SPEEDLATRO
+});
+var CLOCK_EXCEPTIONS = {
+  ruleset_mp_experimental: {
+    ante: "personal",
+    pvp: PVP_HAND_TIMER,
+    personal: PRESSURE,
+    ownSkips: false,
+    forcedTimer: null,
+    displayThresholdMilliseconds: null
+  },
+  ruleset_mp_balanced: PVP_HAND_TIMER_ONLY,
+  ruleset_mp_expanded: PVP_HAND_TIMER_ONLY,
+  // Almanac is Expanded plus the almanac layer.
+  ruleset_mp_almanac: PVP_HAND_TIMER_ONLY,
+  ruleset_mp_speedlatro: SPEEDLATRO_CLOCK,
+  ruleset_mp_chaos: SPEEDLATRO_CLOCK,
+  // rulesets/majorleague.lua:11-12 and minorleague.lua:7-8 in the PvP mod.
+  ruleset_mp_majorleague: __spreadProps(__spreadValues({}, BANK_ONLY), {
+    ownSkips: true,
+    forcedTimer: { baseSeconds: 180, forgiveness: 0 },
+    // layers/majorleague.lua: timer_display_threshold = 180.
+    displayThresholdMilliseconds: 18e4
+  }),
+  ruleset_mp_minorleague: __spreadProps(__spreadValues({}, BANK_ONLY), {
+    forcedTimer: { baseSeconds: 210, forgiveness: 1 }
+  }),
+  ruleset_mp_traditional: __spreadProps(__spreadValues({}, BANK_ONLY), { ante: "none" })
+};
+var RULESET_CLOCKS = __spreadValues(__spreadValues({}, Object.fromEntries(BANK_ONLY_RULESETS.map((id) => [id, BANK_ONLY]))), CLOCK_EXCEPTIONS);
+function clockSettingOf(ruleset) {
+  if (typeof ruleset !== "string" || !Object.prototype.hasOwnProperty.call(RULESET_CLOCKS, ruleset))
+    return { ok: false, reason: "bad_rules" };
+  return { ok: true, clock: RULESET_CLOCKS[ruleset] };
+}
+function clockRulesFor(setting, timerBaseMilliseconds) {
+  const { ante, pvp, personal } = setting;
+  if (personal === null) return { ante, pvp, personal: null };
+  if (personal.kind === "speedlatro") return { ante, pvp, personal };
+  return {
+    ante,
+    pvp,
+    personal: {
+      kind: "pressure",
+      baseMilliseconds: timerBaseMilliseconds * personal.baseMultiplier,
+      timedRate: personal.timedRate,
+      previewCostMilliseconds: personal.previewCostMilliseconds
+    }
+  };
+}
+function secondsToMilliseconds(seconds) {
+  return seconds === null ? null : Math.max(0, Math.round(seconds * 1e3));
+}
+function settingsFromLobby(lobbySettings, startedIds) {
+  var _a;
+  const found = clockSettingOf(lobbySettings.ruleset);
+  if (!found.ok) return { ok: false, reason: "bad_rules", key: "ruleset" };
+  const bad = (key) => ({
+    ok: false,
+    reason: "bad_rules",
+    key
+  });
+  const mode = modeOfQueue(lobbySettings.queue_mode);
+  if (mode === null) return bad("queue_mode");
+  const startingLives2 = wholeNumberBetween(
+    lobbySettings.starting_lives,
+    1,
+    MAX_STARTING_LIVES
+  );
+  if (startingLives2 === null) return bad("starting_lives");
+  const hunterLives = positiveWholeNumber(lobbySettings.manhunt_hunter_lives);
+  if (hunterLives === null) return bad("manhunt_hunter_lives");
+  const pvpStartAnte = positiveWholeNumber(lobbySettings.pvp_start_ante);
+  if (pvpStartAnte === null) return bad("pvp_start_ante");
+  const forced = found.clock.forcedTimer;
+  const baseSeconds = forced ? forced.baseSeconds : numberBetween(
+    lobbySettings.timer_base_seconds,
+    MIN_TIMER_MILLISECONDS / 1e3,
+    MAX_TIMER_MILLISECONDS / 1e3
+  );
+  if (baseSeconds === null) return bad("timer_base_seconds");
+  const forgiveness = forced ? forced.forgiveness : wholeNumberBetween(
+    lobbySettings.timer_forgiveness,
+    0,
+    MAX_TIMER_FORGIVENESS
+  );
+  if (forgiveness === null) return bad("timer_forgiveness");
+  const rawIncrement = lobbySettings.timer_increment_seconds;
+  const increment = rawIncrement === null ? null : numberOrNull(rawIncrement);
+  if (rawIncrement !== null && increment === null)
+    return bad("timer_increment_seconds");
+  const deathOnNormalBlindLoss = lobbyOption(lobbySettings.death_on_normal_blind_loss);
+  if (deathOnNormalBlindLoss === null) return bad("death_on_normal_blind_loss");
+  const goldOnLifeLoss = lobbyOption(lobbySettings.gold_on_life_loss);
+  if (goldOnLifeLoss === null) return bad("gold_on_life_loss");
+  const timerOption = lobbyOption(lobbySettings.timer);
+  if (timerOption === null) return bad("timer");
+  const timerBaseMilliseconds = Math.round(baseSeconds * 1e3);
+  return {
+    ok: true,
+    settings: {
+      mode,
+      startedCount: startedIds.length,
+      startingLives: startingLives2,
+      hunterLives,
+      pvpStartAnte,
+      // Timer off (the lobby toggle) stops the Ante bank, Pressure and the PvP hand
+      // timer; the Speedlatro clock ignores it, as on main.
+      clocks: timerOption || ((_a = found.clock.personal) == null ? void 0 : _a.kind) === "speedlatro" ? clockRulesFor(found.clock, timerBaseMilliseconds) : { ante: "none", pvp: null, personal: null },
+      // The host publishes the raw values (timer_base_seconds is not multiplied).
+      timerBaseMilliseconds,
+      timerIncrementMilliseconds: secondsToMilliseconds(increment),
+      skipTimeRule: found.clock.ownSkips ? "own" : "lead",
+      timerDisplayThresholdMilliseconds: found.clock.displayThresholdMilliseconds,
+      timerForgiveness: forgiveness,
+      failedBlindLife: deathOnNormalBlindLoss ? "costs" : "free",
+      lifeLossGold: goldOnLifeLoss ? "paid" : "none"
+    }
+  };
+}
+
+// src/lobby/pvp/rules/players.ts
+function inRunIgnoringLives(playerLives) {
+  return (playerLives == null ? void 0 : playerLives.status) === "playing";
+}
+var isStanding = (seat) => seat !== void 0 && seat.lives > 0 && inRunIgnoringLives(seat);
+var isInRun = (run, player) => isStanding(run.lives[player]);
+function isPvpBlind(run, blindKey) {
+  if (!isBlindKey(blindKey) || !isBossBlind(blindKey)) return false;
+  return Number(blindKey.split(":")[0]) >= run.rules.pvpStartAnte;
+}
+var isResolved = (run, blindKey) => run.finishedPvpBlinds.some((done) => done.blindKey === blindKey);
+function playersOfBoss(run, blindKey) {
+  if (!isPvpBlind(run, blindKey) || isResolved(run, blindKey)) return [];
+  const players = Object.keys(run.lives).filter(
+    (player) => isInRun(run, player)
+  );
+  return players.length >= 2 ? players : [];
+}
+function playedPvpBlind(run, player, blindKey) {
+  const open = run.currentPvpBlind;
+  if ((open == null ? void 0 : open.blindKey) === blindKey && open.players[player] !== void 0)
+    return true;
+  return run.finishedPvpBlinds.some(
+    (done) => done.blindKey === blindKey && player in done.scores
+  ) || playersOfBoss(run, blindKey).includes(player);
+}
+var isPvpBlindOf = (run, player, blindKey) => isPvpBlind(run, blindKey) && playedPvpBlind(run, player, blindKey);
+function requiredPlayers(run) {
+  if (run.currentPvpBlind === null) return [];
+  return Object.keys(run.currentPvpBlind.players).filter(
+    (player) => isInRun(run, player)
+  );
+}
 
 // ../packages/types/src/big-score.ts
 var MAX_SAFE = 9007199254740991;
@@ -4591,209 +4884,6 @@ var manhuntMode = {
   pickOpponents
 };
 
-// src/lobby/pvp/rules/settings.ts
-var MODE_OF_QUEUE = {
-  pvp_nemesis: "nemesis",
-  pvp_experimental: "nemesis",
-  pvp_manhunt: "manhunt",
-  pvp_teams: "teams",
-  pvp_royale: "royale",
-  pvp_smallworld: "royale"
-};
-function modeOfQueue(queueMode) {
-  if (typeof queueMode !== "string") return null;
-  return Object.prototype.hasOwnProperty.call(MODE_OF_QUEUE, queueMode) ? MODE_OF_QUEUE[queueMode] : null;
-}
-function positiveWholeNumber(value) {
-  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
-  return typeof parsed === "number" && Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-}
-var BLIND_KEY = /^(0|[1-9]\d*):(Small|Big|Boss)$/;
-function isBlindKey(value) {
-  return typeof value === "string" && BLIND_KEY.test(value);
-}
-var anteOfBlind = (blindKey) => Number(blindKey.split(":")[0]);
-function isBossBlind(blindKey) {
-  return blindKey.endsWith(":Boss");
-}
-var MIN_TIMER_MILLISECONDS = 1e4;
-var MAX_TIMER_MILLISECONDS = 36e5;
-var MAX_TIMER_FORGIVENESS = 9;
-var MAX_STARTING_LIVES = 10;
-function numberOrNull(value) {
-  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
-  return typeof parsed === "number" && Number.isFinite(parsed) ? parsed : null;
-}
-function numberBetween(value, lowest, highest) {
-  const parsed = numberOrNull(value);
-  return parsed !== null && parsed >= lowest && parsed <= highest ? parsed : null;
-}
-function wholeNumberBetween(value, lowest, highest) {
-  const parsed = numberBetween(value, lowest, highest);
-  return parsed !== null && Number.isInteger(parsed) ? parsed : null;
-}
-function lobbyOption(value) {
-  if (value === void 0) return true;
-  return typeof value === "boolean" ? value : null;
-}
-var PRESSURE = {
-  kind: "pressure",
-  baseMultiplier: 2,
-  timedRate: 2,
-  previewCostMilliseconds: 3500
-};
-var SPEEDLATRO = {
-  kind: "speedlatro",
-  baseMilliseconds: 147e3,
-  pvpMilliseconds: 73500,
-  timedRate: 2,
-  previewCostMilliseconds: 0
-};
-var PVP_HAND_TIMER = {
-  baseMilliseconds: 6e4,
-  handMilliseconds: 1e4
-};
-var BANK_ONLY = {
-  ante: "bank",
-  pvp: null,
-  personal: null,
-  ownSkips: false,
-  forcedTimer: null,
-  displayThresholdMilliseconds: null
-};
-var BANK_ONLY_RULESETS = [
-  "ruleset_mp_experimental_legacy",
-  "ruleset_mp_badlatro",
-  "ruleset_mp_legacy_ranked",
-  "ruleset_mp_sandbox",
-  "ruleset_mp_smallworld",
-  "ruleset_mp_vanilla",
-  "ruleset_mp_wsob"
-];
-var PVP_HAND_TIMER_ONLY = __spreadProps(__spreadValues({}, BANK_ONLY), { pvp: PVP_HAND_TIMER });
-var SPEEDLATRO_CLOCK = __spreadProps(__spreadValues({}, BANK_ONLY), {
-  ante: "personal",
-  personal: SPEEDLATRO
-});
-var CLOCK_EXCEPTIONS = {
-  ruleset_mp_experimental: {
-    ante: "personal",
-    pvp: PVP_HAND_TIMER,
-    personal: PRESSURE,
-    ownSkips: false,
-    forcedTimer: null,
-    displayThresholdMilliseconds: null
-  },
-  ruleset_mp_balanced: PVP_HAND_TIMER_ONLY,
-  ruleset_mp_expanded: PVP_HAND_TIMER_ONLY,
-  // Almanac is Expanded plus the almanac layer.
-  ruleset_mp_almanac: PVP_HAND_TIMER_ONLY,
-  ruleset_mp_speedlatro: SPEEDLATRO_CLOCK,
-  ruleset_mp_chaos: SPEEDLATRO_CLOCK,
-  // rulesets/majorleague.lua:11-12 and minorleague.lua:7-8 in the PvP mod.
-  ruleset_mp_majorleague: __spreadProps(__spreadValues({}, BANK_ONLY), {
-    ownSkips: true,
-    forcedTimer: { baseSeconds: 180, forgiveness: 0 },
-    // layers/majorleague.lua: timer_display_threshold = 180.
-    displayThresholdMilliseconds: 18e4
-  }),
-  ruleset_mp_minorleague: __spreadProps(__spreadValues({}, BANK_ONLY), {
-    forcedTimer: { baseSeconds: 210, forgiveness: 1 }
-  }),
-  ruleset_mp_traditional: __spreadProps(__spreadValues({}, BANK_ONLY), { ante: "none" })
-};
-var RULESET_CLOCKS = __spreadValues(__spreadValues({}, Object.fromEntries(BANK_ONLY_RULESETS.map((id) => [id, BANK_ONLY]))), CLOCK_EXCEPTIONS);
-function clockSettingOf(ruleset) {
-  if (typeof ruleset !== "string" || !Object.prototype.hasOwnProperty.call(RULESET_CLOCKS, ruleset))
-    return { ok: false, reason: "bad_rules" };
-  return { ok: true, clock: RULESET_CLOCKS[ruleset] };
-}
-function clockRulesFor(setting, timerBaseMilliseconds) {
-  const { ante, pvp, personal } = setting;
-  if (personal === null) return { ante, pvp, personal: null };
-  if (personal.kind === "speedlatro") return { ante, pvp, personal };
-  return {
-    ante,
-    pvp,
-    personal: {
-      kind: "pressure",
-      baseMilliseconds: timerBaseMilliseconds * personal.baseMultiplier,
-      timedRate: personal.timedRate,
-      previewCostMilliseconds: personal.previewCostMilliseconds
-    }
-  };
-}
-function secondsToMilliseconds(seconds) {
-  return seconds === null ? null : Math.max(0, Math.round(seconds * 1e3));
-}
-function settingsFromLobby(lobbySettings, startedIds) {
-  var _a;
-  const found = clockSettingOf(lobbySettings.ruleset);
-  if (!found.ok) return { ok: false, reason: "bad_rules", key: "ruleset" };
-  const bad = (key) => ({
-    ok: false,
-    reason: "bad_rules",
-    key
-  });
-  const mode = modeOfQueue(lobbySettings.queue_mode);
-  if (mode === null) return bad("queue_mode");
-  const startingLives2 = wholeNumberBetween(
-    lobbySettings.starting_lives,
-    1,
-    MAX_STARTING_LIVES
-  );
-  if (startingLives2 === null) return bad("starting_lives");
-  const hunterLives = positiveWholeNumber(lobbySettings.manhunt_hunter_lives);
-  if (hunterLives === null) return bad("manhunt_hunter_lives");
-  const pvpStartAnte = positiveWholeNumber(lobbySettings.pvp_start_ante);
-  if (pvpStartAnte === null) return bad("pvp_start_ante");
-  const forced = found.clock.forcedTimer;
-  const baseSeconds = forced ? forced.baseSeconds : numberBetween(
-    lobbySettings.timer_base_seconds,
-    MIN_TIMER_MILLISECONDS / 1e3,
-    MAX_TIMER_MILLISECONDS / 1e3
-  );
-  if (baseSeconds === null) return bad("timer_base_seconds");
-  const forgiveness = forced ? forced.forgiveness : wholeNumberBetween(
-    lobbySettings.timer_forgiveness,
-    0,
-    MAX_TIMER_FORGIVENESS
-  );
-  if (forgiveness === null) return bad("timer_forgiveness");
-  const rawIncrement = lobbySettings.timer_increment_seconds;
-  const increment = rawIncrement === null ? null : numberOrNull(rawIncrement);
-  if (rawIncrement !== null && increment === null)
-    return bad("timer_increment_seconds");
-  const deathOnNormalBlindLoss = lobbyOption(lobbySettings.death_on_normal_blind_loss);
-  if (deathOnNormalBlindLoss === null) return bad("death_on_normal_blind_loss");
-  const goldOnLifeLoss = lobbyOption(lobbySettings.gold_on_life_loss);
-  if (goldOnLifeLoss === null) return bad("gold_on_life_loss");
-  const timerOption = lobbyOption(lobbySettings.timer);
-  if (timerOption === null) return bad("timer");
-  const timerBaseMilliseconds = Math.round(baseSeconds * 1e3);
-  return {
-    ok: true,
-    settings: {
-      mode,
-      startedCount: startedIds.length,
-      startingLives: startingLives2,
-      hunterLives,
-      pvpStartAnte,
-      // Timer off (the lobby toggle) stops the Ante bank, Pressure and the PvP hand
-      // timer; the Speedlatro clock ignores it, as on main.
-      clocks: timerOption || ((_a = found.clock.personal) == null ? void 0 : _a.kind) === "speedlatro" ? clockRulesFor(found.clock, timerBaseMilliseconds) : { ante: "none", pvp: null, personal: null },
-      // The host publishes the raw values (timer_base_seconds is not multiplied).
-      timerBaseMilliseconds,
-      timerIncrementMilliseconds: secondsToMilliseconds(increment),
-      skipTimeRule: found.clock.ownSkips ? "own" : "lead",
-      timerDisplayThresholdMilliseconds: found.clock.displayThresholdMilliseconds,
-      timerForgiveness: forgiveness,
-      failedBlindLife: deathOnNormalBlindLoss ? "costs" : "free",
-      lifeLossGold: goldOnLifeLoss ? "paid" : "none"
-    }
-  };
-}
-
 // src/lobby/pvp/modes/nemesis.ts
 var pairKey = (first, second) => first < second ? `${first}|${second}` : `${second}|${first}`;
 function shuffled2(ids, random) {
@@ -4956,49 +5046,6 @@ var royaleMode = __spreadProps(__spreadValues({
   view: view3
 });
 
-// src/lobby/pvp/core/run_player.ts
-function changeRunPlayer(state, player, change) {
-  const run = state.run;
-  const entry = run == null ? void 0 : run.players[player];
-  if (run === null || entry === void 0)
-    throw new Error(`player ${player} is not in the run`);
-  return __spreadProps(__spreadValues({}, state), {
-    run: __spreadProps(__spreadValues({}, run), { players: __spreadProps(__spreadValues({}, run.players), { [player]: change(entry) }) })
-  });
-}
-
-// src/lobby/pvp/core/inbox.ts
-var INBOX_ITEMS_PER_VIEW = 32;
-function addInboxItem(state, player, item) {
-  return changeRunPlayer(state, player, (entry) => __spreadProps(__spreadValues({}, entry), {
-    inbox: [...entry.inbox, __spreadProps(__spreadValues({}, item), { itemNumber: entry.inbox.length + 1 })]
-  }));
-}
-function recordLastItemDone(state, player, inboxDone) {
-  var _a;
-  const entry = (_a = state.run) == null ? void 0 : _a.players[player];
-  if (entry === void 0) return { state, refusals: [] };
-  if (inboxDone > entry.inbox.length)
-    return { state, refusals: ["bad_inbox_done"] };
-  if (inboxDone <= entry.inboxDone) return { state, refusals: [] };
-  return {
-    state: changeRunPlayer(state, player, (own) => __spreadProps(__spreadValues({}, own), { inboxDone })),
-    refusals: []
-  };
-}
-function visibleInbox(state, player) {
-  var _a;
-  const entry = (_a = state.run) == null ? void 0 : _a.players[player];
-  if (entry === void 0) return { inbox: [], inboxNewest: 0 };
-  return {
-    inbox: entry.inbox.slice(
-      entry.inboxDone,
-      entry.inboxDone + INBOX_ITEMS_PER_VIEW
-    ),
-    inboxNewest: entry.inbox.length
-  };
-}
-
 // src/lobby/pvp/core/same.ts
 var isRecord = (value) => typeof value === "object" && value !== null;
 function same(a, b) {
@@ -5006,40 +5053,6 @@ function same(a, b) {
   if (!isRecord(a) || !isRecord(b)) return false;
   const names = Object.keys(a);
   return names.length === Object.keys(b).length && names.every((name) => name in b && same(a[name], b[name]));
-}
-
-// src/lobby/pvp/rules/players.ts
-function inRunIgnoringLives(playerLives) {
-  return (playerLives == null ? void 0 : playerLives.status) === "playing";
-}
-var isStanding = (seat) => seat !== void 0 && seat.lives > 0 && inRunIgnoringLives(seat);
-var isInRun = (run, player) => isStanding(run.lives[player]);
-function isPvpBlind(run, blindKey) {
-  if (!isBlindKey(blindKey) || !isBossBlind(blindKey)) return false;
-  return Number(blindKey.split(":")[0]) >= run.rules.pvpStartAnte;
-}
-var isResolved = (run, blindKey) => run.finishedPvpBlinds.some((done) => done.blindKey === blindKey);
-function playersOfBoss(run, blindKey) {
-  if (!isPvpBlind(run, blindKey) || isResolved(run, blindKey)) return [];
-  const players = Object.keys(run.lives).filter(
-    (player) => isInRun(run, player)
-  );
-  return players.length >= 2 ? players : [];
-}
-function playedPvpBlind(run, player, blindKey) {
-  const open = run.currentPvpBlind;
-  if ((open == null ? void 0 : open.blindKey) === blindKey && open.players[player] !== void 0)
-    return true;
-  return run.finishedPvpBlinds.some(
-    (done) => done.blindKey === blindKey && player in done.scores
-  ) || playersOfBoss(run, blindKey).includes(player);
-}
-var isPvpBlindOf = (run, player, blindKey) => isPvpBlind(run, blindKey) && playedPvpBlind(run, player, blindKey);
-function requiredPlayers(run) {
-  if (run.currentPvpBlind === null) return [];
-  return Object.keys(run.currentPvpBlind.players).filter(
-    (player) => isInRun(run, player)
-  );
 }
 
 // src/lobby/pvp/rules/deaths.ts
@@ -5589,19 +5602,6 @@ function modeOf(run) {
   );
 }
 
-// src/lobby/pvp/core/random.ts
-function seededRandom(seed) {
-  let hash2 = 2166136261;
-  for (let index = 0; index < seed.length; index++)
-    hash2 = Math.imul(hash2 ^ seed.charCodeAt(index), 16777619);
-  return () => {
-    hash2 = hash2 + 1831565813 | 0;
-    let mixed = Math.imul(hash2 ^ hash2 >>> 15, 1 | hash2);
-    mixed = mixed + Math.imul(mixed ^ mixed >>> 7, 61 | mixed) ^ mixed;
-    return ((mixed ^ mixed >>> 14) >>> 0) / 4294967296;
-  };
-}
-
 // src/lobby/pvp/rules/pvp_blind_rules.ts
 var isPersonalOf = (countdown, currentPvpBlind) => countdown.kind === "personal" && countdown.against.some(
   (player) => currentPvpBlind.players[player] !== void 0
@@ -5711,6 +5711,20 @@ function pvpBlindOpponentOf(state, currentPvpBlind, actor) {
   const shown = shownTargets(state, anteOfBlind(currentPvpBlind.blindKey));
   return shown === null ? null : opponentsFrom(shown.run, shown.mode, shown.shown, actor).one;
 }
+function reachedBy(state, actor, reach) {
+  const run = state.run;
+  if (run === null) return [];
+  if (reach === "everyone")
+    return Object.keys(run.lives).sort().filter((id) => id !== actor && isInRun(run, id));
+  const mine = shownTargetsOf(state, actor);
+  if (mine === null) return [];
+  if (reach === "every opponent")
+    return opponentsFrom(mine.run, mine.mode, mine.shown, actor).each;
+  return Object.keys(run.lives).sort().filter((id) => {
+    const theirs = shownTargetsOf(state, id);
+    return theirs !== null && mayTarget(run, actor, id) && opponentsFrom(run, theirs.mode, theirs.shown, id).one === actor;
+  });
+}
 function teamScoresOf(viewer, shown) {
   var _a, _b;
   const currentPvpBlind = shown.run.currentPvpBlind;
@@ -5743,6 +5757,49 @@ function targetsOf(state, viewer) {
     teamScores: teamScoresOf(viewer, shown)
   };
 }
+
+// src/lobby/pvp/inputs/effects.ts
+var MAX_EFFECTS_PER_PLAYER = 384;
+var EFFECT_NAMES = ["asteroid", "pizza", "gambling"];
+var EFFECTS = {
+  asteroid: { reach: "targeting me", amount: 1 },
+  pizza: { reach: "everyone", amount: 1 },
+  gambling: { reach: "everyone", amount: 10 }
+};
+var effectSpec = {
+  effect: { type: "oneOf", values: EFFECT_NAMES },
+  total: { type: "whole", max: MAX_EFFECTS_PER_PLAYER }
+};
+function hit(state, from, effect, times, ante) {
+  const { reach, amount } = EFFECTS[effect];
+  let next = state;
+  for (const target of reachedBy(state, from, reach))
+    for (let count2 = 0; count2 < times; count2++)
+      next = addInboxItem(
+        next,
+        target,
+        effect === "pizza" ? { from, effect, amount, ante } : { from, effect, amount }
+      );
+  return next;
+}
+var effectHandler = {
+  spec: effectSpec,
+  handle(state, player, body, _now, previousTotal) {
+    var _a;
+    const run = state.run;
+    const ante = (_a = run == null ? void 0 : run.players[player]) == null ? void 0 : _a.ante;
+    if (run === null || ante === null || ante === void 0)
+      return { refusal: "no_progress" };
+    if (!isInRun(run, player)) return { refusal: "eliminated" };
+    return hit(
+      state,
+      player,
+      body.effect,
+      body.total - (previousTotal != null ? previousTotal : 0),
+      ante
+    );
+  }
+};
 
 // src/lobby/pvp/rules/skips.ts
 var NO_SKIPS = {
@@ -6933,6 +6990,145 @@ function runPlayerView(run, player) {
   };
 }
 
+// src/lobby/pvp/inputs/traps.ts
+var ARCANE_LOCK_KEY = "c_mp_trap_arcane_lock";
+var TRAP_KEY_MAX = 64;
+var MAX_PLANTS_PER_KEY = 32;
+var MAX_TRAP_ID = 1e6;
+var MAX_FIRE_DATA_KEYS = 16;
+var MAX_FIRE_DATA_KEY_LENGTH = 32;
+var MAX_FIRE_DATA_SIZE = 1024;
+var plantSpec = {
+  key: { type: "text", max: TRAP_KEY_MAX },
+  total: { type: "whole", max: MAX_PLANTS_PER_KEY }
+};
+var fireSpec = {
+  trapId: { type: "whole", max: MAX_TRAP_ID },
+  data: {
+    type: "record",
+    maxKeys: MAX_FIRE_DATA_KEYS,
+    maxKeyLength: MAX_FIRE_DATA_KEY_LENGTH,
+    maxSize: MAX_FIRE_DATA_SIZE
+  }
+};
+var lostSpec = {
+  trapId: { type: "whole", max: MAX_TRAP_ID }
+};
+function withTraps(state, traps) {
+  if (state.run === null) return state;
+  return __spreadProps(__spreadValues({}, state), { run: __spreadProps(__spreadValues({}, state.run), { traps }) });
+}
+function withTrapState(traps, id, newState) {
+  return traps.map(
+    (trap) => trap.id === id ? __spreadProps(__spreadValues({}, trap), { state: newState }) : trap
+  );
+}
+function liveLockHeldBy(traps, player) {
+  return traps.find(
+    (trap) => trap.key === ARCANE_LOCK_KEY && trap.holder === player && trap.state === "live"
+  );
+}
+function bounced(state, lock, key, planter) {
+  var _a, _b;
+  const traps = (_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [];
+  const sent = withTraps(state, [
+    ...withTrapState(traps, lock.id, "fired"),
+    {
+      id: traps.length + 1,
+      key,
+      owner: lock.owner,
+      holder: planter,
+      state: "live"
+    }
+  ]);
+  return addInboxItem(sent, lock.owner, {
+    from: planter,
+    effect: "trapReward",
+    amount: 1,
+    trap: { id: lock.id, key: lock.key, data: {} }
+  });
+}
+function plantedAt(state, key, planter, target) {
+  var _a, _b;
+  const traps = (_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [];
+  return withTraps(state, [
+    ...traps,
+    {
+      id: traps.length + 1,
+      key,
+      owner: planter,
+      holder: target,
+      state: "live"
+    }
+  ]);
+}
+var trapPlantHandler = {
+  spec: plantSpec,
+  handle(state, player, body, _now, previousTotal) {
+    var _a, _b, _c;
+    const run = state.run;
+    const ante = (_a = run == null ? void 0 : run.players[player]) == null ? void 0 : _a.ante;
+    if (run === null || ante === null || ante === void 0)
+      return { refusal: "no_progress" };
+    if (!isInRun(run, player)) return { refusal: "eliminated" };
+    const targets = reachedBy(state, player, "every opponent");
+    const planted = body.total - (previousTotal != null ? previousTotal : 0);
+    let next = state;
+    for (let count2 = 0; count2 < planted; count2++) {
+      const lock = liveLockHeldBy((_c = (_b = next.run) == null ? void 0 : _b.traps) != null ? _c : [], player);
+      if (lock !== void 0) next = bounced(next, lock, body.key, player);
+      else
+        for (const target of targets)
+          next = plantedAt(next, body.key, player, target);
+    }
+    return next;
+  }
+};
+function liveTrapHeldBy(state, player, id) {
+  var _a;
+  const trap = (_a = state.run) == null ? void 0 : _a.traps.find((each) => each.id === id);
+  if (trap === void 0 || trap.holder !== player)
+    return { ok: false, refusal: "not_holder" };
+  return trap.state === "live" ? { ok: true, trap } : { ok: false, refusal: "already_fired" };
+}
+var trapFireHandler = {
+  spec: fireSpec,
+  handle(state, player, body) {
+    var _a, _b;
+    const held = liveTrapHeldBy(state, player, body.trapId);
+    if (!held.ok) return { refusal: held.refusal };
+    const trap = held.trap;
+    if (trap.key === ARCANE_LOCK_KEY) return { refusal: "arcane_lock" };
+    const fired = withTraps(
+      state,
+      withTrapState((_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [], trap.id, "fired")
+    );
+    return addInboxItem(fired, trap.owner, {
+      from: player,
+      effect: "trapReward",
+      amount: 1,
+      trap: { id: trap.id, key: trap.key, data: body.data }
+    });
+  }
+};
+var trapLostHandler = {
+  spec: lostSpec,
+  handle(state, player, body) {
+    var _a, _b;
+    const held = liveTrapHeldBy(state, player, body.trapId);
+    if (!held.ok) return { refusal: held.refusal };
+    const trap = held.trap;
+    return withTraps(
+      state,
+      withTrapState((_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : [], trap.id, "lost")
+    );
+  }
+};
+function trapsView(state, viewer) {
+  var _a, _b;
+  return ((_b = (_a = state.run) == null ? void 0 : _a.traps) != null ? _b : []).filter((trap) => trap.owner === viewer || trap.holder === viewer).map((trap) => __spreadValues({}, trap));
+}
+
 // src/lobby/pvp/core/request_checks.ts
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -7197,6 +7393,10 @@ var inputHandlers = {
   sell: sellHandler,
   shop: shopHandler,
   voucher: voucherHandler,
+  effect: effectHandler,
+  trapPlant: trapPlantHandler,
+  trapFire: trapFireHandler,
+  trapLost: trapLostHandler,
   timerStart: timerStartHandler,
   timerPause: timerPauseHandler,
   paidPreviews: paidPreviewsHandler,
@@ -7215,6 +7415,10 @@ function totalKey(input) {
       return `sell:${String(input.ante)}`;
     case "shop":
       return "shop";
+    case "effect":
+      return `effect:${String(input.effect)}`;
+    case "trapPlant":
+      return `trap:${String(input.key)}`;
     case "paidPreviews":
       return "paidPreviews";
     default:
@@ -7405,7 +7609,9 @@ function view5(state, player, now, facts) {
     },
     players: playersViewOf(state, player, facts),
     timers: __spreadProps(__spreadValues({}, timers), { deadlines: [...timers.deadlines, ...grace] }),
-    onlyMine: __spreadValues({}, visibleInbox(state, player))
+    onlyMine: __spreadValues({
+      traps: trapsView(state, player)
+    }, visibleInbox(state, player))
   };
 }
 
@@ -7577,6 +7783,7 @@ function startPvpRun(lobby, config, now) {
         cardTargets: opening.cardTargets,
         teams: opening.teams,
         skips: {},
+        traps: [],
         votes: { draw: [], seed: [] },
         places: {},
         endGames: {},
@@ -13778,7 +13985,7 @@ function lobbyView(lobby, player, now) {
       pvpBanks: {},
       anteBanks: {}
     },
-    onlyMine: { inbox: [], inboxNewest: 0 }
+    onlyMine: { traps: [], inbox: [], inboxNewest: 0 }
   };
 }
 

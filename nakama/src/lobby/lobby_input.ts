@@ -250,6 +250,6 @@ export function lobbyView(
 			pvpBanks: {},
 			anteBanks: {},
 		},
-		onlyMine: { inbox: [], inboxNewest: 0 },
+		onlyMine: { traps: [], inbox: [], inboxNewest: 0 },
 	}
 }

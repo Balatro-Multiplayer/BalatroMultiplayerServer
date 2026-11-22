@@ -12,20 +12,22 @@ import { addInboxItem } from './inbox'
 import type { State } from './types'
 
 // Rows for the table: the real ones arrive with the inputHandlers.
-const sell: InputHandler<{
-	ante: { type: 'whole'; max: 2 }
+const effect: InputHandler<{
+	effect: { type: 'oneOf'; values: readonly ['pizza', 'gambling'] }
 	total: { type: 'whole' }
 }> = {
 	spec: {
-		ante: { type: 'whole', max: 2 },
+		effect: { type: 'oneOf', values: ['pizza', 'gambling'] },
 		total: { type: 'whole' },
 	},
-	handle: (state, player) =>
-		addInboxItem(state, player, {
-			from: null,
-			effect: 'comebackBonus',
-			amount: 1,
-		}),
+	handle: (state, player, body) =>
+		addInboxItem(
+			state,
+			player,
+			body.effect === 'pizza'
+				? { from: null, effect: body.effect, amount: 1, ante: 1 }
+				: { from: null, effect: body.effect, amount: 1 },
+		),
 }
 const team: InputHandler<{
 	team: { type: 'oneOf'; values: readonly ['A', 'B'] }
@@ -38,7 +40,7 @@ const stale: InputHandler = {
 	spec: {},
 	handle: () => ({ refusal: 'stale' }),
 }
-const table: InputHandlers = { sell, team, stale }
+const table: InputHandlers = { effect, team, stale }
 
 const PLAYERS = ['ann', 'bob']
 const start = (): State => runState(PLAYERS)
@@ -64,12 +66,12 @@ const header = (messageNumber: number, extra: object = {}) => ({
 	runId: 'run-1',
 	...extra,
 })
-const sale = (messageNumber: number, total: number) =>
-	header(messageNumber, { kind: 'sell', ante: 1, total })
+const pizza = (messageNumber: number, total: number) =>
+	header(messageNumber, { kind: 'effect', effect: 'pizza', total })
 
 describe('the dispatch table', () => {
 	it('a kind that is not in it is a bad body, confirmed', () => {
-		const result = apply(start(), 'ann', header(1, { kind: 'sell' }), 0, 0)
+		const result = apply(start(), 'ann', header(1, { kind: 'effect' }), 0, 0)
 		expect(result.refusals).toEqual(['bad_request_body'])
 		expect(result.lastNumber).toBe(1)
 	})
@@ -139,7 +141,7 @@ describe('input header rules', () => {
 			players: { ...base.players, cat: { team: null } },
 		}
 		for (const input of [
-			sale(1, 1),
+			pizza(1, 1),
 			header(1, { kind: 'applied' }),
 			header(1, { kind: 'stale' }),
 		]) {
@@ -208,7 +210,7 @@ describe('input header rules', () => {
 			[5, 'bad_request_body'],
 		]
 		for (const [runId, code] of cases) {
-			const result = send(start(), 'ann', { ...sale(1, 1), runId })
+			const result = send(start(), 'ann', { ...pizza(1, 1), runId })
 			expect(result.lastNumber).toBe(1)
 			expect(result.state.run).toEqual(start().run)
 			expect(result.refusals).toEqual([code])
@@ -216,7 +218,7 @@ describe('input header rules', () => {
 	})
 
 	it('a run input with no run in the match is refused', () => {
-		const result = send({ ...start(), run: null }, 'ann', sale(1, 1))
+		const result = send({ ...start(), run: null }, 'ann', pizza(1, 1))
 		expect(result.refusals).toEqual(['wrong_run'])
 		expect(result.lastNumber).toBe(1)
 	})
@@ -253,10 +255,10 @@ describe('input header rules', () => {
 
 describe('bad_body_is_confirmed_and_refused', () => {
 	const badBodies: { [field: string]: unknown }[] = [
-		{ kind: 'sell', ante: 1 },
-		{ kind: 'sell', ante: 1, total: 1.5 },
-		{ kind: 'sell', ante: 'rocks', total: 1 },
-		{ kind: 'sell', ante: 1, total: 1, extra: 1 },
+		{ kind: 'effect', effect: 'pizza' },
+		{ kind: 'effect', effect: 'pizza', total: 1.5 },
+		{ kind: 'effect', effect: 'rocks', total: 1 },
+		{ kind: 'effect', effect: 'pizza', total: 1, extra: 1 },
 		{ kind: 7 },
 		{},
 	]
@@ -268,7 +270,7 @@ describe('bad_body_is_confirmed_and_refused', () => {
 			expect(result.refusals).toEqual(['bad_request_body'])
 			expect(result.lastNumber).toBe(1)
 			expect(result.state).toEqual(start())
-			const next = send(result.state, 'ann', sale(2, 1))
+			const next = send(result.state, 'ann', pizza(2, 1))
 			expect(next.refusals).toEqual([])
 			expect(next.state.run?.players.ann.inbox).toHaveLength(1)
 		},
@@ -279,12 +281,12 @@ describe('bad_body_is_confirmed_and_refused', () => {
 const inputArbitrary = fc.oneof(
 	fc
 		.record({
-			ante: fc.constantFrom(1, 2, 'rocks'),
+			effect: fc.constantFrom('pizza', 'gambling', 'rocks'),
 			total: fc.nat({ max: 4 }),
 			inboxDone: fc.nat({ max: 3 }),
 			runId: fc.constantFrom('run-1', 'run-0'),
 		})
-		.map((input) => ({ kind: 'sell', ...input })),
+		.map((input) => ({ kind: 'effect', ...input })),
 	fc.constantFrom({ kind: 'stale', runId: 'run-1', inboxDone: 0 }),
 	fc.record({
 		kind: fc.constant('applied'),
@@ -381,9 +383,9 @@ describe('gap_input_changes_nothing', () => {
 	})
 
 	it('the missing numbers then close the gap in order', () => {
-		const second = send(start(), 'ann', sale(2, 2), 0)
-		const first = send(second.state, 'ann', sale(1, 1), second.lastNumber)
-		const again = send(first.state, 'ann', sale(2, 2), first.lastNumber)
+		const second = send(start(), 'ann', pizza(2, 2), 0)
+		const first = send(second.state, 'ann', pizza(1, 1), second.lastNumber)
+		const again = send(first.state, 'ann', pizza(2, 2), first.lastNumber)
 		expect(again.state.run?.players.ann.inbox).toHaveLength(2)
 		expect(again.lastNumber).toBe(2)
 	})
@@ -421,7 +423,7 @@ describe('bad_body_is_confirmed_and_refused (any bad body)', () => {
 describe('totals_count_each_action_once', () => {
 	const totalsArbitrary = fc.array(
 		fc.record({
-			ante: fc.constantFrom(1, 2),
+			effect: fc.constantFrom('pizza', 'gambling'),
 			total: fc.nat({ max: 6 }),
 		}),
 		{ maxLength: 25 },
@@ -430,7 +432,7 @@ describe('totals_count_each_action_once', () => {
 	// Sends the list, each with the next number after `from`; returns the match and the last number.
 	function sendAll(
 		state: State,
-		list: { ante: number; total: number }[],
+		list: { effect: string; total: number }[],
 		from = 0,
 	): { state: State; last: number } {
 		let next = state
@@ -439,7 +441,7 @@ describe('totals_count_each_action_once', () => {
 			const taken = send(
 				next,
 				'ann',
-				{ ...header(last + 1), kind: 'sell', ...item },
+				{ ...header(last + 1), kind: 'effect', ...item },
 				last,
 			)
 			next = taken.state
@@ -451,11 +453,11 @@ describe('totals_count_each_action_once', () => {
 	it('items equal the number of times each key reached a new highest total', () => {
 		fc.assert(
 			fc.property(totalsArbitrary, (list) => {
-				const highest: { [ante: number]: number } = {}
+				const highest: { [key: string]: number } = {}
 				let raised = 0
 				for (const item of list) {
-					if (item.total > (highest[item.ante] ?? 0)) {
-						highest[item.ante] = item.total
+					if (item.total > (highest[item.effect] ?? 0)) {
+						highest[item.effect] = item.total
 						raised += 1
 					}
 				}
@@ -464,9 +466,9 @@ describe('totals_count_each_action_once', () => {
 				expect(own?.inbox).toHaveLength(raised)
 				expect(own?.totals).toEqual(
 					Object.fromEntries(
-						Object.keys(highest).map((ante) => [
-							`sell:${ante}`,
-							highest[Number(ante)],
+						Object.keys(highest).map((effect) => [
+							`effect:${effect}`,
+							highest[effect],
 						]),
 					),
 				)
@@ -486,11 +488,13 @@ describe('totals_count_each_action_once', () => {
 
 	it('another ante or key has its own count', () => {
 		const { state } = sendAll(start(), [
-			{ ante: 1, total: 2 },
-			{ ante: 2, total: 1 },
+			{ effect: 'pizza', total: 2 },
+			{ effect: 'gambling', total: 1 },
 		])
-		expect(state.run?.players.ann.totals).toEqual({ 'sell:1': 2, 'sell:2': 1 })
-		expect(state.run?.players.ann.inbox).toHaveLength(2)
+		expect(state.run?.players.ann.inbox.map((item) => item.effect)).toEqual([
+			'pizza',
+			'gambling',
+		])
 	})
 })
 
@@ -500,8 +504,9 @@ describe('inbox_done_above_inbox_ignored (through apply)', () => {
 		for (let i = 0; i < 2; i++)
 			state = addInboxItem(state, 'ann', {
 				from: null,
-				effect: 'comebackBonus',
+				effect: 'pizza',
 				amount: 1,
+				ante: 1,
 			})
 		return state
 	}
@@ -518,7 +523,7 @@ describe('inbox_done_above_inbox_ignored (through apply)', () => {
 
 	it('ignores a claim above the inbox, logs it, and still runs the input', () => {
 		const result = send(withTwoItems(), 'ann', {
-			...sale(1, 1),
+			...pizza(1, 1),
 			inboxDone: 3,
 		})
 		expect(result.refusals).toEqual(['bad_inbox_done'])
@@ -548,14 +553,14 @@ describe('inbox_done_above_inbox_ignored (through apply)', () => {
 	})
 
 	it('a total that is not higher still moves the claim', () => {
-		const first = send(withTwoItems(), 'ann', sale(1, 3))
-		const again = send(first.state, 'ann', { ...sale(2, 3), inboxDone: 2 })
+		const first = send(withTwoItems(), 'ann', pizza(1, 3))
+		const again = send(first.state, 'ann', { ...pizza(2, 3), inboxDone: 2 })
 		expect(again.state.run?.players.ann.inboxDone).toBe(2)
 	})
 
 	it('a claim sent for another run is not counted', () => {
 		const result = send(withTwoItems(), 'ann', {
-			...sale(1, 1),
+			...pizza(1, 1),
 			runId: 'run-0',
 			inboxDone: 2,
 		})

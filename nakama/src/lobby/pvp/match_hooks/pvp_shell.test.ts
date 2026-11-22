@@ -720,8 +720,9 @@ describe('joinState', () => {
 		const inbox = [1, 2, 3].map((itemNumber) => ({
 			itemNumber,
 			from: null,
-			effect: 'comebackBonus' as const,
+			effect: 'pizza' as const,
 			amount: 1,
+			ante: 1,
 		}))
 		return {
 			...state,

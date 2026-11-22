@@ -693,8 +693,9 @@ const FILLED: FilledState = {
 					{
 						itemNumber: 1,
 						from: 'bob',
-						effect: 'voucherLife',
+						effect: 'trapReward',
 						amount: 2,
+						trap: { id: 7, key: 'snare', data: { size: 3 } },
 					},
 				],
 				inboxDone: 1,
@@ -807,6 +808,15 @@ const FILLED: FilledState = {
 		skips: {
 			ann: { skips: 2, skipsAtPvp: 0, facing: 'bob', spentMilliseconds: 0 },
 		},
+		traps: [
+			{
+				id: 1,
+				key: 'c_mp_trap_snare',
+				owner: 'ann',
+				holder: 'bob',
+				state: 'live',
+			},
+		],
 		votes: { draw: ['ann'], seed: ['bob'] },
 		places: { ann: 1, bob: 2 },
 		lastJokers: { bob: 'j_joker' },

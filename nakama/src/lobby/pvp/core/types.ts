@@ -1,9 +1,11 @@
 import type { PvpCardTargets, PvpPairing, WaitingDeath } from '../modes/types'
+import type { EffectInput } from '../inputs/effects'
 import type { EntryInput } from '../inputs/entry'
 import type { FinishInput } from '../inputs/finish'
 import type { PvpBlindInput } from '../inputs/pvp_blind'
 import type { RunActionInput } from '../inputs/run'
 import type { TimerInput } from '../inputs/timer'
+import type { TrapInput } from '../inputs/traps'
 // The state of a PvP match and the two shapes that cross the wire: what a player sends
 // (an input) and what the server sends back (the view). Types only.
 //
@@ -28,6 +30,7 @@ export interface AwayFrom {
 export type BigNum = string
 // "<ante>:Small|Big|Boss"
 export type BlindKey = string
+export type TrapData = { [field: string]: string | number | boolean }
 export type Team = 'A' | 'B' | 'RUNNER' | 'HUNTER'
 
 export interface PvpLimits {
@@ -49,9 +52,20 @@ interface InboxItemBase {
 }
 
 // One shape per effect; a field exists only on the effect that carries it.
-export type InboxItem = InboxItemBase & {
-	effect: 'comebackBonus' | 'voucherLife'
-}
+export type InboxItem =
+	| (InboxItemBase & {
+			effect: 'pizza'
+			// Its sender's ante when it was eaten (after the PvP blind, so the next ante). Its
+			// discards last until that ante's PvP blind; a receiver already past that ante gets none.
+			ante: number
+	  })
+	| (InboxItemBase & {
+			effect: 'gambling' | 'asteroid' | 'comebackBonus' | 'voucherLife'
+	  })
+	| (InboxItemBase & {
+			effect: 'trapReward'
+			trap: { id: number; key: string; data: TrapData }
+	  })
 
 // An item before it gets its number.
 export type NewInboxItem = InboxItem extends infer Item
@@ -191,6 +205,15 @@ export interface LifeLedger {
 	runOutsForgiven: { [player: PlayerId]: number }
 }
 
+// One planted trap: the owner planted it and gets its reward; the holder carries it and fires it.
+export interface Trap {
+	id: number
+	key: string
+	owner: PlayerId
+	holder: PlayerId
+	state: 'live' | 'lost' | 'fired'
+}
+
 // One player leaving the standing: lives gone, forfeit, leave. Players going out in the same
 // change share a `batch`, counted from 1. `blindKey` is the blind the last life was lost on,
 // null for any other way out. The places of a 3+ game read both.
@@ -230,6 +253,8 @@ export interface Run {
 	teams: { [player: PlayerId]: Team }
 	// Each player's reported skips: the one owner of the skip count (skips.ts).
 	skips: SkipEntries
+	// Every planted trap, oldest first; a trap's id is its place here, counted from 1.
+	traps: Trap[]
 	// Who says yes to a draw or a new seed; a vote belongs to its run.
 	votes: { draw: PlayerId[]; seed: PlayerId[] }
 	// The place of each player once a win or draw is decided; 1 is first.
@@ -278,6 +303,8 @@ export type Input = InputHeader &
 		| EntryInput
 		| PvpBlindInput
 		| RunActionInput
+		| EffectInput
+		| TrapInput
 		| TimerInput
 		| FinishInput
 	)
@@ -454,6 +481,7 @@ export interface TimersView {
 }
 
 export interface MineView {
+	traps: Trap[]
 	inbox: InboxItem[]
 	inboxNewest: number
 }
