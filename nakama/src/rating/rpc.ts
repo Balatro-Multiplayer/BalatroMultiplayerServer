@@ -26,7 +26,8 @@ function boardOf(payload: string): { modId: string; mode: string; input: { [key:
 }
 
 // {modId, mode, playerId?} -> the player's (default: the caller's) rating record on that board (a fresh one if
-// they haven't played it), plus whether they're still in placement games.
+// they haven't played it), plus whether they're still in placement games and their
+// leaderboard `rank` (null while in placements or before the board exists).
 export function rpcRatingGet(
 	ctx: nkruntime.Context,
 	logger: nkruntime.Logger,
@@ -40,8 +41,21 @@ export function rpcRatingGet(
 	const playerId = input.playerId === undefined ? ctx.userId : input.playerId
 	if (typeof playerId !== 'string' || !USER_ID_PATTERN.test(playerId))
 		throw runtimeError(INVALID_ARGUMENT, 'playerId is not a user id')
-	const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating()
-	return JSON.stringify({ ...rating, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
+	const season = currentSeason(nk)
+	const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), season).current[playerId] || newRating()
+	const board = boardId(modId, mode, season)
+	// The raw board position by stored score. A leaderboard page re-ranks its
+	// entries by decayed rating (see boardEntries), so the two can differ for a
+	// decayed player; that is known, not a bug to fix on one side.
+	let rank: number | null = null
+	try {
+		const page = nk.leaderboardRecordsList(board, [playerId], 1, '', 0)
+		const own = (page.ownerRecords || []).find((r) => r.ownerId === playerId)
+		if (own && typeof own.rank === 'number' && own.rank > 0) rank = own.rank
+	} catch (e) {
+		// No board until the first rated game.
+	}
+	return JSON.stringify({ ...rating, rank, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
 }
 
 // {modId, mode, cursor?} -> {entries: [{rank, playerId, name, rating, wins,

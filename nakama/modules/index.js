@@ -10898,8 +10898,17 @@ function rpcRatingGet(ctx, logger, nk, payload) {
   const playerId = input.playerId === void 0 ? ctx.userId : input.playerId;
   if (typeof playerId !== "string" || !USER_ID_PATTERN3.test(playerId))
     throw runtimeError(INVALID_ARGUMENT, "playerId is not a user id");
-  const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), currentSeason(nk)).current[playerId] || newRating();
-  return JSON.stringify(__spreadProps(__spreadValues({}, rating), { seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
+  const season = currentSeason(nk);
+  const rating = loadRatings(nk, modId, mode, [playerId], Date.now(), season).current[playerId] || newRating();
+  const board = boardId(modId, mode, season);
+  let rank = null;
+  try {
+    const page = nk.leaderboardRecordsList(board, [playerId], 1, "", 0);
+    const own = (page.ownerRecords || []).find((r) => r.ownerId === playerId);
+    if (own && typeof own.rank === "number" && own.rank > 0) rank = own.rank;
+  } catch (e) {
+  }
+  return JSON.stringify(__spreadProps(__spreadValues({}, rating), { rank, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
 }
 function rpcLeaderboardGet(ctx, logger, nk, payload) {
   if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "Rating RPCs need a player session");
