@@ -2,6 +2,9 @@
 // (mpapi_report_result), and once they're all in -- or the clock runs out --
 // the reports are reconciled into one result, handed off to be stored, and
 // the lobby is free to start again. Pure, like the rest of src/actions.
+import { runningReferee } from '../lobby/hooks'
+import { pvpHooks } from '../lobby/pvp/match_hooks/pvp_shell'
+import { logClosed } from '../lobby/log_check'
 import {
 	type GameEnded,
 	type Participant,
@@ -135,7 +138,7 @@ function remainingParticipants(lobby: Lobby): string[] {
 export function finishGame(
 	lobby: Lobby,
 	now: number,
-	override?: { status: RunStatus; announce: boolean },
+	override?: { status: RunStatus; announce: boolean; placements?: Placement[] },
 ): Step {
 	const game = lobby.game
 	const started = game.started
@@ -153,7 +156,8 @@ export function finishGame(
 		: override
 			? override.status
 			: reconciled.status
-	const placements = status === 'abandoned' ? [] : reconciled.placements
+	const placements =
+		override?.placements ?? (status === 'abandoned' ? [] : reconciled.placements)
 	const run: RunRecord = {
 		runId: started.runId,
 		code: lobby.code,
@@ -182,7 +186,9 @@ export function finishGame(
 			? started.players.filter((p) => !seated[p.id]).map((p) => p.id)
 			: []
 
-	const next = { ...lobby, lastRunId: started.runId, game: emptyGame() }
+	// A decided PvP match stays as `ended` until the next start, so its result is still readable.
+	const ended = game.pvp?.result ? { ended: game.pvp } : {}
+	const next = { ...lobby, lastRunId: started.runId, game: { ...emptyGame(), ...ended } }
 	const out: Outbound[] = [{ kind: 'saveRun', run, logs: game.logs, lateResultTo }]
 	if (!override || override.announce) {
 		const ended: GameEnded = { runId: started.runId, status, placements }
@@ -202,6 +208,26 @@ export function finishGame(
 export function settle(lobby: Lobby, now: number): Step {
 	const started = lobby.game.started
 	if (!started) return { lobby, out: [] }
+
+	// A game the server referees takes its ending from the match: no reports. A contest still outranks its status
+	// (finishGame). The run is stored once every remaining player's log is closed, or when
+	// the result clock runs out: the clients close their logs on seeing the result.
+	if (runningReferee(lobby) === 'server') {
+		const ending = pvpHooks.ending(lobby, now)
+		// A passed seed vote is carried out by the match loop, which builds the next game.
+		if (ending === null || ending.status === 'restarted')
+			return { lobby, out: [] }
+		const decided = { ...ending, announce: true }
+		const logs = lobby.game.logs
+		if (remainingParticipants(lobby).every((id) => logClosed(logs[id])))
+			return finishGame(lobby, now, decided)
+		const from = lobby.game.settleFrom ?? now
+		if (now - from >= lobby.resultTimeoutMs)
+			return finishGame(lobby, now, decided)
+		if (from === lobby.game.settleFrom) return { lobby, out: [] }
+		const game = { ...lobby.game, settleFrom: from }
+		return { lobby: { ...lobby, game }, out: [] }
+	}
 
 	const remaining = remainingParticipants(lobby)
 	if (remaining.length === 0) return finishGame(lobby, now)

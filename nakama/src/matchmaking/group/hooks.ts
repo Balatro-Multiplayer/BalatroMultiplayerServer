@@ -5,8 +5,8 @@
 import { readConfig } from '../../config'
 import { PERMISSION_DENIED, runtimeError } from '../../errors'
 import type { GroupEndReason, LobbySignal } from '../../lobby/protocol'
-import { pvpVersionOutliers, queueRefusalFor } from '../gate'
-import { PVP_MOD_ID, VERSION_MISMATCH } from '../../standing/pvp_version'
+import { pvpVersionRefusals, queueRefusalFor } from '../gate'
+import { PVP_MOD_ID } from '../../standing/pvp_version'
 import { queueKey } from '../matched'
 import { clearMatched, liveTicketHolders, writeGroupRecords } from '../queue'
 import {
@@ -63,8 +63,9 @@ export function memberFactsOf(
 	}
 	// A PvP group must run one PvP version, or the matched game would be refused.
 	if (modId === PVP_MOD_ID) {
-		for (const id of pvpVersionOutliers(nk, memberIds)) {
-			if (!refusals[id]) refusals[id] = { code: VERSION_MISMATCH }
+		const versions = pvpVersionRefusals(nk, memberIds)
+		for (const id of Object.keys(versions)) {
+			if (!refusals[id]) refusals[id] = versions[id]
 		}
 	}
 	return { refusals, queuedIds: liveTicketHolders(nk, memberIds, exceptTicket) }

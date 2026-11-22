@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SEED_LENGTH, seedFromHex } from '../actions/registry'
+import { PVP_MOD_ID } from '../standing/pvp_version'
 import { ServerOp } from './protocol'
 import { BURST, MAX_PARAMS_BYTES, type RelayStep, action } from './relay'
 import {
@@ -113,6 +114,46 @@ describe('relayed actions', () => {
 			params: { obj: 'j_x', kind: 'sync' },
 		})
 		expect(delivered(step)).toHaveLength(1)
+	})
+
+	it('in a refereed lobby, relays only the synced-card channel', () => {
+		let lobby = lobbyWith('a', 'b')
+		lobby = {
+			...lobby,
+			modId: PVP_MOD_ID,
+			game: {
+				...lobby.game,
+				started: { runId: 'run-1', seed: 'SEED', stake: null, options: null, startedAt: 0, hostId: 'a', players: [], referee: 'server' },
+			},
+		}
+		const copy = send(lobby, 'a', {
+			cid: 'c1',
+			action: 'mp_mpapi_sync',
+			to: '*',
+			params: {
+				obj: 'j_mp_lets_go_gambling',
+				kind: 'phantom',
+				data: { op: 'add' },
+			},
+		})
+		expect(delivered(copy)).toHaveLength(1)
+		expect(delivered(copy)[0].to).toEqual(['a', 'b'])
+		for (const action of [
+			'mp_location',
+			'mp_mpapi_sync_x',
+			'mpapi_sync',
+			'zz_mpapi_sync',
+		]) {
+			const other = send(lobby, 'a', { cid: 'c2', action, to: '*', params: {} })
+			expect(rejection(other)).toBe('server_referee')
+		}
+		const nobody = send(lobby, 'a', {
+			cid: 'c3',
+			action: 'mp_mpapi_sync',
+			to: 'zed',
+			params: {},
+		})
+		expect(rejection(nobody)).toBe('unknown_target')
 	})
 
 	it('rejects an unknown target, a bad key and oversized params', () => {

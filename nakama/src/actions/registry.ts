@@ -5,10 +5,23 @@
 //
 // Pure: a reducer gets the lobby and its context and returns the new game
 // state plus the results to broadcast, or a rejection reason for the sender.
-import type { GameState, PlayerLog, SpectateEvent, StartedGame } from '../lobby/protocol'
+import type { ServerConfig } from '../config'
+import { nextReferee, runningReferee, savedReferee } from '../lobby/hooks'
+import { pvpHooks } from '../lobby/pvp/match_hooks/pvp_shell'
+import {
+	type ActionEnvelope,
+	BROADCAST_TARGET,
+	type GameState,
+	type PlayerLog,
+	SERVER_TARGET,
+	ServerOp,
+	type SpectateEvent,
+	type StartedGame,
+} from '../lobby/protocol'
 import {
 	type Lobby,
 	type Outbound,
+	type Step,
 	MAX_PLAYERS,
 	emptyGame,
 	isParticipant,
@@ -30,6 +43,8 @@ export interface ActionContext {
 	newId: () => string
 	// A number in [0, 1), for Setup's rolls.
 	random: () => number
+	// The server config; a PvP lobby needs it to decide the referee at a start, and refuses without it.
+	config?: ServerConfig
 }
 
 // A result broadcast as ACTION {from:'server'}: to every player (the
@@ -89,14 +104,30 @@ function startedParams(started: StartedGame) {
 	}
 }
 
+// A new game the server referees goes through its mod (onStart, onRestart), which may
+// add its own state to the game or refuse it. Any other game is handed back as is.
+function handedToMod(
+	lobby: Lobby,
+	game: GameState,
+	ctx: Omit<ActionContext, 'from'>,
+	call: 'onStart' | 'onRestart',
+): { game: GameState; out: Outbound[] } | { reject: string } {
+	if (game.started?.referee !== 'server') return { game, out: [] }
+	if (ctx.config === undefined) return { reject: 'no_config' }
+	const step = pvpHooks[call]({ ...lobby, game }, ctx.config, ctx.now)
+	return 'reject' in step ? step : { game: step.lobby.game, out: step.out }
+}
+
 // A new game on the lobby's present players, with a server-picked seed.
 function newGame(
 	lobby: Lobby,
-	ctx: ActionContext,
+	ctx: Omit<ActionContext, 'from'>,
 	stake: number | null,
 	options: unknown,
+	referee: 'server' | 'players' | undefined,
 ): StartedGame {
 	return {
+		...(referee === undefined ? {} : { referee }),
 		runId: ctx.newId(),
 		seed: ctx.newSeed(),
 		stake,
@@ -153,46 +184,101 @@ const startGame: AuthoritativeAction = {
 			for (const pl of present) versions[pl.id] = pl.info.pvpVersion || ''
 			if (versionOutliers(versions).length > 0) return { reject: VERSION_MISMATCH }
 		}
+		// Decided anew at every start, from the setting now and the players seated now.
+		if (lobby.modId === PVP_MOD_ID && ctx.config === undefined) return { reject: 'no_config' }
+		const referee =
+			lobby.modId === PVP_MOD_ID
+				? nextReferee(lobby, ctx.config?.pvpServerRulesVersion ?? '')
+				: undefined
 		const started = newGame(
 			lobby,
 			ctx,
 			typeof p.stake === 'number' ? p.stake : null,
 			options,
+			referee,
 		)
+		const game = { ...emptyGame(), started, presence: startingPresence(started) }
+		const handed = handedToMod(lobby, game, ctx, 'onStart')
+		if ('reject' in handed) return handed
 		return {
-			game: { ...emptyGame(), started, presence: startingPresence(started) },
+			game: handed.game,
 			params: startedParams(started),
+			...(handed.out.length > 0 ? { out: handed.out } : {}),
 		}
 	},
 }
 
-// {} -- host only: a new game on a new seed, same options and stake (a
-// finished Draft has set the stake), same Setup results. The current one is
-// stored as 'restarted' (no GAME_ENDED: clients go straight into the new game,
-// through the same path as a start).
-const restartGame: AuthoritativeAction = {
-	key: 'mpapi_restart_game',
+// A new game on a new seed, same options and stake (a finished Draft has set
+// the stake), same Setup results. The current one is stored as 'restarted' (no
+// GAME_ENDED: clients go straight into the new game, through the same path as
+// a start). No host check: the action keeps it, a passed seed vote has no host.
+export function restartGame(
+	lobby: Lobby,
+	ctx: Omit<ActionContext, 'from'>,
+): ActionResult | { reject: string } {
+	const current = lobby.game.started
+	if (!current) return { reject: 'not_in_game' }
+	const finished = finishGame(lobby, ctx.now, {
+		status: 'restarted',
+		announce: false,
+	})
+	const referee =
+		lobby.modId === PVP_MOD_ID ? savedReferee(lobby.game) : undefined
+	const started = newGame(
+		finished.lobby,
+		ctx,
+		current.stake,
+		current.options,
+		referee,
+	)
+	const game = { ...emptyGame(), started, setup: setupForRestart(lobby.game), presence: startingPresence(started) }
+	const handed = handedToMod(finished.lobby, game, ctx, 'onRestart')
+	if ('reject' in handed) return handed
+	return { game: handed.game, params: startedParams(started), out: finished.out.concat(handed.out) }
+}
+
+// The restart a passed seed vote makes: the broadcast the action would send.
+export function restartedStep(
+	lobby: Lobby,
+	ctx: Omit<ActionContext, 'from'>,
+): Step | { reject: string } {
+	const result = restartGame(lobby, ctx)
+	if ('reject' in result) return result
+	const envelope: ActionEnvelope = {
+		cid: '',
+		action: RESTART_KEY,
+		from: SERVER_TARGET,
+		to: BROADCAST_TARGET,
+		params: result.params,
+	}
+	const broadcast: Outbound = {
+		kind: 'send',
+		op: ServerOp.ACTION,
+		payload: envelope,
+		to: lobby.players.map((p) => p.id),
+	}
+	return { lobby: { ...lobby, game: result.game }, out: [broadcast, ...(result.out ?? [])] }
+}
+
+const RESTART_KEY = 'mpapi_restart_game'
+
+// {} -- host only: restartGame.
+const restartAction: AuthoritativeAction = {
+	key: RESTART_KEY,
 	reduce(lobby, ctx) {
 		if (lobby.hostId !== ctx.from) return { reject: 'not_host' }
-		const current = lobby.game.started
-		if (!current) return { reject: 'not_in_game' }
-		const finished = finishGame(lobby, ctx.now, {
-			status: 'restarted',
-			announce: false,
-		})
-		const started = newGame(finished.lobby, ctx, current.stake, current.options)
-		return {
-			game: { ...emptyGame(), started, setup: setupForRestart(lobby.game), presence: startingPresence(started) },
-			params: startedParams(started),
-			out: finished.out,
-		}
+		return restartGame(lobby, ctx)
 	},
 }
+
+// The server referees a PvP game, so the host's say-so about its result is refused.
+export const SERVER_REFEREE = 'server_referee'
 
 // {} -- host only: ends the game without a result.
 const abandonGame: AuthoritativeAction = {
 	key: 'mpapi_abandon_game',
 	reduce(lobby, ctx) {
+		if (runningReferee(lobby) === 'server') return { reject: SERVER_REFEREE }
 		if (lobby.hostId !== ctx.from) return { reject: 'not_host' }
 		const current = lobby.game.started
 		if (!current) return { reject: 'not_in_game' }
@@ -214,6 +300,7 @@ const abandonGame: AuthoritativeAction = {
 const reportResult: AuthoritativeAction = {
 	key: 'mpapi_report_result',
 	reduce(lobby, ctx, params) {
+		if (runningReferee(lobby) === 'server') return { reject: SERVER_REFEREE }
 		const started = lobby.game.started
 		if (!started) return { reject: 'not_in_game' }
 		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
@@ -244,6 +331,7 @@ const reportResult: AuthoritativeAction = {
 const setResultPending: AuthoritativeAction = {
 	key: 'mpapi_set_result_pending',
 	reduce(lobby, ctx, params) {
+		if (runningReferee(lobby) === 'server') return { reject: SERVER_REFEREE }
 		const started = lobby.game.started
 		if (!started) return { reject: 'not_in_game' }
 		if (!isParticipant(lobby, ctx.from)) return { reject: 'not_participant' }
@@ -452,7 +540,7 @@ const logEvents: AuthoritativeAction = {
 const REGISTRY: { [key: string]: AuthoritativeAction } = {
 	[ready.key]: ready,
 	[startGame.key]: startGame,
-	[restartGame.key]: restartGame,
+	[restartAction.key]: restartAction,
 	[abandonGame.key]: abandonGame,
 	[reportResult.key]: reportResult,
 	[setResultPending.key]: setResultPending,

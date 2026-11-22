@@ -199,6 +199,15 @@ describe('the lobby while its group is away', () => {
 		return disconnect(l, 'b', 'b-s1', 2000)
 	}
 
+	it('names no forfeit time for a parked member, in the snapshot or the event', () => {
+		const first = disconnect(away(home('a', 'b')), 'a', 'a-s1', 2000)
+		const sent = first.out.flatMap((o) =>
+			o.kind === 'send' && o.op === ServerOp.EVENT ? [o.payload as { type: string; data?: unknown }] : [],
+		)
+		expect(sent.find((e) => e.type === 'player_disconnected')?.data).toEqual({ forfeitsAt: null, serverNow: 2000 })
+		expect(snapshotFor(gone().lobby, 'a').players.map((p) => p.forfeitsAt)).toEqual([null, null])
+	})
+
 	it('keeps its host and stays open with everyone gone', () => {
 		const step = gone()
 		expect(step.lobby.closed).toBe(false)

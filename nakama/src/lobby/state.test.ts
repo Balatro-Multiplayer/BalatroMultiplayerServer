@@ -250,6 +250,17 @@ describe('disconnect and grace period', () => {
 		})
 	})
 
+	it('names the server time an away player forfeits, in the event and the snapshot', () => {
+		const dropped = disconnect(lobbyWith('a', 'b'), 'a', 'a-s1', 1000)
+		const forfeitsAt = 1000 + GRACE
+		expect(events(dropped)[0]).toMatchObject({
+			type: 'player_disconnected',
+			data: { forfeitsAt, serverNow: 1000 },
+		})
+		const seen = snapshotFor(dropped.lobby, 'b', 5000)
+		expect(seen.players.map((p) => p.forfeitsAt)).toEqual([forfeitsAt, null])
+	})
+
 	it("sends a rejoining participant the others' logs of the running game", () => {
 		const lobby = lobbyWith('a', 'b')
 		const started = {

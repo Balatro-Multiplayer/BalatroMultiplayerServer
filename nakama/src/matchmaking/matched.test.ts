@@ -120,6 +120,19 @@ describe('matchmakerMatched', () => {
 			expect(sent('b')[0].content).toMatchObject({ requeue: true })
 		})
 
+		it('tells a player below the minimum to update, not that the versions differ', () => {
+			const nk = fakeNk()
+			writeConfig(nk as any, { ...DEFAULT_CONFIG, pvpMinVersion: '1.0.3' })
+			report(nk, 'a', '1.0.3')
+			report(nk, 'b', '1.0.3')
+			report(nk, 'c', '1.0.2')
+			expect(() => match(nk, CASUAL_PVP, 'a', 'b', 'c')).toThrow(/may not queue/)
+			const sent = (id: string) => nk.notifications.filter((n) => n.userId === id)
+			expect(sent('c')[0].content).toMatchObject({ code: 'update_required', requeue: false })
+			expect(sent('c')[0].content.reason).toMatch(/too old/)
+			expect(sent('a')[0].content).toMatchObject({ requeue: true })
+		})
+
 		it('compares the X.Y.Z prefix only', () => {
 			const nk = fakeNk()
 			;(nk as any).matchCreate = () => 'match-id'

@@ -4,6 +4,11 @@
 import type { TellOutcome } from '../notification/kinds'
 import type { QueueRefusalCode } from '../matchmaking/queue_refusal'
 import type { AccountStanding, RequiredStanding } from '../standing/standing'
+import type {
+	Input as PvpInput,
+	State as PvpState,
+	MyView as PvpView,
+} from './pvp/core/types'
 
 export const LOBBY_MATCH = 'bmp_lobby'
 
@@ -26,6 +31,8 @@ export const ClientOp = {
 	// player's Run save and the events after it (answered with SPECTATE_RUN).
 	// fromStart asks for the whole log and no Run save.
 	SPECTATE_VIEW: 7,
+	// PvpInputMessage -- one input of a PvP run, from a seated player.
+	INPUT: 8,
 } as const
 
 export const ServerOp = {
@@ -61,7 +68,15 @@ export const ServerOp = {
 	GROUP_QUEUE: 112,
 	// SpectateRun, to the spectator that asked (ClientOp.SPECTATE_VIEW).
 	SPECTATE_RUN: 113,
+	// PvpViewMessage, to one player: their view of the PvP match, sent when it changed.
+	VIEW: 114,
 } as const
+
+// The body of ClientOp.INPUT: what a valid input looks like. The server reads it as
+// untrusted, field by field (pvp/core/apply.ts).
+export type PvpInputMessage = PvpInput
+// The body of ServerOp.VIEW.
+export type PvpViewMessage = PvpView
 
 // Where an ACTION goes: a player id, '*' for everyone (the sender included),
 // or SERVER_TARGET for an authoritative action.
@@ -124,6 +139,9 @@ export interface StartedGame {
 	raceStartedAt?: number
 	hostId: string
 	players: Participant[]
+	// Who referees this game, fixed at its start. Absent on a PvP game saved before it was
+	// written (see savedReferee) and on any lobby that is not PvP.
+	referee?: 'server' | 'players'
 }
 
 // One player's replay events in arrival order, each the JSON text of its
@@ -255,6 +273,10 @@ export interface GameState {
 	// Who joined, left, dropped or came back while the game ran, in order
 	// (lobby/presence.ts). Absent in match state from before it was kept.
 	presence?: PresenceEvent[]
+	// The PvP match (lobby/pvp/pvp_shell.ts owns it); absent unless the server referees the game.
+	pvp?: PvpState
+	// The PvP match that ended, kept until the next game starts so its result stays readable.
+	ended?: PvpState
 }
 
 // How a player's seat changed during a game.
@@ -271,8 +293,6 @@ export type PresenceKind =
 	| 'kicked'
 	// The grace period ran out while they were away.
 	| 'timed_out'
-	// The catch-up limit ran out while they were catching up.
-	| 'catch_up_limit'
 
 export interface PresenceEvent {
 	userId: string
@@ -541,6 +561,8 @@ export interface PlayerInfo {
 export interface SnapshotPlayer extends Omit<PlayerInfo, 'standing' | 'pvpVersion'> {
 	id: string
 	isAway: boolean
+	// Server clock (ms) at which an away player forfeits the seat; null while present.
+	forfeitsAt: number | null
 	// Replaying its own run after a crash (ClientOp.CATCHING_UP).
 	catchingUp: boolean
 	// null when the server never worked it out (see PlayerInfo).
