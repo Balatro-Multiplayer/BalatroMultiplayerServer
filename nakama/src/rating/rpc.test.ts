@@ -78,6 +78,8 @@ describe('rpcRatingGet rank', () => {
 	})
 
 	// A fake whose boards hold ranked records per owner; an unknown board throws like Nakama's.
+	// Real Nakama reports a rank only for a board created with enableRank (pinned in
+	// board_sync.test.ts); the rank-0 case below models an unranked board.
 	function setup(boards: { [id: string]: { [ownerId: string]: number } }, ratings: { [key: string]: number } = {}) {
 		const asked: string[] = []
 		const nk = fakeNk({

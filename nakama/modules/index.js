@@ -5677,9 +5677,12 @@ function computeRatingDeltas(mode, placements, ratings) {
 }
 
 // src/rating/board_sync.ts
+function ensureRatingBoard(nk, board, metadata) {
+  nk.leaderboardCreate(board, true, "desc", "set", null, metadata, true);
+}
 function syncLeaderboardEntry(nk, logger, board, metadata, userId, name, record) {
   try {
-    nk.leaderboardCreate(board, true, "desc", "set", null, metadata);
+    ensureRatingBoard(nk, board, metadata);
     if (record && record.gamesPlayed >= PLACEMENT_GAMES) {
       nk.leaderboardRecordWrite(
         board,
@@ -8186,7 +8189,7 @@ function applyRatings(nk, logger, run, mode, bounds = {}) {
 }
 function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
   try {
-    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
+    ensureRatingBoard(nk, id, { modId: run.modId, mode });
     for (const player of run.players) {
       const after = plan.updates[player.id];
       if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
@@ -8296,7 +8299,7 @@ function claimLegacyRatings(nk, logger, userId, username, hash2, now) {
     if (b.gamesPlayed < PLACEMENT_GAMES) continue;
     const id = boardId(b.modId, b.mode, b.season);
     try {
-      nk.leaderboardCreate(id, true, "desc", "set", null, { modId: b.modId, mode: b.mode });
+      ensureRatingBoard(nk, id, { modId: b.modId, mode: b.mode });
       nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
         losses: b.losses,
         gamesPlayed: b.gamesPlayed,

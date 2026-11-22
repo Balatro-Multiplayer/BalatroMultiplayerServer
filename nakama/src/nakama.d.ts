@@ -107,6 +107,7 @@ declare namespace nkruntime {
 			operator: 'best' | 'set' | 'incr' | 'decr',
 			resetSchedule: string | null,
 			metadata: { [key: string]: unknown },
+			enableRank?: boolean,
 		): void
 		leaderboardRecordWrite(
 			id: string,
