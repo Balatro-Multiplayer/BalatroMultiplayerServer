@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_CONFIG } from '../config'
+import { LIMITS } from './pvp/testing/state'
+import { withRules } from './pvp/testing/rules'
 import { ServerOp } from './protocol'
 import { action } from './relay'
 import { type Lobby, type Step, join, newLobby } from './state'
 
 const info = (name: string, pvpVersion?: string) => ({ displayName: name, preferredJoker: null, mods: null, pvpVersion })
 
-const ctx = { now: 1000, newSeed: () => 'SEED', newId: () => 'RUN', random: () => 0 }
+const ctx = { now: 1000, newSeed: () => 'SEED', newId: () => 'RUN', random: () => 0, config: DEFAULT_CONFIG }
 
 function send(lobby: Lobby, from: string, key: string, params: unknown = {}) {
 	return action(lobby, from, { cid: `${key}-${from}`, action: key, to: 'server', params }, ctx)
@@ -43,11 +46,16 @@ describe('starting a PvP game', () => {
 		expect(rejection(send(lobby, 'a', 'mpapi_start_game'))).toBe('version_mismatch')
 	})
 
-	it('starts when the versions are equal', () => {
-		const lobby = readyLobby('MultiplayerPvP', ['a', '1.0.3'], ['b', '1.0.3'])
-		const step = send(lobby, 'a', 'mpapi_start_game')
+	it('starts the game when the versions are equal', () => {
+		const lobby = { ...readyLobby('MultiplayerPvP', ['a', '1.0.3'], ['b', '1.0.3']), metadata: withRules() }
+		const step = action(
+			lobby,
+			'a',
+			{ cid: 'start', action: 'mpapi_start_game', to: 'server', params: { stake: 1 } },
+			{ ...ctx, config: { ...DEFAULT_CONFIG, pvpLimits: LIMITS } },
+		)
 		expect(rejection(step)).toBeUndefined()
-		expect(step.lobby.game.started).not.toBeNull()
+		expect(step.lobby.game.started?.runId).toBe('RUN')
 	})
 
 	it('does not check other mods', () => {

@@ -3,14 +3,10 @@
 // the relay (relay.ts) drops them from anyone else and never forwards them.
 //
 // The host of record is the lobby's own `hostId`, which moves with a host
-// transfer (state.ts transferHostFrom). That is how PvP re-elects its referee
-// too: the new host's client sees HOST_CHANGED and takes the referee over
-// (PvP pvp_api/lobby_bridge.lua -> PVP.referee_take_over), so its referee
-// messages pass from the moment the server made it host. Pure.
+// transfer (state.ts transferHostFrom). Pure.
 import type { Lobby } from './state'
 
-// 'host': only the host of record sends it (the PvP referee's broadcasts, the
-//   SPDRN host's timeout/draw/reseed).
+// 'host': only the host of record sends it (the SPDRN host's timeout/draw/reseed).
 // 'self': `params.player_id` names the sender.
 // 'self_or_host': the player claims it for itself, or the host declares it for
 //   another (a SPDRN forfeit win: the host's check_single_survivor names the
@@ -18,25 +14,6 @@ import type { Lobby } from './state'
 export type SenderRule = 'host' | 'self' | 'self_or_host'
 
 export const SENDER_RULES = {
-	// PvP referee (pvp_api/referee.lua: every broadcast is under is_host()).
-	pvp_win: 'host',
-	pvp_player_won: 'host', // check_single_survivor: host only
-	pvp_end_pvp: 'host',
-	pvp_round_state: 'host',
-	pvp_player_lives: 'host',
-	pvp_eliminated: 'host',
-	pvp_start_blind: 'host',
-	pvp_ready_check: 'host', // referee.lua: the host asks everyone to confirm Ready before a blind
-	pvp_timer_hand_lost: 'host',
-	pvp_nemesis_pairing: 'host',
-	pvp_royale_target: 'host',
-	pvp_manhunt_target: 'host',
-	pvp_team_card_target: 'host',
-	pvp_team_score_board: 'host',
-	pvp_team_lives: 'host',
-	pvp_team_roster: 'host',
-	pvp_death_pending: 'host', // pvp_api/referee.lua: the host broadcasts a pending death
-	pvp_reseed: 'host', // run_actions.lua: host on a unanimous seed vote
 	// SPDRN host decisions.
 	spdrn_match_timeout: 'host', // matchmaking/duration.lua: host clock
 	spdrn_match_draw: 'host', // ui/lobby/draw_vote.lua: host on unanimity

@@ -3,6 +3,8 @@
 // the first lobby_current or lobby_find that finds the match gone but the
 // checkpoint there claims it and starts a new match from it, under the same
 // code. Every player comes back away, with a fresh grace period to rejoin in.
+import { runningReferee } from './hooks'
+import { pvpHooks } from './pvp/match_hooks/pvp_shell'
 import { bindCode } from './codes'
 import { setupAfterDowntime } from '../actions/setup'
 import {
@@ -14,7 +16,7 @@ import {
 	LOBBY_MATCH,
 	SYSTEM_USER_ID,
 } from './protocol'
-import type { Lobby } from './state'
+import { type Lobby, type LobbyPlayer, inLiveRun } from './state'
 
 export { CHECKPOINT_TTL_MS }
 // A claim whose resume never finished (the claimer failed midway) can be
@@ -67,8 +69,27 @@ export function isClaimable(checkpoint: Checkpoint, now: number): boolean {
 	)
 }
 
+// The seat a resumed match gives back: nobody is attached yet. A player who dropped from a
+// live PvP run keeps the away time they have left, moved on by the downtime; every other
+// player is away because of the restart, from now, with the whole lobby grace.
+function resumedSeat(
+	player: LobbyPlayer,
+	live: boolean,
+	downtime: number,
+	now: number,
+): LobbyPlayer {
+	const since = player.awaySince
+	const dropped = live && since !== null && player.awayReason === 'dropped'
+	return {
+		...player,
+		sessionId: '',
+		awaySince: dropped ? since + downtime : now,
+		awayReason: dropped ? 'dropped' : 'server restart',
+	}
+}
+
 // The lobby a resumed match starts with. Every player is away (nobody is
-// attached yet) from now, so each gets the whole grace period; the result
+// attached yet), see resumedSeat; the result
 // clock moves on by the time the server was down, so the restart doesn't eat
 // into it. Spectators and rate-limit buckets don't carry over, nor does a
 // group queue still forming or queued: its party went with the server. (Its
@@ -78,11 +99,13 @@ export function resumeFrom(checkpoint: Checkpoint, now: number): Lobby {
 	const downtime = Math.max(0, now - checkpoint.at)
 	const settleFrom = lobby.game.settleFrom
 	const gq = lobby.groupQueue
-	return {
+	const resumed: Lobby = {
 		...lobby,
 		groupQueue: gq && gq.phase === 'away' ? gq : null,
 		createdAt: now,
-		players: lobby.players.map((p) => ({ ...p, sessionId: '', awaySince: now })),
+		players: lobby.players.map((p) =>
+			resumedSeat(p, inLiveRun(lobby), downtime, now),
+		),
 		spectators: [],
 		actionBudget: {},
 		game: {
@@ -110,6 +133,8 @@ export function resumeFrom(checkpoint: Checkpoint, now: number): Lobby {
 				}
 			: undefined,
 	}
+	// The mod's own state is told how long the server was down.
+	return runningReferee(resumed) === 'server' ? pvpHooks.onResume(resumed, downtime) : resumed
 }
 
 // Whose current-lobby record a resumed lobby takes back: everyone's but its

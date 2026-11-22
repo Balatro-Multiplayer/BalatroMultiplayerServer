@@ -9,9 +9,12 @@ import {
 	type ActionContext,
 	LOG_EVENTS_KEY,
 	LOG_EVENT_KEY,
+	SERVER_REFEREE,
 	authoritativeAction,
 } from '../actions/registry'
 import { settle } from '../actions/results'
+import { runningReferee } from './hooks'
+import { PVP_RELAYED_KEYS } from './pvp/match_hooks/pvp_shell'
 import {
 	type ActionEnvelope,
 	type ActionRejection,
@@ -127,7 +130,7 @@ export function action(
 	if (!sender || sender.awaySince === null) return relayAction(lobby, senderId, data, ctx)
 	const back: Lobby = {
 		...lobby,
-		players: lobby.players.map((p) => (p.id === senderId ? { ...p, awaySince: null } : p)),
+		players: lobby.players.map((p) => (p.id === senderId ? { ...p, awaySince: null, awayReason: null } : p)),
 	}
 	const payload: LobbyEventMessage = {
 		type: 'player_reconnected',
@@ -236,6 +239,9 @@ function relayAction(
 	}
 	// Only the server may send an authoritative action's result.
 	if (authoritative) return refuse('authoritative_only')
+	// The server referees this game: no player's message reaches another player, except the keys
+	// it names.
+	if (runningReferee(budgeted) === 'server' && !PVP_RELAYED_KEYS.includes(key)) return refuse(SERVER_REFEREE)
 
 	// Not relayed to anyone; only the sender hears why.
 	const dropped = senderRefusal(budgeted, senderId, key, params)

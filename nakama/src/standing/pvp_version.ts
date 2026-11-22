@@ -8,6 +8,8 @@ export const PVP_MOD_ID = 'MultiplayerPvP'
 
 export const VERSION_MISMATCH = 'version_mismatch'
 export const VERSION_MISMATCH_MESSAGE = 'Everyone in a PvP game needs the same MultiplayerPvP version. Update the mod and try again.'
+export const UPDATE_REQUIRED = 'update_required'
+export const UPDATE_REQUIRED_MESSAGE = 'Your MultiplayerPvP version is too old to play. Update the mod and try again.'
 
 const X_Y_Z = /^v?(\d+\.\d+\.\d+)/
 
@@ -35,6 +37,20 @@ function compareVersions(a: string, b: string): number {
 	return 0
 }
 
+const WHOLE_VERSION = /^\d+\.\d+\.\d+$/
+
+// True when the reported X.Y.Z is lower than the minimum. No minimum ('') lets
+// everyone in; an unknown version (undefined: no seat or no report) and one that is
+// not X.Y.Z ('UNK') are below any minimum. A minimum that is not X.Y.Z is no minimum (config accepts only X.Y.Z).
+export function belowMinimum(
+	version: string | undefined,
+	minimum: string,
+): boolean {
+	if (!WHOLE_VERSION.test(minimum)) return false
+	if (version === undefined || !WHOLE_VERSION.test(version)) return true
+	return compareVersions(version, minimum) < 0
+}
+
 // Who is off the version most players run (the newer version wins a tie), in
 // the order given. Empty when all agree.
 export function versionOutliers(versionByPlayer: { [userId: string]: string }): string[] {
@@ -52,4 +68,15 @@ export function versionOutliers(versionByPlayer: { [userId: string]: string }): 
 		}
 	}
 	return ids.filter((id) => versionByPlayer[id] !== kept)
+}
+
+// True when the server referees a lobby's PvP: a rules version is set and every player
+// reported at least that version. No rules version, no players, or a player with an
+// unknown version keeps it with the players.
+export function everyoneOnServerRules(
+	rulesVersion: string | undefined,
+	versions: (string | undefined)[],
+): boolean {
+	if (rulesVersion === undefined || !WHOLE_VERSION.test(rulesVersion)) return false
+	return versions.length > 0 && versions.every((version) => !belowMinimum(version, rulesVersion))
 }

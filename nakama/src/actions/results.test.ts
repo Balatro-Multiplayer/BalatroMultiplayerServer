@@ -372,7 +372,7 @@ describe('reporting results', () => {
 	it('only lets a participant of a started game mark a run pending', () => {
 		let idle = newLobby({
 			code: 'ABC123',
-			modId: 'MultiplayerPvP',
+			modId: 'OtherMod',
 			maxPlayers: 2,
 			creatorId: 'a',
 			now: 0,
@@ -433,7 +433,7 @@ describe('reporting results', () => {
 function startedMatchmade(...players: string[]): Lobby {
 	let lobby = newLobby({
 		code: 'ABC123',
-		modId: 'MultiplayerPvP',
+		modId: 'OtherMod',
 		maxPlayers: 8,
 		creatorId: players[0],
 		gameMode: 'ranked:duel',

@@ -6,10 +6,11 @@
 import { logHeldOf } from './log_check'
 import type { TeamPlan } from '../matchmaking/group/teams'
 import type { RequiredStanding } from '../standing/standing'
+import { awayForfeitAt } from './pvp/core/clock'
+import type { AwayReason, Team } from './pvp/core/types'
 import { type LobbyKind, lobbyKindOf } from '../review/ranked'
 import { replayTailOf } from './active'
 import { withPresence } from './presence'
-import { CATCH_UP_LIMIT_REASON } from './catch_up'
 import { setupOf, setupView } from '../actions/setup'
 import {
 	endGroup,
@@ -60,6 +61,8 @@ export interface LobbyPlayer {
 	sessionId: string
 	info: PlayerInfo
 	awaySince: number | null
+	// Why they are away; null exactly when `awaySince` is.
+	awayReason: AwayReason | null
 	// When the player said it was catching up (ClientOp.CATCHING_UP); null when
 	// it is not. A join clears it: the new session reports again. A checkpoint
 	// written before this field has none: read it through isCatchingUp.
@@ -92,9 +95,6 @@ export interface Lobby {
 	kickedIds: string[]
 	createdAt: number
 	graceMs: number
-	// How long a seat may stay "catching up" before it is forfeited (lobby/catch_up.ts);
-	// null or absent: no limit.
-	catchUpLimitMs?: number | null
 	resultTimeoutMs: number
 	closed: boolean
 	// Owned by the authoritative actions (src/actions).
@@ -115,6 +115,16 @@ export interface Lobby {
 	groupsReleased?: boolean
 	// A matchmade Teams game's teams.
 	teamPlan?: TeamPlan | null
+	// userId -> the number of the last input the server took from them. It belongs to the
+	// player in this lobby, so it outlives each game: a new game carries it on. Only the
+	// PvP referee writes it; a player not listed starts at 0.
+	messageNumbers?: { [userId: string]: number }
+	// userId -> the server's answer to the Start that player's input number `number` asked for
+	// (lobby_input.ts); refused is the reason, null when the game started.
+	startAnswers?: { [userId: string]: { number: number; refused: string | null } }
+	// userId -> the team (Manhunt role or Teams side) that player picked in the lobby; every match
+	// of this lobby starts from it (pvp_shell newMatch).
+	teamPicks?: { [userId: string]: Team }
 	// A matchmade lobby: the standing its players queued with, which a
 	// returning player must have again (lobby/match.ts). Fixed when the match
 	// is planned, so a config change can't move the bar mid-game; absent on
@@ -164,7 +174,6 @@ export function newLobby(params: {
 	requiredStanding?: RequiredStanding
 	now: number
 	graceMs: number
-	catchUpLimitMs?: number | null
 	resultTimeoutMs?: number
 }): Lobby {
 	return {
@@ -181,7 +190,6 @@ export function newLobby(params: {
 		kickedIds: [],
 		createdAt: params.now,
 		graceMs: params.graceMs,
-		catchUpLimitMs: params.catchUpLimitMs ?? null,
 		resultTimeoutMs: params.resultTimeoutMs ?? DEFAULT_RESULT_TIMEOUT_MS,
 		closed: false,
 		game: emptyGame(),
@@ -327,6 +335,38 @@ export function isCatchingUp(player: LobbyPlayer): boolean {
 }
 
 // `now` times an open Setup step (its msLeft) and is the snapshot's serverNow.
+// When the server forfeits this player's seat, null while present or parked (a group's away
+// members are in their public game, not timing out).
+function forfeitTime(lobby: Lobby, p: LobbyPlayer): number | null {
+	if (p.awaySince === null) return null
+	const parked = isParked(lobby) && lobby.groupQueue?.memberIds.indexOf(p.id) !== -1
+	return parked ? null : awayEndsAt(lobby, p, p.awaySince)
+}
+
+// Whether a PvP run is being played.
+export function inLiveRun(lobby: Lobby): boolean {
+	const pvp = lobby.game.pvp
+	return pvp !== undefined && pvp.result === null && pvp.run !== null
+}
+
+// When a player away since `awaySince` loses their seat. A drop in a live PvP run is decided by
+// the run's one away budget (the PvP core owns it); anywhere else, and while waiting to
+// reconnect after a server restart, it is the lobby grace from `awaySince`.
+export function awayEndsAt(
+	lobby: Lobby,
+	player: LobbyPlayer,
+	awaySince: number,
+): number {
+	const run = lobby.game.pvp?.run ?? null
+	const budgetEnd =
+		run === null ||
+		!inLiveRun(lobby) ||
+		player.awayReason === 'server restart'
+			? null
+			: awayForfeitAt(run.clocks, player.id, awaySince)
+	return budgetEnd ?? awaySince + lobby.graceMs
+}
+
 export function snapshotFor(lobby: Lobby, userId: string, now: number = Date.now()): Snapshot {
 	const self = findPlayer(lobby, userId)
 	return {
@@ -344,6 +384,7 @@ export function snapshotFor(lobby: Lobby, userId: string, now: number = Date.now
 			mods: p.info.mods,
 			standing: p.info.standing || null,
 			isAway: p.awaySince !== null,
+			forfeitsAt: forfeitTime(lobby, p),
 			catchingUp: isCatchingUp(p),
 		})),
 		ownState: self ? self.ownState : null,
@@ -374,7 +415,16 @@ export function join(
 	if (existing) {
 		const wasAway = existing.awaySince !== null
 		const wasCatchingUp = isCatchingUp(existing)
-		const back: LobbyPlayer = { ...existing, sessionId, awaySince: null, catchingUpSince: null }
+		// The seat keeps its info, but the PvP version is the joining session's: the version gate reads it.
+		const { pvpVersion: _, ...kept } = existing.info
+		const back: LobbyPlayer = {
+			...existing,
+			sessionId,
+			info: { ...kept, ...(info.pvpVersion === undefined ? {} : { pvpVersion: info.pvpVersion }) },
+			awaySince: null,
+			awayReason: null,
+			catchingUpSince: null,
+		}
 		const next = withPresence(
 			{ ...lobby, players: lobby.players.map((p) => (p.id === userId ? back : p)) },
 			{ userId, kind: 'rejoined', at: now },
@@ -412,6 +462,7 @@ export function join(
 		sessionId,
 		info,
 		awaySince: null,
+		awayReason: null,
 		catchingUpSince: null,
 		ownState: null,
 	}
@@ -551,6 +602,8 @@ function remove(
 	const transferred = transferHostFrom(grouped.lobby, userId)
 	const ready = { ...transferred.lobby.game.ready }
 	delete ready[userId]
+	const teamPicks = { ...transferred.lobby.teamPicks }
+	delete teamPicks[userId]
 	const actionBudget = { ...transferred.lobby.actionBudget }
 	delete actionBudget[userId]
 	delete actionBudget[logBudgetKey(userId)]
@@ -558,6 +611,7 @@ function remove(
 		...transferred.lobby,
 		players: transferred.lobby.players.filter((p) => p.id !== userId),
 		game: { ...transferred.lobby.game, ready },
+		teamPicks,
 		actionBudget,
 	}
 	const others = allIds(next)
@@ -611,7 +665,7 @@ export function disconnect(
 	if (!player || player.sessionId !== sessionId || player.awaySince !== null)
 		return { lobby, out: [] }
 
-	const away: LobbyPlayer = { ...player, awaySince: now }
+	const away: LobbyPlayer = { ...player, awaySince: now, awayReason: 'dropped' }
 	const grouped = memberDisconnected(lobby, userId)
 	const marked = withPresence(
 		{
@@ -625,7 +679,11 @@ export function disconnect(
 		event(
 			transferred.lobby,
 			'player_disconnected',
-			{ playerId: userId, displayName: player.info.displayName },
+			{
+				playerId: userId,
+				displayName: player.info.displayName,
+				data: { forfeitsAt: forfeitTime(transferred.lobby, away), serverNow: now },
+			},
 			othersThan(transferred.lobby, userId),
 		),
 	])
@@ -762,33 +820,7 @@ export function setPlayerInfo(lobby: Lobby, userId: string, patch: Partial<Playe
 	}
 }
 
-// Whether the seat has been catching up for as long as the lobby's mod allows.
-function catchUpLimitReached(lobby: Lobby, player: LobbyPlayer, now: number): boolean {
-	const limit = lobby.catchUpLimitMs
-	return typeof limit === 'number' && typeof player.catchingUpSince === 'number' && now - player.catchingUpSince >= limit
-}
-
-// A seat forfeited at the catch-up limit is still connected (it is catching up,
-// not away): tell it, then kick its presence, or it plays on alone. A seat
-// whose grace ran out has no presence to tell.
-function toldAndKicked(lobby: Lobby, player: LobbyPlayer, graceRanOut: boolean): Outbound[] {
-	if (graceRanOut || player.awaySince !== null) return []
-	return [
-		event(
-			lobby,
-			'player_kicked',
-			{
-				playerId: player.id,
-				displayName: player.info.displayName,
-				data: { kickedBy: 'server', reason: CATCH_UP_LIMIT_REASON },
-			},
-			[player.id],
-		),
-		{ kind: 'kick', userId: player.id },
-	]
-}
-
-// Time passing: expire grace periods and catch-up limits, and close a lobby its creator never
+// Time passing: expire grace periods and close a lobby its creator never
 // joined.
 export function tick(lobby: Lobby, now: number): Step {
 	if (lobby.closed) return { lobby, out: [] }
@@ -805,8 +837,8 @@ export function tick(lobby: Lobby, now: number): Step {
 		const parked = isParked(step.lobby) && step.lobby.groupQueue!.memberIds.indexOf(p.id) !== -1
 		const current = findPlayer(step.lobby, p.id) || p
 		const awaySince = current.awaySince
-		const graceRanOut = !parked && awaySince !== null && now - awaySince >= lobby.graceMs
-		if (graceRanOut || catchUpLimitReached(lobby, current, now)) {
+		const graceRanOut = !parked && awaySince !== null && now >= awayEndsAt(step.lobby, current, awaySince)
+		if (graceRanOut) {
 			const started = step.lobby.game.started
 			const forfeited: Outbound[] =
 				started && started.players.some((q) => q.id === p.id)
@@ -814,7 +846,7 @@ export function tick(lobby: Lobby, now: number): Step {
 					: []
 			const timedOut = withPresence(step.lobby, {
 				userId: p.id,
-				kind: graceRanOut ? 'timed_out' : 'catch_up_limit',
+				kind: 'timed_out',
 				at: now,
 			})
 			const removed = remove(timedOut, p.id, 'player_left', 'member_disconnected')
@@ -822,7 +854,7 @@ export function tick(lobby: Lobby, now: number): Step {
 				forfeited.length > 0 && started
 					? { ...removed.lobby, forfeitedSeats: { ...(removed.lobby.forfeitedSeats || {}), [p.id]: started.runId } }
 					: removed.lobby
-			step = { lobby: marked, out: step.out.concat(forfeited, removed.out, toldAndKicked(step.lobby, current, graceRanOut)) }
+			step = { lobby: marked, out: step.out.concat(forfeited, removed.out) }
 		}
 	}
 	return step

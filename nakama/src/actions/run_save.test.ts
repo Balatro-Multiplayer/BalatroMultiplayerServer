@@ -36,7 +36,7 @@ function send(
 function started(ids: string[]): Lobby {
 	let lobby = newLobby({
 		code: 'ABC123',
-		modId: 'MultiplayerPvP',
+		modId: 'OtherMod',
 		maxPlayers: 4,
 		creatorId: ids[0],
 		now: 0,

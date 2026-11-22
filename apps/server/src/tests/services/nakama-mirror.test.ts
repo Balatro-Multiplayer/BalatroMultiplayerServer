@@ -159,6 +159,7 @@ describe('runRowsOf', () => {
 		expect(rows.ratings).toEqual([])
 		expect(rows.logs.map((l) => l.status)).toEqual(['complete', 'partial'])
 		expect(runRowsOf({ ...entry, run: { ...entry.run, status: 'restarted' } }, ids).lobbyRun.status).toBe('terminated')
+		expect(runRowsOf({ ...entry, run: { ...entry.run, status: 'dodged' } }, ids).lobbyRun.status).toBe('terminated')
 	})
 })
 

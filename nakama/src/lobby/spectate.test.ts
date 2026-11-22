@@ -21,7 +21,7 @@ const info = (name: string) => ({ displayName: name, preferredJoker: null, mods:
 function lobbyWith(ids: string[], matched = false): Lobby {
 	let lobby = newLobby({
 		code: 'ABC123',
-		modId: 'MultiplayerPvP',
+		modId: 'OtherMod',
 		maxPlayers: 4,
 		creatorId: ids[0],
 		allowedIds: matched ? ids : undefined,
@@ -76,13 +76,13 @@ describe('spectateRejection', () => {
 	it('refuses a spectator from another mod, but not one that names no mod', () => {
 		const lobby = started(lobbyWith(['a', 'b'], true))
 		expect(spectateRejection(lobby, 'z', 'MultiplayerSPDRN')).toBe('Lobby is for a different mod')
-		expect(spectateRejection(lobby, 'z', 'MultiplayerPvP')).toBeNull()
+		expect(spectateRejection(lobby, 'z', 'OtherMod')).toBeNull()
 		expect(spectateRejection(lobby, 'z', '')).toBeNull()
 	})
 
 	it('keeps a spectator out of a seat', () => {
 		const lobby = addSpectator(lobbyWith(['a', 'b'], true), 'z').lobby
-		expect(joinRejection(lobby, 'z', 'MultiplayerPvP')).toBe('You are spectating this lobby')
+		expect(joinRejection(lobby, 'z', 'OtherMod')).toBe('You are spectating this lobby')
 	})
 })
 
@@ -99,7 +99,7 @@ describe('spectators in the lobby', () => {
 		const step = addSpectator(lobbyWith(['a', 'b'], true), 'z')
 		const [snapshot] = sends(step, ServerOp.SPECTATE_SNAPSHOT)
 		expect(snapshot.to).toEqual(['z'])
-		expect(snapshot.payload).toEqual({ code: 'ABC123', modId: 'MultiplayerPvP', runId: null, players: [], snapshot: [] })
+		expect(snapshot.payload).toEqual({ code: 'ABC123', modId: 'OtherMod', runId: null, players: [], snapshot: [] })
 	})
 
 	it('get every participant replay event, and nothing else', () => {
@@ -151,7 +151,7 @@ describe('spectateSnapshot', () => {
 		for (const [from, t, opcode, args] of events) lobby = logEvent(lobby, from, t, opcode, args).lobby
 		expect(spectateSnapshot(lobby)).toEqual({
 			code: 'ABC123',
-			modId: 'MultiplayerPvP',
+			modId: 'OtherMod',
 			runId: 'RUN1',
 			players: [
 				{ playerId: 'a', displayName: 'a' },
@@ -190,7 +190,7 @@ describe('spectatableLobbies', () => {
 		const hidden = labelOf(lobbyWith(['c', 'd']))
 		const full = JSON.stringify({ ...JSON.parse(watchable), code: 'FULL01', spectators: MAX_SPECTATORS })
 		expect(spectatableLobbies([watchable, hidden, full, 'garbage'])).toEqual([
-			{ code: 'ABC123', modId: 'MultiplayerPvP', playerCount: 2, started: false, spectators: 0 },
+			{ code: 'ABC123', modId: 'OtherMod', playerCount: 2, started: false, spectators: 0 },
 		])
 	})
 })
