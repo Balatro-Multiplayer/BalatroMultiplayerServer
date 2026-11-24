@@ -24,6 +24,7 @@ export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 		testingMode: config.testingMode === true,
 		integrityEnforced,
 		chatAllowlist: [...config.chatAllowlist],
+		instantQueue: config.instantQueue ?? {},
 		...(config.season ? { season: config.season } : {}),
 	}
 }

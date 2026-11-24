@@ -300,6 +300,16 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'updated_at',
 	],
 	preset_reasons: ['item_type', 'reasons', 'updated_at'],
+	instant_queue_ranges: [
+		'mod_id',
+		'game_mode',
+		'enabled',
+		'floor',
+		'ceiling',
+		'floor_multiplier',
+		'ceiling_multiplier',
+		'updated_at',
+	],
 	mod_versions: [
 		'mod_id',
 		'display_name',

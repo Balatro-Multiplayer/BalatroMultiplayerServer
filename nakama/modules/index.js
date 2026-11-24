@@ -1598,6 +1598,34 @@ var RATINGS_COLLECTION = "ratings";
 // src/config.ts
 var CONFIG_COLLECTION = "server_config";
 var CONFIG_KEY = "global";
+var MAX_RANGE_RATING = 1e4;
+var RANGE_KEY_PATTERN = /^[^\s]{1,258}$/;
+function edgeOf(value) {
+  if (value === null) return null;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= MAX_RANGE_RATING) return value;
+  return void 0;
+}
+function multiplierOf(value) {
+  return typeof value === "number" && isFinite(value) && value >= 0.1 && value <= 10 ? value : void 0;
+}
+function instantRangesOf(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const out = {};
+  for (const key in value) {
+    const raw = value[key];
+    if (!RANGE_KEY_PATTERN.test(key) || typeof raw !== "object" || raw === null) continue;
+    const floor = edgeOf(raw.floor);
+    const ceiling = edgeOf(raw.ceiling);
+    const floorMultiplier = multiplierOf(raw.floorMultiplier);
+    const ceilingMultiplier = multiplierOf(raw.ceilingMultiplier);
+    if (floor === void 0 || ceiling === void 0 || floorMultiplier === void 0 || ceilingMultiplier === void 0)
+      continue;
+    if (floor === null && ceiling === null) continue;
+    if (floor !== null && ceiling !== null && ceiling >= floor) continue;
+    out[key] = { floor, ceiling, floorMultiplier, ceilingMultiplier };
+  }
+  return out;
+}
 var DEFAULT_CONFIG = {
   chatEnabled: true,
   rankedEnabled: true,
@@ -1610,7 +1638,8 @@ var DEFAULT_CONFIG = {
   chatAllowlist: [],
   season: 0,
   queueAllowedModIds: [],
-  queueAllowedModIdsExtra: []
+  queueAllowedModIdsExtra: [],
+  instantQueue: {}
 };
 var MAX_MOD_IDS = 500;
 var MOD_ID_PATTERN = /^[^\s]{1,128}$/;
@@ -1644,10 +1673,12 @@ function mergeConfig(current, update) {
   if (allowedIds) next.queueAllowedModIds = allowedIds;
   const extraIds = modIdsOf(update.queueAllowedModIdsExtra);
   if (extraIds) next.queueAllowedModIdsExtra = extraIds;
+  const ranges = instantRangesOf(update.instantQueue);
+  if (ranges) next.instantQueue = ranges;
   return next;
 }
 function clientConfig(config) {
-  const _a = config, { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra } = _a, shown = __objRest(_a, ["chatAllowlist", "queueAllowedModIds", "queueAllowedModIdsExtra"]);
+  const _a = config, { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, instantQueue } = _a, shown = __objRest(_a, ["chatAllowlist", "queueAllowedModIds", "queueAllowedModIdsExtra", "instantQueue"]);
   return shown;
 }
 function readConfig(nk) {
@@ -7150,6 +7181,258 @@ function takeTicketRemoved(nk, ticket) {
   return true;
 }
 
+// src/rating/metrics.ts
+var METRIC_CONFIG = {
+  MultiplayerPvP: { kind: "score", direction: "desc" },
+  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
+};
+var BOUNDS = {
+  // A legitimate ranked run can't complete in under 10s nor take over 6h.
+  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
+};
+function seasonBestOf(modId, stored) {
+  const config = METRIC_CONFIG[modId];
+  if (!config) return null;
+  if (config.kind === "score") {
+    if (typeof stored === "string") return normalizeScore(stored);
+    if (typeof stored === "number" && Number.isFinite(stored)) return fromNumber(stored);
+    return null;
+  }
+  return typeof stored === "number" && Number.isFinite(stored) ? stored : null;
+}
+function roundTotalOf(value) {
+  if (typeof value === "string") return normalizeScore(value);
+  return typeof value === "number" && Number.isFinite(value) ? fromNumber(value) : null;
+}
+function logBounds(events, checks) {
+  const bounds = {};
+  for (const userId in checks) {
+    if (checks[userId] !== "match") continue;
+    let bound = ZERO_SCORE;
+    for (const event2 of events[userId] || []) {
+      if (event2.opcode !== "hand_result" || !Array.isArray(event2.args)) continue;
+      const total = roundTotalOf(event2.args[0]);
+      if (total !== null && compareScores(total, bound) === 1) bound = total;
+    }
+    bounds[userId] = bound;
+  }
+  return bounds;
+}
+function nextSeasonBest(modId, reported, current, bound) {
+  const config = METRIC_CONFIG[modId];
+  if (!config) return current;
+  if (config.kind === "score") {
+    const best = seasonBestOf(modId, current);
+    const text = reported.metricText === void 0 ? null : normalizeScore(reported.metricText);
+    if (text === null) return best;
+    if (bound !== void 0 && compareScores(text, bound) === 1) return best;
+    if (best === null) return text;
+    return compareScores(text, best) === 1 ? text : best;
+  }
+  const value = reported.metric;
+  if (value === void 0) return current;
+  const bounds = BOUNDS.time_ms;
+  if (!Number.isFinite(value) || value < bounds.min || value > bounds.max) return current;
+  if (typeof current !== "number") return value;
+  return value < current ? value : current;
+}
+
+// src/rating/season.ts
+var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
+var DECAY_RATE_PER_DAY = 5;
+var DECAY_FLOOR = 1200;
+var bootSeason = 1;
+function currentSeason(nk) {
+  const pushed = readConfig(nk).season;
+  return pushed > 0 ? pushed : bootSeason;
+}
+function configureSeason(value) {
+  const parsed = value === void 0 ? NaN : Number(value);
+  if (Number.isInteger(parsed) && parsed > 0) bootSeason = parsed;
+}
+function decayedRating(record, now) {
+  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
+  if (record.rating <= DECAY_FLOOR) return record.rating;
+  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
+  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
+  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
+  return Math.max(DECAY_FLOOR, record.rating - loss);
+}
+function carriedOver(previous, now) {
+  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
+  return applySoftReset(decayedRating(previous, now));
+}
+
+// src/rating/apply.ts
+function boardId(modId, mode, season) {
+  return `${modId}:${mode}:${season}`;
+}
+function newRating() {
+  return {
+    rating: INITIAL_HIDDEN_RATING,
+    wins: 0,
+    losses: 0,
+    gamesPlayed: 0,
+    seasonBest: null,
+    lastMatchAt: 0
+  };
+}
+function planRatings(run, current, bounds = {}) {
+  const plan = { updates: {}, results: {} };
+  if (run.status !== "agreed" && run.status !== "partial") return plan;
+  const placements = run.placements;
+  if (placements.length < 2) return plan;
+  const ratings = /* @__PURE__ */ new Map();
+  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
+  const entries = placements.map((p) => ({
+    playerId: p.playerId,
+    place: p.place,
+    performance: p.performance
+  }));
+  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
+  const bestPlace = Math.min(...placements.map((p) => p.place));
+  for (const p of placements) {
+    const before = ratings.get(p.playerId);
+    const delta = deltas.get(p.playerId) || 0;
+    const won = p.place === bestPlace;
+    const after = {
+      rating: Math.max(RATING_FLOOR, before.rating + delta),
+      wins: before.wins + (won ? 1 : 0),
+      losses: before.losses + (won ? 0 : 1),
+      gamesPlayed: before.gamesPlayed + 1,
+      seasonBest: nextSeasonBest(run.modId, p, before.seasonBest, bounds[p.playerId]),
+      lastMatchAt: run.endedAt
+    };
+    plan.updates[p.playerId] = after;
+    const placing = after.gamesPlayed < PLACEMENT_GAMES;
+    plan.results[p.playerId] = {
+      delta: placing ? null : after.rating - before.rating,
+      newRating: placing ? null : after.rating,
+      isPlacement: placing,
+      // The game that finishes the placement games: the first rating shown.
+      justPlaced: !placing && before.gamesPlayed < PLACEMENT_GAMES,
+      gamesPlayed: after.gamesPlayed
+    };
+  }
+  return plan;
+}
+var WRITE_ATTEMPTS3 = 5;
+function loadRatings(nk, modId, mode, playerIds, now, season) {
+  const key = boardId(modId, mode, season);
+  const current = {};
+  const versions = {};
+  for (const object of nk.storageRead(
+    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
+  )) {
+    const record = object.value;
+    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
+    versions[object.userId] = object.version;
+  }
+  const fresh = playerIds.filter((id) => !current[id]);
+  if (season > 1 && fresh.length > 0) {
+    const previous = nk.storageRead(
+      fresh.map((id) => ({
+        collection: RATINGS_COLLECTION,
+        key: boardId(modId, mode, season - 1),
+        userId: id
+      }))
+    );
+    for (const object of previous) {
+      const rating = carriedOver(object.value, now);
+      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
+    }
+  }
+  return { current, versions };
+}
+function applyRatings(nk, logger, run, mode, bounds = {}) {
+  const season = currentSeason(nk);
+  const key = boardId(run.modId, mode, season);
+  for (let attempt = 0; attempt < WRITE_ATTEMPTS3; attempt++) {
+    const { current, versions } = loadRatings(
+      nk,
+      run.modId,
+      mode,
+      run.players.map((p) => p.id),
+      run.endedAt,
+      season
+    );
+    const plan = planRatings(run, current, bounds);
+    const ids = Object.keys(plan.updates);
+    if (ids.length === 0) return {};
+    try {
+      nk.storageWrite(
+        ids.map((id) => ({
+          collection: RATINGS_COLLECTION,
+          key,
+          userId: id,
+          value: plan.updates[id],
+          permissionRead: 2,
+          permissionWrite: 0,
+          // '*' = only if it doesn't exist yet.
+          version: versions[id] || "*"
+        }))
+      );
+    } catch (e) {
+      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
+      continue;
+    }
+    mirrorToLeaderboard(nk, logger, run, key, mode, plan);
+    return plan.results;
+  }
+  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS3);
+  return {};
+}
+function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
+  try {
+    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
+    for (const player of run.players) {
+      const after = plan.updates[player.id];
+      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
+      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
+        losses: after.losses,
+        gamesPlayed: after.gamesPlayed,
+        seasonBest: after.seasonBest
+      }, "set");
+    }
+  } catch (e) {
+    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
+  }
+}
+
+// src/matchmaking/instant_queue.ts
+var QUEUE_NAME_PATTERN2 = /^[A-Za-z0-9_.:-]{1,128}$/;
+var NO_RANGE = {
+  floor: null,
+  ceiling: null,
+  floorMultiplier: 1,
+  ceilingMultiplier: 1
+};
+function rangeFor(config, modId, mode) {
+  return config.instantQueue[modId + ":" + mode] || NO_RANGE;
+}
+function rpcQueueRanges(ctx, logger, nk, payload) {
+  if (!ctx.userId)
+    throw runtimeError(UNAUTHENTICATED, "Queue ranges need a player session");
+  const { modId, mode } = parsePayload(payload);
+  if (typeof modId !== "string" || typeof mode !== "string" || !QUEUE_NAME_PATTERN2.test(modId) || !QUEUE_NAME_PATTERN2.test(mode))
+    throw runtimeError(INVALID_ARGUMENT, "modId and mode are required");
+  return JSON.stringify(rangeFor(readConfig(nk), modId, mode));
+}
+function stampRating(nk, userId, add, modId, mode) {
+  const stored = loadRatings(
+    nk,
+    modId,
+    mode,
+    [userId],
+    Date.now(),
+    currentSeason(nk)
+  ).current[userId];
+  const rating = Math.round((stored || newRating()).rating);
+  const numeric = add.numericProperties || add.numeric_properties;
+  if (numeric && typeof numeric === "object") numeric.rating = rating;
+  else add.numericProperties = { rating };
+}
+
 // src/matchmaking/gate.ts
 function queueRefusalFor(nk, settings, userId, ranked, now) {
   const config = readConfig(nk);
@@ -7177,6 +7460,7 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
   const group = groupOf(nk, ctx.userId);
   if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE);
   if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
+  if (ranked) stampRating(nk, ctx.userId, matchmakerAdd(envelope), String(props.modId), String(props.mode));
   return envelope;
 }
 function refusedMemberOf(player) {
@@ -7981,224 +8265,6 @@ function rpcAdminAnnounce(ctx, logger, nk, payload) {
   nk.notificationSendAll("announcement", { text }, NotifyCode.ANNOUNCEMENT, false);
   logger.info("Announcement sent (%d characters)", text.length);
   return JSON.stringify({ ok: true });
-}
-
-// src/rating/metrics.ts
-var METRIC_CONFIG = {
-  MultiplayerPvP: { kind: "score", direction: "desc" },
-  MultiplayerSPDRN: { kind: "time_ms", direction: "asc" }
-};
-var BOUNDS = {
-  // A legitimate ranked run can't complete in under 10s nor take over 6h.
-  time_ms: { min: 1e4, max: 6 * 60 * 60 * 1e3 }
-};
-function seasonBestOf(modId, stored) {
-  const config = METRIC_CONFIG[modId];
-  if (!config) return null;
-  if (config.kind === "score") {
-    if (typeof stored === "string") return normalizeScore(stored);
-    if (typeof stored === "number" && Number.isFinite(stored)) return fromNumber(stored);
-    return null;
-  }
-  return typeof stored === "number" && Number.isFinite(stored) ? stored : null;
-}
-function roundTotalOf(value) {
-  if (typeof value === "string") return normalizeScore(value);
-  return typeof value === "number" && Number.isFinite(value) ? fromNumber(value) : null;
-}
-function logBounds(events, checks) {
-  const bounds = {};
-  for (const userId in checks) {
-    if (checks[userId] !== "match") continue;
-    let bound = ZERO_SCORE;
-    for (const event2 of events[userId] || []) {
-      if (event2.opcode !== "hand_result" || !Array.isArray(event2.args)) continue;
-      const total = roundTotalOf(event2.args[0]);
-      if (total !== null && compareScores(total, bound) === 1) bound = total;
-    }
-    bounds[userId] = bound;
-  }
-  return bounds;
-}
-function nextSeasonBest(modId, reported, current, bound) {
-  const config = METRIC_CONFIG[modId];
-  if (!config) return current;
-  if (config.kind === "score") {
-    const best = seasonBestOf(modId, current);
-    const text = reported.metricText === void 0 ? null : normalizeScore(reported.metricText);
-    if (text === null) return best;
-    if (bound !== void 0 && compareScores(text, bound) === 1) return best;
-    if (best === null) return text;
-    return compareScores(text, best) === 1 ? text : best;
-  }
-  const value = reported.metric;
-  if (value === void 0) return current;
-  const bounds = BOUNDS.time_ms;
-  if (!Number.isFinite(value) || value < bounds.min || value > bounds.max) return current;
-  if (typeof current !== "number") return value;
-  return value < current ? value : current;
-}
-
-// src/rating/season.ts
-var DECAY_INACTIVE_THRESHOLD_DAYS = 7;
-var DECAY_RATE_PER_DAY = 5;
-var DECAY_FLOOR = 1200;
-var bootSeason = 1;
-function currentSeason(nk) {
-  const pushed = readConfig(nk).season;
-  return pushed > 0 ? pushed : bootSeason;
-}
-function configureSeason(value) {
-  const parsed = value === void 0 ? NaN : Number(value);
-  if (Number.isInteger(parsed) && parsed > 0) bootSeason = parsed;
-}
-function decayedRating(record, now) {
-  if (record.gamesPlayed < PLACEMENT_GAMES || record.lastMatchAt <= 0) return record.rating;
-  if (record.rating <= DECAY_FLOOR) return record.rating;
-  const inactiveDays = (now - record.lastMatchAt) / DAY_MS;
-  if (inactiveDays <= DECAY_INACTIVE_THRESHOLD_DAYS) return record.rating;
-  const loss = Math.floor(inactiveDays - DECAY_INACTIVE_THRESHOLD_DAYS) * DECAY_RATE_PER_DAY;
-  return Math.max(DECAY_FLOOR, record.rating - loss);
-}
-function carriedOver(previous, now) {
-  if (!previous || previous.gamesPlayed < PLACEMENT_GAMES) return void 0;
-  return applySoftReset(decayedRating(previous, now));
-}
-
-// src/rating/apply.ts
-function boardId(modId, mode, season) {
-  return `${modId}:${mode}:${season}`;
-}
-function newRating() {
-  return {
-    rating: INITIAL_HIDDEN_RATING,
-    wins: 0,
-    losses: 0,
-    gamesPlayed: 0,
-    seasonBest: null,
-    lastMatchAt: 0
-  };
-}
-function planRatings(run, current, bounds = {}) {
-  const plan = { updates: {}, results: {} };
-  if (run.status !== "agreed" && run.status !== "partial") return plan;
-  const placements = run.placements;
-  if (placements.length < 2) return plan;
-  const ratings = /* @__PURE__ */ new Map();
-  for (const p of placements) ratings.set(p.playerId, current[p.playerId] || newRating());
-  const entries = placements.map((p) => ({
-    playerId: p.playerId,
-    place: p.place,
-    performance: p.performance
-  }));
-  const deltas = computeRatingDeltas(detectRatingMode(entries), entries, ratings);
-  const bestPlace = Math.min(...placements.map((p) => p.place));
-  for (const p of placements) {
-    const before = ratings.get(p.playerId);
-    const delta = deltas.get(p.playerId) || 0;
-    const won = p.place === bestPlace;
-    const after = {
-      rating: Math.max(RATING_FLOOR, before.rating + delta),
-      wins: before.wins + (won ? 1 : 0),
-      losses: before.losses + (won ? 0 : 1),
-      gamesPlayed: before.gamesPlayed + 1,
-      seasonBest: nextSeasonBest(run.modId, p, before.seasonBest, bounds[p.playerId]),
-      lastMatchAt: run.endedAt
-    };
-    plan.updates[p.playerId] = after;
-    const placing = after.gamesPlayed < PLACEMENT_GAMES;
-    plan.results[p.playerId] = {
-      delta: placing ? null : after.rating - before.rating,
-      newRating: placing ? null : after.rating,
-      isPlacement: placing,
-      // The game that finishes the placement games: the first rating shown.
-      justPlaced: !placing && before.gamesPlayed < PLACEMENT_GAMES,
-      gamesPlayed: after.gamesPlayed
-    };
-  }
-  return plan;
-}
-var WRITE_ATTEMPTS3 = 5;
-function loadRatings(nk, modId, mode, playerIds, now, season) {
-  const key = boardId(modId, mode, season);
-  const current = {};
-  const versions = {};
-  for (const object of nk.storageRead(
-    playerIds.map((id) => ({ collection: RATINGS_COLLECTION, key, userId: id }))
-  )) {
-    const record = object.value;
-    current[object.userId] = __spreadProps(__spreadValues({}, record), { rating: decayedRating(record, now) });
-    versions[object.userId] = object.version;
-  }
-  const fresh = playerIds.filter((id) => !current[id]);
-  if (season > 1 && fresh.length > 0) {
-    const previous = nk.storageRead(
-      fresh.map((id) => ({
-        collection: RATINGS_COLLECTION,
-        key: boardId(modId, mode, season - 1),
-        userId: id
-      }))
-    );
-    for (const object of previous) {
-      const rating = carriedOver(object.value, now);
-      if (rating !== void 0) current[object.userId] = __spreadProps(__spreadValues({}, newRating()), { rating });
-    }
-  }
-  return { current, versions };
-}
-function applyRatings(nk, logger, run, mode, bounds = {}) {
-  const season = currentSeason(nk);
-  const key = boardId(run.modId, mode, season);
-  for (let attempt = 0; attempt < WRITE_ATTEMPTS3; attempt++) {
-    const { current, versions } = loadRatings(
-      nk,
-      run.modId,
-      mode,
-      run.players.map((p) => p.id),
-      run.endedAt,
-      season
-    );
-    const plan = planRatings(run, current, bounds);
-    const ids = Object.keys(plan.updates);
-    if (ids.length === 0) return {};
-    try {
-      nk.storageWrite(
-        ids.map((id) => ({
-          collection: RATINGS_COLLECTION,
-          key,
-          userId: id,
-          value: plan.updates[id],
-          permissionRead: 2,
-          permissionWrite: 0,
-          // '*' = only if it doesn't exist yet.
-          version: versions[id] || "*"
-        }))
-      );
-    } catch (e) {
-      logger.warn("Rating write for run %s conflicted (attempt %d): %v", run.runId, attempt + 1, e);
-      continue;
-    }
-    mirrorToLeaderboard(nk, logger, run, key, mode, plan);
-    return plan.results;
-  }
-  logger.error("Could not rate run %s after %d attempts", run.runId, WRITE_ATTEMPTS3);
-  return {};
-}
-function mirrorToLeaderboard(nk, logger, run, id, mode, plan) {
-  try {
-    nk.leaderboardCreate(id, true, "desc", "set", null, { modId: run.modId, mode });
-    for (const player of run.players) {
-      const after = plan.updates[player.id];
-      if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue;
-      nk.leaderboardRecordWrite(id, player.id, player.displayName, after.rating, after.wins, {
-        losses: after.losses,
-        gamesPlayed: after.gamesPlayed,
-        seasonBest: after.seasonBest
-      }, "set");
-    }
-  } catch (e) {
-    logger.warn("Leaderboard update for run %s failed: %v", run.runId, e);
-  }
 }
 
 // src/rating/legacy.ts
@@ -12572,6 +12638,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("group_queue_open", rpcGroupQueueOpen);
   initializer.registerRpc("group_queue_cancel", rpcGroupQueueCancel);
   initializer.registerRpc("queue_counts", rpcQueueCounts);
+  initializer.registerRpc("queue_ranges", rpcQueueRanges);
   initializer.registerRpc("session_init", rpcSessionInit);
   initializer.registerRpc("tos_accept", rpcTosAccept);
   initializer.registerRpc("profile_set_display", rpcProfileSetDisplay);

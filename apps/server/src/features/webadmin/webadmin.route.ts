@@ -8,6 +8,7 @@ import blogRouter from './blog.route.js'
 import chatLabelsRouter from './chat-labels.route.js'
 import configRouter from './config.route.js'
 import forfeitReconciliationRouter from './forfeit-reconciliation.route.js'
+import instantQueueRouter from './instant-queue.route.js'
 import presetReasonsRouter from './preset-reasons.route.js'
 import launcherReleasesRouter from './launcher-releases.route.js'
 import lobbiesRouter from './lobbies.route.js'
@@ -43,6 +44,9 @@ function webAdmin(req: Request, res: Response, next: NextFunction) {
 // Pages and routes for admins only: a moderator gets no data from them.
 const admin = roleGuard('admin')
 
+// The instant queue panel also opens to the 'instaqueue' privilege, so it
+// sits ahead of the staff gate and guards itself.
+router.use(instantQueueRouter)
 router.use(webAdmin)
 router.use(playersRouter)
 router.use(playerPageRouter)

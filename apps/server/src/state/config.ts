@@ -1,3 +1,5 @@
+import type { InstantRange } from '../features/instant-queue/ranges.js'
+
 export interface ModConfig {
 	modId: string
 	displayName: string
@@ -38,6 +40,9 @@ export interface AppConfig {
 	// The rating season (seasons table): the active one, else the latest.
 	// Pushed to Nakama, which rates games into it. Unset: no seasons yet.
 	season?: number
+	// The instant queue ranges (instant_queue_ranges), keyed 'modId:gameMode'
+	// and pushed to Nakama. Only set ranges are held.
+	instantQueue?: Record<string, InstantRange>
 }
 
 let _config: AppConfig = {

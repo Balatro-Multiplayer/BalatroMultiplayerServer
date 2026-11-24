@@ -14,6 +14,7 @@ import { standingFor } from '../standing/current'
 import { PVP_MOD_ID, VERSION_MISMATCH, pvpVersionOf, versionOutliers } from '../standing/pvp_version'
 import { readModReport } from '../standing/storage'
 import { groupOf } from './group/binding'
+import { stampRating } from './instant_queue'
 import { blocksSoloQueue } from './group/refusal'
 import type { RefusedMember } from '../lobby/protocol'
 import type { MatchPlan } from './matched'
@@ -69,6 +70,7 @@ export function beforeMatchmakerAdd(
 	const group = groupOf(nk, ctx.userId)
 	if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE)
 	if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId)
+	if (ranked) stampRating(nk, ctx.userId, matchmakerAdd(envelope), String(props.modId), String(props.mode))
 	return envelope
 }
 

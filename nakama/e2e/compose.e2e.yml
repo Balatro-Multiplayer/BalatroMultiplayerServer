@@ -1,0 +1,63 @@
+# A throwaway Nakama for the end-to-end tests (nakama/e2e/*.e2e.ts): its own
+# Postgres and its own ports, so it never touches a running dev server.
+#
+# A Community server: Device login with a test name, no Steam, no launcher
+# integrity check, any mods. Build the bundle first (`pnpm --filter
+# bmp-nakama-modules build`), then:
+#
+#   docker compose -f nakama/e2e/compose.e2e.yml up -d --wait
+#   pnpm --filter bmp-nakama-modules test:e2e
+#   docker compose -f nakama/e2e/compose.e2e.yml down -v
+#
+# Restart it (`restart nakama`) after rebuilding the bundle.
+name: bmp-e2e
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nakama
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  nakama:
+    image: heroiclabs/nakama:3.41.0
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        db="postgres:postgres@postgres:5432/nakama"
+        /nakama/nakama migrate up --database.address "$$db"
+        exec /nakama/nakama --config /nakama/data/local.yml \
+          --database.address "$$db" \
+          --socket.server_key defaultkey \
+          --session.encryption_key e2e-session-encryption-key \
+          --session.refresh_encryption_key e2e-refresh-encryption-key \
+          --runtime.http_key e2e-http-key \
+          --console.password e2e-console-password \
+          --console.signing_key e2e-console-signing-key \
+          --runtime.env "BMP_SERVER_KIND=community" \
+          --runtime.env "PLAYER_ID_SALT=e2e-player-id-salt" \
+          --runtime.env "IP_HASH_SALT=e2e-ip-hash-salt" \
+          --runtime.env "EXPRESS_INTERNAL_URL=http://api:8788" \
+          --runtime.env "EXPRESS_INTERNAL_KEY=e2e-internal-key"
+    volumes:
+      - ../local.yml:/nakama/data/local.yml:ro
+      - ../modules:/nakama/data/modules:ro
+    ports:
+      - "127.0.0.1:17350:7350"
+      - "127.0.0.1:17351:7351"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
