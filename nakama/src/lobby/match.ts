@@ -1,7 +1,7 @@
 // The bmp_lobby authoritative match: adapts Nakama's match callbacks to the
 // pure rules in state.ts and carries out the Outbound effects they return.
 // One match per lobby; the match ends (returns null) once the lobby closes.
-import { seedFromHex } from '../actions/registry'
+import { makeSeed } from '../actions/registry'
 import { finishGame, settle } from '../actions/results'
 import { setupTick } from '../actions/setup'
 import { activeRunOf } from './active'
@@ -694,7 +694,7 @@ function stepForMessage(
 		case ClientOp.ACTION:
 			return action(lobby, senderId, data, {
 				now: Date.now(),
-				newSeed: () => seedFromHex(nk.uuidv4()),
+				newSeed: () => makeSeed(() => nk.uuidv4()),
 				newId: () => nk.uuidv4(),
 				random: Math.random,
 			})

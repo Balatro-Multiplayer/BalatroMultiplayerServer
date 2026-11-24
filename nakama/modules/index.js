@@ -8969,12 +8969,18 @@ function authoritativeAction(key) {
   return Object.prototype.hasOwnProperty.call(REGISTRY, key) ? REGISTRY[key] : null;
 }
 var SEED_ALPHABET = "123456789ABCDEFGHIJKLMNPQRSTUVWXYZ";
-var SEED_LENGTH = 8;
-function seedFromHex(hex) {
-  const digits = hex.replace(/[^0-9a-f]/gi, "");
+var SEED_LENGTH = 16;
+var HEX_PER_LETTER = 3;
+function makeSeed(randomHex) {
+  let digits = "";
+  while (digits.length < SEED_LENGTH * HEX_PER_LETTER) {
+    const more = randomHex().replace(/[^0-9a-f]/gi, "");
+    if (more.length === 0) throw new Error("randomHex returned no hex digits");
+    digits += more;
+  }
   let seed = "";
   for (let i = 0; i < SEED_LENGTH; i++) {
-    const n = Number.parseInt(digits.substr(i * 3, 3) || "0", 16);
+    const n = Number.parseInt(digits.substr(i * HEX_PER_LETTER, HEX_PER_LETTER), 16);
     seed += SEED_ALPHABET[n % SEED_ALPHABET.length];
   }
   return seed;
@@ -10225,7 +10231,7 @@ function stepForMessage(nk, lobby, senderId, opCode, data) {
     case ClientOp.ACTION:
       return action(lobby, senderId, data, {
         now: Date.now(),
-        newSeed: () => seedFromHex(nk.uuidv4()),
+        newSeed: () => makeSeed(() => nk.uuidv4()),
         newId: () => nk.uuidv4(),
         random: Math.random
       });

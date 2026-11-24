@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SEED_LENGTH, seedFromHex } from '../actions/registry'
+import { SEED_LENGTH, makeSeed } from '../actions/registry'
 import { ServerOp } from './protocol'
 import { BURST, MAX_PARAMS_BYTES, type RelayStep, action } from './relay'
 import {
@@ -313,11 +313,25 @@ describe('authoritative actions', () => {
 	})
 })
 
-describe('seedFromHex', () => {
-	it('makes a Balatro seed', () => {
-		const seed = seedFromHex('9f86d081-884c-4d63-9a0e-4e7c8e9b2f1a')
+describe('makeSeed', () => {
+	it('makes a 16-letter Balatro seed', () => {
+		const seed = makeSeed(() => '9f86d081-884c-4d63-9a0e-4e7c8e9b2f1a')
+		expect(SEED_LENGTH).toBe(16)
 		expect(seed).toHaveLength(SEED_LENGTH)
 		expect(seed).toMatch(/^[1-9A-NP-Z]+$/)
+	})
+
+	it('draws more hex until every letter has its own, instead of padding the tail', () => {
+		const uuids = ['0'.repeat(32), 'f'.repeat(32)]
+		let calls = 0
+		const seed = makeSeed(() => uuids[calls++])
+		expect(calls).toBe(2)
+		// fff = 4095, 4095 % 34 = 15 -> 'G'; a padded tail would be '1's.
+		expect(seed.slice(-5)).toBe('GGGGG')
+	})
+
+	it('rejects a source that gives no hex', () => {
+		expect(() => makeSeed(() => '----')).toThrow('no hex digits')
 	})
 })
 

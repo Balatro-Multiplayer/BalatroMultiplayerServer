@@ -475,14 +475,21 @@ export function authoritativeAction(key: string): AuthoritativeAction | null {
 
 // Balatro's seed alphabet: 1-9 and A-Z without O (G.CONTROLLER seed entry).
 const SEED_ALPHABET = '123456789ABCDEFGHIJKLMNPQRSTUVWXYZ'
-export const SEED_LENGTH = 8
+// 16 letters (~80 bits) so the seed can't be found by scanning every seed against a visible shop.
+export const SEED_LENGTH = 16
+const HEX_PER_LETTER = 3
 
-// Turns random hex (e.g. a UUID) into a Balatro seed.
-export function seedFromHex(hex: string): string {
-	const digits = hex.replace(/[^0-9a-f]/gi, '')
+// A Balatro seed from random hex (e.g. UUIDs), drawing as much as every letter needs.
+export function makeSeed(randomHex: () => string): string {
+	let digits = ''
+	while (digits.length < SEED_LENGTH * HEX_PER_LETTER) {
+		const more = randomHex().replace(/[^0-9a-f]/gi, '')
+		if (more.length === 0) throw new Error('randomHex returned no hex digits')
+		digits += more
+	}
 	let seed = ''
 	for (let i = 0; i < SEED_LENGTH; i++) {
-		const n = Number.parseInt(digits.substr(i * 3, 3) || '0', 16)
+		const n = Number.parseInt(digits.substr(i * HEX_PER_LETTER, HEX_PER_LETTER), 16)
 		seed += SEED_ALPHABET[n % SEED_ALPHABET.length]
 	}
 	return seed
