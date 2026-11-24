@@ -55,6 +55,7 @@ export const STAFF_ACTIONS = [
 	'preset_reasons_edit',
 	'season_replay_apply',
 	'season_replay_restore',
+	'ranked_cocktail_edit',
 ] as const
 export type StaffAction = (typeof STAFF_ACTIONS)[number]
 

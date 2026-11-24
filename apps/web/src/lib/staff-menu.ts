@@ -39,6 +39,7 @@ const OPS: Entry[] = [
   { href: '/admin/blog', label: 'Blog' },
   { href: '/admin/config', label: 'Configuration', adminOnly: true },
   { href: '/admin/ranked-mods', label: 'Ranked Mods', adminOnly: true },
+  { href: '/admin/ranked-cocktail', label: 'Ranked Cocktail', adminOnly: true },
 ]
 
 export function staffMenuGroups({

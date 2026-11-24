@@ -24,6 +24,8 @@ export function nakamaConfigOf(config: AppConfig): Record<string, unknown> {
 		testingMode: config.testingMode === true,
 		integrityEnforced,
 		chatAllowlist: [...config.chatAllowlist],
+		// null clears it: the mod falls back to its built-in recipe.
+		rankedCocktail: config.rankedCocktail ?? null,
 		...(config.season ? { season: config.season } : {}),
 	}
 }

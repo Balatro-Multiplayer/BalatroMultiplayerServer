@@ -1,0 +1,24 @@
+import { describe, expect, it } from 'vitest'
+import { parseRecipe } from '../../features/ranked-cocktail/recipe.js'
+
+describe('parseRecipe', () => {
+	it('accepts a name and one to three distinct deck keys', () => {
+		expect(parseRecipe({ name: '  Sample ', decks: ['b_red', 'b_mp_orange'] })).toEqual({
+			ok: true,
+			recipe: { name: 'Sample', decks: ['b_red', 'b_mp_orange'] },
+		})
+	})
+
+	it.each([
+		['no name', { name: ' ', decks: ['b_red'] }],
+		['a long name', { name: 'x'.repeat(65), decks: ['b_red'] }],
+		['no decks', { name: 'x', decks: [] }],
+		['four decks', { name: 'x', decks: ['b_red', 'b_blue', 'b_black', 'b_green'] }],
+		['a repeat', { name: 'x', decks: ['b_red', 'b_red'] }],
+		['a display name', { name: 'x', decks: ['Red Deck'] }],
+		['the Cocktail itself', { name: 'x', decks: ['b_mp_cocktail'] }],
+		['no body', undefined],
+	])('refuses %s', (_label, body) => {
+		expect(parseRecipe(body).ok).toBe(false)
+	})
+})

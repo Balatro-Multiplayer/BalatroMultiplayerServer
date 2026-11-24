@@ -1,3 +1,5 @@
+import type { CocktailRecipe } from '../features/ranked-cocktail/recipe.js'
+
 export interface ModConfig {
 	modId: string
 	displayName: string
@@ -38,6 +40,9 @@ export interface AppConfig {
 	// The rating season (seasons table): the active one, else the latest.
 	// Pushed to Nakama, which rates games into it. Unset: no seasons yet.
 	season?: number
+	// The Cocktail deck Ranked plays (ranked_cocktail), pushed to Nakama. Unset:
+	// the mod's built-in recipe.
+	rankedCocktail?: CocktailRecipe
 }
 
 let _config: AppConfig = {

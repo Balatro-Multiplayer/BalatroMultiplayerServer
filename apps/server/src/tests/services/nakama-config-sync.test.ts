@@ -40,7 +40,11 @@ describe('pushing config to Nakama', () => {
 			testingMode: false,
 			integrityEnforced: false,
 			chatAllowlist: ['gg'],
+			rankedCocktail: null,
 		})
+		expect(
+			nakamaConfigOf({ ...config, rankedCocktail: { name: 'Sample', decks: ['b_red'] } }).rankedCocktail,
+		).toEqual({ name: 'Sample', decks: ['b_red'] })
 		expect(nakamaConfigOf({ ...config, season: 4 }).season).toBe(4)
 		setIntegrityEnforced(true)
 		expect(nakamaConfigOf(config).integrityEnforced).toBe(true)

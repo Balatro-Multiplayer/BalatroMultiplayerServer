@@ -39,7 +39,7 @@ describe('staffMenuGroups', () => {
       ],
       [
         'Ops',
-        ['Seasons', 'BET Releases', 'Blog', 'Configuration', 'Ranked Mods'],
+        ['Seasons', 'BET Releases', 'Blog', 'Configuration', 'Ranked Mods', 'Ranked Cocktail'],
       ],
     ])
   })

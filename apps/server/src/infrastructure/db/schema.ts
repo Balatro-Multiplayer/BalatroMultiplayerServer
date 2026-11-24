@@ -562,6 +562,17 @@ export const gracePeriods = pgTable('grace_periods', {
 		.defaultNow(),
 })
 
+// The Cocktail deck Ranked plays: a name and one to three deck keys. A single
+// row (id 1); no row means the mod falls back to its built-in recipe.
+export const rankedCocktail = pgTable('ranked_cocktail', {
+	id: integer('id').primaryKey().default(1),
+	name: varchar('name', { length: 64 }).notNull(),
+	decks: jsonb('decks').$type<string[]>().notNull(),
+	updatedAt: timestamp('updated_at', { withTimezone: true })
+		.notNull()
+		.defaultNow(),
+})
+
 export const matchmakingRatings = pgTable(
 	'matchmaking_ratings',
 	{

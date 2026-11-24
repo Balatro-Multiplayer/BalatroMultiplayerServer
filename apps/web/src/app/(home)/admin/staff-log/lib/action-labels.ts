@@ -52,6 +52,7 @@ export const STAFF_ACTION_LABELS: Record<string, string> = {
   preset_reasons_edit: 'Edit preset reasons',
   season_replay_apply: 'Apply season replay',
   season_replay_restore: 'Restore season replay backup',
+  ranked_cocktail_edit: 'Edit ranked cocktail',
 }
 
 export type Tone = 'red' | 'amber' | 'green' | 'blue' | 'plain'

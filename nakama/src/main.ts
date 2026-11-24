@@ -63,6 +63,7 @@ import {
 	beforeMatchmakerRemove,
 	rpcQueueCounts,
 } from './matchmaking/queue'
+import { rpcCocktailRecipe } from './matchmaking/cocktail'
 import { rpcLeaderboardGet, rpcRatingGet } from './rating/rpc'
 import { rpcAdminCheckpointsSweep } from './lobby/checkpoint_sweep'
 import { rpcAdminRunsExpired, rpcAdminRunsPurgeNamed } from './lobby/retention'
@@ -153,6 +154,7 @@ function InitModule(
 	initializer.registerRpc('group_queue_open', rpcGroupQueueOpen)
 	initializer.registerRpc('group_queue_cancel', rpcGroupQueueCancel)
 	initializer.registerRpc('queue_counts', rpcQueueCounts)
+	initializer.registerRpc('cocktail_recipe', rpcCocktailRecipe)
 	initializer.registerRpc('session_init', rpcSessionInit)
 	initializer.registerRpc('tos_accept', rpcTosAccept)
 	initializer.registerRpc('profile_set_display', rpcProfileSetDisplay)
