@@ -12,7 +12,28 @@ export async function getRankedCocktail(
 		.select()
 		.from(rankedCocktail)
 		.where(eq(rankedCocktail.id, 1))
-	return row ? { name: row.name, decks: row.decks } : null
+	if (!row) return null
+	if (!row.random) return { name: row.name, decks: row.decks }
+	return row.sameEveryTile
+		? { name: row.name, random: true, sameEveryTile: true }
+		: { name: row.name, random: true }
+}
+
+// The row's columns for a recipe (a random one keeps no decks).
+function columnsOf(recipe: CocktailRecipe) {
+	return 'random' in recipe
+		? {
+				name: recipe.name,
+				decks: [],
+				random: true,
+				sameEveryTile: recipe.sameEveryTile === true,
+			}
+		: {
+				name: recipe.name,
+				decks: recipe.decks,
+				random: false,
+				sameEveryTile: false,
+			}
 }
 
 export async function setRankedCocktail(
@@ -21,10 +42,10 @@ export async function setRankedCocktail(
 ): Promise<void> {
 	await exec
 		.insert(rankedCocktail)
-		.values({ id: 1, ...recipe })
+		.values({ id: 1, ...columnsOf(recipe) })
 		.onConflictDoUpdate({
 			target: rankedCocktail.id,
-			set: { ...recipe, updatedAt: new Date() },
+			set: { ...columnsOf(recipe), updatedAt: new Date() },
 		})
 }
 

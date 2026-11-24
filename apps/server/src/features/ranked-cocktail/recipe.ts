@@ -1,10 +1,12 @@
 // The Cocktail deck Ranked plays: a name and one to three distinct deck keys
 // (the mod's PVP.receive_cocktail_recipe accepts the same shape, and refuses a
-// key the player's game does not know).
-export interface CocktailRecipe {
-	name: string
-	decks: string[]
-}
+// key the player's game does not know), or random: the mod rolls three decks
+// for every Cocktail tile of a game's Draft, under this name (sameEveryTile:
+// one roll per game, for every tile). A mod from before random falls back to
+// its built-in recipe (it needs decks).
+export type CocktailRecipe =
+	| { name: string; decks: string[] }
+	| { name: string; random: true; sameEveryTile?: true }
 
 export const MAX_COCKTAIL_DECKS = 3
 export const MAX_COCKTAIL_NAME = 64
@@ -15,7 +17,12 @@ export type RecipeCheck =
 	| { ok: false; message: string }
 
 export function parseRecipe(body: unknown): RecipeCheck {
-	const { name, decks } = (body ?? {}) as { name?: unknown; decks?: unknown }
+	const { name, decks, random, sameEveryTile } = (body ?? {}) as {
+		name?: unknown
+		decks?: unknown
+		random?: unknown
+		sameEveryTile?: unknown
+	}
 	if (typeof name !== 'string' || !name.trim())
 		return { ok: false, message: 'A name is required' }
 	if (name.trim().length > MAX_COCKTAIL_NAME)
@@ -23,6 +30,22 @@ export function parseRecipe(body: unknown): RecipeCheck {
 			ok: false,
 			message: `The name is over ${MAX_COCKTAIL_NAME} characters`,
 		}
+	if (random !== undefined && typeof random !== 'boolean')
+		return { ok: false, message: 'random must be true or false' }
+	if (sameEveryTile !== undefined && typeof sameEveryTile !== 'boolean')
+		return { ok: false, message: 'sameEveryTile must be true or false' }
+	if (random === true) {
+		if (decks !== undefined && !(Array.isArray(decks) && decks.length === 0))
+			return { ok: false, message: 'A random Cocktail has no decks' }
+		return {
+			ok: true,
+			recipe: sameEveryTile
+				? { name: name.trim(), random: true, sameEveryTile: true }
+				: { name: name.trim(), random: true },
+		}
+	}
+	if (sameEveryTile === true)
+		return { ok: false, message: 'Only a random Cocktail rolls per tile' }
 	if (
 		!Array.isArray(decks) ||
 		decks.length < 1 ||

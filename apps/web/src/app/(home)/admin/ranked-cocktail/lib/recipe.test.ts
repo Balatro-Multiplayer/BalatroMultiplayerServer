@@ -13,6 +13,18 @@ describe('recipeOf', () => {
     expect(recipeOf('x', ['b_red', 'b_red', ''])).toHaveProperty('error')
     expect(recipeOf('x'.repeat(65), ['b_red'])).toHaveProperty('error')
   })
+  it('makes a random one from the name alone', () => {
+    expect(recipeOf(' Mystery ', ['b_red', '', ''], true)).toEqual({
+      recipe: { name: 'Mystery', random: true },
+    })
+    expect(recipeOf('', [], true)).toHaveProperty('error')
+    expect(recipeOf('Mystery', [], true, true)).toEqual({
+      recipe: { name: 'Mystery', random: true, sameEveryTile: true },
+    })
+    expect(recipeOf('x', ['b_red'], false, true)).toEqual({
+      recipe: { name: 'x', decks: ['b_red'] },
+    })
+  })
 })
 
 describe('sameRecipe', () => {
@@ -21,5 +33,12 @@ describe('sameRecipe', () => {
     expect(sameRecipe(r, { ...r, decks: [...r.decks] })).toBe(true)
     expect(sameRecipe(r, { ...r, decks: ['b_blue', 'b_red'] })).toBe(false)
     expect(sameRecipe(null, r)).toBe(false)
+  })
+  it('tells random from fixed', () => {
+    const random = { name: 'A', random: true as const }
+    expect(sameRecipe(random, { name: 'A', random: true })).toBe(true)
+    expect(sameRecipe(random, r)).toBe(false)
+    expect(sameRecipe(r, random)).toBe(false)
+    expect(sameRecipe(random, { ...random, sameEveryTile: true })).toBe(false)
   })
 })
