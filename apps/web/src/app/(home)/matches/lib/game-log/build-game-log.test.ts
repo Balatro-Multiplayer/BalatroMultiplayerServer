@@ -280,6 +280,48 @@ describe('buildGameLog with a reduced side', () => {
   })
 })
 
+describe('buildGameLog refused buys', () => {
+  const ident = (c: { type: string; ident?: string }) =>
+    c.type === 'other_card' ? c.ident : ''
+
+  test('ignores a buy with no spend after it, keeping the one that was charged', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [11, 'cashout', []],
+        // Refused (joker slots full): logged, but nothing was charged.
+        [12, 'buy', [4, 0, joker(1, 'j_dna'), 8]],
+        [13, 'sell', [4, 1, joker(2, 'j_golden')]],
+        [14, 'buy', [4, 0, joker(1, 'j_dna'), 8]],
+        [14, 'money_delta', [-8]],
+      ]),
+    ])
+    const p = log.players[0]
+    expect((p?.finalJokers ?? []).map(ident)).toEqual(['j_dna'])
+    expect(p?.itemizedPurchases).toBe(8)
+    const buys = (p?.rounds ?? [])
+      .flatMap((r) => r.events)
+      .filter((e) => e.type === 'shop' && e.action === 'buy')
+    expect(buys).toHaveLength(1)
+  })
+
+  test('keeps every buy in a log that records no money changes', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [12, 'buy', [4, 0, joker(1, 'j_a'), 4]],
+        [13, 'buy', [4, 1, joker(2, 'j_b'), 4]],
+      ]),
+    ])
+    expect((log.players[0]?.finalJokers ?? []).map(ident)).toEqual([
+      'j_a',
+      'j_b',
+    ])
+  })
+})
+
 describe('buildGameLog joker hits', () => {
   const hits = (log: ReturnType<typeof buildGameLog>) =>
     (log.players[0]?.rounds ?? [])

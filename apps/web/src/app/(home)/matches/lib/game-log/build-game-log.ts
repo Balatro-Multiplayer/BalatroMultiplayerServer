@@ -286,6 +286,9 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
   let finalDeck: ResolvedCard[] = []
   const consumedMoney = new Set<number>()
 
+  // Logs that never record money changes cannot show a refused buy.
+  const hasMoneyEvents = events.some((e) => e[1] === 'money_delta')
+
   const push = (event: GameEvent) => {
     current.events.push(event)
   }
@@ -605,6 +608,17 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
         area = typeof a[0] === 'number' ? a[0] : null
         const r = resolve(a[2])
         card = r?.card ?? null
+        // Older mods logged a buy the game then refused (no free joker slot,
+        // say). Nothing was charged, so no spend follows it: leave it out.
+        if (
+          (action === 'buy' || action === 'voucher') &&
+          hasMoneyEvents &&
+          typeof a[3] === 'number' &&
+          a[3] > 0 &&
+          followingSpend() === null
+        ) {
+          return
+        }
         if (action !== 'sell' && typeof a[3] === 'number') {
           cost = a[3]
           itemizedPurchases += cost
