@@ -75,6 +75,7 @@ function rankedFields(row: ModRow) {
 		rankedVersion: row.rankedVersion,
 		smodsIds: row.smodsIds,
 		rankedVersionSha256: row.rankedVersionSha256,
+		rankedFileHashes: row.rankedFileHashes,
 		rankedDownloadUrl: row.rankedDownloadUrl,
 		rankedSource: row.rankedSource,
 		rankedDownloadStatus: row.rankedDownloadStatus,
@@ -617,6 +618,7 @@ export async function listRankedPins() {
 			repoUrl: modRegistry.repoUrl,
 			rankedVersion: modRegistry.rankedVersion,
 			rankedVersionSha256: modRegistry.rankedVersionSha256,
+			rankedFileHashes: modRegistry.rankedFileHashes,
 			rankedDownloadUrl: modRegistry.rankedDownloadUrl,
 			rankedSource: modRegistry.rankedSource,
 			rankedDownloadStatus: modRegistry.rankedDownloadStatus,
@@ -668,6 +670,7 @@ export async function storeRankedPin(
 		source: ModLayout
 		hash: string
 		smodsIds: string[]
+		fileHashes?: Record<string, string>
 	},
 	expectedVersion?: string,
 ): Promise<void> {
@@ -676,6 +679,7 @@ export async function storeRankedPin(
 		.set({
 			rankedVersion: pin.version,
 			rankedVersionSha256: pin.hash,
+			rankedFileHashes: pin.fileHashes ?? {},
 			smodsIds: pin.smodsIds,
 			smodsIdsReadVersion: pin.version,
 			rankedDownloadUrl: pin.downloadUrl,
@@ -691,6 +695,21 @@ export async function storeRankedPin(
 						eq(modRegistry.id, modId),
 						eq(modRegistry.rankedVersion, expectedVersion),
 					),
+		)
+}
+
+// A pin's injector-file hashes, read again from its files (the backfill). Only
+// writes if the pin is still that version.
+export async function storePinFileHashes(
+	modId: string,
+	version: string,
+	fileHashes: Record<string, string>,
+): Promise<void> {
+	await db
+		.update(modRegistry)
+		.set({ rankedFileHashes: fileHashes, updatedAt: new Date() })
+		.where(
+			and(eq(modRegistry.id, modId), eq(modRegistry.rankedVersion, version)),
 		)
 }
 
@@ -780,6 +799,7 @@ export async function setRankedVersion(
 			.set({
 				rankedVersion: null,
 				rankedVersionSha256: null,
+				rankedFileHashes: null,
 				smodsIds: [],
 				smodsIdsReadVersion: null,
 				rankedDownloadUrl: null,

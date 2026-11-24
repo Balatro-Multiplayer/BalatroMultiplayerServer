@@ -54,6 +54,7 @@ describe('a pin change (mods.gateway.ts)', () => {
 			.mockReturnValueOnce(rows([version]))
 		vi.mocked(inspectModRelease).mockResolvedValue({
 			hash: 'h'.repeat(64),
+			fileHashes: {},
 			smodsIds: ['AliceMod'],
 		})
 

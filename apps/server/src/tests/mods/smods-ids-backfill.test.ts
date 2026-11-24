@@ -26,6 +26,7 @@ function pin(overrides: Partial<Pin> = {}): Pin {
 		repoUrl: null,
 		rankedVersion: '2.0.0',
 		rankedVersionSha256: 'b'.repeat(64),
+		rankedFileHashes: null,
 		rankedDownloadUrl: 'https://ts/Alice-Mod/2.0.0/',
 		rankedSource: 'thunderstore',
 		rankedDownloadStatus: 'ok',
@@ -41,6 +42,7 @@ beforeEach(() => {
 	vi.mocked(gateway.listRankedPins).mockResolvedValue([])
 	vi.mocked(inspectModRelease).mockResolvedValue({
 		hash: 'h',
+		fileHashes: {},
 		smodsIds: ['AliceMod'],
 	})
 	warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -99,7 +101,7 @@ describe('fillMissingSmodsIds (API boot)', () => {
 		vi.mocked(gateway.listRankedPins).mockResolvedValue([
 			pin({ id: 'Thunderstore-lovely' }),
 		])
-		vi.mocked(inspectModRelease).mockResolvedValue({ hash: 'h', smodsIds: [] })
+		vi.mocked(inspectModRelease).mockResolvedValue({ hash: 'h', fileHashes: {}, smodsIds: [] })
 
 		await fillMissingSmodsIds()
 
@@ -129,7 +131,7 @@ describe('fillMissingSmodsIds (API boot)', () => {
 			pin({ id: 'Bob-Mod' }),
 		])
 		vi.mocked(inspectModRelease).mockImplementation(async (modId) =>
-			modId === 'Dead-Link' ? null : { hash: 'h', smodsIds: ['BobMod'] },
+			modId === 'Dead-Link' ? null : { hash: 'h', fileHashes: {}, smodsIds: ['BobMod'] },
 		)
 
 		await fillMissingSmodsIds()

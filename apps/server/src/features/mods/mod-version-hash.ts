@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -32,9 +33,49 @@ function extractedFolderName(version: string): string {
 	return `${sanitized || '_default'}_extracted`
 }
 
+// The file names the launcher deploys beside the game executable (Lovely's
+// DLL proxy, before and after v0.10.0, and its macOS dylib). Kept in step with
+// the launcher's ModInstaller injectorFileNames().
+const INJECTOR_FILE_NAMES = ['winmm.dll', 'version.dll', 'liblovely.dylib']
+
+// SHA-256 of each injector file found anywhere in dir (the first match by
+// shallowest path wins), keyed by lower-case file name.
+export async function hashInjectorFiles(
+	dir: string,
+): Promise<Record<string, string>> {
+	const found: Record<string, { depth: number; full: string }> = {}
+	async function walk(current: string, depth: number): Promise<void> {
+		for (const entry of await fs.readdir(current, { withFileTypes: true })) {
+			const full = path.join(current, entry.name)
+			if (entry.isDirectory()) {
+				await walk(full, depth + 1)
+			} else if (entry.isFile()) {
+				const name = entry.name.toLowerCase()
+				if (
+					INJECTOR_FILE_NAMES.includes(name) &&
+					(!found[name] || depth < found[name].depth)
+				) {
+					found[name] = { depth, full }
+				}
+			}
+		}
+	}
+	await walk(dir, 0)
+	const out: Record<string, string> = {}
+	for (const [name, { full }] of Object.entries(found)) {
+		out[name] = createHash('sha256')
+			.update(await fs.readFile(full))
+			.digest('hex')
+	}
+	return out
+}
+
 // What a pin records about the folder it deploys as.
 export interface ReleaseInspection {
 	hash: string
+	// SHA-256 of each injector file the extracted pin contains, by file name
+	// ({} when none). See modRegistry.rankedFileHashes.
+	fileHashes: Record<string, string>
 	// The SMODS ids its files declare (mod-smods-ids.ts); [] when none.
 	smodsIds: string[]
 }
@@ -74,6 +115,7 @@ export async function inspectModRelease(
 
 		return {
 			hash: await computeModFolderHash(extractedDir),
+			fileHashes: await hashInjectorFiles(extractedDir),
 			smodsIds: await readSmodsIds(extractedDir),
 		}
 	} catch (err) {

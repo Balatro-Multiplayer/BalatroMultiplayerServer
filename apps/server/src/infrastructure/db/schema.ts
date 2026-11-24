@@ -1076,6 +1076,13 @@ export const modRegistry = pgTable('mod_registry', {
 	// rankedDownloadStatus).
 	rankedVersion: varchar('ranked_version', { length: 64 }),
 	rankedVersionSha256: varchar('ranked_version_sha256', { length: 64 }),
+	// SHA-256 of each injector file (winmm.dll, version.dll, liblovely.dylib) the
+	// pin's files contain, keyed by file name. Lovely is deployed as one file
+	// next to the game rather than as a hashed Mods folder, so the folder hash
+	// above can't vouch for what ends up there; this lets the launcher check the
+	// deployed file itself against a value from outside the player's machine.
+	// Null: not read yet (the API boot fills it). {}: the pin has no such file.
+	rankedFileHashes: jsonb('ranked_file_hashes').$type<Record<string, string>>(),
 	// The SMODS mod ids the pin's files declare (mod-smods-ids.ts), read when
 	// an admin pins and overridable by one; what a client reports this mod
 	// as. A pinned mod's ids are allowed in matchmaking (queueAllowedModIds).
