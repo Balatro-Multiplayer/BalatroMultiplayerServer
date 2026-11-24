@@ -15,6 +15,8 @@ describe('cocktailRecipeOf', () => {
 		expect(cocktailRecipeOf({ name: 'Mystery', random: true, decks: [] })).toEqual({ name: 'Mystery', random: true })
 		expect(cocktailRecipeOf({ name: '', random: true })).toBeNull()
 		expect(cocktailRecipeOf({ name: 'x', random: 'yes' })).toBeNull()
+		expect(cocktailRecipeOf({ name: 'Mystery', random: true, sameEveryTile: true })).toEqual({ name: 'Mystery', random: true, sameEveryTile: true })
+		expect(cocktailRecipeOf({ name: 'Mystery', random: true, sameEveryTile: 'yes' })).toEqual({ name: 'Mystery', random: true })
 	})
 	it('refuses anything else', () => {
 		expect(cocktailRecipeOf(null)).toBeNull()

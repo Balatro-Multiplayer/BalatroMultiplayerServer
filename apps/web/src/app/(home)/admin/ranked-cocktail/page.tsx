@@ -17,6 +17,7 @@ import {
   deckLabel,
   decksOf,
   isRandom,
+  isSameEveryTile,
   recipeOf,
   sameRecipe,
 } from './lib/recipe'
@@ -34,7 +35,7 @@ const slotsOf = (r: Recipe) =>
 
 const describe = (r: Recipe) =>
   isRandom(r)
-    ? `${r.name} (three random decks each game)`
+    ? `${r.name} (${isSameEveryTile(r) ? 'three random decks each game' : 'three random decks on every Cocktail tile'})`
     : `${r.name} (${r.decks.map(deckLabel).join(', ')})`
 
 // Admin only: the server sends nobody else anything from it.
@@ -64,10 +65,10 @@ export default function RankedCocktailPage() {
         <h1 className='font-bold text-3xl tracking-tight'>Ranked Cocktail</h1>
         <p className='text-muted-foreground text-sm'>
           The Cocktail deck Ranked games play: its name and one to three decks
-          whose effects it combines, or three random decks rolled for every game
-          (players hover the Cocktail to see them). A save applies to games that
-          start after it and goes in the staff log. With no saved recipe the
-          game plays its built-in one.
+          whose effects it combines, or random: three decks rolled for every
+          Cocktail tile in the Draft (players hover a tile to see them). A save
+          applies to games that start after it and goes in the staff log. With
+          no saved recipe the game plays its built-in one.
         </p>
       </div>
       {isLoading && <p className='text-muted-foreground text-sm'>Loading…</p>}
@@ -99,9 +100,10 @@ function RecipeCard({
   const [name, setName] = useState(start.name)
   const [slots, setSlots] = useState<string[]>(slotsOf(start))
   const [random, setRandom] = useState(isRandom(start))
+  const [sameEveryTile, setSameEveryTile] = useState(isSameEveryTile(start))
   const [note, setNote] = useState('')
 
-  const parsed = recipeOf(name, slots, random)
+  const parsed = recipeOf(name, slots, random, sameEveryTile)
   const changed = 'recipe' in parsed && !sameRecipe(saved, parsed.recipe)
 
   const save = useMutation({
@@ -169,12 +171,27 @@ function RecipeCard({
           disabled={busy}
           onChange={(e) => setRandom(e.target.checked)}
         />
-        Random each game
+        Random
         <span className='text-muted-foreground'>
-          (three decks rolled for every game; older game versions play the
-          built-in recipe instead)
+          (every Cocktail tile in a game's Draft rolls its own three decks;
+          older game versions play the built-in recipe instead)
         </span>
       </label>
+
+      {random && (
+        <label className='flex items-center gap-2 pl-6 text-sm'>
+          <input
+            type='checkbox'
+            checked={sameEveryTile}
+            disabled={busy}
+            onChange={(e) => setSameEveryTile(e.target.checked)}
+          />
+          Same mix on every Cocktail tile
+          <span className='text-muted-foreground'>
+            (one roll per game instead of one per tile)
+          </span>
+        </label>
+      )}
 
       {!random && (
         <div className='grid gap-3 sm:grid-cols-3'>

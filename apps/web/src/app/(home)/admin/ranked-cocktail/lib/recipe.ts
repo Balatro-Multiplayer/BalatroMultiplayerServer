@@ -30,14 +30,20 @@ export const COCKTAIL_DECKS: { key: string; label: string }[] = [
 export const MAX_DECKS = 3
 export const MAX_NAME = 64
 
-// A fixed mix, or random: the game rolls three decks for every match, under
-// this name.
+// A fixed mix, or random: the game rolls three decks for every Cocktail tile
+// of a game's Draft, under this name (sameEveryTile: one roll per game, for
+// every tile).
 export type Recipe =
   | { name: string; decks: string[] }
-  | { name: string; random: true }
+  | { name: string; random: true; sameEveryTile?: true }
 
-export const isRandom = (r: Recipe): r is { name: string; random: true } =>
+export const isRandom = (
+  r: Recipe
+): r is { name: string; random: true; sameEveryTile?: true } =>
   'random' in r && r.random === true
+
+export const isSameEveryTile = (r: Recipe) =>
+  isRandom(r) && r.sameEveryTile === true
 
 export const decksOf = (r: Recipe): string[] => (isRandom(r) ? [] : r.decks)
 
@@ -49,13 +55,19 @@ export const deckLabel = (key: string) =>
 export function recipeOf(
   name: string,
   slots: string[],
-  random = false
+  random = false,
+  sameEveryTile = false
 ): { recipe: Recipe } | { error: string } {
   const decks = slots.filter((k) => k !== '')
   if (!name.trim()) return { error: 'A name is required' }
   if (name.trim().length > MAX_NAME)
     return { error: `The name is over ${MAX_NAME} characters` }
-  if (random) return { recipe: { name: name.trim(), random: true } }
+  if (random)
+    return {
+      recipe: sameEveryTile
+        ? { name: name.trim(), random: true, sameEveryTile: true }
+        : { name: name.trim(), random: true },
+    }
   if (decks.length < 1) return { error: 'Pick at least one deck' }
   if (new Set(decks).size !== decks.length)
     return { error: 'Each deck can be picked once' }
@@ -63,7 +75,12 @@ export function recipeOf(
 }
 
 export function sameRecipe(a: Recipe | null, b: Recipe): boolean {
-  if (a === null || a.name !== b.name || isRandom(a) !== isRandom(b))
+  if (
+    a === null ||
+    a.name !== b.name ||
+    isRandom(a) !== isRandom(b) ||
+    isSameEveryTile(a) !== isSameEveryTile(b)
+  )
     return false
   const da = decksOf(a)
   const db = decksOf(b)

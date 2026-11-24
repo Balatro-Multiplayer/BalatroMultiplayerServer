@@ -18,6 +18,12 @@ describe('recipeOf', () => {
       recipe: { name: 'Mystery', random: true },
     })
     expect(recipeOf('', [], true)).toHaveProperty('error')
+    expect(recipeOf('Mystery', [], true, true)).toEqual({
+      recipe: { name: 'Mystery', random: true, sameEveryTile: true },
+    })
+    expect(recipeOf('x', ['b_red'], false, true)).toEqual({
+      recipe: { name: 'x', decks: ['b_red'] },
+    })
   })
 })
 
@@ -33,5 +39,6 @@ describe('sameRecipe', () => {
     expect(sameRecipe(random, { name: 'A', random: true })).toBe(true)
     expect(sameRecipe(random, r)).toBe(false)
     expect(sameRecipe(r, random)).toBe(false)
+    expect(sameRecipe(random, { ...random, sameEveryTile: true })).toBe(false)
   })
 })

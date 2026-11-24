@@ -13,16 +13,27 @@ export async function getRankedCocktail(
 		.from(rankedCocktail)
 		.where(eq(rankedCocktail.id, 1))
 	if (!row) return null
-	return row.random
-		? { name: row.name, random: true }
-		: { name: row.name, decks: row.decks }
+	if (!row.random) return { name: row.name, decks: row.decks }
+	return row.sameEveryTile
+		? { name: row.name, random: true, sameEveryTile: true }
+		: { name: row.name, random: true }
 }
 
 // The row's columns for a recipe (a random one keeps no decks).
 function columnsOf(recipe: CocktailRecipe) {
 	return 'random' in recipe
-		? { name: recipe.name, decks: [], random: true }
-		: { name: recipe.name, decks: recipe.decks, random: false }
+		? {
+				name: recipe.name,
+				decks: [],
+				random: true,
+				sameEveryTile: recipe.sameEveryTile === true,
+			}
+		: {
+				name: recipe.name,
+				decks: recipe.decks,
+				random: false,
+				sameEveryTile: false,
+			}
 }
 
 export async function setRankedCocktail(

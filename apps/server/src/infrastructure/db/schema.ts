@@ -563,13 +563,15 @@ export const gracePeriods = pgTable('grace_periods', {
 })
 
 // The Cocktail deck Ranked plays: a name and one to three deck keys, or
-// random (three decks rolled for every game; decks is then empty). A single
-// row (id 1); no row means the mod falls back to its built-in recipe.
+// random (three decks rolled for every Cocktail tile of a game's Draft, or one
+// roll for every tile with sameEveryTile; decks is then empty). A single row
+// (id 1); no row means the mod falls back to its built-in recipe.
 export const rankedCocktail = pgTable('ranked_cocktail', {
 	id: integer('id').primaryKey().default(1),
 	name: varchar('name', { length: 64 }).notNull(),
 	decks: jsonb('decks').$type<string[]>().notNull(),
 	random: boolean('random').notNull().default(false),
+	sameEveryTile: boolean('same_every_tile').notNull().default(false),
 	updatedAt: timestamp('updated_at', { withTimezone: true })
 		.notNull()
 		.defaultNow(),

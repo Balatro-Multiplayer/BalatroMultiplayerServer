@@ -10,17 +10,18 @@ export const CONFIG_KEY = 'global'
 
 // The Cocktail deck Ranked plays, set on the website (matchmaking/cocktail.ts
 // serves it to the mod): a name and one to three distinct deck keys, or random
-// (the mod rolls three decks for every game, under this name).
-export type CocktailRecipe = { name: string; decks: string[] } | { name: string; random: true }
+// (the mod rolls three decks for every Cocktail tile of a game's Draft, under
+// this name; sameEveryTile: one roll per game, for every tile).
+export type CocktailRecipe = { name: string; decks: string[] } | { name: string; random: true; sameEveryTile?: true }
 
 const DECK_KEY_PATTERN = /^b_[a-z0-9_]{1,60}$/
 
 // A pushed recipe if it is valid, else null.
 export function cocktailRecipeOf(value: unknown): CocktailRecipe | null {
 	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
-	const { name, decks, random } = value as { [key: string]: unknown }
+	const { name, decks, random, sameEveryTile } = value as { [key: string]: unknown }
 	if (typeof name !== 'string' || name.length < 1 || name.length > 64) return null
-	if (random === true) return { name, random: true }
+	if (random === true) return sameEveryTile === true ? { name, random: true, sameEveryTile: true } : { name, random: true }
 	if (!Array.isArray(decks) || decks.length < 1 || decks.length > 3) return null
 	for (let i = 0; i < decks.length; i++) {
 		const key = decks[i]
