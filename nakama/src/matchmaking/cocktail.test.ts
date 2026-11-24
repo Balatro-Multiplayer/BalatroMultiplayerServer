@@ -11,6 +11,11 @@ describe('cocktailRecipeOf', () => {
 		expect(cocktailRecipeOf(RECIPE)).toEqual(RECIPE)
 		expect(cocktailRecipeOf({ name: 'One', decks: ['b_red'] })).toEqual({ name: 'One', decks: ['b_red'] })
 	})
+	it('accepts a random one, keeping only its name', () => {
+		expect(cocktailRecipeOf({ name: 'Mystery', random: true, decks: [] })).toEqual({ name: 'Mystery', random: true })
+		expect(cocktailRecipeOf({ name: '', random: true })).toBeNull()
+		expect(cocktailRecipeOf({ name: 'x', random: 'yes' })).toBeNull()
+	})
 	it('refuses anything else', () => {
 		expect(cocktailRecipeOf(null)).toBeNull()
 		expect(cocktailRecipeOf({ name: '', decks: ['b_red'] })).toBeNull()
@@ -41,6 +46,10 @@ describe('rpcCocktailRecipe', () => {
 			{ collection: CONFIG_COLLECTION, key: CONFIG_KEY, userId: SYSTEM_USER_ID, value: { rankedCocktail: RECIPE } },
 		])
 		expect(ask()).toEqual({ recipe: RECIPE })
+		nk.storageWrite([
+			{ collection: CONFIG_COLLECTION, key: CONFIG_KEY, userId: SYSTEM_USER_ID, value: { rankedCocktail: { name: 'Mystery', random: true } } },
+		])
+		expect(ask()).toEqual({ recipe: { name: 'Mystery', random: true } })
 	})
 	it('needs a player session', () => {
 		expect(() => rpcCocktailRecipe({} as any, fakeLogger, fakeNk() as any, '')).toThrow()

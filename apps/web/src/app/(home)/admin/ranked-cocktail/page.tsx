@@ -15,6 +15,8 @@ import {
   MAX_NAME,
   type Recipe,
   deckLabel,
+  decksOf,
+  isRandom,
   recipeOf,
   sameRecipe,
 } from './lib/recipe'
@@ -28,9 +30,12 @@ const BUILT_IN: Recipe = {
 }
 
 const slotsOf = (r: Recipe) =>
-  Array.from({ length: MAX_DECKS }, (_, i) => r.decks[i] ?? '')
+  Array.from({ length: MAX_DECKS }, (_, i) => decksOf(r)[i] ?? '')
 
-const describe = (r: Recipe) => `${r.name} (${r.decks.map(deckLabel).join(', ')})`
+const describe = (r: Recipe) =>
+  isRandom(r)
+    ? `${r.name} (three random decks each game)`
+    : `${r.name} (${r.decks.map(deckLabel).join(', ')})`
 
 // Admin only: the server sends nobody else anything from it.
 export default function RankedCocktailPage() {
@@ -59,9 +64,10 @@ export default function RankedCocktailPage() {
         <h1 className='font-bold text-3xl tracking-tight'>Ranked Cocktail</h1>
         <p className='text-muted-foreground text-sm'>
           The Cocktail deck Ranked games play: its name and one to three decks
-          whose effects it combines. A save applies to games that start after
-          it and goes in the staff log. With no saved recipe the game plays its
-          built-in one.
+          whose effects it combines, or three random decks rolled for every game
+          (players hover the Cocktail to see them). A save applies to games that
+          start after it and goes in the staff log. With no saved recipe the
+          game plays its built-in one.
         </p>
       </div>
       {isLoading && <p className='text-muted-foreground text-sm'>Loading…</p>}
@@ -92,9 +98,10 @@ function RecipeCard({
   const start = saved ?? BUILT_IN
   const [name, setName] = useState(start.name)
   const [slots, setSlots] = useState<string[]>(slotsOf(start))
+  const [random, setRandom] = useState(isRandom(start))
   const [note, setNote] = useState('')
 
-  const parsed = recipeOf(name, slots)
+  const parsed = recipeOf(name, slots, random)
   const changed = 'recipe' in parsed && !sameRecipe(saved, parsed.recipe)
 
   const save = useMutation({
@@ -138,7 +145,9 @@ function RecipeCard({
       <p className='text-muted-foreground text-xs'>
         Now playing:{' '}
         <span className='text-foreground'>
-          {saved ? describe(saved) : `${describe(BUILT_IN)}, the built-in recipe`}
+          {saved
+            ? describe(saved)
+            : `${describe(BUILT_IN)}, the built-in recipe`}
         </span>
       </p>
 
@@ -153,37 +162,55 @@ function RecipeCard({
         />
       </div>
 
-      <div className='grid gap-3 sm:grid-cols-3'>
-        {slots.map((slot, i) => (
-          <div key={i} className='space-y-1'>
-            <Label htmlFor={`cocktail-deck-${i}`}>
-              Deck {i + 1}
-              {i > 0 && (
-                <span className='font-normal text-muted-foreground'>
-                  {' '}
-                  (optional)
-                </span>
-              )}
-            </Label>
-            <select
-              id={`cocktail-deck-${i}`}
-              value={slot}
-              disabled={busy}
-              onChange={(e) =>
-                setSlots((s) => s.map((v, j) => (j === i ? e.target.value : v)))
-              }
-              className='h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm'
-            >
-              <option value=''>{i === 0 ? 'Pick a deck' : 'None'}</option>
-              {COCKTAIL_DECKS.map((d) => (
-                <option key={d.key} value={d.key}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        ))}
-      </div>
+      <label className='flex items-center gap-2 text-sm'>
+        <input
+          type='checkbox'
+          checked={random}
+          disabled={busy}
+          onChange={(e) => setRandom(e.target.checked)}
+        />
+        Random each game
+        <span className='text-muted-foreground'>
+          (three decks rolled for every game; older game versions play the
+          built-in recipe instead)
+        </span>
+      </label>
+
+      {!random && (
+        <div className='grid gap-3 sm:grid-cols-3'>
+          {slots.map((slot, i) => (
+            <div key={i} className='space-y-1'>
+              <Label htmlFor={`cocktail-deck-${i}`}>
+                Deck {i + 1}
+                {i > 0 && (
+                  <span className='font-normal text-muted-foreground'>
+                    {' '}
+                    (optional)
+                  </span>
+                )}
+              </Label>
+              <select
+                id={`cocktail-deck-${i}`}
+                value={slot}
+                disabled={busy}
+                onChange={(e) =>
+                  setSlots((s) =>
+                    s.map((v, j) => (j === i ? e.target.value : v))
+                  )
+                }
+                className='h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm'
+              >
+                <option value=''>{i === 0 ? 'Pick a deck' : 'None'}</option>
+                {COCKTAIL_DECKS.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
 
       {'error' in parsed && (
         <p className='text-bal-red text-sm' role='alert'>

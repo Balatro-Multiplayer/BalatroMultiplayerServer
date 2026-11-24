@@ -30,23 +30,32 @@ export const COCKTAIL_DECKS: { key: string; label: string }[] = [
 export const MAX_DECKS = 3
 export const MAX_NAME = 64
 
-export interface Recipe {
-  name: string
-  decks: string[]
-}
+// A fixed mix, or random: the game rolls three decks for every match, under
+// this name.
+export type Recipe =
+  | { name: string; decks: string[] }
+  | { name: string; random: true }
+
+export const isRandom = (r: Recipe): r is { name: string; random: true } =>
+  'random' in r && r.random === true
+
+export const decksOf = (r: Recipe): string[] => (isRandom(r) ? [] : r.decks)
 
 export const deckLabel = (key: string) =>
   COCKTAIL_DECKS.find((d) => d.key === key)?.label ?? key
 
-// The recipe a draft makes, or why it is not one yet. Empty slots are skipped.
+// The recipe a draft makes, or why it is not one yet. Empty slots are skipped;
+// a random one ignores them.
 export function recipeOf(
   name: string,
-  slots: string[]
+  slots: string[],
+  random = false
 ): { recipe: Recipe } | { error: string } {
   const decks = slots.filter((k) => k !== '')
   if (!name.trim()) return { error: 'A name is required' }
   if (name.trim().length > MAX_NAME)
     return { error: `The name is over ${MAX_NAME} characters` }
+  if (random) return { recipe: { name: name.trim(), random: true } }
   if (decks.length < 1) return { error: 'Pick at least one deck' }
   if (new Set(decks).size !== decks.length)
     return { error: 'Each deck can be picked once' }
@@ -54,10 +63,9 @@ export function recipeOf(
 }
 
 export function sameRecipe(a: Recipe | null, b: Recipe): boolean {
-  return (
-    a !== null &&
-    a.name === b.name &&
-    a.decks.length === b.decks.length &&
-    a.decks.every((d, i) => d === b.decks[i])
-  )
+  if (a === null || a.name !== b.name || isRandom(a) !== isRandom(b))
+    return false
+  const da = decksOf(a)
+  const db = decksOf(b)
+  return da.length === db.length && da.every((d, i) => d === db[i])
 }
