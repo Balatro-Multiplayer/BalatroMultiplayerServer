@@ -1,5 +1,7 @@
 import { ExternalLinkIcon } from 'lucide-react'
+import Link from 'next/link'
 import type { ComponentProps, ReactNode } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -51,13 +53,18 @@ export default function DownloadPage() {
       </div>
 
       <div className='space-y-8'>
-        <Card>
+        <Card className='border-2 border-amber-500'>
           <CardHeader>
-            <CardTitle>Recommended: Install with r2modman</CardTitle>
+            <Badge className='mb-1 w-fit bg-amber-500 font-bold text-black hover:bg-amber-500'>
+              CASUAL ONLY
+            </Badge>
+            <CardTitle className='font-extrabold text-2xl'>
+              CASUAL PLAY ONLY: You CANNOT queue Ranked with r2modman
+            </CardTitle>
             <CardDescription>
               r2modman is the Thunderstore mod manager. It installs the
               Multiplayer mods and everything they need, and keeps them up to
-              date.
+              date. Use it for Casual games and lobbies only.
             </CardDescription>
           </CardHeader>
           <CardContent className='space-y-6'>
@@ -85,17 +92,22 @@ export default function DownloadPage() {
                   in with your Steam account.
                 </li>
               </ol>
-              <p className='mt-2 text-muted-foreground text-sm'>
-                This is all you need for Casual games and lobbies. Ranked needs
-                one of the apps below.
+              <p className='mt-3 font-bold text-amber-500 text-base'>
+                This is for Casual games and lobbies ONLY. If you want to play
+                Ranked, you need to use one of the options below.
               </p>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className='border-2 border-green-500'>
           <CardHeader>
-            <CardTitle>To play Ranked</CardTitle>
+            <Badge className='mb-1 w-fit bg-green-500 font-bold text-black hover:bg-green-500'>
+              RANKED
+            </Badge>
+            <CardTitle className='font-extrabold text-2xl'>
+              RANKED PLAY: Use one of these to queue Ranked
+            </CardTitle>
             <CardDescription>
               Ranked games need an app with our anti-cheat. Pick the one you
               like better. Both install the same mods.
@@ -104,16 +116,41 @@ export default function DownloadPage() {
           <CardContent className='grid gap-6 md:grid-cols-2'>
             <div className='flex flex-col gap-4 rounded-lg border bg-card p-4'>
               <div>
-                <h3 className='font-semibold'>BET Launcher</h3>
+                <h3 className='font-semibold'>
+                  BET - Balatro Essentials Toolkit
+                </h3>
                 <p className='mt-1 text-muted-foreground text-sm'>
-                  A simple launcher made for Balatro, like Balatro Mod Manager.
-                  Pick this if you do not use r2modman. It installs Lovely,
-                  Steamodded and the Multiplayer mods, can install other Balatro
-                  mods, and lets you switch between mod profiles in one click.
+                  Our in-house built launcher, made for playing Ranked or just
+                  as a mod manager.
                 </p>
               </div>
               <div className='mt-auto'>
                 <OSDownloadButton product='launcher' />
+              </div>
+              <div className='rounded-lg border bg-background p-3'>
+                <p className='mb-2 font-semibold text-sm'>
+                  How to set up BET for Ranked
+                </p>
+                <ol className='list-inside list-decimal space-y-1 text-muted-foreground text-sm'>
+                  <li>Download Balatro Essentials Toolkit.</li>
+                  <li>
+                    Go to the <strong>Mods</strong> tab and make a new profile.
+                  </li>
+                  <li>
+                    Select <strong>Multiplayer PvP</strong> then{' '}
+                    <strong>Ranked</strong>.
+                  </li>
+                  <li>
+                    Name it whatever you want and click{' '}
+                    <strong>Create Profile</strong>.
+                  </li>
+                  <li>
+                    After that you can add any additional mods you wish. If you
+                    are on a ranked profile, only ranked legal mods will
+                    display. Texture packs can be done from{' '}
+                    <strong>Tools &gt; Manage Reskin Packs</strong>.
+                  </li>
+                </ol>
               </div>
             </div>
             <div className='flex flex-col gap-4 rounded-lg border bg-card p-4'>
@@ -207,6 +244,14 @@ export default function DownloadPage() {
             </p>
           </CardContent>
         </Card>
+
+        <p className='text-center text-muted-foreground'>
+          Struggling to get everything working? See the{' '}
+          <Link href='/faq' className='font-semibold underline'>
+            FAQ
+          </Link>{' '}
+          before asking in our Discord channel.
+        </p>
       </div>
     </div>
   )
