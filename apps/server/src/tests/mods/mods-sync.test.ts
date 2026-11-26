@@ -236,6 +236,7 @@ describe('syncModRegistry', () => {
 			})
 			vi.mocked(inspectModRelease).mockResolvedValue({
 				hash: 'c'.repeat(64),
+				fileHashes: {},
 				smodsIds: ['AliceMod'],
 			})
 
@@ -254,6 +255,7 @@ describe('syncModRegistry', () => {
 					downloadUrl: 'https://ts/Alice-Mod/2.0.0/',
 					source: 'thunderstore',
 					hash: 'c'.repeat(64),
+					fileHashes: {},
 					smodsIds: ['AliceMod'],
 				},
 				'2.0.0',
