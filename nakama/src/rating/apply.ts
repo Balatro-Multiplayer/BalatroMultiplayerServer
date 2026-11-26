@@ -7,6 +7,7 @@ import {
 	PLACEMENT_GAMES,
 	RATING_FLOOR,
 } from './elo'
+import { ensureRatingBoard } from './board_sync'
 import { nextSeasonBest } from './metrics'
 import { carriedOver, currentSeason, decayedRating } from './season'
 import type { RunRecord } from '../lobby/protocol'
@@ -193,7 +194,7 @@ function mirrorToLeaderboard(
 	plan: RatingPlan,
 ) {
 	try {
-		nk.leaderboardCreate(id, true, 'desc', 'set', null, { modId: run.modId, mode })
+		ensureRatingBoard(nk, id, { modId: run.modId, mode })
 		for (const player of run.players) {
 			const after = plan.updates[player.id]
 			if (!after || after.gamesPlayed < PLACEMENT_GAMES) continue

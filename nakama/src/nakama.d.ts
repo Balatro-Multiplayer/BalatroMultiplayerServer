@@ -107,6 +107,7 @@ declare namespace nkruntime {
 			operator: 'best' | 'set' | 'incr' | 'decr',
 			resetSchedule: string | null,
 			metadata: { [key: string]: unknown },
+			enableRank?: boolean,
 		): void
 		leaderboardRecordWrite(
 			id: string,
@@ -124,7 +125,14 @@ declare namespace nkruntime {
 			limit: number,
 			cursor: string,
 			expiry: number,
-		): { records?: LeaderboardRecord[]; nextCursor?: string }
+		): {
+			records?: LeaderboardRecord[]
+			// The records of the requested ownerIds, with their global rank.
+			ownerRecords?: LeaderboardRecord[]
+			nextCursor?: string | null
+			prevCursor?: string | null
+			rankCount?: number
+		}
 		uuidv4(): string
 		accountGetId(userId: string): Account
 		// Every argument but userId may be null to leave that field unchanged.

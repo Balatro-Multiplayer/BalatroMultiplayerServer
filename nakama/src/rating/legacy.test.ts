@@ -11,12 +11,14 @@ const board = (over = {}) => ({
 
 function fakeNk() {
 	const records: { id: string; owner: string; score: number }[] = []
+	const created: unknown[][] = []
 	return sharedFakeNk({
 		records,
+		created,
 		// The account is already named by the hash; nothing is hashed again.
 		sha256Hash: () => 'f'.repeat(64),
 		accountGetId: () => ({ user: { username: 'Bob' }, customId: `steamhash:${HASH}` }),
-		leaderboardCreate: () => undefined,
+		leaderboardCreate: (...args: unknown[]) => { created.push(args) },
 		leaderboardRecordWrite: (id: string, owner: string, _n: string, score: number) => { records.push({ id, owner, score }) },
 	})
 }
@@ -45,6 +47,8 @@ describe('claiming at login', () => {
 		expect(nk.objects.get('ratings/u1/MultiplayerSPDRN:x:1')?.value.rating).toBe(700)
 		expect(nk.objects.get('ratings/u1/MultiplayerSPDRN:y:1')?.value.gamesPlayed).toBe(3)
 		expect(nk.records).toEqual([{ id: 'MultiplayerSPDRN:x:1', owner: 'u1', score: 700 }])
+		// The claimed board is created ranked, like every other rating board.
+		expect(nk.created).toEqual([['MultiplayerSPDRN:x:1', true, 'desc', 'set', null, { modId: 'MultiplayerSPDRN', mode: 'x' }, true]])
 		expect(nk.objects.get(`${LEGACY_RATINGS_COLLECTION}/${SYSTEM}/${HASH}`)?.value.claimedBy).toBe('u1')
 	})
 	it('claims only once', () => {

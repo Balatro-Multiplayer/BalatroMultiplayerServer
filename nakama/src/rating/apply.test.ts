@@ -216,9 +216,11 @@ describe('seasonBestOf', () => {
 function fakeNk(before?: (nk: ReturnType<typeof fakeNk>) => void) {
 	const objects = new Map<string, { value: RatingRecord; version: number }>()
 	const boards: { [id: string]: { [owner: string]: number } } = {}
+	const created: unknown[][] = []
 	const nk = {
 		objects,
 		boards,
+		created,
 		writes: 0,
 		storageRead: (reads: { key: string; userId: string; collection: string }[]) =>
 			reads.flatMap((r) => {
@@ -238,7 +240,9 @@ function fakeNk(before?: (nk: ReturnType<typeof fakeNk>) => void) {
 				objects.set(`${w.userId}/${w.key}`, { value: w.value, version: (existing?.version ?? 0) + 1 })
 			}
 		},
-		leaderboardCreate: () => undefined,
+		leaderboardCreate: (...args: unknown[]) => {
+			created.push(args)
+		},
 		leaderboardRecordWrite: (id: string, owner: string, _name: string, score: number) => {
 			boards[id] = { ...boards[id], [owner]: score }
 		},
@@ -277,6 +281,16 @@ describe('applyRatings', () => {
 		nk.objects.set('a/MultiplayerSPDRN:solo:1', { value: seasoned(600), version: 1 })
 		applyRatings(nk as never, logger, run(), 'solo')
 		expect(Object.keys(nk.boards['MultiplayerSPDRN:solo:1'])).toEqual(['a'])
+	})
+
+	// A season's board is created here on its first ranked game; it must be
+	// ranked, or rating_get answers rank null for everyone on it.
+	it('creates the season board ranked', () => {
+		const nk = fakeNk()
+		applyRatings(nk as never, logger, run(), 'solo')
+		expect(nk.created).toEqual([
+			['MultiplayerSPDRN:solo:1', true, 'desc', 'set', null, { modId: 'MultiplayerSPDRN', mode: 'solo' }, true],
+		])
 	})
 
 	it('rates nobody, and writes nothing, for a disputed game', () => {

@@ -8,6 +8,7 @@ import { RATINGS_COLLECTION, SYSTEM_USER_ID } from '../lobby/protocol'
 import { requireServer } from '../rpc'
 import { steamIdHashOf } from '../player/steam_id'
 import { boardId, type RatingRecord } from './apply'
+import { ensureRatingBoard } from './board_sync'
 import { PLACEMENT_GAMES } from './elo'
 
 export const LEGACY_RATINGS_COLLECTION = 'legacy_ratings'
@@ -172,7 +173,7 @@ export function claimLegacyRatings(
 		if (b.gamesPlayed < PLACEMENT_GAMES) continue
 		const id = boardId(b.modId, b.mode, b.season)
 		try {
-			nk.leaderboardCreate(id, true, 'desc', 'set', null, { modId: b.modId, mode: b.mode })
+			ensureRatingBoard(nk, id, { modId: b.modId, mode: b.mode })
 			nk.leaderboardRecordWrite(id, userId, username, b.rating, b.wins, {
 				losses: b.losses,
 				gamesPlayed: b.gamesPlayed,
