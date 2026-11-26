@@ -300,6 +300,7 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'updated_at',
 	],
 	preset_reasons: ['item_type', 'reasons', 'updated_at'],
+	ranked_cocktail: ['id', 'name', 'decks', 'random', 'same_every_tile', 'updated_at'],
 	instant_queue_ranges: [
 		'mod_id',
 		'game_mode',
@@ -542,6 +543,7 @@ const NO_PLAYER_ID: { readonly [table: string]: readonly string[] } = {
 		'latest_download_url',
 		'ranked_version',
 		'ranked_version_sha256',
+		'ranked_file_hashes',
 		'smods_ids',
 		'smods_ids_read_version',
 		'ranked_download_url',

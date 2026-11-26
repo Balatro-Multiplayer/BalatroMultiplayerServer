@@ -1,23 +1,23 @@
-﻿import { describe, expect, it } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { recipeOf, sameRecipe } from './recipe'
 
 describe('recipeOf', () => {
-  it('skips empty slots and trims the name', () => {
+  test('skips empty slots and trims the name', () => {
     expect(recipeOf('  Sample ', ['b_red', '', 'b_blue'])).toEqual({
       recipe: { name: 'Sample', decks: ['b_red', 'b_blue'] },
     })
   })
-  it('needs a name and a deck, and no repeats', () => {
-    expect(recipeOf('', ['b_red'])).toHaveProperty('error')
-    expect(recipeOf('x', ['', '', ''])).toHaveProperty('error')
-    expect(recipeOf('x', ['b_red', 'b_red', ''])).toHaveProperty('error')
-    expect(recipeOf('x'.repeat(65), ['b_red'])).toHaveProperty('error')
+  test('needs a name and a deck, and no repeats', () => {
+    expect('error' in recipeOf('', ['b_red'])).toBe(true)
+    expect('error' in recipeOf('x', ['', '', ''])).toBe(true)
+    expect('error' in recipeOf('x', ['b_red', 'b_red', ''])).toBe(true)
+    expect('error' in recipeOf('x'.repeat(65), ['b_red'])).toBe(true)
   })
-  it('makes a random one from the name alone', () => {
+  test('makes a random one from the name alone', () => {
     expect(recipeOf(' Mystery ', ['b_red', '', ''], true)).toEqual({
       recipe: { name: 'Mystery', random: true },
     })
-    expect(recipeOf('', [], true)).toHaveProperty('error')
+    expect('error' in recipeOf('', [], true)).toBe(true)
     expect(recipeOf('Mystery', [], true, true)).toEqual({
       recipe: { name: 'Mystery', random: true, sameEveryTile: true },
     })
@@ -29,12 +29,12 @@ describe('recipeOf', () => {
 
 describe('sameRecipe', () => {
   const r = { name: 'A', decks: ['b_red', 'b_blue'] }
-  it('compares name and deck order', () => {
+  test('compares name and deck order', () => {
     expect(sameRecipe(r, { ...r, decks: [...r.decks] })).toBe(true)
     expect(sameRecipe(r, { ...r, decks: ['b_blue', 'b_red'] })).toBe(false)
     expect(sameRecipe(null, r)).toBe(false)
   })
-  it('tells random from fixed', () => {
+  test('tells random from fixed', () => {
     const random = { name: 'A', random: true as const }
     expect(sameRecipe(random, { name: 'A', random: true })).toBe(true)
     expect(sameRecipe(random, r)).toBe(false)
