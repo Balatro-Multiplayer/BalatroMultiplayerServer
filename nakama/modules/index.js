@@ -7441,15 +7441,21 @@ function rpcQueueRanges(ctx, logger, nk, payload) {
     throw runtimeError(INVALID_ARGUMENT, "modId and mode are required");
   return JSON.stringify(rangeFor(readConfig(nk), modId, mode));
 }
-function stampRating(nk, userId, add, modId, mode) {
-  const stored = loadRatings(
-    nk,
-    modId,
-    mode,
-    [userId],
-    Date.now(),
-    currentSeason(nk)
-  ).current[userId];
+function stampRating(nk, logger, userId, add, modId, mode) {
+  let stored;
+  try {
+    stored = loadRatings(
+      nk,
+      modId,
+      mode,
+      [userId],
+      Date.now(),
+      currentSeason(nk)
+    ).current[userId];
+  } catch (e) {
+    logger.error("Could not stamp the rating of %s on %s %s: %v", userId, modId, mode, e);
+    return;
+  }
   const rating = Math.round((stored || newRating()).rating);
   const numeric = add.numericProperties || add.numeric_properties;
   if (numeric && typeof numeric === "object") numeric.rating = rating;
@@ -7483,7 +7489,7 @@ function beforeMatchmakerAdd(ctx, logger, nk, envelope) {
   const group = groupOf(nk, ctx.userId);
   if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE);
   if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId);
-  if (ranked) stampRating(nk, ctx.userId, matchmakerAdd(envelope), String(props.modId), String(props.mode));
+  if (ranked) stampRating(nk, logger, ctx.userId, matchmakerAdd(envelope), String(props.modId), String(props.mode));
   return envelope;
 }
 function refusedMemberOf(player) {

@@ -70,7 +70,7 @@ export function beforeMatchmakerAdd(
 	const group = groupOf(nk, ctx.userId)
 	if (group && blocksSoloQueue(group.phase)) throw runtimeError(PERMISSION_DENIED, IN_GROUP_QUEUE)
 	if (ranked && readConfig(nk).integrityEnforced) checkRankedReadiness(ctx, logger, nk, ctx.userId)
-	if (ranked) stampRating(nk, ctx.userId, matchmakerAdd(envelope), String(props.modId), String(props.mode))
+	if (ranked) stampRating(nk, logger, ctx.userId, matchmakerAdd(envelope), String(props.modId), String(props.mode))
 	return envelope
 }
 

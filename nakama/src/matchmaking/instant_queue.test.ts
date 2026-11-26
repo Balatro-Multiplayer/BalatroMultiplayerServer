@@ -148,10 +148,20 @@ describe('stampRating', () => {
 			},
 		])
 		const forged = { numericProperties: { rating: 3000 }, stringProperties: {} }
-		stampRating(nk as any, 'u1', forged, 'M', 'standard')
+		stampRating(nk as any, fakeLogger, 'u1', forged, 'M', 'standard')
 		expect(forged.numericProperties.rating).toBe(1534)
 		const bare: { [key: string]: unknown } = {}
-		stampRating(nk as any, 'u2', bare, 'M', 'standard')
+		stampRating(nk as any, fakeLogger, 'u2', bare, 'M', 'standard')
 		expect(bare.numericProperties).toEqual({ rating: 600 })
+	})
+
+	it('logs and keeps the ticket as sent when the storage read throws', () => {
+		const nk = fakeNk()
+		;(nk as any).storageRead = () => {
+			throw new Error('storage down')
+		}
+		const ticket = { numericProperties: { rating: 1300 } }
+		expect(() => stampRating(nk as any, fakeLogger, 'u1', ticket, 'M', 'standard')).not.toThrow()
+		expect(ticket.numericProperties.rating).toBe(1300)
 	})
 })

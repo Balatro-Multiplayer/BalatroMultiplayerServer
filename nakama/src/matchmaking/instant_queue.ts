@@ -53,19 +53,27 @@ export function rpcQueueRanges(
 // but the one it offers is the server's.
 export function stampRating(
 	nk: nkruntime.Nakama,
+	logger: nkruntime.Logger,
 	userId: string,
 	add: { [key: string]: unknown },
 	modId: string,
 	mode: string,
 ): void {
-	const stored = loadRatings(
-		nk,
-		modId,
-		mode,
-		[userId],
-		Date.now(),
-		currentSeason(nk),
-	).current[userId]
+	let stored: ReturnType<typeof loadRatings>['current'][string] | undefined
+	try {
+		stored = loadRatings(
+			nk,
+			modId,
+			mode,
+			[userId],
+			Date.now(),
+			currentSeason(nk),
+		).current[userId]
+	} catch (e) {
+		// A failed read must not stop the player queueing: the ticket keeps the rating the client sent.
+		logger.error('Could not stamp the rating of %s on %s %s: %v', userId, modId, mode, e)
+		return
+	}
 	const rating = Math.round((stored || newRating()).rating)
 	const numeric = (add.numericProperties || add.numeric_properties) as
 		| { [key: string]: unknown }
