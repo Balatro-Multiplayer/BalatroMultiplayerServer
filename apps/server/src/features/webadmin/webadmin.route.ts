@@ -19,6 +19,7 @@ import matchesRouter from './matches.route.js'
 import modsRouter from './mods.route.js'
 import playerPageRouter from './player-page.route.js'
 import playersRouter from './players.route.js'
+import rankedCocktailRouter from './ranked-cocktail.route.js'
 import reportsRouter from './reports.route.js'
 import seasonReplayRouter from './season-replay.route.js'
 import seasonsRouter from './seasons.route.js'
@@ -73,6 +74,8 @@ router.use(serviceQueueRouter)
 router.use(staffLogRouter)
 router.use('/achievements', admin)
 router.use(achievementsRouter)
+router.use('/ranked-cocktail', admin)
+router.use(rankedCocktailRouter)
 router.use('/ratings', admin)
 router.use(seasonReplayRouter)
 

@@ -1626,6 +1626,20 @@ function instantRangesOf(value) {
   }
   return out;
 }
+var DECK_KEY_PATTERN = /^b_[a-z0-9_]{1,60}$/;
+function cocktailRecipeOf(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const { name, decks, random, sameEveryTile } = value;
+  if (typeof name !== "string" || name.length < 1 || name.length > 64) return null;
+  if (random === true) return sameEveryTile === true ? { name, random: true, sameEveryTile: true } : { name, random: true };
+  if (!Array.isArray(decks) || decks.length < 1 || decks.length > 3) return null;
+  for (let i = 0; i < decks.length; i++) {
+    const key = decks[i];
+    if (typeof key !== "string" || !DECK_KEY_PATTERN.test(key) || key === "b_mp_cocktail") return null;
+    if (decks.indexOf(key) !== i) return null;
+  }
+  return { name, decks };
+}
 var DEFAULT_CONFIG = {
   chatEnabled: true,
   rankedEnabled: true,
@@ -1639,7 +1653,8 @@ var DEFAULT_CONFIG = {
   season: 0,
   queueAllowedModIds: [],
   queueAllowedModIdsExtra: [],
-  instantQueue: {}
+  instantQueue: {},
+  rankedCocktail: null
 };
 var MAX_MOD_IDS = 500;
 var MOD_ID_PATTERN = /^[^\s]{1,128}$/;
@@ -1675,10 +1690,15 @@ function mergeConfig(current, update) {
   if (extraIds) next.queueAllowedModIdsExtra = extraIds;
   const ranges = instantRangesOf(update.instantQueue);
   if (ranges) next.instantQueue = ranges;
+  if (update.rankedCocktail === null) next.rankedCocktail = null;
+  else {
+    const recipe = cocktailRecipeOf(update.rankedCocktail);
+    if (recipe) next.rankedCocktail = recipe;
+  }
   return next;
 }
 function clientConfig(config) {
-  const _a = config, { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, instantQueue } = _a, shown = __objRest(_a, ["chatAllowlist", "queueAllowedModIds", "queueAllowedModIdsExtra", "instantQueue"]);
+  const _a = config, { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, instantQueue, rankedCocktail } = _a, shown = __objRest(_a, ["chatAllowlist", "queueAllowedModIds", "queueAllowedModIdsExtra", "instantQueue", "rankedCocktail"]);
   return shown;
 }
 function readConfig(nk) {
@@ -10950,6 +10970,12 @@ function rpcGroupQueueCancel(ctx, logger, nk, payload) {
   return relayed(signal(nk, seat.matchId, { type: "group_cancel", partyId: home.groupQueue.partyId, reason, userId }));
 }
 
+// src/matchmaking/cocktail.ts
+function rpcCocktailRecipe(ctx, logger, nk, payload) {
+  if (!ctx.userId) throw runtimeError(UNAUTHENTICATED, "The Cocktail recipe needs a player session");
+  return JSON.stringify({ recipe: readConfig(nk).rankedCocktail });
+}
+
 // src/rating/rpc.ts
 var BOARD_PAGE = 50;
 var USER_ID_PATTERN3 = /^[0-9a-f-]{36}$/;
@@ -12657,6 +12683,7 @@ function InitModule(ctx, logger, nk, initializer) {
   initializer.registerRpc("group_queue_cancel", rpcGroupQueueCancel);
   initializer.registerRpc("queue_counts", rpcQueueCounts);
   initializer.registerRpc("queue_ranges", rpcQueueRanges);
+  initializer.registerRpc("cocktail_recipe", rpcCocktailRecipe);
   initializer.registerRpc("session_init", rpcSessionInit);
   initializer.registerRpc("tos_accept", rpcTosAccept);
   initializer.registerRpc("profile_set_display", rpcProfileSetDisplay);

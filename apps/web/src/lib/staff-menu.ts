@@ -44,6 +44,7 @@ const OPS: Entry[] = [
   { href: '/admin/config', label: 'Configuration', adminOnly: true },
   { href: '/admin/ranked-mods', label: 'Ranked Mods', adminOnly: true },
   { href: '/admin/instant-queue', label: 'Instant Queue', instantQueue: true },
+  { href: '/admin/ranked-cocktail', label: 'Ranked Cocktail', adminOnly: true },
 ]
 
 export function staffMenuGroups({

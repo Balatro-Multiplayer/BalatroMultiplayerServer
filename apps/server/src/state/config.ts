@@ -1,4 +1,5 @@
 import type { InstantRange } from '../features/instant-queue/ranges.js'
+import type { CocktailRecipe } from '../features/ranked-cocktail/recipe.js'
 
 export interface ModConfig {
 	modId: string
@@ -43,6 +44,9 @@ export interface AppConfig {
 	// The instant queue ranges (instant_queue_ranges), keyed 'modId:gameMode'
 	// and pushed to Nakama. Only set ranges are held.
 	instantQueue?: Record<string, InstantRange>
+	// The Cocktail deck Ranked plays (ranked_cocktail), pushed to Nakama. Unset:
+	// the mod's built-in recipe.
+	rankedCocktail?: CocktailRecipe
 }
 
 let _config: AppConfig = {

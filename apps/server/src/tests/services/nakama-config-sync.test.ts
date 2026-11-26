@@ -41,7 +41,11 @@ describe('pushing config to Nakama', () => {
 			integrityEnforced: false,
 			chatAllowlist: ['gg'],
 			instantQueue: {},
+			rankedCocktail: null,
 		})
+		expect(
+			nakamaConfigOf({ ...config, rankedCocktail: { name: 'Sample', decks: ['b_red'] } }).rankedCocktail,
+		).toEqual({ name: 'Sample', decks: ['b_red'] })
 		expect(nakamaConfigOf({ ...config, season: 4 }).season).toBe(4)
 		const range = { floor: 1200, ceiling: null, floorMultiplier: 1, ceilingMultiplier: 1 }
 		expect(nakamaConfigOf({ ...config, instantQueue: { 'M:standard': range } }).instantQueue).toEqual({

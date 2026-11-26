@@ -50,6 +50,7 @@ describe('staffMenuGroups', () => {
           'Configuration',
           'Ranked Mods',
           'Instant Queue',
+          'Ranked Cocktail',
         ],
       ],
     ])

@@ -53,6 +53,7 @@ export const STAFF_ACTION_LABELS: Record<string, string> = {
   season_replay_apply: 'Apply season replay',
   season_replay_restore: 'Restore season replay backup',
   instant_queue_edit: 'Edit instant queue range',
+  ranked_cocktail_edit: 'Edit ranked cocktail',
 }
 
 export type Tone = 'red' | 'amber' | 'green' | 'blue' | 'plain'
