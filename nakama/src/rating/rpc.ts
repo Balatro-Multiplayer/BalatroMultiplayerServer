@@ -53,7 +53,8 @@ export function rpcRatingGet(
 		const own = (page.ownerRecords || []).find((r) => r.ownerId === playerId)
 		if (own && typeof own.rank === 'number' && own.rank > 0) rank = own.rank
 	} catch (e) {
-		// No board until the first rated game.
+		// Usually no board until the first rated game, so rank stays null.
+		logger.error('rating_get: could not read the rank of %s on %s: %v', playerId, board, e)
 	}
 	return JSON.stringify({ ...rating, rank, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES })
 }
