@@ -11014,7 +11014,7 @@ function rpcRatingGet(ctx, logger, nk, payload) {
     const own = (page.ownerRecords || []).find((r) => r.ownerId === playerId);
     if (own && typeof own.rank === "number" && own.rank > 0) rank = own.rank;
   } catch (e) {
-    logger.error("rating_get: could not read the rank of %s on %s: %v", playerId, board, e);
+    logger.debug("rating_get: could not read the rank of %s on %s: %v", playerId, board, e);
   }
   return JSON.stringify(__spreadProps(__spreadValues({}, rating), { rank, seasonBest: seasonBestOf(modId, rating.seasonBest), isPlacement: rating.gamesPlayed < PLACEMENT_GAMES }));
 }
