@@ -59,12 +59,13 @@ export default function DownloadPage() {
               CASUAL ONLY
             </Badge>
             <CardTitle className='font-extrabold text-2xl'>
-              CASUAL PLAY ONLY: You CANNOT queue Ranked with r2modman
+              CASUAL PLAY ONLY: Stock r2modman cannot queue Ranked
             </CardTitle>
             <CardDescription>
               r2modman is the Thunderstore mod manager. It installs the
               Multiplayer mods and everything they need, and keeps them up to
-              date. Use it for Casual games and lobbies only.
+              date. The stock r2modman from Thunderstore is for Casual games
+              and lobbies only.
             </CardDescription>
           </CardHeader>
           <CardContent className='space-y-6'>
@@ -93,8 +94,8 @@ export default function DownloadPage() {
                 </li>
               </ol>
               <p className='mt-3 font-bold text-amber-500 text-base'>
-                This is for Casual games and lobbies ONLY. If you want to play
-                Ranked, you need to use one of the options below.
+                Stock r2modman is for Casual games and lobbies ONLY. To play
+                Ranked, use one of the options below.
               </p>
             </div>
           </CardContent>
@@ -159,7 +160,8 @@ export default function DownloadPage() {
                 <p className='mt-1 text-muted-foreground text-sm'>
                   Our build of r2modman with the anti-cheat added. Pick this if
                   you want to keep using r2modman. It works the same as
-                  r2modman, so you can use the steps above.
+                  r2modman: pick Balatro, make a profile, and install
+                  MultiplayerPvP or MultiplayerSpeedrun from Online.
                 </p>
               </div>
               <div className='mt-auto'>
@@ -169,8 +171,11 @@ export default function DownloadPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className='border-2 border-amber-500'>
           <CardHeader>
+            <Badge className='mb-1 w-fit bg-amber-500 font-bold text-black hover:bg-amber-500'>
+              CASUAL ONLY
+            </Badge>
             <CardTitle>Alternative: Manual installation</CardTitle>
             <CardDescription>
               Install the mods yourself, with no mod manager. You can play
