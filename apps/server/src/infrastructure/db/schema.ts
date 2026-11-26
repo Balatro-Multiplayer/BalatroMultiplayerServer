@@ -9,6 +9,7 @@ import {
 	pgEnum,
 	pgTable,
 	primaryKey,
+	real,
 	serial,
 	smallint,
 	text,
@@ -561,6 +562,28 @@ export const gracePeriods = pgTable('grace_periods', {
 		.notNull()
 		.defaultNow(),
 })
+
+// The instant queue ranges (features/instant-queue/ranges.ts): per ranked
+// queue, the floor and ceiling of the ratings that queue among each other at
+// once, with how long each waits before its range opens up. A row with both
+// edges empty is no range.
+export const instantQueueRanges = pgTable(
+	'instant_queue_ranges',
+	{
+		modId: varchar('mod_id', { length: 128 }).notNull(),
+		gameMode: varchar('game_mode', { length: 128 }).notNull(),
+		// The ranges apply only while on; the values are kept when off.
+		enabled: boolean('enabled').notNull().default(false),
+		floor: integer('floor'),
+		ceiling: integer('ceiling'),
+		floorMultiplier: real('floor_multiplier').notNull().default(1),
+		ceilingMultiplier: real('ceiling_multiplier').notNull().default(1),
+		updatedAt: timestamp('updated_at', { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+	},
+	(t) => [primaryKey({ columns: [t.modId, t.gameMode] })],
+)
 
 export const matchmakingRatings = pgTable(
 	'matchmaking_ratings',

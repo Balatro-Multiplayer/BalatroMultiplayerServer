@@ -31,11 +31,11 @@ export function StaffMenu({
 }: {
   itemClass: (active: boolean) => string
 }) {
-  const { isAdmin, isModerator } = useAuth()
+  const { isAdmin, isModerator, canEditInstantQueue } = useAuth()
   const pathname = usePathname()
   const isStaff = isAdmin || isModerator
   const count = useOpenQueueCount(isStaff)
-  const groups = staffMenuGroups({ isAdmin, isModerator })
+  const groups = staffMenuGroups({ isAdmin, isModerator, canEditInstantQueue })
   if (groups.length === 0) return null
 
   return (

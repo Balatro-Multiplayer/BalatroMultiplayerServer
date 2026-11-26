@@ -8,6 +8,51 @@ import { SYSTEM_USER_ID } from './lobby/protocol'
 export const CONFIG_COLLECTION = 'server_config'
 export const CONFIG_KEY = 'global'
 
+// A ranked queue's instant range (matchmaking/instant_queue.ts): the rating
+// floor and ceiling whose players queue among each other at once, and the
+// multiplier on how long each waits before its range opens up. null: no range
+// on that side.
+export interface InstantRange {
+	floor: number | null
+	ceiling: number | null
+	floorMultiplier: number
+	ceilingMultiplier: number
+}
+
+const MAX_RANGE_RATING = 10000
+const RANGE_KEY_PATTERN = /^[^\s]{1,258}$/
+
+function edgeOf(value: unknown): number | null | undefined {
+	if (value === null) return null
+	if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= MAX_RANGE_RATING) return value
+	return undefined
+}
+
+function multiplierOf(value: unknown): number | undefined {
+	return typeof value === 'number' && isFinite(value) && value >= 0.1 && value <= 10 ? value : undefined
+}
+
+// The valid ranges of a pushed {'modId:mode': range} map; an invalid entry
+// (or a ceiling not below its floor) is dropped.
+export function instantRangesOf(value: unknown): { [key: string]: InstantRange } | null {
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+	const out: { [key: string]: InstantRange } = {}
+	for (const key in value as { [key: string]: unknown }) {
+		const raw = (value as { [key: string]: unknown })[key] as { [key: string]: unknown } | null
+		if (!RANGE_KEY_PATTERN.test(key) || typeof raw !== 'object' || raw === null) continue
+		const floor = edgeOf(raw.floor)
+		const ceiling = edgeOf(raw.ceiling)
+		const floorMultiplier = multiplierOf(raw.floorMultiplier)
+		const ceilingMultiplier = multiplierOf(raw.ceilingMultiplier)
+		if (floor === undefined || ceiling === undefined || floorMultiplier === undefined || ceilingMultiplier === undefined)
+			continue
+		if (floor === null && ceiling === null) continue
+		if (floor !== null && ceiling !== null && ceiling >= floor) continue
+		out[key] = { floor, ceiling, floorMultiplier, ceilingMultiplier }
+	}
+	return out
+}
+
 export interface ServerConfig {
 	chatEnabled: boolean
 	rankedEnabled: boolean
@@ -34,6 +79,9 @@ export interface ServerConfig {
 	// boot from QUEUE_ALLOWED_MOD_IDS_EXTRA -- standing/seed.ts); the API
 	// never sends it, so its pushes leave it be.
 	queueAllowedModIdsExtra: string[]
+	// The instant queue ranges, keyed 'modId:mode' (the bare mode), as the
+	// API pushes them. A queue with none is absent.
+	instantQueue: { [queueKey: string]: InstantRange }
 }
 
 // Until the API's first push: everything Nakama already did stays allowed.
@@ -50,6 +98,7 @@ export const DEFAULT_CONFIG: ServerConfig = {
 	season: 0,
 	queueAllowedModIds: [],
 	queueAllowedModIdsExtra: [],
+	instantQueue: {},
 }
 
 const MAX_MOD_IDS = 500
@@ -88,16 +137,21 @@ export function mergeConfig(current: ServerConfig, update: { [key: string]: unkn
 	if (allowedIds) next.queueAllowedModIds = allowedIds
 	const extraIds = modIdsOf(update.queueAllowedModIdsExtra)
 	if (extraIds) next.queueAllowedModIdsExtra = extraIds
+	const ranges = instantRangesOf(update.instantQueue)
+	if (ranges) next.instantQueue = ranges
 	return next
 }
 
-export type ClientConfig = Omit<ServerConfig, 'chatAllowlist' | 'queueAllowedModIds' | 'queueAllowedModIdsExtra'>
+export type ClientConfig = Omit<
+	ServerConfig,
+	'chatAllowlist' | 'queueAllowedModIds' | 'queueAllowedModIdsExtra' | 'instantQueue'
+>
 
 // What a client is shown (the login response): the switches, not the
 // moderators' allowlist nor the mod allowlists (account_standing answers
 // for those).
 export function clientConfig(config: ServerConfig): ClientConfig {
-	const { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, ...shown } = config
+	const { chatAllowlist, queueAllowedModIds, queueAllowedModIdsExtra, instantQueue, ...shown } = config
 	return shown
 }
 

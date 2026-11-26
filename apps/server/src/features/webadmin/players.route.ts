@@ -47,7 +47,9 @@ function reasonOf(value: unknown): string {
 
 const BAN_LOGGED_AS = { chat: 'chat_ban', queue: 'queue_ban', account: 'account_ban', username: 'username_ban' } as const satisfies Record<string, StaffAction>
 
-const STAFF_ROLES = ['moderator', 'admin'] as const
+// The privileges whose grant and removal go in the staff log: the staff roles,
+// and 'instaqueue' (edits the instant queue ranges).
+const STAFF_ROLES = ['moderator', 'admin', 'instaqueue'] as const
 
 const router = Router()
 

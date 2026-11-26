@@ -15,10 +15,14 @@ export interface StaffMenuGroup {
 interface StaffRole {
   isAdmin: boolean
   isModerator: boolean
+  // Holds the 'instaqueue' privilege (an admin always may).
+  canEditInstantQueue?: boolean
 }
 
 interface Entry extends StaffMenuItem {
   adminOnly?: boolean
+  // Open to the 'instaqueue' privilege as well as to admins, staff or not.
+  instantQueue?: boolean
 }
 
 const MODERATION: Entry[] = [
@@ -39,19 +43,26 @@ const OPS: Entry[] = [
   { href: '/admin/blog', label: 'Blog' },
   { href: '/admin/config', label: 'Configuration', adminOnly: true },
   { href: '/admin/ranked-mods', label: 'Ranked Mods', adminOnly: true },
+  { href: '/admin/instant-queue', label: 'Instant Queue', instantQueue: true },
 ]
 
 export function staffMenuGroups({
   isAdmin,
   isModerator,
+  canEditInstantQueue = false,
 }: StaffRole): StaffMenuGroup[] {
-  if (!isAdmin && !isModerator) return []
+  const isStaff = isAdmin || isModerator
+  if (!isStaff && !canEditInstantQueue) return []
   const visible = (entries: Entry[]): StaffMenuItem[] =>
     entries
-      .filter((e) => isAdmin || !e.adminOnly)
-      .map(({ adminOnly: _adminOnly, ...item }) => item)
+      .filter((e) =>
+        e.instantQueue
+          ? isAdmin || canEditInstantQueue
+          : isStaff && (isAdmin || !e.adminOnly)
+      )
+      .map(({ adminOnly: _adminOnly, instantQueue: _instantQueue, ...item }) => item)
   return [
     { label: 'Moderation', items: visible(MODERATION) },
     { label: 'Ops', items: visible(OPS) },
-  ]
+  ].filter((group) => group.items.length > 0)
 }

@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { staffMenuGroups } from './staff-menu'
 
-const labels = (role: { isAdmin: boolean; isModerator: boolean }) =>
+const labels = (role: {
+  isAdmin: boolean
+  isModerator: boolean
+  canEditInstantQueue?: boolean
+}) =>
   staffMenuGroups(role).map((g) => [g.label, g.items.map((i) => i.label)])
 
 describe('staffMenuGroups', () => {
@@ -39,9 +43,31 @@ describe('staffMenuGroups', () => {
       ],
       [
         'Ops',
-        ['Seasons', 'BET Releases', 'Blog', 'Configuration', 'Ranked Mods'],
+        [
+          'Seasons',
+          'BET Releases',
+          'Blog',
+          'Configuration',
+          'Ranked Mods',
+          'Instant Queue',
+        ],
       ],
     ])
+  })
+
+  test('a player with the instaqueue privilege sees only Instant Queue', () => {
+    expect(
+      labels({ isAdmin: false, isModerator: false, canEditInstantQueue: true })
+    ).toEqual([['Ops', ['Instant Queue']]])
+  })
+
+  test('a moderator with the instaqueue privilege sees it as well', () => {
+    const ops = labels({
+      isAdmin: false,
+      isModerator: true,
+      canEditInstantQueue: true,
+    })[1]
+    expect(ops).toEqual(['Ops', ['Seasons', 'Blog', 'Instant Queue']])
   })
 
   test('no menu links the removed pages', () => {

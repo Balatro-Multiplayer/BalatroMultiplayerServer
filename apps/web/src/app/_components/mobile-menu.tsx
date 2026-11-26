@@ -157,15 +157,17 @@ function MobileStaffSection({
   onClose,
   isAdmin,
   isModerator,
+  canEditInstantQueue,
 }: {
   onClose: () => void
   isAdmin: boolean
   isModerator: boolean
+  canEditInstantQueue: boolean
 }) {
-  const count = useOpenQueueCount(true)
+  const count = useOpenQueueCount(isAdmin || isModerator)
   return (
     <>
-      {staffMenuGroups({ isAdmin, isModerator }).map((group) => (
+      {staffMenuGroups({ isAdmin, isModerator, canEditInstantQueue }).map((group) => (
         <Fragment key={group.label}>
           <Separator />
           <div className='px-3 py-3'>
@@ -186,7 +188,8 @@ function MobileStaffSection({
 }
 
 export function MobileMenu({ className }: { className?: string }) {
-  const { player, isLoggedIn, isAdmin, isModerator, logout } = useAuth()
+  const { player, isLoggedIn, isAdmin, isModerator, canEditInstantQueue, logout } =
+    useAuth()
   const [open, setOpen] = useState(false)
   const close = () => setOpen(false)
 
@@ -214,11 +217,12 @@ export function MobileMenu({ className }: { className?: string }) {
         <div className='min-h-0 flex-1 overflow-y-auto'>
           <MobileNavLinks onClose={close} />
           {isLoggedIn && player && <MobileAccountSection onClose={close} />}
-          {(isAdmin || isModerator) && (
+          {(isAdmin || isModerator || canEditInstantQueue) && (
             <MobileStaffSection
               onClose={close}
               isAdmin={isAdmin}
               isModerator={isModerator}
+              canEditInstantQueue={canEditInstantQueue}
             />
           )}
         </div>

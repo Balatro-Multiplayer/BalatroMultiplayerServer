@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ApiError } from '../api'
 import { fetchCurrentPlayer, callLogout } from './api'
 import { getToken, setToken, clearToken } from './token'
-import { isAdmin, isModerator } from './privilege-checks'
+import { canEditInstantQueue, isAdmin, isModerator } from './privilege-checks'
 import type { Player } from './types'
 
 export function useAuth() {
@@ -60,6 +60,7 @@ export function useAuth() {
     isLoggedIn: player !== null,
     isAdmin: isAdmin(player),
     isModerator: isModerator(player),
+    canEditInstantQueue: canEditInstantQueue(player),
     isOwner: player?.isOwner === true,
     loginWithToken,
     logout,

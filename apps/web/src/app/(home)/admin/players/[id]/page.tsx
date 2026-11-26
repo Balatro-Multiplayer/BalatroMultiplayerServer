@@ -21,6 +21,7 @@ import {
 import { MatchesTab, ReportsTab } from '../components/list-tabs'
 import { type BarStart, PlayerActionBar } from '../components/player-action-bar'
 import { SideColumn } from '../components/side-column'
+import { InstantQueueAccessCard } from '../components/instant-queue-access-card'
 import { StaffRoleCard } from '../components/staff-role-card'
 import type { LiftTarget, PlayerAction } from '../lib/player-bar'
 import {
@@ -219,6 +220,13 @@ function PlayerPageView() {
         <SideColumn playerId={id} page={data} now={now}>
           {isAdmin && (
             <StaffRoleCard
+              key={player.privileges.join(',')}
+              playerId={id}
+              privileges={player.privileges}
+            />
+          )}
+          {isAdmin && (
+            <InstantQueueAccessCard
               key={player.privileges.join(',')}
               playerId={id}
               privileges={player.privileges}

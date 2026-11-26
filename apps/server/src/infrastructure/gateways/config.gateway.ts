@@ -5,6 +5,7 @@ import type { AppConfig } from '../../state/config.js'
 import { setConfig } from '../../state/config.js'
 import { env } from '../../env.js'
 import { pushConfigToNakama } from '../nakama/config-sync.js'
+import { loadInstantRanges } from './instant-queue.gateway.js'
 
 // The active season (ended_at IS NULL), else the latest between seasons.
 async function ratingSeason(): Promise<number | undefined> {
@@ -63,6 +64,7 @@ export async function loadConfigFromDb(): Promise<AppConfig> {
 		lobbyCreationEnabled: configRow?.lobbyCreationEnabled ?? true,
 		achievementsEnabled: configRow?.achievementsEnabled ?? true,
 		queueAllowedModIds: await pinnedSmodsIds(),
+		instantQueue: await loadInstantRanges(),
 	}
 	setConfig(config)
 	// Every config load (boot, admin refresh, webadmin edits) reaches Nakama.

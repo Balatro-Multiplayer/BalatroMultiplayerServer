@@ -40,8 +40,13 @@ describe('pushing config to Nakama', () => {
 			testingMode: false,
 			integrityEnforced: false,
 			chatAllowlist: ['gg'],
+			instantQueue: {},
 		})
 		expect(nakamaConfigOf({ ...config, season: 4 }).season).toBe(4)
+		const range = { floor: 1200, ceiling: null, floorMultiplier: 1, ceilingMultiplier: 1 }
+		expect(nakamaConfigOf({ ...config, instantQueue: { 'M:standard': range } }).instantQueue).toEqual({
+			'M:standard': range,
+		})
 		setIntegrityEnforced(true)
 		expect(nakamaConfigOf(config).integrityEnforced).toBe(true)
 		setIntegrityEnforced(false)

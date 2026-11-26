@@ -55,6 +55,7 @@ export const STAFF_ACTIONS = [
 	'preset_reasons_edit',
 	'season_replay_apply',
 	'season_replay_restore',
+	'instant_queue_edit',
 ] as const
 export type StaffAction = (typeof STAFF_ACTIONS)[number]
 
@@ -66,7 +67,9 @@ export const isStaffAction = (value: unknown): value is StaffAction =>
 export const DEPLOY_ROLE = 'deploy'
 export const DEPLOY_ACTOR_ID = '00000000-0000-0000-0000-000000000000'
 
-export type LoggedRole = 'moderator' | 'admin'
+// 'instaqueue' is the privilege that edits the instant queue ranges without
+// being staff.
+export type LoggedRole = 'moderator' | 'admin' | 'instaqueue'
 
 // One staff action: who did it, to whom, on which queue item, and why.
 export interface StaffActionEntry {
