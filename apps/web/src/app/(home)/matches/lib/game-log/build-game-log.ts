@@ -244,6 +244,17 @@ const SHOP_OPCODES = new Set([
   'pack_skip',
 ])
 
+// Where a purchase's money change can no longer follow it.
+const SPEND_BOUNDARIES = new Set([
+  ...SHOP_OPCODES,
+  'leave_shop',
+  'select_blind',
+  'skip_blind',
+  'ready_blind',
+  'cashout',
+  'end',
+])
+
 export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
   const resolve = makeResolver()
   const events = log.events
@@ -298,19 +309,22 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
     current.endT = t
     const a = Array.isArray(args) ? args : []
 
-    // Cost of the action = the negative money_delta that follows it.
-    const followingSpend = (): number | null => {
-      const next = events[i + 1]
-      if (
-        next &&
-        next[1] === 'money_delta' &&
-        typeof (Array.isArray(next[2]) ? next[2][0] : next[2]) === 'number'
-      ) {
-        const delta = (Array.isArray(next[2]) ? next[2][0] : next[2]) as number
-        if (delta < 0) {
-          consumedMoney.add(i + 1)
-          return -delta
+    // Cost of the action = the negative money_delta that follows it. With
+    // `ahead`, other events in between are passed over, up to the next shop
+    // action or shop boundary.
+    const followingSpend = (ahead = false): number | null => {
+      for (let j = i + 1; j < events.length; j++) {
+        const next = events[j] as [number, string, unknown]
+        if (next[1] === 'money_delta') {
+          const delta = Array.isArray(next[2]) ? next[2][0] : next[2]
+          if (typeof delta === 'number' && delta < 0) {
+            consumedMoney.add(j)
+            return -delta
+          }
+        } else if (SPEND_BOUNDARIES.has(next[1])) {
+          return null
         }
+        if (!ahead) return null
       }
       return null
     }
@@ -615,7 +629,7 @@ export function buildPlayerGameLog(log: DecodedPlayerLog): PlayerGameLog {
           hasMoneyEvents &&
           typeof a[3] === 'number' &&
           a[3] > 0 &&
-          followingSpend() === null
+          followingSpend(true) === null
         ) {
           return
         }

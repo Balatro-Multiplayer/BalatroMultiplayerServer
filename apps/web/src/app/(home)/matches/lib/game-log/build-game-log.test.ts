@@ -306,6 +306,25 @@ describe('buildGameLog refused buys', () => {
     expect(buys).toHaveLength(1)
   })
 
+  test('keeps a buy whose money change comes after an unrelated event', () => {
+    const log = buildGameLog([
+      player('a', [
+        ...opening,
+        [10, 'select_blind', [0, 'bl_small']],
+        [11, 'cashout', []],
+        [12, 'buy', [4, 0, joker(1, 'j_dna'), 8]],
+        [12, 'reorder', [4, []]],
+        [13, 'money_delta', [-8]],
+      ]),
+    ])
+    const p = log.players[0]
+    expect((p?.finalJokers ?? []).map(ident)).toEqual(['j_dna'])
+    expect(p?.itemizedPurchases).toBe(8)
+    const shop = (p?.rounds ?? []).flatMap((r) => r.events)
+    expect(shop.filter((e) => e.type === 'shop' && e.action === 'buy')).toHaveLength(1)
+    expect(shop.filter((e) => e.type === 'money')).toHaveLength(0)
+  })
+
   test('keeps every buy in a log that records no money changes', () => {
     const log = buildGameLog([
       player('a', [
