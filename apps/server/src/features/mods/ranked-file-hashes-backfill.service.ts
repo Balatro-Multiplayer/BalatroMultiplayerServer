@@ -48,6 +48,13 @@ export async function backfillRankedFileHashes(): Promise<FileHashesBackfillSumm
 			summary.failed++
 			continue
 		}
+		if (inspected.hash !== pin.rankedVersionSha256) {
+			console.warn(
+				`[file-hashes] The download of ${pin.id}@${version} no longer matches the pinned hash; not storing its injector file hashes`,
+			)
+			summary.failed++
+			continue
+		}
 		await storePinFileHashes(pin.id, version, inspected.fileHashes)
 		summary.read++
 	}

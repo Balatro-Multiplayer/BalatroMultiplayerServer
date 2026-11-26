@@ -9,7 +9,15 @@ vi.mock('../../infrastructure/gateways/mods.gateway.js', () => ({
 	storePinFileHashes: vi.fn(),
 }))
 
-import { hashInjectorFiles } from '../../features/mods/mod-version-hash.js'
+vi.mock('../../features/mods/mod-version-hash.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../features/mods/mod-version-hash.js')>()),
+	inspectModRelease: vi.fn(),
+}))
+
+import {
+	hashInjectorFiles,
+	inspectModRelease,
+} from '../../features/mods/mod-version-hash.js'
 import { backfillRankedFileHashes } from '../../features/mods/ranked-file-hashes-backfill.service.js'
 import * as gateway from '../../infrastructure/gateways/mods.gateway.js'
 
@@ -38,6 +46,14 @@ describe('hashInjectorFiles', () => {
 		expect(await hashInjectorFiles(dir)).toEqual({ 'winmm.dll': sha('top') })
 	})
 
+	it('picks the same copy at equal depth whatever the directory order', async () => {
+		await fs.mkdir(path.join(dir, 'b'))
+		await fs.mkdir(path.join(dir, 'a'))
+		await fs.writeFile(path.join(dir, 'b', 'winmm.dll'), 'from-b')
+		await fs.writeFile(path.join(dir, 'a', 'winmm.dll'), 'from-a')
+		expect(await hashInjectorFiles(dir)).toEqual({ 'winmm.dll': sha('from-a') })
+	})
+
 	it('returns {} when the pin ships no injector file', async () => {
 		await fs.writeFile(path.join(dir, 'main.lua'), 'x')
 		expect(await hashInjectorFiles(dir)).toEqual({})
@@ -59,5 +75,44 @@ describe('backfillRankedFileHashes', () => {
 		const summary = await backfillRankedFileHashes()
 		expect(summary).toEqual({ read: 0, failed: 0, skipped: 2 })
 		expect(gateway.storePinFileHashes).not.toHaveBeenCalled()
+	})
+
+	const lovelyPin = {
+		id: 'Thunderstore-lovely',
+		rankedVersion: '1.0.0',
+		rankedVersionSha256: 'pinned-hash',
+		rankedFileHashes: null,
+		rankedDownloadUrl: 'https://example.com/lovely.zip',
+		rankedSource: 'thunderstore',
+	}
+
+	it('stores the hashes when the download matches the pinned hash', async () => {
+		vi.mocked(gateway.listRankedPins).mockResolvedValue([lovelyPin] as never)
+		vi.mocked(inspectModRelease).mockResolvedValue({
+			hash: 'pinned-hash',
+			fileHashes: { 'winmm.dll': 'abc' },
+			smodsIds: [],
+		})
+		const summary = await backfillRankedFileHashes()
+		expect(summary).toEqual({ read: 1, failed: 0, skipped: 0 })
+		expect(gateway.storePinFileHashes).toHaveBeenCalledWith(
+			'Thunderstore-lovely',
+			'1.0.0',
+			{ 'winmm.dll': 'abc' },
+		)
+	})
+
+	it('skips a pin whose download no longer matches the pinned hash', async () => {
+		vi.mocked(gateway.storePinFileHashes).mockClear()
+		vi.mocked(gateway.listRankedPins).mockResolvedValue([lovelyPin] as never)
+		vi.mocked(inspectModRelease).mockResolvedValue({
+			hash: 'other-hash',
+			fileHashes: { 'winmm.dll': 'abc' },
+			smodsIds: [],
+		})
+		const summary = await backfillRankedFileHashes()
+		expect(summary).toEqual({ read: 0, failed: 1, skipped: 0 })
+		expect(gateway.storePinFileHashes).not.toHaveBeenCalled()
+		expect(console.warn).toHaveBeenCalled()
 	})
 })

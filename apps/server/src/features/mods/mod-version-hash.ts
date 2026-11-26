@@ -39,13 +39,16 @@ function extractedFolderName(version: string): string {
 const INJECTOR_FILE_NAMES = ['winmm.dll', 'version.dll', 'liblovely.dylib']
 
 // SHA-256 of each injector file found anywhere in dir (the first match by
-// shallowest path wins), keyed by lower-case file name.
+// shallowest path wins; entries are read in name order so a tie is stable),
+// keyed by lower-case file name.
 export async function hashInjectorFiles(
 	dir: string,
 ): Promise<Record<string, string>> {
 	const found: Record<string, { depth: number; full: string }> = {}
 	async function walk(current: string, depth: number): Promise<void> {
-		for (const entry of await fs.readdir(current, { withFileTypes: true })) {
+		const entries = await fs.readdir(current, { withFileTypes: true })
+		entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+		for (const entry of entries) {
 			const full = path.join(current, entry.name)
 			if (entry.isDirectory()) {
 				await walk(full, depth + 1)
