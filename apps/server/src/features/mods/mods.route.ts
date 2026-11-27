@@ -5,6 +5,7 @@ import {
 	listPublicMods,
 	listPublicProfiles,
 } from '../../infrastructure/gateways/mods.gateway.js'
+import { servePinProxyAsset } from './pin-proxy-download.js'
 
 // Public, launcher/website/mod-facing endpoint. No auth -- same trust level as
 // /api/releases. GET /api/mods is the compact list (a mod is ranked-allowed
@@ -41,6 +42,16 @@ router.get('/profiles/:slug', async (req, res, next) => {
 			return
 		}
 		res.json(profile)
+	} catch (err) {
+		next(err)
+	}
+})
+
+// A proxy pin's download (see pin-proxy-download.ts). It has more path
+// segments than /:id, so the two never collide.
+router.get('/:id/pin-proxy/:version/:file', async (req, res, next) => {
+	try {
+		await servePinProxyAsset(req, res)
 	} catch (err) {
 		next(err)
 	}

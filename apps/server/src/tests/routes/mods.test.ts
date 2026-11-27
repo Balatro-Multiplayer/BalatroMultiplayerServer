@@ -265,6 +265,52 @@ describe('mods routes', () => {
 			expect(res.status).toBe(404)
 		})
 
+		it('lists a proxy pin that has no version row, after the Thunderstore versions', async () => {
+			const proxyUrl =
+				'https://balatromp.com/api/mods/MultiplayerAPI/pin-proxy/0.1.3/MultiplayerAPI-0.1.3.zip'
+			mockSelects(
+				[
+					modRow({
+						rankedVersion: '0.1.3',
+						rankedDownloadUrl: proxyUrl,
+						rankedSource: 'thunderstore',
+					}),
+				],
+				[
+					versionRow(1, '0.1.1', '2026-08-01'),
+					versionRow(2, '0.1.2', '2026-09-01'),
+					versionRow(3, '0.1.0-gh', '2026-07-01', 'github'),
+				],
+			)
+
+			const res = await request(app).get('/api/mods/MultiplayerAPI')
+
+			expect(res.status).toBe(200)
+			expect(res.body.rankedDownloadUrl).toBe(proxyUrl)
+			expect(res.body.versions.map((v: { version: string }) => v.version)).toEqual(
+				['0.1.2', '0.1.1', '0.1.3', '0.1.0-gh'],
+			)
+			expect(res.body.versions[2]).toMatchObject({
+				version: '0.1.3',
+				source: 'thunderstore',
+				downloadUrl: proxyUrl,
+				sha256: 'a'.repeat(64),
+			})
+			// The latest version stays the one Thunderstore lists.
+			expect(res.body.latestVersion).toBe('0.1.2')
+		})
+
+		it('adds no row when a version row already names the pin', async () => {
+			mockSelects(
+				[modRow()],
+				[versionRow(2, '0.1.2', '2026-09-01')],
+			)
+
+			const res = await request(app).get('/api/mods/MultiplayerAPI')
+
+			expect(res.body.versions).toHaveLength(1)
+		})
+
 		it('serves every key the pre-Thunderstore detail did, plus the new ones', async () => {
 			mockSelects(
 				[modRow()],

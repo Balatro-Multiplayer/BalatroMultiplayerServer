@@ -138,6 +138,43 @@ function toVersionItem(row: ModRow, v: ModVersionRow) {
 	}
 }
 
+// The pinned version when no version row names it: a release served through
+// the Server's proxy while Thunderstore approves it (ranked-pin-proxy.service.ts)
+// has no Thunderstore row yet, and the sync removes any row it wrote. It is
+// added as the last Thunderstore-layout version, so "latest" stays what
+// Thunderstore lists, and the admin version picker still shows the pin.
+function withUnlistedPin(
+	row: ModRow,
+	items: ReturnType<typeof toVersionItem>[],
+) {
+	const pinned = row.rankedVersion
+	if (!pinned || !row.rankedDownloadUrl || row.rankedSource !== 'thunderstore')
+		return items
+	if (items.some((v) => v.version === pinned || v.aliases.includes(pinned)))
+		return items
+	const lastThunderstore = items
+		.map((v) => v.source)
+		.lastIndexOf('thunderstore')
+	const unlisted = {
+		id: -1,
+		modId: row.id,
+		version: pinned,
+		source: 'thunderstore' as VersionSource,
+		aliases: [] as string[],
+		ref: null,
+		sha256: row.rankedVersionSha256,
+		downloadUrl: row.rankedDownloadUrl,
+		releasedAt: null,
+		pinFailedAt: null,
+		dependencies: [] as string[],
+	}
+	return [
+		...items.slice(0, lastThunderstore + 1),
+		unlisted,
+		...items.slice(lastThunderstore + 1),
+	]
+}
+
 function toDetail(row: ModRow, versions: ModVersionRow[]) {
 	return {
 		id: row.id,
@@ -171,7 +208,10 @@ function toDetail(row: ModRow, versions: ModVersionRow[]) {
 		donationLink: row.donationLink,
 		versions: withLegacySteamoddedTags(
 			row.thunderstoreFullName,
-			orderVersions(versions).map((v) => toVersionItem(row, v)),
+			withUnlistedPin(
+				row,
+				orderVersions(versions).map((v) => toVersionItem(row, v)),
+			),
 		),
 	}
 }
@@ -662,32 +702,102 @@ export async function resolvePinTarget(
 // read from it. With expectedVersion set (the sync) it only writes if the pin
 // is still that version, so an admin re-pin that lands mid-sync is never
 // overwritten.
+export interface RankedPinInput {
+	version: string
+	downloadUrl: string
+	source: ModLayout
+	hash: string
+	smodsIds: string[]
+	fileHashes?: Record<string, string>
+}
+
+function pinColumns(pin: RankedPinInput) {
+	return {
+		rankedVersion: pin.version,
+		rankedVersionSha256: pin.hash,
+		rankedFileHashes: pin.fileHashes ?? {},
+		smodsIds: pin.smodsIds,
+		smodsIdsReadVersion: pin.version,
+		rankedDownloadUrl: pin.downloadUrl,
+		rankedSource: pin.source,
+		rankedDownloadStatus: 'ok',
+		rankedCheckedAt: new Date(),
+		updatedAt: new Date(),
+	}
+}
+
+// Moves a pin served through the Server's proxy to the Thunderstore version of
+// the same release, by the same steps as an admin pin: resolve the version
+// row, download and hash it as shipped. It writes only while the pin is still
+// that version at the proxy URL, so an admin re-pin that lands first wins.
+export type MoveProxyPinResult =
+	| { ok: true; hash: string; previousHash: string | null }
+	| {
+			ok: false
+			reason:
+				| 'not-listed'
+				| 'download-unresolvable'
+				| 'hash-failed'
+				| 'pin-changed'
+	  }
+
+export async function moveProxyPinToThunderstore(
+	modId: string,
+	version: string,
+	proxyUrl: string,
+): Promise<MoveProxyPinResult> {
+	const existing = await findModByIdOrFullName(modId)
+	if (
+		!existing ||
+		existing.rankedVersion !== version ||
+		existing.rankedDownloadUrl !== proxyUrl
+	)
+		return { ok: false, reason: 'pin-changed' }
+	const target = await resolvePinTarget(existing.id, existing.repoUrl, version)
+	if (!target || target.source !== 'thunderstore' || target.version !== version)
+		return { ok: false, reason: 'not-listed' }
+	if (!target.downloadUrl) return { ok: false, reason: 'download-unresolvable' }
+	const inspected = await inspectModRelease(
+		existing.id,
+		target.version,
+		target.downloadUrl,
+		target.source,
+	)
+	if (!inspected) return { ok: false, reason: 'hash-failed' }
+	const written = await db
+		.update(modRegistry)
+		.set(
+			pinColumns({
+				version: target.version,
+				downloadUrl: target.downloadUrl,
+				source: target.source,
+				...inspected,
+			}),
+		)
+		.where(
+			and(
+				eq(modRegistry.id, existing.id),
+				eq(modRegistry.rankedVersion, version),
+				eq(modRegistry.rankedDownloadUrl, proxyUrl),
+			),
+		)
+		.returning({ id: modRegistry.id })
+	if (written.length === 0) return { ok: false, reason: 'pin-changed' }
+	return {
+		ok: true,
+		hash: inspected.hash,
+		previousHash: existing.rankedVersionSha256,
+	}
+}
+
 export async function storeRankedPin(
 	modId: string,
-	pin: {
-		version: string
-		downloadUrl: string
-		source: ModLayout
-		hash: string
-		smodsIds: string[]
-		fileHashes?: Record<string, string>
-	},
+	pin: RankedPinInput,
 	expectedVersion?: string,
 ): Promise<void> {
 	await db
 		.update(modRegistry)
-		.set({
-			rankedVersion: pin.version,
-			rankedVersionSha256: pin.hash,
-			rankedFileHashes: pin.fileHashes ?? {},
-			smodsIds: pin.smodsIds,
-			smodsIdsReadVersion: pin.version,
-			rankedDownloadUrl: pin.downloadUrl,
-			rankedSource: pin.source,
-			rankedDownloadStatus: 'ok',
-			rankedCheckedAt: new Date(),
-			updatedAt: new Date(),
-		})
+		.set(pinColumns(pin))
 		.where(
 			expectedVersion === undefined
 				? eq(modRegistry.id, modId)
@@ -891,8 +1001,11 @@ export async function setTrackGithub(
 export async function listVersionsForMod(modId: string) {
 	const row = await findModByIdOrFullName(modId)
 	if (!row) return null
-	return orderVersions(await listVersionRows(row.id)).map((v) =>
-		toVersionItem(row, v),
+	return withUnlistedPin(
+		row,
+		orderVersions(await listVersionRows(row.id)).map((v) =>
+			toVersionItem(row, v),
+		),
 	)
 }
 

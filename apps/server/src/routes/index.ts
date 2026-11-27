@@ -7,6 +7,7 @@ import { createDeployRouter } from '../features/deploy/deploy.route.js'
 import blogRouter from '../features/blog/blog.route.js'
 import launcherRouter from '../features/launcher/launcher.route.js'
 import modsRouter from '../features/mods/mods.route.js'
+import { createCiRouter } from '../features/mods/ranked-pin-proxy.route.js'
 import { createInternalNakamaRouter } from '../features/nakama/internal.route.js'
 import r2modmanReleasesRouter from '../features/r2modman-releases/r2modman-releases.route.js'
 import { createContestPageService } from '../features/contests/contest-page.service.js'
@@ -160,6 +161,7 @@ router.use('/api/mods', modsRouter)
 router.use('/api/r2modman/updates', r2modmanReleasesRouter)
 router.use('/api/webadmin', webadminRouter)
 router.use('/api/deploy', createDeployRouter())
+router.use('/api/ci', createCiRouter())
 router.use('/admin', adminRouter)
 router.use('/internal/nakama', createInternalNakamaRouter())
 

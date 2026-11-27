@@ -1,0 +1,152 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+	type PinProxyDeps,
+	pinThroughProxy,
+} from '../../features/mods/ranked-pin-proxy.service.js'
+
+const REPO = 'https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI'
+const ASSET = `${REPO}/releases/download/v1.2.3/MultiplayerAPI-1.2.3.zip`
+const NOW = new Date('2026-12-01T10:00:00Z')
+const INSPECTED = {
+	hash: 'a'.repeat(64),
+	fileHashes: { 'winmm.dll': 'b'.repeat(64) },
+	smodsIds: ['MultiplayerAPI'],
+}
+
+function makeDeps(overrides: Partial<PinProxyDeps> = {}): PinProxyDeps {
+	return {
+		findMod: vi.fn().mockResolvedValue({
+			id: 'MultiplayerAPI',
+			repoUrl: REPO,
+			rankedVersion: '1.2.2',
+		}),
+		hasThunderstoreVersion: vi.fn().mockResolvedValue(false),
+		setRankedVersion: vi.fn().mockResolvedValue({ ok: true }),
+		inspect: vi.fn().mockResolvedValue(INSPECTED),
+		storePin: vi.fn().mockResolvedValue(undefined),
+		startSwitch: vi.fn().mockResolvedValue(undefined),
+		reloadConfig: vi.fn().mockResolvedValue(undefined),
+		publicBaseUrl: 'https://balatromp.com',
+		now: () => NOW,
+		...overrides,
+	}
+}
+const input = { mod: 'MultiplayerAPI', version: '1.2.3', assetUrl: ASSET }
+const PROXY_URL =
+	'https://balatromp.com/api/mods/MultiplayerAPI/pin-proxy/1.2.3/MultiplayerAPI-1.2.3.zip'
+
+let deps: PinProxyDeps
+beforeEach(() => {
+	deps = makeDeps()
+})
+
+describe('pinThroughProxy', () => {
+	it('pins the proxy URL with the Thunderstore layout and the asset hash', async () => {
+		const result = await pinThroughProxy(input, deps)
+
+		expect(result).toMatchObject({
+			ok: true,
+			mode: 'proxy',
+			proxyUrl: PROXY_URL,
+			previousVersion: '1.2.2',
+		})
+		// Hashed from the GitHub asset itself, laid out as a Thunderstore package.
+		expect(deps.inspect).toHaveBeenCalledWith(
+			'MultiplayerAPI',
+			'1.2.3',
+			ASSET,
+			'thunderstore',
+		)
+		expect(deps.storePin).toHaveBeenCalledWith('MultiplayerAPI', {
+			version: '1.2.3',
+			downloadUrl: PROXY_URL,
+			source: 'thunderstore',
+			...INSPECTED,
+		})
+		expect(deps.reloadConfig).toHaveBeenCalled()
+	})
+
+	it('starts the switch 10 minutes out and keeps the proxy hash', async () => {
+		await pinThroughProxy(input, deps)
+
+		expect(deps.startSwitch).toHaveBeenCalledWith({
+			modId: 'MultiplayerAPI',
+			version: '1.2.3',
+			assetUrl: ASSET,
+			assetName: 'MultiplayerAPI-1.2.3.zip',
+			proxyUrl: PROXY_URL,
+			proxyHash: INSPECTED.hash,
+			startedAt: NOW,
+			nextCheckAt: new Date('2026-12-01T10:10:00Z'),
+		})
+	})
+
+	it('writes the switch before the pin, so the proxy URL always has a row', async () => {
+		const order: string[] = []
+		deps = makeDeps({
+			startSwitch: vi.fn(async () => void order.push('switch')),
+			storePin: vi.fn(async () => void order.push('pin')),
+		})
+		await pinThroughProxy(input, deps)
+		expect(order).toEqual(['switch', 'pin'])
+	})
+
+	it('allows only MultiplayerAPI', async () => {
+		deps = makeDeps({
+			findMod: vi.fn().mockResolvedValue({
+				id: 'MultiplayerPvP',
+				repoUrl: REPO,
+				rankedVersion: null,
+			}),
+		})
+		expect(await pinThroughProxy(input, deps)).toEqual({
+			ok: false,
+			reason: 'mod-not-allowed',
+		})
+		expect(deps.inspect).not.toHaveBeenCalled()
+		expect(deps.storePin).not.toHaveBeenCalled()
+	})
+
+	it('refuses an unknown mod, a bad version and an asset of another repo', async () => {
+		deps = makeDeps({ findMod: vi.fn().mockResolvedValue(null) })
+		expect(await pinThroughProxy(input, deps)).toEqual({
+			ok: false,
+			reason: 'mod-not-found',
+		})
+		deps = makeDeps()
+		expect(await pinThroughProxy({ ...input, version: 'v1' }, deps)).toEqual({
+			ok: false,
+			reason: 'bad-version',
+		})
+		expect(
+			await pinThroughProxy(
+				{ ...input, assetUrl: ASSET.replace('API/', 'Other/') },
+				deps,
+			),
+		).toEqual({ ok: false, reason: 'wrong-repo' })
+		expect(deps.inspect).not.toHaveBeenCalled()
+	})
+
+	it('changes nothing when the asset cannot be hashed', async () => {
+		deps = makeDeps({ inspect: vi.fn().mockResolvedValue(null) })
+		expect(await pinThroughProxy(input, deps)).toEqual({
+			ok: false,
+			reason: 'hash-failed',
+		})
+		expect(deps.startSwitch).not.toHaveBeenCalled()
+		expect(deps.storePin).not.toHaveBeenCalled()
+	})
+
+	it('pins the normal way when Thunderstore already lists the version', async () => {
+		deps = makeDeps({ hasThunderstoreVersion: vi.fn().mockResolvedValue(true) })
+		const result = await pinThroughProxy(input, deps)
+
+		expect(result).toMatchObject({ ok: true, mode: 'thunderstore' })
+		expect(deps.setRankedVersion).toHaveBeenCalledWith(
+			'MultiplayerAPI',
+			'1.2.3',
+		)
+		expect(deps.storePin).not.toHaveBeenCalled()
+		expect(deps.startSwitch).not.toHaveBeenCalled()
+	})
+})
