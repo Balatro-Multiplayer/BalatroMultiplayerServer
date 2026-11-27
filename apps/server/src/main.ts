@@ -3,6 +3,7 @@ import express from 'express'
 import type { Express, Request, Response } from 'express'
 import { env } from './env.js'
 import { createDevChallengeStrategy } from './features/launcher-integrity/dev-strategy.js'
+import { startPinProxySwitchJob } from './features/mods/pin-proxy-switch.job.js'
 import { syncModRegistry } from './features/mods/mods-sync.service.js'
 import { fillAchievementsAtBoot } from './features/achievements/achievements-backfill.service.js'
 import { fillMissingRankedFileHashes } from './features/mods/ranked-file-hashes-backfill.service.js'
@@ -149,6 +150,8 @@ async function start() {
 		startSeasonJob()
 		// Players hear when a ban ends.
 		startBanEndJob()
+		// A release pinned through the GitHub proxy moves to Thunderstore.
+		startPinProxySwitchJob()
 
 
 		server = app.listen(env.PORT, () => {
