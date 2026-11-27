@@ -1,37 +1,41 @@
 import { checkDownloadAvailable } from './ranked-pin-health.js'
 
-const PACKAGE_URL = 'https://thunderstore.io/api/experimental/package'
-const FETCH_TIMEOUT_MS = 15_000
+// The Balatro community's package list: the list r2modman and the mods sync
+// read. A package in review is missing from it, but the experimental package
+// API and the download link answer during review, so those alone cannot tell.
+const COMMUNITY_INDEX_URL = 'https://thunderstore.io/c/balatro/api/v1/package/'
+const FETCH_TIMEOUT_MS = 30_000
 
-// Whether one exact version of a Thunderstore package is up: its page answers
-// and its download works. A version that waits for approval has neither, so
-// this is true only once players can really download it. Any doubt (a network
-// error, a rate limit, an odd answer) is 'not-up': the caller asks again.
+interface IndexPackage {
+	full_name?: string
+	is_active?: boolean
+	versions?: {
+		version_number?: string
+		is_active?: boolean
+		download_url?: string
+	}[]
+}
+
+// Whether one exact version of a Thunderstore package is up: the community
+// package list shows it and its download works. Any doubt (a network error, a
+// rate limit, an odd answer) is 'not-up': the caller asks again.
 export async function checkThunderstoreVersion(
 	fullName: string,
 	version: string,
 ): Promise<'up' | 'not-up'> {
-	const split = fullName.indexOf('-')
-	if (split <= 0) return 'not-up'
-	const owner = fullName.slice(0, split)
-	const name = fullName.slice(split + 1)
 	try {
-		const res = await fetch(
-			`${PACKAGE_URL}/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/`,
-			{ signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
-		)
+		const res = await fetch(COMMUNITY_INDEX_URL, {
+			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+		})
 		if (!res.ok) return 'not-up'
-		const body = (await res.json()) as {
-			version_number?: string
-			is_active?: boolean
-			download_url?: string
-		}
-		if (body.version_number !== version || body.is_active === false)
+		const index = (await res.json()) as IndexPackage[]
+		if (!Array.isArray(index)) return 'not-up'
+		const pkg = index.find((p) => p.full_name === fullName)
+		if (!pkg || pkg.is_active === false) return 'not-up'
+		const entry = pkg.versions?.find((v) => v.version_number === version)
+		if (!entry || entry.is_active === false || !entry.download_url)
 			return 'not-up'
-		const downloadUrl =
-			body.download_url ??
-			`https://thunderstore.io/package/download/${owner}/${name}/${version}/`
-		return (await checkDownloadAvailable(downloadUrl)) === 'ok'
+		return (await checkDownloadAvailable(entry.download_url)) === 'ok'
 			? 'up'
 			: 'not-up'
 	} catch {
