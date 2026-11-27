@@ -129,6 +129,11 @@ export const env = {
 	// Bearer token GitHub Actions send to /api/deploy/* (ADR 0012). Set on the
 	// Official server only. Unset = those routes answer 404.
 	DEPLOY_TOKEN: optional('DEPLOY_TOKEN', ''),
+	// Bearer token the MultiplayerAPI release workflow sends to
+	// /api/ci/ranked-pin-proxy (features/mods/ranked-pin-proxy.route.ts), which
+	// pins a release served from GitHub while Thunderstore approves it. Unset =
+	// that route answers 404. Not the DEPLOY_TOKEN: it can pin one mod only.
+	MOD_PIN_PROXY_TOKEN: optional('MOD_PIN_PROXY_TOKEN', ''),
 	// The one player id (an admin) allowed to run the owner-only repair tools,
 	// such as the Season replay. Unset = nobody is the owner.
 	OWNER_PLAYER_ID: optional('OWNER_PLAYER_ID', ''),

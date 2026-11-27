@@ -561,6 +561,13 @@
       "when": 1795000500000,
       "tag": "0079_ranked_cocktail",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1795000600000,
+      "tag": "0080_mod_pin_proxy_switches",
+      "breakpoints": true
     }
   ]
 }

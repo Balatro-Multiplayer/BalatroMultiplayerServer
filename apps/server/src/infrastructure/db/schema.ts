@@ -1198,6 +1198,59 @@ export const modRegistryVersions = pgTable(
 	],
 )
 
+// The states of a proxy pin's switch to Thunderstore (see modPinProxySwitches).
+export const PIN_PROXY_SWITCH_STATES = [
+	'pending',
+	'switched',
+	'superseded',
+	'gave_up',
+] as const
+export type PinProxySwitchState = (typeof PIN_PROXY_SWITCH_STATES)[number]
+
+// A ranked pin served through the Server's own proxy of a GitHub release
+// asset, because the version waits for Thunderstore's approval. The job in
+// features/mods/pin-proxy-switch.job.ts reads these rows: it checks Thunderstore
+// for the version and then moves the pin there. Stored so a restart loses
+// nothing. One row per mod and version; a repeat pin of the same version
+// restarts it.
+export const modPinProxySwitches = pgTable(
+	'mod_pin_proxy_switches',
+	{
+		id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+		modId: varchar('mod_id', { length: 128 })
+			.notNull()
+			.references(() => modRegistry.id, { onDelete: 'cascade' }),
+		version: varchar('version', { length: 64 }).notNull(),
+		// The GitHub release asset the proxy serves (checked against the mod's
+		// own repo when the row is written).
+		assetUrl: text('asset_url').notNull(),
+		// The file name the proxy URL ends with (the asset's name).
+		assetName: varchar('asset_name', { length: 255 }).notNull(),
+		// The pin's download URL on the Server's public base URL.
+		proxyUrl: text('proxy_url').notNull(),
+		// The pin's hash while it was served by the proxy, to compare with the
+		// Thunderstore hash at the switch.
+		proxyHash: varchar('proxy_hash', { length: 64 }).notNull(),
+		state: varchar('state', { length: 16 }).notNull().default('pending'),
+		startedAt: timestamp('started_at', { withTimezone: true })
+			.notNull()
+			.defaultNow(),
+		nextCheckAt: timestamp('next_check_at', { withTimezone: true }).notNull(),
+		lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+		attempts: integer('attempts').notNull().default(0),
+		finishedAt: timestamp('finished_at', { withTimezone: true }),
+		// A short plain-language remark on the last step.
+		note: text('note'),
+	},
+	(t) => [
+		uniqueIndex('mod_pin_proxy_switches_mod_version_idx').on(
+			t.modId,
+			t.version,
+		),
+		index('mod_pin_proxy_switches_due_idx').on(t.state, t.nextCheckAt),
+	],
+)
+
 // Named mod presets the launcher offers (GET /api/mods/profiles). Admins edit
 // them on /admin/ranked-mods (PUT/POST/DELETE /api/webadmin/mods/profiles).
 export const modProfiles = pgTable('mod_profiles', {
