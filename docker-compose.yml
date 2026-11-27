@@ -137,6 +137,7 @@ services:
       DEPLOY_TOKEN: ${DEPLOY_TOKEN:-}
       # Opens /api/ci/ranked-pin-proxy for the MultiplayerAPI release workflow; unset = 404.
       MOD_PIN_PROXY_TOKEN: ${MOD_PIN_PROXY_TOKEN:-}
+      MOD_PIN_PROXY_SKIP_FIRST_WAIT: ${MOD_PIN_PROXY_SKIP_FIRST_WAIT:-false}
       ARCHIVE_DIR: /app/archives
     volumes:
       # Read-only bind mount of manually-populated Discord channel archive

@@ -57,6 +57,8 @@ export interface PinProxyDeps {
 	}): Promise<void>
 	reloadConfig(): Promise<void>
 	publicBaseUrl: string
+	// Check Thunderstore at once instead of after the first wait.
+	skipFirstWait: boolean
 	now(): Date
 }
 
@@ -83,7 +85,14 @@ export type PinProxyResult =
 	| { ok: false; reason: PinProxyError }
 
 export async function pinThroughProxy(
-	input: { mod: string; version: string; assetUrl: string },
+	input: {
+		mod: string
+		version: string
+		assetUrl: string
+		// Serve through the proxy even when Thunderstore already lists the
+		// version: a hand-run check of the proxy and the switch timer.
+		forceProxy?: boolean
+	},
 	deps: PinProxyDeps,
 ): Promise<PinProxyResult> {
 	const mod = await deps.findMod(input.mod)
@@ -98,7 +107,10 @@ export async function pinThroughProxy(
 	if (!asset.ok) return { ok: false, reason: asset.error }
 
 	const previousVersion = mod.rankedVersion
-	if (await deps.hasThunderstoreVersion(mod.id, input.version)) {
+	if (
+		!input.forceProxy &&
+		(await deps.hasThunderstoreVersion(mod.id, input.version))
+	) {
 		const pinned = await deps.setRankedVersion(mod.id, input.version)
 		if (!pinned.ok)
 			return {
@@ -133,6 +145,9 @@ export async function pinThroughProxy(
 		asset.value.assetName,
 	)
 	const startedAt = deps.now()
+	const nextCheckAt = new Date(
+		startedAt.getTime() + (deps.skipFirstWait ? 0 : PIN_PROXY_FIRST_CHECK_MS),
+	)
 	// The switch row goes first: the proxy route serves from it, and a pin with
 	// no row would never move to Thunderstore.
 	await deps.startSwitch({
@@ -143,7 +158,7 @@ export async function pinThroughProxy(
 		proxyUrl,
 		proxyHash: inspected.hash,
 		startedAt,
-		nextCheckAt: new Date(startedAt.getTime() + PIN_PROXY_FIRST_CHECK_MS),
+		nextCheckAt,
 	})
 	await deps.storePin(mod.id, {
 		version: input.version,
@@ -158,6 +173,6 @@ export async function pinThroughProxy(
 		modId: mod.id,
 		previousVersion,
 		proxyUrl,
-		nextCheckAt: new Date(startedAt.getTime() + PIN_PROXY_FIRST_CHECK_MS),
+		nextCheckAt,
 	}
 }

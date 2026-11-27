@@ -59,6 +59,7 @@ const liveDeps = (): PinProxyDeps => ({
 		await loadConfigFromDb()
 	},
 	publicBaseUrl: env.WEB_BASE_URL,
+	skipFirstWait: env.MOD_PIN_PROXY_SKIP_FIRST_WAIT,
 	now: () => new Date(),
 })
 
@@ -90,11 +91,15 @@ export function createCiRouter() {
 		const mod = text(body.mod)
 		const version = text(body.version)
 		const assetUrl = text(body.assetUrl)
+		const forceProxy = body.forceProxy === true
 		if (!mod) throw new AppError('mod is required', 400)
 		if (!version) throw new AppError('version is required', 400)
 		if (!assetUrl) throw new AppError('assetUrl is required', 400)
 
-		const result = await pinThroughProxy({ mod, version, assetUrl }, liveDeps())
+		const result = await pinThroughProxy(
+			{ mod, version, assetUrl, forceProxy },
+			liveDeps(),
+		)
 		if (!result.ok) {
 			const [status, message] = ERRORS[result.reason]
 			throw new AppError(message, status)

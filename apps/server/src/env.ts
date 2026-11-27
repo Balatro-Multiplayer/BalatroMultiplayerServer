@@ -40,7 +40,10 @@ function requiredInProduction(key: string, defaultValue: string): string {
 
 const SERVER = (() => {
 	const result = serverSettings(process.env)
-	if (!result.ok) throw new Error(`Refusing to start: ${serverKindErrorMessage(result.error)}`)
+	if (!result.ok)
+		throw new Error(
+			`Refusing to start: ${serverKindErrorMessage(result.error)}`,
+		)
 	return result.value
 })()
 
@@ -134,6 +137,12 @@ export const env = {
 	// pins a release served from GitHub while Thunderstore approves it. Unset =
 	// that route answers 404. Not the DEPLOY_TOKEN: it can pin one mod only.
 	MOD_PIN_PROXY_TOKEN: optional('MOD_PIN_PROXY_TOKEN', ''),
+	// true = a new proxy pin checks Thunderstore at once, then every 2 minutes,
+	// with no 10 minute wait first.
+	MOD_PIN_PROXY_SKIP_FIRST_WAIT: optionalBool(
+		'MOD_PIN_PROXY_SKIP_FIRST_WAIT',
+		false,
+	),
 	// The one player id (an admin) allowed to run the owner-only repair tools,
 	// such as the Season replay. Unset = nobody is the owner.
 	OWNER_PLAYER_ID: optional('OWNER_PLAYER_ID', ''),

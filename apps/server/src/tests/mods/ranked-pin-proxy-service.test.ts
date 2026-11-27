@@ -27,6 +27,7 @@ function makeDeps(overrides: Partial<PinProxyDeps> = {}): PinProxyDeps {
 		startSwitch: vi.fn().mockResolvedValue(undefined),
 		reloadConfig: vi.fn().mockResolvedValue(undefined),
 		publicBaseUrl: 'https://balatromp.com',
+		skipFirstWait: false,
 		now: () => NOW,
 		...overrides,
 	}
@@ -148,5 +149,29 @@ describe('pinThroughProxy', () => {
 		)
 		expect(deps.storePin).not.toHaveBeenCalled()
 		expect(deps.startSwitch).not.toHaveBeenCalled()
+	})
+
+	it('serves through the proxy when forced, even if Thunderstore lists the version', async () => {
+		deps = makeDeps({ hasThunderstoreVersion: vi.fn().mockResolvedValue(true) })
+		const result = await pinThroughProxy({ ...input, forceProxy: true }, deps)
+
+		expect(result).toMatchObject({
+			ok: true,
+			mode: 'proxy',
+			proxyUrl: PROXY_URL,
+		})
+		expect(deps.setRankedVersion).not.toHaveBeenCalled()
+		expect(deps.startSwitch).toHaveBeenCalled()
+		expect(deps.storePin).toHaveBeenCalled()
+	})
+
+	it('checks Thunderstore at once when the first wait is skipped', async () => {
+		deps = makeDeps({ skipFirstWait: true })
+		const result = await pinThroughProxy(input, deps)
+
+		expect(result).toMatchObject({ ok: true, mode: 'proxy', nextCheckAt: NOW })
+		expect(deps.startSwitch).toHaveBeenCalledWith(
+			expect.objectContaining({ nextCheckAt: NOW }),
+		)
 	})
 })
