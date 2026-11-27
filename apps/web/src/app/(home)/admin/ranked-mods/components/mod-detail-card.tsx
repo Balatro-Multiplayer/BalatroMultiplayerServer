@@ -56,6 +56,13 @@ function PinDetails({ mod }: { mod: ModSummary }) {
       {mod.rankedDownloadStatus === 'unavailable' && (
         <Badge variant='destructive'>Unavailable, pin again</Badge>
       )}
+      {mod.pinProxy && (
+        <Badge variant='secondary'>
+          {mod.pinProxy.state === 'pending'
+            ? `Served by the proxy, waiting for Thunderstore (${mod.pinProxy.attempts} checks, next ${new Date(mod.pinProxy.nextCheckAt).toLocaleString()})`
+            : 'Served by the proxy, Thunderstore never listed it (gave up)'}
+        </Badge>
+      )}
     </p>
   )
 }

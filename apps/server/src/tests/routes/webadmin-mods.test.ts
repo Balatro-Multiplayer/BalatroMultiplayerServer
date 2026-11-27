@@ -1,5 +1,6 @@
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { db } from '../../infrastructure/db/index.js'
 import { signJwt } from '../../features/auth/jwt.js'
 import * as modsGateway from '../../infrastructure/gateways/mods.gateway.js'
 import * as playerGateway from '../../infrastructure/gateways/player.gateway.js'
@@ -48,6 +49,14 @@ import { resolveSourceInput } from '../../features/mods/custom-mod-version-check
 import { backfillSmodsIds } from '../../features/mods/smods-ids-backfill.service.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 
+// A select chain that resolves to the rows, like the db mock's default.
+function selectRows(rows: unknown[]) {
+	const c: Record<string, unknown> = {}
+	for (const m of ['from', 'where']) c[m] = vi.fn(() => c)
+	c.then = (resolve: (v: unknown) => unknown) => resolve(rows)
+	return c
+}
+
 const app = createTestApp()
 
 // A carried-over row: legacy id, claimed by a Thunderstore package.
@@ -93,6 +102,47 @@ describe('GET /api/webadmin/mods', () => {
 		expect(modsGateway.listPublicMods).toHaveBeenCalledWith({
 			includeHidden: true,
 		})
+	})
+})
+
+describe('GET /api/webadmin/mods with a proxy pin', () => {
+	it('adds the switch state to the mod that is pinned through the proxy', async () => {
+		const proxyUrl = 'https://balatromp.com/api/mods/Mod/pin-proxy/1.2.3/x.zip'
+		vi.mocked(modsGateway.listPublicMods).mockResolvedValue([
+			{ id: 'Mod', rankedVersion: '1.2.3', rankedDownloadUrl: proxyUrl },
+			{ id: 'Other', rankedVersion: '1.2.3', rankedDownloadUrl: 'https://x/' },
+		] as never)
+		const startedAt = new Date('2026-12-01T10:00:00Z')
+		const nextCheckAt = new Date('2026-12-01T10:12:00Z')
+		vi.mocked(db.select).mockReturnValueOnce(
+			selectRows([
+				{
+					modId: 'Mod',
+					version: '1.2.3',
+					proxyUrl,
+					state: 'pending',
+					attempts: 1,
+					startedAt,
+					nextCheckAt,
+					note: 'Thunderstore does not have the version up yet.',
+				},
+			]) as never,
+		)
+
+		const token = authAsAdmin('mod-list-proxy', 'Mod')
+		const res = await request(app)
+			.get('/api/webadmin/mods')
+			.set('Authorization', token)
+
+		expect(res.status).toBe(200)
+		expect(res.body[0].pinProxy).toEqual({
+			state: 'pending',
+			attempts: 1,
+			startedAt: startedAt.toISOString(),
+			nextCheckAt: nextCheckAt.toISOString(),
+			note: 'Thunderstore does not have the version up yet.',
+		})
+		expect(res.body[1]).not.toHaveProperty('pinProxy')
 	})
 })
 

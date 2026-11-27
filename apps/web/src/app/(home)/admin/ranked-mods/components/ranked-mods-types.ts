@@ -21,6 +21,15 @@ export interface ModSummary {
   rankedDownloadUrl: string | null
   rankedSource: VersionSource | null
   rankedDownloadStatus: 'ok' | 'unavailable' | null
+  // Set while the pin is served by the Server's GitHub proxy and its move to
+  // Thunderstore is waiting ('pending') or was given up ('gave_up').
+  pinProxy?: {
+    state: 'pending' | 'gave_up'
+    attempts: number
+    startedAt: string
+    nextCheckAt: string
+    note: string | null
+  }
   // The SMODS ids the pin's files declare (read at pin time, admin-editable):
   // what a client running this mod reports, so what matchmaking allows.
   smodsIds: string[]

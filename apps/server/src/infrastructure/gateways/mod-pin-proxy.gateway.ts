@@ -1,4 +1,4 @@
-import { and, desc, eq, lte, sql } from 'drizzle-orm'
+import { and, eq, inArray, lte, sql } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import {
 	type PinProxySwitchState,
@@ -62,17 +62,13 @@ export async function findPinProxySwitch(
 	return rows[0] ?? null
 }
 
-// The newest switch of a mod, for the admin page.
-export async function latestPinProxySwitch(
-	modId: string,
-): Promise<PinProxySwitchRow | null> {
-	const rows = await db
+// The switches that still concern a pin: waiting for Thunderstore, or given
+// up (the proxy pin stays). For the admin ranked-mods list.
+export async function listOpenPinProxySwitches(): Promise<PinProxySwitchRow[]> {
+	return db
 		.select()
 		.from(modPinProxySwitches)
-		.where(eq(modPinProxySwitches.modId, modId))
-		.orderBy(desc(modPinProxySwitches.startedAt))
-		.limit(1)
-	return rows[0] ?? null
+		.where(inArray(modPinProxySwitches.state, ['pending', 'gave_up']))
 }
 
 // Takes every pending switch that is due. Each one is leased: its next check

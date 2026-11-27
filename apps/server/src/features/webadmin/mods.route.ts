@@ -4,6 +4,7 @@ import {
 	modProfileVersionModeEnum,
 } from '../../infrastructure/db/schema.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
+import { listOpenPinProxySwitches } from '../../infrastructure/gateways/mod-pin-proxy.gateway.js'
 import {
 	type ModProfileFields,
 	type PinCommitResult,
@@ -57,7 +58,34 @@ const router = Router()
 // hidden mods so they can be un-hidden.
 router.get('/mods', async (_req, res, next) => {
 	try {
-		res.json(await listPublicMods({ includeHidden: true }))
+		const [mods, switches] = await Promise.all([
+			listPublicMods({ includeHidden: true }),
+			listOpenPinProxySwitches(),
+		])
+		// A mod pinned through the GitHub proxy shows where its switch to
+		// Thunderstore stands (pin-proxy-switch.service.ts).
+		res.json(
+			mods.map((mod) => {
+				const open = switches.find(
+					(s) =>
+						s.modId === mod.id &&
+						s.version === mod.rankedVersion &&
+						s.proxyUrl === mod.rankedDownloadUrl,
+				)
+				return open
+					? {
+							...mod,
+							pinProxy: {
+								state: open.state,
+								attempts: open.attempts,
+								startedAt: open.startedAt,
+								nextCheckAt: open.nextCheckAt,
+								note: open.note,
+							},
+						}
+					: mod
+			}),
+		)
 	} catch (err) {
 		next(err)
 	}
