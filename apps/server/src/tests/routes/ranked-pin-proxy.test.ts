@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto'
 import request from 'supertest'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { env } from '../../env.js'
-import { inspectModRelease } from '../../features/mods/mod-version-hash.js'
-import { upsertPinProxySwitch } from '../../infrastructure/gateways/mod-pin-proxy.gateway.js'
+import { inspectModArchive } from '../../features/mods/mod-version-hash.js'
+import {
+	hasThunderstoreVersion,
+	upsertPinProxySwitch,
+} from '../../infrastructure/gateways/mod-pin-proxy.gateway.js'
 import * as modsGateway from '../../infrastructure/gateways/mods.gateway.js'
 import { recordStaffAction } from '../../infrastructure/gateways/staff-log.gateway.js'
 import { createTestApp } from './app.js'
@@ -29,30 +33,38 @@ vi.mock('../../infrastructure/gateways/mod-pin-proxy.gateway.js', () => ({
 	findPinProxySwitch: vi.fn(),
 }))
 vi.mock('../../features/mods/mod-version-hash.js', () => ({
-	inspectModRelease: vi.fn(),
+	inspectModArchive: vi.fn(),
 }))
 
 const app = createTestApp()
 const original = env.MOD_PIN_PROXY_TOKEN
 const TOKEN = 'pin-proxy-token-123'
-const REPO = 'https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI'
-const ASSET = `${REPO}/releases/download/v1.2.3/MultiplayerAPI-1.2.3.zip`
-const body = { mod: 'MultiplayerAPI', version: '1.2.3', assetUrl: ASSET }
+const ZIP = Buffer.from('PK\x03\x04 zip bytes')
+const query = { mod: 'MultiplayerAPI', version: '1.2.3' }
 
-const call = (token?: string, payload: unknown = body) => {
-	const req = request(app).post('/api/ci/ranked-pin-proxy')
+const call = (
+	token?: string,
+	params: Record<string, string> = query,
+	payload: Buffer = ZIP,
+	type = 'application/zip',
+) => {
+	const req = request(app)
+		.post('/api/ci/ranked-pin-proxy')
+		.query(params)
+		.set('Content-Type', type)
 	return (token ? req.set('Authorization', `Bearer ${token}`) : req).send(
-		payload as object,
+		payload,
 	)
 }
 
 beforeEach(() => {
+	vi.mocked(hasThunderstoreVersion).mockReset().mockResolvedValue(false)
 	vi.mocked(modsGateway.findModByIdOrFullName).mockResolvedValue({
 		id: 'MultiplayerAPI',
-		repoUrl: REPO,
+		thunderstoreFullName: 'BalatroMultiplayer-MultiplayerAPI',
 		rankedVersion: '1.2.2',
 	} as never)
-	vi.mocked(inspectModRelease).mockResolvedValue({
+	vi.mocked(inspectModArchive).mockResolvedValue({
 		hash: 'a'.repeat(64),
 		fileHashes: {},
 		smodsIds: ['MultiplayerAPI'],
@@ -71,16 +83,18 @@ describe('/api/ci/ranked-pin-proxy auth', () => {
 		const blank = await request(app)
 			.post('/api/ci/ranked-pin-proxy')
 			.set('Authorization', 'Bearer ')
-			.send(body)
+			.set('Content-Type', 'application/zip')
+			.query(query)
+			.send(ZIP)
 		expect(blank.status).toBe(404)
-		expect(inspectModRelease).not.toHaveBeenCalled()
+		expect(inspectModArchive).not.toHaveBeenCalled()
 	})
 
 	it('refuses a missing, wrong or different-length token and changes nothing', async () => {
 		expect((await call()).status).toBe(401)
 		expect((await call('pin-proxy-token-124')).status).toBe(403)
 		expect((await call('x')).status).toBe(403)
-		expect(inspectModRelease).not.toHaveBeenCalled()
+		expect(inspectModArchive).not.toHaveBeenCalled()
 		expect(modsGateway.storeRankedPin).not.toHaveBeenCalled()
 		expect(upsertPinProxySwitch).not.toHaveBeenCalled()
 		expect(recordStaffAction).not.toHaveBeenCalled()
@@ -102,12 +116,12 @@ describe('/api/ci/ranked-pin-proxy pin', () => {
 		expect(res.body).toMatchObject({
 			ok: true,
 			mode: 'proxy',
-			downloadUrl: `${env.WEB_BASE_URL}/api/mods/MultiplayerAPI/pin-proxy/1.2.3/MultiplayerAPI-1.2.3.zip`,
+			downloadUrl: `${env.WEB_BASE_URL}/api/mods/MultiplayerAPI/pin-proxy/1.2.3/BalatroMultiplayer-MultiplayerAPI-1.2.3.zip`,
 		})
-		expect(inspectModRelease).toHaveBeenCalledWith(
+		expect(inspectModArchive).toHaveBeenCalledWith(
 			'MultiplayerAPI',
 			'1.2.3',
-			ASSET,
+			expect.any(Buffer),
 			'thunderstore',
 		)
 		expect(modsGateway.storeRankedPin).toHaveBeenCalledWith(
@@ -115,6 +129,11 @@ describe('/api/ci/ranked-pin-proxy pin', () => {
 			expect.objectContaining({ version: '1.2.3', source: 'thunderstore' }),
 		)
 		expect(upsertPinProxySwitch).toHaveBeenCalledTimes(1)
+		const started = vi.mocked(upsertPinProxySwitch).mock.calls[0]?.[0]
+		expect(Buffer.from(started?.zipBytes ?? []).equals(ZIP)).toBe(true)
+		expect(started?.zipSha256).toBe(
+			createHash('sha256').update(ZIP).digest('hex'),
+		)
 		expect(recordStaffAction).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.objectContaining({ action: 'mod_pin' }),
@@ -124,39 +143,71 @@ describe('/api/ci/ranked-pin-proxy pin', () => {
 	it('refuses a mod that is not on the allowlist', async () => {
 		vi.mocked(modsGateway.findModByIdOrFullName).mockResolvedValue({
 			id: 'MultiplayerPvP',
-			repoUrl: REPO,
+			thunderstoreFullName: 'BalatroMultiplayer-MultiplayerAPI',
 			rankedVersion: null,
 		} as never)
-		const res = await call(TOKEN, { ...body, mod: 'MultiplayerPvP' })
+		const res = await call(TOKEN, { ...query, mod: 'MultiplayerPvP' })
 		expect(res.status).toBe(403)
 		expect(modsGateway.storeRankedPin).not.toHaveBeenCalled()
 	})
 
-	it('never fetches an asset URL that is not a release of the mod repo', async () => {
+	it('refuses an empty body and a body that is not a zip, and fetches nothing', async () => {
 		const fetchSpy = vi.spyOn(globalThis, 'fetch')
-		for (const assetUrl of [
-			'https://evil.example/x.zip',
-			'https://github.com/someone/else/releases/download/v1/x.zip',
-			`${ASSET}?x=1`,
-		]) {
-			const res = await call(TOKEN, { ...body, assetUrl })
-			expect(res.status).toBe(400)
-		}
-		expect(inspectModRelease).not.toHaveBeenCalled()
+		expect((await call(TOKEN, query, Buffer.alloc(0))).status).toBe(400)
+		expect(
+			(await call(TOKEN, query, Buffer.from('<html>not a zip</html>'))).status,
+		).toBe(400)
+		const wrongType = await call(TOKEN, query, ZIP, 'application/json')
+		expect(wrongType.status).toBe(400)
+		expect(inspectModArchive).not.toHaveBeenCalled()
+		expect(upsertPinProxySwitch).not.toHaveBeenCalled()
 		expect(fetchSpy).not.toHaveBeenCalled()
 		fetchSpy.mockRestore()
 	})
 
-	it('asks for every field', async () => {
-		for (const missing of ['mod', 'version', 'assetUrl']) {
-			const payload: Record<string, unknown> = { ...body }
-			delete payload[missing]
-			expect((await call(TOKEN, payload)).status).toBe(400)
+	it('refuses a body over 50 MB', async () => {
+		const big = Buffer.alloc(50 * 1024 * 1024 + 1024)
+		big.write('PK\x03\x04')
+		const res = await call(TOKEN, query, big)
+		expect(res.status).toBe(413)
+		expect(inspectModArchive).not.toHaveBeenCalled()
+		expect(upsertPinProxySwitch).not.toHaveBeenCalled()
+	})
+
+	it('asks for the mod and the version', async () => {
+		for (const missing of ['mod', 'version']) {
+			const params: Record<string, string> = { ...query }
+			delete params[missing]
+			expect((await call(TOKEN, params)).status).toBe(400)
 		}
 	})
 
-	it('answers 502 and changes nothing when the asset cannot be hashed', async () => {
-		vi.mocked(inspectModRelease).mockResolvedValue(null)
+	it('refuses a version that is not x.y.z', async () => {
+		expect((await call(TOKEN, { ...query, version: 'v1' })).status).toBe(400)
+		expect(inspectModArchive).not.toHaveBeenCalled()
+	})
+
+	it('serves through the proxy when forceProxy=true, even if Thunderstore lists the version', async () => {
+		vi.mocked(hasThunderstoreVersion).mockResolvedValueOnce(true)
+		const res = await call(TOKEN, { ...query, forceProxy: 'true' })
+		expect(res.status).toBe(200)
+		expect(res.body.mode).toBe('proxy')
+		expect(upsertPinProxySwitch).toHaveBeenCalledTimes(1)
+	})
+
+	it('pins the normal way when Thunderstore already lists the version', async () => {
+		vi.mocked(hasThunderstoreVersion).mockResolvedValueOnce(true)
+		vi.mocked(modsGateway.setRankedVersion).mockResolvedValueOnce({
+			ok: true,
+		} as never)
+		const res = await call(TOKEN)
+		expect(res.status).toBe(200)
+		expect(res.body.mode).toBe('thunderstore')
+		expect(upsertPinProxySwitch).not.toHaveBeenCalled()
+	})
+
+	it('answers 502 and changes nothing when the zip cannot be hashed', async () => {
+		vi.mocked(inspectModArchive).mockResolvedValue(null)
 		expect((await call(TOKEN)).status).toBe(502)
 		expect(modsGateway.storeRankedPin).not.toHaveBeenCalled()
 		expect(upsertPinProxySwitch).not.toHaveBeenCalled()

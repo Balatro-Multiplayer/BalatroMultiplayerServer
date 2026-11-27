@@ -1,9 +1,5 @@
-import { type Result, err, ok } from '../../shared/utils/result.js'
-import type { RepoInfo } from './github-api.js'
-import { extractRepoInfo } from './github-api.js'
-
-// The pin proxy: a ranked pin whose download is served by this Server from a
-// GitHub release asset, while the same package waits for Thunderstore's
+// The pin proxy: a ranked pin whose download is served by this Server from the
+// zip the release workflow posted, while the same package waits for Thunderstore's
 // approval (ranked-pin-proxy.service.ts, pin-proxy-switch.service.ts).
 
 // Mods that may be pinned through the proxy. A mod id, as in mod_registry.
@@ -19,40 +15,27 @@ export const PIN_PROXY_GIVE_UP_MS = 7 * 24 * 60 * 60 * 1000
 const VERSION = /^\d+\.\d+\.\d+$/
 export const isPinProxyVersion = (version: string) => VERSION.test(version)
 
-// https://github.com/<owner>/<repo>/releases/download/<tag>/<file>.zip, with a
-// plain character set and no query or fragment, so a request can only name a
-// file of a release.
-const RELEASE_ZIP =
-	/^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/releases\/download\/([\w.+-]+)\/([\w.+-]+\.zip)$/
-
-export interface ProxyAsset {
-	assetUrl: string
-	tag: string
-	assetName: string
+// The file name a proxy pin's zip is served under: the Thunderstore package
+// full name (<namespace>-<name>), the version, then .zip, like a package
+// built for Thunderstore. A mod with no Thunderstore name uses its id.
+export function proxyAssetName(
+	thunderstoreFullName: string | null,
+	modId: string,
+	version: string,
+): string {
+	return `${thunderstoreFullName || modId}-${version}.zip`
 }
 
-export type ProxyAssetError = 'bad-asset-url' | 'wrong-repo'
-
-// The asset must be a release zip of the mod's own repository (the repo_url
-// of its mod_registry row), compared without regard to case.
-export function parseProxyAsset(
-	assetUrl: string,
-	repoUrl: string | null,
-): Result<ProxyAsset, ProxyAssetError> {
-	const match = RELEASE_ZIP.exec(assetUrl)
-	if (!match) return err('bad-asset-url')
-	const repo: RepoInfo | null = extractRepoInfo(repoUrl)
-	if (
-		!repo ||
-		repo.owner.toLowerCase() !== (match[1] as string).toLowerCase() ||
-		repo.repo.toLowerCase() !== (match[2] as string).toLowerCase()
+// A zip starts with the local file header signature, "PK\x03\x04"; an empty
+// zip starts with the end of central directory one, "PK\x05\x06".
+export function looksLikeZip(bytes: Buffer): boolean {
+	return (
+		bytes.length >= 4 &&
+		bytes[0] === 0x50 &&
+		bytes[1] === 0x4b &&
+		((bytes[2] === 0x03 && bytes[3] === 0x04) ||
+			(bytes[2] === 0x05 && bytes[3] === 0x06))
 	)
-		return err('wrong-repo')
-	return ok({
-		assetUrl,
-		tag: match[3] as string,
-		assetName: match[4] as string,
-	})
 }
 
 // The pin's download URL: this Server's public address, then the proxy route

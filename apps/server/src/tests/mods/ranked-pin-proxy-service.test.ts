@@ -1,11 +1,13 @@
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
 	type PinProxyDeps,
 	pinThroughProxy,
 } from '../../features/mods/ranked-pin-proxy.service.js'
 
-const REPO = 'https://github.com/Balatro-Multiplayer/BalatroMultiplayerAPI'
-const ASSET = `${REPO}/releases/download/v1.2.3/MultiplayerAPI-1.2.3.zip`
+const ZIP = Buffer.from('PK\x03\x04 zip bytes')
+const ZIP_SHA = createHash('sha256').update(ZIP).digest('hex')
+const FULL_NAME = 'BalatroMultiplayer-MultiplayerAPI'
 const NOW = new Date('2026-12-01T10:00:00Z')
 const INSPECTED = {
 	hash: 'a'.repeat(64),
@@ -17,7 +19,7 @@ function makeDeps(overrides: Partial<PinProxyDeps> = {}): PinProxyDeps {
 	return {
 		findMod: vi.fn().mockResolvedValue({
 			id: 'MultiplayerAPI',
-			repoUrl: REPO,
+			thunderstoreFullName: FULL_NAME,
 			rankedVersion: '1.2.2',
 		}),
 		hasThunderstoreVersion: vi.fn().mockResolvedValue(false),
@@ -32,9 +34,9 @@ function makeDeps(overrides: Partial<PinProxyDeps> = {}): PinProxyDeps {
 		...overrides,
 	}
 }
-const input = { mod: 'MultiplayerAPI', version: '1.2.3', assetUrl: ASSET }
+const input = { mod: 'MultiplayerAPI', version: '1.2.3', zip: ZIP }
 const PROXY_URL =
-	'https://balatromp.com/api/mods/MultiplayerAPI/pin-proxy/1.2.3/MultiplayerAPI-1.2.3.zip'
+	'https://balatromp.com/api/mods/MultiplayerAPI/pin-proxy/1.2.3/BalatroMultiplayer-MultiplayerAPI-1.2.3.zip'
 
 let deps: PinProxyDeps
 beforeEach(() => {
@@ -51,11 +53,11 @@ describe('pinThroughProxy', () => {
 			proxyUrl: PROXY_URL,
 			previousVersion: '1.2.2',
 		})
-		// Hashed from the GitHub asset itself, laid out as a Thunderstore package.
+		// Hashed from the posted zip itself, laid out as a Thunderstore package.
 		expect(deps.inspect).toHaveBeenCalledWith(
 			'MultiplayerAPI',
 			'1.2.3',
-			ASSET,
+			ZIP,
 			'thunderstore',
 		)
 		expect(deps.storePin).toHaveBeenCalledWith('MultiplayerAPI', {
@@ -73,10 +75,11 @@ describe('pinThroughProxy', () => {
 		expect(deps.startSwitch).toHaveBeenCalledWith({
 			modId: 'MultiplayerAPI',
 			version: '1.2.3',
-			assetUrl: ASSET,
-			assetName: 'MultiplayerAPI-1.2.3.zip',
+			assetName: 'BalatroMultiplayer-MultiplayerAPI-1.2.3.zip',
 			proxyUrl: PROXY_URL,
 			proxyHash: INSPECTED.hash,
+			zipBytes: ZIP,
+			zipSha256: ZIP_SHA,
 			startedAt: NOW,
 			nextCheckAt: new Date('2026-12-01T10:10:00Z'),
 		})
@@ -96,7 +99,7 @@ describe('pinThroughProxy', () => {
 		deps = makeDeps({
 			findMod: vi.fn().mockResolvedValue({
 				id: 'MultiplayerPvP',
-				repoUrl: REPO,
+				thunderstoreFullName: FULL_NAME,
 				rankedVersion: null,
 			}),
 		})
@@ -108,7 +111,7 @@ describe('pinThroughProxy', () => {
 		expect(deps.storePin).not.toHaveBeenCalled()
 	})
 
-	it('refuses an unknown mod, a bad version and an asset of another repo', async () => {
+	it('refuses an unknown mod and a bad version', async () => {
 		deps = makeDeps({ findMod: vi.fn().mockResolvedValue(null) })
 		expect(await pinThroughProxy(input, deps)).toEqual({
 			ok: false,
@@ -119,16 +122,10 @@ describe('pinThroughProxy', () => {
 			ok: false,
 			reason: 'bad-version',
 		})
-		expect(
-			await pinThroughProxy(
-				{ ...input, assetUrl: ASSET.replace('API/', 'Other/') },
-				deps,
-			),
-		).toEqual({ ok: false, reason: 'wrong-repo' })
 		expect(deps.inspect).not.toHaveBeenCalled()
 	})
 
-	it('changes nothing when the asset cannot be hashed', async () => {
+	it('changes nothing when the zip cannot be hashed', async () => {
 		deps = makeDeps({ inspect: vi.fn().mockResolvedValue(null) })
 		expect(await pinThroughProxy(input, deps)).toEqual({
 			ok: false,

@@ -1,6 +1,7 @@
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import {
 	claimDuePinProxySwitches,
+	clearPinProxyZip,
 	finishPinProxySwitch,
 	notePinProxySwitch,
 } from '../../infrastructure/gateways/mod-pin-proxy.gateway.js'
@@ -33,6 +34,7 @@ const liveDeps: PinProxySwitchDeps = {
 	moveToThunderstore: moveProxyPinToThunderstore,
 	note: notePinProxySwitch,
 	finish: finishPinProxySwitch,
+	clearZip: clearPinProxyZip,
 	reloadConfig: async () => {
 		await loadConfigFromDb()
 	},

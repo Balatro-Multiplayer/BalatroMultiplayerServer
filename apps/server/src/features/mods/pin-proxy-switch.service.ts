@@ -12,6 +12,8 @@ import { PIN_PROXY_GIVE_UP_MS, PIN_PROXY_RETRY_MS } from './pin-proxy.js'
 //  - Thunderstore does not have the version up yet: nothing, ask again later;
 //  - it is up: refresh the Thunderstore versions, then move the pin to the
 //    Thunderstore version (only while it is still the proxy pin).
+// A switch that ends 'switched' or 'superseded' drops its stored zip; one that
+// gives up keeps it, because the pin still points at the proxy.
 
 export interface PinProxySwitchDeps {
 	claimDue(now: Date, leaseMs: number): Promise<PinProxySwitchRow[]>
@@ -38,6 +40,8 @@ export interface PinProxySwitchDeps {
 		note: string,
 		now: Date,
 	): Promise<void>
+	// Drops the stored zip: the pin no longer uses the proxy URL.
+	clearZip(id: number): Promise<void>
 	reloadConfig(): Promise<void>
 	logSwitch(entry: {
 		modId: string
@@ -88,6 +92,7 @@ async function runOne(
 			'The pin was changed by an admin, so the proxy pin was left alone.',
 			now,
 		)
+		await deps.clearZip(row.id)
 		return 'superseded'
 	}
 	if (now.getTime() - row.startedAt.getTime() >= PIN_PROXY_GIVE_UP_MS) {
@@ -130,6 +135,7 @@ async function runOne(
 				'The pin was changed by an admin, so the proxy pin was left alone.',
 				now,
 			)
+			await deps.clearZip(row.id)
 			return 'superseded'
 		}
 		await deps.note(
@@ -150,6 +156,7 @@ async function runOne(
 			: 'Switched to Thunderstore. The hash is the same.',
 		now,
 	)
+	await deps.clearZip(row.id)
 	await deps.reloadConfig()
 	if (hashChanged)
 		console.warn(

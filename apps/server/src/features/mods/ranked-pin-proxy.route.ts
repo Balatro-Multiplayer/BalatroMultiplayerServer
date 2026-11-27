@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
-import { Router } from 'express'
+import express, { Router } from 'express'
 import { env } from '../../env.js'
 import { loadConfigFromDb } from '../../infrastructure/gateways/config.gateway.js'
 import {
@@ -14,7 +14,8 @@ import {
 } from '../../infrastructure/gateways/mods.gateway.js'
 import { AppError } from '../../shared/utils/errors.js'
 import { logDeployAction } from '../deploy/deploy-auth.js'
-import { inspectModRelease } from './mod-version-hash.js'
+import { inspectModArchive } from './mod-version-hash.js'
+import { looksLikeZip } from './pin-proxy.js'
 import {
 	type PinProxyDeps,
 	type PinProxyError,
@@ -52,7 +53,7 @@ const liveDeps = (): PinProxyDeps => ({
 	findMod: findModByIdOrFullName,
 	hasThunderstoreVersion,
 	setRankedVersion,
-	inspect: inspectModRelease,
+	inspect: inspectModArchive,
 	storePin: storeRankedPin,
 	startSwitch: upsertPinProxySwitch,
 	reloadConfig: async () => {
@@ -67,59 +68,69 @@ const ERRORS: Record<PinProxyError, [number, string]> = {
 	'mod-not-found': [404, 'Mod not found'],
 	'mod-not-allowed': [403, 'That mod cannot be pinned through the proxy'],
 	'bad-version': [400, 'version must look like 1.2.3'],
-	'bad-asset-url': [
-		400,
-		'assetUrl must be a https://github.com/<owner>/<repo>/releases/download/<tag>/<file>.zip URL',
-	],
-	'wrong-repo': [400, "assetUrl is not a release of the mod's own repo"],
-	'hash-failed': [502, "Couldn't download or hash the release asset"],
+	'hash-failed': [502, "Couldn't hash the posted zip"],
 	'pin-failed': [400, "Couldn't pin that version"],
 }
 
 const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '')
 
-// POST /api/ci/ranked-pin-proxy {mod, version, assetUrl}: pins the mod to the
-// release asset served through this Server's proxy and starts the timer that
-// later moves the pin to Thunderstore. The request names a file of the mod's
-// own repo's releases and nothing else; the Server never fetches any other URL.
+// The most a posted zip may be. The real package is about 8 MB.
+export const PIN_PROXY_MAX_ZIP_BYTES = 50 * 1024 * 1024
+
+// POST /api/ci/ranked-pin-proxy?mod=&version=[&forceProxy=true], with the zip
+// as the raw body (Content-Type: application/zip): pins the mod to that zip
+// served through this Server's proxy and starts the timer that later moves
+// the pin to Thunderstore. The Server fetches nothing: the workflow sends the
+// exact zip it uploaded to Thunderstore.
 export function createCiRouter() {
 	const router = Router()
 	router.use(requireModPinProxyToken)
 
-	router.post('/ranked-pin-proxy', async (req, res) => {
-		const body = (req.body ?? {}) as Record<string, unknown>
-		const mod = text(body.mod)
-		const version = text(body.version)
-		const assetUrl = text(body.assetUrl)
-		const forceProxy = body.forceProxy === true
-		if (!mod) throw new AppError('mod is required', 400)
-		if (!version) throw new AppError('version is required', 400)
-		if (!assetUrl) throw new AppError('assetUrl is required', 400)
+	router.post(
+		'/ranked-pin-proxy',
+		express.raw({
+			type: 'application/zip',
+			limit: PIN_PROXY_MAX_ZIP_BYTES,
+		}),
+		async (req, res) => {
+			const mod = text(req.query.mod)
+			const version = text(req.query.version)
+			const forceProxy = req.query.forceProxy === 'true'
+			if (!mod) throw new AppError('mod is required', 400)
+			if (!version) throw new AppError('version is required', 400)
+			const zip = req.body
+			if (!Buffer.isBuffer(zip) || zip.length === 0)
+				throw new AppError(
+					'The body must be the zip, sent with Content-Type: application/zip',
+					400,
+				)
+			if (!looksLikeZip(zip)) throw new AppError('The body is not a zip', 400)
 
-		const result = await pinThroughProxy(
-			{ mod, version, assetUrl, forceProxy },
-			liveDeps(),
-		)
-		if (!result.ok) {
-			const [status, message] = ERRORS[result.reason]
-			throw new AppError(message, status)
-		}
-		await logDeployAction({
-			action: 'mod_pin',
-			reason: `Release ${version} pinned by the release workflow${result.mode === 'proxy' ? ' through the GitHub proxy' : ''}`,
-			detail: {
-				modId: result.modId,
-				old: { rankedVersion: result.previousVersion },
-				new: { rankedVersion: version, source: result.mode },
-			},
-		})
-		res.json({
-			ok: true,
-			mode: result.mode,
-			downloadUrl: result.proxyUrl,
-			nextCheckAt: result.nextCheckAt,
-		})
-	})
+			const result = await pinThroughProxy(
+				{ mod, version, zip, forceProxy },
+				liveDeps(),
+			)
+			if (!result.ok) {
+				const [status, message] = ERRORS[result.reason]
+				throw new AppError(message, status)
+			}
+			await logDeployAction({
+				action: 'mod_pin',
+				reason: `Release ${version} pinned by the release workflow${result.mode === 'proxy' ? ' through the Server proxy' : ''}`,
+				detail: {
+					modId: result.modId,
+					old: { rankedVersion: result.previousVersion },
+					new: { rankedVersion: version, source: result.mode },
+				},
+			})
+			res.json({
+				ok: true,
+				mode: result.mode,
+				downloadUrl: result.proxyUrl,
+				nextCheckAt: result.nextCheckAt,
+			})
+		},
+	)
 
 	return router
 }

@@ -568,6 +568,13 @@
       "when": 1795000600000,
       "tag": "0080_mod_pin_proxy_switches",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1795000700000,
+      "tag": "0081_mod_pin_proxy_zip",
+      "breakpoints": true
     }
   ]
 }

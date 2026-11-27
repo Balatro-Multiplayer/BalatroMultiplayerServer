@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { SetRankedVersionResult } from '../../infrastructure/gateways/mods.gateway.js'
 import type { ReleaseInspection } from './mod-version-hash.js'
 import type { ModLayout } from './mod-version-hash.js'
@@ -5,18 +6,18 @@ import {
 	PIN_PROXY_FIRST_CHECK_MS,
 	PIN_PROXY_MOD_IDS,
 	isPinProxyVersion,
-	parseProxyAsset,
+	proxyAssetName,
 	proxyDownloadUrl,
 } from './pin-proxy.js'
 
-// Pins a mod to a release that is served by this Server from a GitHub release
-// asset, because its Thunderstore version waits for approval. The asset is the
-// exact zip that went to Thunderstore, so the hash recorded here is the one
+// Pins a mod to a release that is served by this Server from the zip the release
+// workflow posted, because its Thunderstore version waits for approval. The
+// zip is the exact one that went to Thunderstore, so the hash recorded here is the one
 // the Thunderstore version has, and the later switch changes only the URL.
 
 export interface PinProxyModRow {
 	id: string
-	repoUrl: string | null
+	thunderstoreFullName: string | null
 	rankedVersion: string | null
 }
 
@@ -31,7 +32,7 @@ export interface PinProxyDeps {
 	inspect(
 		modId: string,
 		version: string,
-		downloadUrl: string,
+		zip: Buffer,
 		layout: ModLayout,
 	): Promise<ReleaseInspection | null>
 	storePin(
@@ -48,10 +49,11 @@ export interface PinProxyDeps {
 	startSwitch(input: {
 		modId: string
 		version: string
-		assetUrl: string
 		assetName: string
 		proxyUrl: string
 		proxyHash: string
+		zipBytes: Buffer
+		zipSha256: string
 		startedAt: Date
 		nextCheckAt: Date
 	}): Promise<void>
@@ -66,8 +68,6 @@ export type PinProxyError =
 	| 'mod-not-found'
 	| 'mod-not-allowed'
 	| 'bad-version'
-	| 'bad-asset-url'
-	| 'wrong-repo'
 	| 'hash-failed'
 	| 'pin-failed'
 
@@ -88,7 +88,8 @@ export async function pinThroughProxy(
 	input: {
 		mod: string
 		version: string
-		assetUrl: string
+		// The raw zip, already checked to look like one.
+		zip: Buffer
 		// Serve through the proxy even when Thunderstore already lists the
 		// version: a hand-run check of the proxy and the switch timer.
 		forceProxy?: boolean
@@ -103,8 +104,6 @@ export async function pinThroughProxy(
 		return { ok: false, reason: 'mod-not-allowed' }
 	if (!isPinProxyVersion(input.version))
 		return { ok: false, reason: 'bad-version' }
-	const asset = parseProxyAsset(input.assetUrl, mod.repoUrl)
-	if (!asset.ok) return { ok: false, reason: asset.error }
 
 	const previousVersion = mod.rankedVersion
 	if (
@@ -128,21 +127,26 @@ export async function pinThroughProxy(
 		}
 	}
 
-	// Hashed from the asset itself, with the layout of a Thunderstore package:
+	// Hashed from the posted zip itself, with the layout of a Thunderstore package:
 	// the same steps and bytes as the Thunderstore version will be.
 	const inspected = await deps.inspect(
 		mod.id,
 		input.version,
-		asset.value.assetUrl,
+		input.zip,
 		'thunderstore',
 	)
 	if (!inspected) return { ok: false, reason: 'hash-failed' }
 
+	const assetName = proxyAssetName(
+		mod.thunderstoreFullName,
+		mod.id,
+		input.version,
+	)
 	const proxyUrl = proxyDownloadUrl(
 		deps.publicBaseUrl,
 		mod.id,
 		input.version,
-		asset.value.assetName,
+		assetName,
 	)
 	const startedAt = deps.now()
 	const nextCheckAt = new Date(
@@ -153,10 +157,11 @@ export async function pinThroughProxy(
 	await deps.startSwitch({
 		modId: mod.id,
 		version: input.version,
-		assetUrl: asset.value.assetUrl,
-		assetName: asset.value.assetName,
+		assetName,
 		proxyUrl,
 		proxyHash: inspected.hash,
+		zipBytes: input.zip,
+		zipSha256: createHash('sha256').update(input.zip).digest('hex'),
 		startedAt,
 		nextCheckAt,
 	})

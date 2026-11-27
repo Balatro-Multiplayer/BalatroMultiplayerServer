@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PinProxySwitchRow } from '../../infrastructure/gateways/mod-pin-proxy.gateway.js'
+import {
+	type PinProxySwitchDeps,
+	runPinProxySwitches,
+} from '../../features/mods/pin-proxy-switch.service.js'
 import {
 	PIN_PROXY_FIRST_CHECK_MS,
 	PIN_PROXY_GIVE_UP_MS,
 	PIN_PROXY_RETRY_MS,
 } from '../../features/mods/pin-proxy.js'
-import {
-	type PinProxySwitchDeps,
-	runPinProxySwitches,
-} from '../../features/mods/pin-proxy-switch.service.js'
+import type { PinProxySwitchRow } from '../../infrastructure/gateways/mod-pin-proxy.gateway.js'
 
 const START = new Date('2026-12-01T10:00:00Z')
 const PROXY_URL =
@@ -27,7 +27,6 @@ function harness(opts?: { thunderstore?: 'up' | 'not-up' }) {
 			id: 1,
 			modId: 'MultiplayerAPI',
 			version: '1.2.3',
-			assetUrl: 'https://github.com/o/r/releases/download/v1.2.3/x.zip',
 			assetName: 'x.zip',
 			proxyUrl: PROXY_URL,
 			proxyHash: HASH,
@@ -48,6 +47,7 @@ function harness(opts?: { thunderstore?: 'up' | 'not-up' }) {
 		thunderstore: opts?.thunderstore ?? 'not-up',
 		// What the move reports; the real one hashes the Thunderstore download.
 		moveHash: HASH,
+		zipCleared: false,
 	}
 	const deps: PinProxySwitchDeps = {
 		claimDue: vi.fn(async (now: Date, leaseMs: number) => {
@@ -73,6 +73,9 @@ function harness(opts?: { thunderstore?: 'up' | 'not-up' }) {
 		}),
 		note: vi.fn(async (_id, note) => {
 			state.row = { ...state.row, note }
+		}),
+		clearZip: vi.fn(async () => {
+			state.zipCleared = true
 		}),
 		finish: vi.fn(async (_id, finalState, note, now) => {
 			state.row = { ...state.row, state: finalState, note, finishedAt: now }
@@ -143,6 +146,8 @@ describe('pin proxy timer', () => {
 			PROXY_URL,
 		)
 		expect(h.state.row.state).toBe('switched')
+		// The pin no longer uses the proxy URL, so the stored zip goes.
+		expect(h.state.zipCleared).toBe(true)
 		expect(h.state.mod.rankedDownloadUrl).toBe(TS_URL)
 		expect(h.deps.reloadConfig).toHaveBeenCalled()
 		expect(h.deps.logSwitch).toHaveBeenCalledWith(
@@ -181,6 +186,7 @@ describe('pin proxy timer', () => {
 		expect(h.deps.thunderstoreStatus).not.toHaveBeenCalled()
 		expect(h.deps.moveToThunderstore).not.toHaveBeenCalled()
 		expect(h.state.row.state).toBe('superseded')
+		expect(h.state.zipCleared).toBe(true)
 		expect(h.state.mod.rankedDownloadUrl).toBe(TS_URL.replace('1.2.3', '1.2.4'))
 	})
 
@@ -254,6 +260,8 @@ describe('pin proxy timer', () => {
 		expect(await h.tick()).toEqual(['gave_up'])
 
 		expect(h.state.row.state).toBe('gave_up')
+		// The pin still points at the proxy, so the zip stays.
+		expect(h.state.zipCleared).toBe(false)
 		expect(h.state.mod.rankedDownloadUrl).toBe(PROXY_URL)
 		expect(h.deps.moveToThunderstore).not.toHaveBeenCalled()
 		h.at(PIN_PROXY_GIVE_UP_MS + minutes(60))

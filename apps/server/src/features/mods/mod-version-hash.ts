@@ -84,31 +84,20 @@ export interface ReleaseInspection {
 }
 
 // Reproduces exactly what the launcher deploys into a player's Mods folder:
-// downloads the archive, extracts it, lays it out per `layout`, then hashes
-// the resulting folder (computeModFolderHash(), a port of the launcher's
-// ModFileHash::hashDirectory()) and reads the SMODS ids it declares. Called
-// when an admin pins a version and by the sync for a pin that has no hash
-// yet -- only ranked pins are inspected.
-// Best-effort: a dead URL or unreadable archive logs and returns null.
-export async function inspectModRelease(
+// extracts the archive bytes, lays them out per `layout`, then hashes the
+// resulting folder (computeModFolderHash(), a port of the launcher's
+// ModFileHash::hashDirectory()) and reads the SMODS ids it declares. Used for
+// archives that are already in memory (a zip posted to the pin proxy) and by
+// inspectModRelease after its download.
+// Best-effort: an unreadable archive logs and returns null.
+export async function inspectModArchive(
 	modId: string,
 	version: string,
-	downloadUrl: string,
+	rawBytes: Buffer,
 	layout: ModLayout,
 ): Promise<ReleaseInspection | null> {
 	let tmpRoot: string | null = null
 	try {
-		const res = await fetch(downloadUrl, {
-			signal: AbortSignal.timeout(HASH_FETCH_TIMEOUT_MS),
-		})
-		if (!res.ok) {
-			console.error(
-				`[mod-version-hash] Hash fetch failed (${res.status}) for ${downloadUrl}`,
-			)
-			return null
-		}
-		const rawBytes = Buffer.from(await res.arrayBuffer())
-
 		tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'bmp-mod-hash-'))
 		const extractedDir = path.join(tmpRoot, extractedFolderName(version))
 		await fs.mkdir(extractedDir, { recursive: true })
@@ -129,4 +118,33 @@ export async function inspectModRelease(
 			await fs.rm(tmpRoot, { recursive: true, force: true })
 		}
 	}
+}
+
+// Downloads the archive, then inspects it (inspectModArchive). Called when an
+// admin pins a version and by the sync for a pin that has no hash yet -- only
+// ranked pins are inspected.
+// Best-effort: a dead URL or unreadable archive logs and returns null.
+export async function inspectModRelease(
+	modId: string,
+	version: string,
+	downloadUrl: string,
+	layout: ModLayout,
+): Promise<ReleaseInspection | null> {
+	let rawBytes: Buffer
+	try {
+		const res = await fetch(downloadUrl, {
+			signal: AbortSignal.timeout(HASH_FETCH_TIMEOUT_MS),
+		})
+		if (!res.ok) {
+			console.error(
+				`[mod-version-hash] Hash fetch failed (${res.status}) for ${downloadUrl}`,
+			)
+			return null
+		}
+		rawBytes = Buffer.from(await res.arrayBuffer())
+	} catch (err) {
+		console.error(`[mod-version-hash] Failed to hash ${modId}@${version}:`, err)
+		return null
+	}
+	return inspectModArchive(modId, version, rawBytes, layout)
 }

@@ -1,4 +1,4 @@
-import { and, eq, inArray, lte, sql } from 'drizzle-orm'
+import { and, eq, getTableColumns, inArray, lte, sql } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import {
 	type PinProxySwitchState,
@@ -6,15 +6,24 @@ import {
 	modRegistryVersions,
 } from '../db/schema.js'
 
-export type PinProxySwitchRow = typeof modPinProxySwitches.$inferSelect
+// Every column but the zip, so listing and claiming switches never loads
+// the bytes. The proxy route reads the zip alone (findPinProxyZip).
+const { zipBytes: _zipBytes, ...switchColumns } =
+	getTableColumns(modPinProxySwitches)
+
+export type PinProxySwitchRow = Omit<
+	typeof modPinProxySwitches.$inferSelect,
+	'zipBytes'
+>
 
 export interface NewPinProxySwitch {
 	modId: string
 	version: string
-	assetUrl: string
 	assetName: string
 	proxyUrl: string
 	proxyHash: string
+	zipBytes: Buffer
+	zipSha256: string
 	startedAt: Date
 	nextCheckAt: Date
 }
@@ -25,10 +34,11 @@ export async function upsertPinProxySwitch(
 	input: NewPinProxySwitch,
 ): Promise<void> {
 	const fresh = {
-		assetUrl: input.assetUrl,
 		assetName: input.assetName,
 		proxyUrl: input.proxyUrl,
 		proxyHash: input.proxyHash,
+		zipBytes: input.zipBytes,
+		zipSha256: input.zipSha256,
 		state: 'pending',
 		startedAt: input.startedAt,
 		nextCheckAt: input.nextCheckAt,
@@ -46,12 +56,18 @@ export async function upsertPinProxySwitch(
 		})
 }
 
-export async function findPinProxySwitch(
+// The zip a switch row serves, or null when the row is gone or its bytes
+// were cleared.
+export async function findPinProxyZip(
 	modId: string,
 	version: string,
-): Promise<PinProxySwitchRow | null> {
+): Promise<{ assetName: string; zipBytes: Buffer; zipSha256: string } | null> {
 	const rows = await db
-		.select()
+		.select({
+			assetName: modPinProxySwitches.assetName,
+			zipBytes: modPinProxySwitches.zipBytes,
+			zipSha256: modPinProxySwitches.zipSha256,
+		})
 		.from(modPinProxySwitches)
 		.where(
 			and(
@@ -59,14 +75,20 @@ export async function findPinProxySwitch(
 				eq(modPinProxySwitches.version, version),
 			),
 		)
-	return rows[0] ?? null
+	const row = rows[0]
+	if (!row?.zipBytes || !row.zipSha256) return null
+	return {
+		assetName: row.assetName,
+		zipBytes: row.zipBytes,
+		zipSha256: row.zipSha256,
+	}
 }
 
 // The switches that still concern a pin: waiting for Thunderstore, or given
 // up (the proxy pin stays). For the admin ranked-mods list.
 export async function listOpenPinProxySwitches(): Promise<PinProxySwitchRow[]> {
 	return db
-		.select()
+		.select(switchColumns)
 		.from(modPinProxySwitches)
 		.where(inArray(modPinProxySwitches.state, ['pending', 'gave_up']))
 }
@@ -92,7 +114,7 @@ export async function claimDuePinProxySwitches(
 				lte(modPinProxySwitches.nextCheckAt, now),
 			),
 		)
-		.returning()
+		.returning(switchColumns)
 }
 
 export async function notePinProxySwitch(
@@ -114,6 +136,14 @@ export async function finishPinProxySwitch(
 	await db
 		.update(modPinProxySwitches)
 		.set({ state, note, finishedAt: now })
+		.where(eq(modPinProxySwitches.id, id))
+}
+
+// Drops the stored zip once the pin no longer uses the proxy URL.
+export async function clearPinProxyZip(id: number): Promise<void> {
+	await db
+		.update(modPinProxySwitches)
+		.set({ zipBytes: null })
 		.where(eq(modPinProxySwitches.id, id))
 }
 

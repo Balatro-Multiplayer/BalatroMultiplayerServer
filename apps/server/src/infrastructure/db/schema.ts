@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm'
 import {
 	bigint,
 	boolean,
+	customType,
 	doublePrecision,
 	index,
 	integer,
@@ -18,6 +19,11 @@ import {
 	uuid,
 	varchar,
 } from 'drizzle-orm/pg-core'
+
+// Raw bytes (Postgres bytea), as a Node Buffer.
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+	dataType: () => 'bytea',
+})
 
 export const players = pgTable(
 	'players',
@@ -1207,8 +1213,8 @@ export const PIN_PROXY_SWITCH_STATES = [
 ] as const
 export type PinProxySwitchState = (typeof PIN_PROXY_SWITCH_STATES)[number]
 
-// A ranked pin served through the Server's own proxy of a GitHub release
-// asset, because the version waits for Thunderstore's approval. The job in
+// A ranked pin served through the Server's own proxy of the zip the release
+// workflow posted, because the version waits for Thunderstore's approval. The job in
 // features/mods/pin-proxy-switch.job.ts reads these rows: it checks Thunderstore
 // for the version and then moves the pin there. Stored so a restart loses
 // nothing. One row per mod and version; a repeat pin of the same version
@@ -1221,13 +1227,16 @@ export const modPinProxySwitches = pgTable(
 			.notNull()
 			.references(() => modRegistry.id, { onDelete: 'cascade' }),
 		version: varchar('version', { length: 64 }).notNull(),
-		// The GitHub release asset the proxy serves (checked against the mod's
-		// own repo when the row is written).
-		assetUrl: text('asset_url').notNull(),
-		// The file name the proxy URL ends with (the asset's name).
+		// The file name the proxy URL ends with.
 		assetName: varchar('asset_name', { length: 255 }).notNull(),
 		// The pin's download URL on the Server's public base URL.
 		proxyUrl: text('proxy_url').notNull(),
+		// The zip the release workflow posted, served by the proxy route. Cleared
+		// once the pin no longer uses the proxy URL (switched, superseded); kept
+		// when the switch gave up, because the pin still points at the proxy.
+		zipBytes: bytea('zip_bytes'),
+		// SHA-256 (hex) of the raw zip: the proxy route's ETag.
+		zipSha256: varchar('zip_sha256', { length: 64 }),
 		// The pin's hash while it was served by the proxy, to compare with the
 		// Thunderstore hash at the switch.
 		proxyHash: varchar('proxy_hash', { length: 64 }).notNull(),
