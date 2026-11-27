@@ -172,3 +172,19 @@ describe('pinThroughProxy', () => {
 		)
 	})
 })
+
+describe('pinThroughProxy on a Server that names the mod by its Thunderstore full name', () => {
+	it('allows BalatroMultiplayer-MultiplayerAPI', async () => {
+		const deps = makeDeps({
+			findMod: vi.fn().mockResolvedValue({
+				id: 'BalatroMultiplayer-MultiplayerAPI',
+				rankedVersion: '1.2.2',
+			}),
+		})
+		const result = await pinThroughProxy(
+			{ ...input, mod: 'BalatroMultiplayer-MultiplayerAPI' },
+			deps,
+		)
+		expect(result).toMatchObject({ ok: true, mode: 'proxy' })
+	})
+})

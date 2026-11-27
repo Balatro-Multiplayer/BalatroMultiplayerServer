@@ -2,8 +2,12 @@
 // zip the release workflow posted, while the same package waits for Thunderstore's
 // approval (ranked-pin-proxy.service.ts, pin-proxy-switch.service.ts).
 
-// Mods that may be pinned through the proxy. A mod id, as in mod_registry.
-export const PIN_PROXY_MOD_IDS: readonly string[] = ['MultiplayerAPI']
+// Mods that may be pinned through the proxy. A mod id, as in mod_registry: a
+// Server that synced it from Thunderstore names it by its full name.
+export const PIN_PROXY_MOD_IDS: readonly string[] = [
+	'BalatroMultiplayer-MultiplayerAPI',
+	'MultiplayerAPI',
+]
 
 // First check 10 minutes after the pin, then every 2 minutes, for at most 7
 // days. Then the proxy pin stays and the switch is marked gave_up.
